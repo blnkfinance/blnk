@@ -54,7 +54,7 @@ Balances are calculated for very new transaction entry to a ledger. A ledger can
 | 1 | 4 | BTC  | 1 | 0.00 | 1
 
 
-### Multiplier
+### Balance Multiplier
 Multipliers are used to convert balance to it's lowest currency denomination. Balances are multiplied by the multiplier and the result is stored as the balance value in the db```balance * multiplier```
 
 **Before multiplier is applied**
