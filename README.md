@@ -61,7 +61,7 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 
 | BalanceID | Currency | Credit Balance | Debit Balance | Balance | Multiplier
 | ------ | ------ | ------ | ------ | ------ | ------ |
-| 1 | USD  | 150.00 | 50.00 | 100.00 | 100
+| 1 | USD  | 150.00 | 0.00 | 150.00 | 100
 | 1 | BTC  | 1 | 1 | 1 | 100000000
 
 
