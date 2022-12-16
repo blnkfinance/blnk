@@ -79,8 +79,8 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 | 1 | USD  | 15000 | 0 | 15000 | 100
 | 2 | BTC  | 100000000 | 0 | 1 | 100000000
 
-### Grouping
-Grouping balances by using a common group identifier (such as a ```group_id```) can be a useful way to associate related balances together.
+### Grouping Balance
+Group balances by using a common group identifier (such as a ```group_id```) can be a useful way to associate related balances together.
 
 >For example, if you have a wallet application that enable a customer have multiple ```wallet balances``` you can use grouping to merge or fetch all balances associated with a customer
 
@@ -137,8 +137,8 @@ Idempotence is an important property of transactions, as it ensures that the out
 
 Saifu ensures Idempotency by leveraging ```refereces```. Every transaction is expected to have a unique reference. Saifu ensures no two transactions are stored with the same reference. This helps to ensure that the outcome of the transaction is consistent, regardless of how many times the transaction is performed.
 
-### Grouping
-Grouping transactions by using a common group identifier (such as a ```group_id```) can be a useful way to associate related transactions together. This can be particularly useful when dealing with transactions that have associated fees, as it allows you to easily track and manage the fees that are associated with a particular transaction.
+### Grouping Transactions
+Group transactions by using a common group identifier (such as a ```group_id```) can be a useful way to associate related transactions together. This can be particularly useful when dealing with transactions that have associated fees, as it allows you to easily track and manage the fees that are associated with a particular transaction.
 
 **For example, if you have a system that processes financial transactions, you might use a ```group_id``` to link a main transaction with any associated fees. This would allow you to easily fetch all transactions that are associated with a given group, allowing you to view the main transaction and all associated fees in a single view.**
 
