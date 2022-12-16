@@ -30,14 +30,12 @@ type Balances struct {
 	Mutated       time.Time `json:"mutated"`
 }
 
-type NewLedger struct {
-	ID         string    `json:"id"`
-	BalanceID  string    `json:"balance_id"`
-	ExternalID string    `json:"external_id"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	DeletedAt  time.Time `json:"deleted_at"`
-	Created    time.Time `json:"created"`
-	Mutated    time.Time `json:"mutated"`
+type Ledger struct {
+	ID        string    `json:"id"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	DeletedAt time.Time `json:"deleted_at"`
+	Created   time.Time `json:"created"`
+	Mutated   time.Time `json:"mutated"`
 }

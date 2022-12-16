@@ -5,17 +5,17 @@ import (
 	"github.com/jerry-enebeli/saifu/datasources"
 )
 
-type Service struct {
+type service struct {
 	datasources.DataSource
 	config *config.Configuration
 }
 
-func NewLedgerService() *Service {
+func NewLedgerService() *service {
 	configuration, err := config.Fetch()
 	if err != nil {
 		panic(err)
 		return nil
 	}
 	dataSource := datasources.NewDataSource(configuration)
-	return &Service{DataSource: dataSource, config: configuration}
+	return &service{DataSource: dataSource, config: configuration}
 }

@@ -1,6 +1,6 @@
 package ledger
 
-type Ledger interface {
+type Service interface {
 	CreateLedger()
 	CreateBalance()
 	RecordTransaction()

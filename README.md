@@ -1,24 +1,64 @@
 # Intro
 
-Saifu is a financial ledger tool that enables you build financial products easily.
+Saifu is a financial ledger server that enables you build financial products easily.
 
 # Use Cases
 
 - Banking
 - Digital wallets
 
-# How it works
+# How Saifu works
 
 ## Ledgers
-
+ledgers are the entry point of saifu. They are mostly tied to an entity(user). Ledgers are connected to Balances. Every entry to a ledger either create a new balance or recompute and existing balance. 
 
 ## Balances
+Balances are update to date reflection of all entries in a ledger. Balances are precalculated for very new entry to a ledger
+
+### Creating a Balance
+Balances are auto created when a new transaction entry is recorded for a ledger. A ledger can have multiple balances. Balances are composed of ```Currency``` and ```LedgerID```
+
+### Type of Balances
+Balances in Saifu are made of of three major balance.
+
+| Name | Description |
+| ------ | ------ |
+| Credit Balance | Credit balance hold the sum of all credit transactions recorded |
+| Debit Balance | Debit balance hold the sum of all debit transactions recorded  |
+| Balance | This is calculated by summing the Credit Balance and Debit Balance |
+
+
+### Computing Balances
+Balances are precalculated for very new transaction entry to a ledger
+
+### Example
+
+**Sample Transaction Entries**
+
+| LedgerID | Currency | Amount | DRCR 
+| ------ | ------ | ------ | ------ |
+| 1 | USD| 100.00| CR
+| 1 | USD| 50.00| CR 
+| 1 | NGN| 50,000.00| CR 
+| 1 | NGN| 1,000.00| CR 
+| 1 | GHS| 1,000.00| CR
+| 1 | USD| 50.00| DR 
+
+
+**Computed Balances**
+
+| LedgerID | BalanceID | Currency | Credit Balance | Debit Balance | Balance
+| ------ | ------ | ------ | ------ | ------ | ------ |
+| 1 | 1 | USD  | 150.00 | 50.00 | 100.00
+| 1 | 2 | NGN  | 51,000.00 | 0.00 | 150.00
+| 1 | 3 | GHS  | 1,000.00 | 0.00 | 150.00
+
 
 
 ## Transactions
 
 
-## Transaction Tags
+## Write Ahead Log
 
 ## Config file
 
@@ -83,26 +123,14 @@ Saifu is a RESTFUL server. It exposes interact with your saifu server. The API e
 **Request**
 ```json
 {
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
+  "id": "cu_ghjoipeysnsfu24"
 }
 ```
 
 **Response**
 ```json
 {
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
+  "id": "cu_ghjoipeysnsfu24"
 }
 ```
 
@@ -111,7 +139,7 @@ Saifu is a RESTFUL server. It exposes interact with your saifu server. The API e
 
 **Response**
 ```json
-{
+[{
   "port": "4100",
   "project_name": "MyWallet",
   "default_currency": "NGN",
@@ -119,7 +147,7 @@ Saifu is a RESTFUL server. It exposes interact with your saifu server. The API e
     "name": "MONGO",
     "dns":""
   }
-}
+}]
 ```
 
 ### Get Ledger Balances ```GET```
