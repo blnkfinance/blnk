@@ -174,7 +174,7 @@ $ make build
 ```
 
 # Get Started with Saiffu
-Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The API exposes the following endpoints
+Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The api exposes the following endpoints
 
 
 ## Create Config file ``saifu.json``
@@ -201,7 +201,6 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The AP
 | data_source.name | Name of preferred database. Saifu currently supports a couple of databases. |
 | data_source.name | DNS of database|
 
-
 ### Supported Databases
 | Data Base | Support |
 | ------ | ------ |
@@ -210,170 +209,40 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The AP
 | MongoDB | ✅ |
 | Redis | ✅ |
 
-
-[comment]: <> (## Endpoints)
-
-[comment]: <> (### Create ledger ```POST```)
-
-[comment]: <> (```/ledgers```)
-
-[comment]: <> (**Request**)
-
-[comment]: <> (```json)
-
-[comment]: <> ({)
-
-[comment]: <> (  "id": "cu_ghjoipeysnsfu24")
-
-[comment]: <> (})
-
-[comment]: <> (```)
-
-[comment]: <> (**Response**)
-
-[comment]: <> (```json)
-
-[comment]: <> ({)
-
-[comment]: <> (  "id": "cu_ghjoipeysnsfu24")
-
-[comment]: <> (})
-
-[comment]: <> (```)
-
-[comment]: <> (### Get Ledgers ```GET```)
-
-[comment]: <> (```/ledgers```)
-
-[comment]: <> (**Response**)
-
-[comment]: <> (```json)
-
-[comment]: <> ([{)
-
-[comment]: <> (  "port": "4100",)
-
-[comment]: <> (  "project_name": "MyWallet",)
-
-[comment]: <> (  "default_currency": "NGN",)
-
-[comment]: <> (  "data_source": {)
-
-[comment]: <> (    "name": "MONGO",)
-
-[comment]: <> (    "dns":"")
-
-[comment]: <> (  })
-
-[comment]: <> (}])
-
-[comment]: <> (```)
-
-[comment]: <> (### Get Ledger Balances ```GET```)
-
-[comment]: <> (```/ledgers/balances/{ID}```)
-
-[comment]: <> (**Response**)
-
-[comment]: <> (```json)
-
-[comment]: <> ({)
-
-[comment]: <> (  "port": "4100",)
-
-[comment]: <> (  "project_name": "MyWallet",)
-
-[comment]: <> (  "default_currency": "NGN",)
-
-[comment]: <> (  "data_source": {)
-
-[comment]: <> (    "name": "MONGO",)
-
-[comment]: <> (    "dns":"")
-
-[comment]: <> (  })
-
-[comment]: <> (})
-
-[comment]: <> (```)
-
-[comment]: <> (### Record Transaction ```POST```)
-
-[comment]: <> (```/transactions```)
-
-[comment]: <> (**Request**)
-
-[comment]: <> (```json)
-
-[comment]: <> ({)
-
-[comment]: <> (  "port": "4100",)
-
-[comment]: <> (  "project_name": "MyWallet",)
-
-[comment]: <> (  "default_currency": "NGN",)
-
-[comment]: <> (  "data_source": {)
-
-[comment]: <> (    "name": "MONGO",)
-
-[comment]: <> (    "dns":"")
-
-[comment]: <> (  })
-
-[comment]: <> (})
-
-[comment]: <> (```)
-
-[comment]: <> (**Response**)
-
-[comment]: <> (```json)
-
-[comment]: <> ({)
-
-[comment]: <> (  "port": "4100",)
-
-[comment]: <> (  "project_name": "MyWallet",)
-
-[comment]: <> (  "default_currency": "NGN",)
-
-[comment]: <> (  "data_source": {)
-
-[comment]: <> (    "name": "MONGO",)
-
-[comment]: <> (    "dns":"")
-
-[comment]: <> (  })
-
-[comment]: <> (})
-
-[comment]: <> (```)
-
-
-[comment]: <> (### Get Recorded Transactions ```GET```)
-
-[comment]: <> (```/transactions```)
-
-[comment]: <> (**Response**)
-
-[comment]: <> (```json)
-
-[comment]: <> ({)
-
-[comment]: <> (  "port": "4100",)
-
-[comment]: <> (  "project_name": "MyWallet",)
-
-[comment]: <> (  "default_currency": "NGN",)
-
-[comment]: <> (  "data_source": {)
-
-[comment]: <> (    "name": "MONGO",)
-
-[comment]: <> (    "dns":"")
-
-[comment]: <> (  })
-
-[comment]: <> (})
-
-[comment]: <> (```)
+##Create Ledger
+```shell
+curl --location --request POST 'localhost:4100/ledger' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "id": "ledger1"
+}'
+```
+
+## Create Balance
+```shell
+curl --location --request POST 'localhost:4100/balance' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+"id": "jerry_wallet",
+"currency": "NGN",
+"ledger_id": "ledger1",
+"currency_multiplier": 10000
+}'
+```
+
+## Record Transaction
+```shell
+curl --location --request POST 'localhost:4100/transaction' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "id":"transaction_1",
+    "tag": "CARD_PAYMENT",
+    "reference": "ref-1",
+    "currency": "NGN",
+    "ledger_id": "ledger1",
+    "balance_id": "jerry_wallet",
+    "amount": 5000,
+    "drcr": "Credit",
+    "status": "Successful"
+}'
+```
