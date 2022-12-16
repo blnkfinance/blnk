@@ -103,7 +103,7 @@ Transactions record all events that happen to a ledger. Transaction fall into tw
 | status | The Ledger the balance belongs to | string |
 | reference | The Ledger the balance belongs to | string |
 | tag | The Ledger the balance belongs to | string |
-| group | The Ledger the balance belongs to | string |
+| group | A group identifier | string |
 | description | The Ledger the balance belongs to | string |
 | meta_data | The Ledger the balance belongs to | Object |
 
@@ -120,8 +120,13 @@ For example, consider a transaction that involves transferring money from one ba
 Saifu ensures Idempotency by leveraging ```referece``` Every transaction is expected to have a unique reference. Saifu ensures no two transactions are stored with the same reference. This helps to ensure that the outcome of the transaction is consistent, regardless of how many times the transaction is performed.
 
 ### Grouping
+Grouping transactions by using a common group identifier (such as a ```group_id```) can be a useful way to associate related transactions together. This can be particularly useful when dealing with transactions that have associated fees, as it allows you to easily track and manage the fees that are associated with a particular transaction.
 
+For example, if you have a system that processes financial transactions, you might use a ```group_id``` to link a main transaction with any associated fees. This would allow you to easily fetch all transactions that are associated with a given group, allowing you to view the main transaction and all associated fees in a single view.
 
+Using a group_id to link transactions can also be useful in other contexts, such as when dealing with transactions that are part of a larger process or workflow. By using a group_id, you can easily track and manage all of the transactions that are associated with a particular process, making it easier to track the progress of the process and identify any issues that may arise.
+
+Overall, grouping transactions using a common group_id can be a useful way to manage and track related transactions, and can help to make it easier to view and analyze transactions in your system.
 
 ### Tags
 
