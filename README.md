@@ -12,14 +12,14 @@ Saifu is an open-source financial ledger server that enables you build financial
 
 # How Saifu works
 
-## Ledgers
+# Ledgers
 Yes, ledgers are a common feature of financial systems, and are used to record and track transactions and balances for a particular entity. In a system such as Saifu, ledgers might be used to track the financial transactions and balances of customers, as well as other financial entities such as banks, businesses, or governments.
 
 To create a new ledger in a system like Saifu, you would typically need to specify an identity for the ledger. This identity could be the customer's name or account number, or the name or identification number of another financial entity. The identity of the ledger is used to uniquely identify the ledger within the system, and to associate it with the appropriate transactions and balances.
 
 Once a ledger has been created, all transactions and balances for that ledger can be recorded and tracked within the system. This might include recording and updating the balances for various accounts or financial assets, as well as tracking the flow of assets between accounts. By maintaining accurate and up-to-date ledgers, it is possible to track the financial activity of a particular entity and to ensure the integrity and accuracy of financial transactions.
 
-## Balances
+# Balances
 Balances are typically calculated for each  ledger, and represent the total amount of that asset that is available for use or transfer. Balances are typically updated every time a new transaction is recorded in the ledger, and can be used to track the flow of assets between accounts and to ensure that the ledger remains in balance.
 
 ### A balance consist of Balances three sub balances.
@@ -101,7 +101,7 @@ Overall, grouping balances using a common group_id can be a useful way to manage
 | multiplier | Balance Multiplier | int64 |
 | group | A group identifier | string |
 
-## Transactions
+# Transactions
 Transactions record all ledger events. Transaction are recorded as either  ```Debit(DR)``` ```Credit(CR)```.
 
 
@@ -149,7 +149,7 @@ Overall, grouping transactions using a common group_id can be a useful way to ma
 ### Tags
 
 
-## Fault Tolerance
+# Fault Tolerance
 Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors
 
 **By ```enabling fault tolerance in the config```, Saifu temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
