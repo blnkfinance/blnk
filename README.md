@@ -1,59 +1,46 @@
-# Saifu
-Blnk wallet is a simple to use wallet service. it provides out the box functionalities for a wallet have
+# Intro
 
-#features
-- connect to various databases
-- create a digital wallet for any currency
-- wallet to wallet transfer
-- ability to debit a wallet
-- ability to credit a wallet
-- scheduled credit
-- scheduled debit
-- currency swap
-- wallet to wallet transfer
-- set exchange rate for currencies
-- Balances
-  - main balance
-  - holding balance
-- Fees
-  - credit fee
-  - debit fee
-  - revenue wallet:  where all fees are stored
-- Reporting/analytics
-  - total wallets
-  - total transactions
-  - sum balances
+Saifu is a financial ledger platform that allows users to build financial products such as bank accounts and digital wallets.
 
-#config file
-* project name
-* define how to secure
-  * jwt - pass secret
-  * basic auth - pass username and password
-* Database
-  * select database
-  * Supported databases
-    * Mongo
-    * postgres
-    * mysql
-    * Redis
-  * pass connection requirements
-* Errors
-  * sentry connector
-  * other error reporting connectors
-* Monitoring
-  * new-relic
-* channels
-  * rest api
-  * ussd
-* Notification
-  * webhooks
-  * slack
-  * emails
+# Use Cases
 
-# Deployments
-This provides easy ways to deploy/run the application
-* Docker
+- Bank accounts
+- Digital wallets
 
-# CLi
-* create project
-  * pass configs# saifu
+# Features
+
+- Connect to any database
+- Create ledger
+- Create balance
+- Record transaction
+- Get ledgers
+- Get balances
+- Scheduled new record
+- Write-ahead logs
+- Reconciliation
+
+# Get Started
+
+## Create Config file
+
+```json
+{
+  "port": "4100",
+  "project_name": "Eyowo",
+  "default_currency": "NGN",
+  "data_source": {
+    "name": "MONGO",
+    "dns":""
+  }
+}
+```
+
+
+| Plugin | README |
+| ------ | ------ |
+| Dropbox | [plugins/dropbox/README.md][PlDb] |
+| GitHub | [plugins/github/README.md][PlGh] |
+| Google Drive | [plugins/googledrive/README.md][PlGd] |
+| OneDrive | [plugins/onedrive/README.md][PlOd] |
+| Medium | [plugins/medium/README.md][PlMe] |
+| Google Analytics | [plugins/googleanalytics/README.md][PlGa] |
