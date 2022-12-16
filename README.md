@@ -92,23 +92,32 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 ## Transactions
 Transactions record all events that happen to a ledger. Transaction fall into two major categories. ```Debit(DR)``` ```Credit(CR)```
 
-- transaction Id
-- ledger ID
-- reference
-- tag
-- status
-  - settled
-  - pending
-  - reversed
-- desctiption
-- metadata
-- group id - to group transactions together. this can be used for fees
+### Transaction Properties
+
+| Property | Description | Type |
+| ------ | ------ | --- |
+| id | Balance ID | string |
+| amount | The Ledger the balance belongs to | int64 |
+| currency | Balance currency | String
+| ledger_id | The Ledger the balance belongs to | string |
+| status | The Ledger the balance belongs to | string |
+| reference | The Ledger the balance belongs to | string |
+| tag | The Ledger the balance belongs to | string |
+| group | The Ledger the balance belongs to | string |
+| description | The Ledger the balance belongs to | string |
+| meta_data | The Ledger the balance belongs to | Object |
 
 ### Immutability
-
+Transactions are immutable, this means that the records of the transaction cannot be altered or tampered with once they have been recorded. This is an important feature of transactions, as it ensures that the record of a transaction remains accurate and unchanged, even if the transaction itself is modified or reversed at a later time.
 
 ### Idempotency
+Transactions are idempotent, "idempotent" means that the effect of a particular operation will be the same, no matter how many times it is performed. In other words, if a transaction is idempotent, then repeating the transaction multiple times will have the same result as performing it just once.
 
+Idempotence is an important property of transactions, as it ensures that the outcome of the transaction is predictable and consistent, regardless of how many times it is performed. This can be particularly useful in situations where a transaction may be repeated due to network errors or other issues that may cause the transaction to fail.
+
+For example, consider a transaction that involves transferring money from one bank account to another. If the transaction is idempotent, then it will not matter how many times the transaction is repeated – the end result will always be the same. This helps to prevent unintended consequences, such as multiple transfers occurring or funds being mistakenly credited or debited multiple times.
+
+Saifu ensures Idempotency by leveraging ```referece``` Every transaction is expected to have a unique reference. Saifu ensures no two transactions are stored with the same reference. This helps to ensure that the outcome of the transaction is consistent, regardless of how many times the transaction is performed.
 
 ### Grouping
 
