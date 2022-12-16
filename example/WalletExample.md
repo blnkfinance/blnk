@@ -41,7 +41,7 @@ Assuming you have collected your customer data and have it saved in your db. Cre
   - currency: NGN
 
 
-## strep 5 wallet to wallet transfer
+## step 5 wallet to wallet transfer
 - Create a new debit transaction on customer A balance
   - balance_id: jerry_id
   - amount: 200
