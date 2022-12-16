@@ -211,169 +211,169 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The AP
 | Redis | ✅ |
 
 
-[comment]: <> (## Endpoints)
+## Endpoints
 
-[comment]: <> (### Create ledger ```POST```)
+### Create ledger ```POST```
 
-[comment]: <> (```/ledgers```)
+```/ledgers```
 
-[comment]: <> (**Request**)
+**Request**
 
-[comment]: <> (```json)
+```json
 
-[comment]: <> ({)
+{
 
-[comment]: <> (  "id": "cu_ghjoipeysnsfu24")
+  "id": "cu_ghjoipeysnsfu24"
 
-[comment]: <> (})
+}
 
-[comment]: <> (```)
+```
 
-[comment]: <> (**Response**)
+**Response**
 
-[comment]: <> (```json)
+```json
 
-[comment]: <> ({)
+{
 
-[comment]: <> (  "id": "cu_ghjoipeysnsfu24")
+  "id": "cu_ghjoipeysnsfu24"
 
-[comment]: <> (})
+}
 
-[comment]: <> (```)
+```
 
-[comment]: <> (### Get Ledgers ```GET```)
+### Get Ledgers ```GET```
 
-[comment]: <> (```/ledgers```)
+```/ledgers```
 
-[comment]: <> (**Response**)
+**Response**
 
-[comment]: <> (```json)
+```json
 
-[comment]: <> ([{)
+[{
 
-[comment]: <> (  "port": "4100",)
+  "port": "4100",
 
-[comment]: <> (  "project_name": "MyWallet",)
+  "project_name": "MyWallet",
 
-[comment]: <> (  "default_currency": "NGN",)
+  "default_currency": "NGN",
 
-[comment]: <> (  "data_source": {)
+  "data_source": {
 
-[comment]: <> (    "name": "MONGO",)
+    "name": "MONGO",
 
-[comment]: <> (    "dns":"")
+    "dns":""
 
-[comment]: <> (  })
+  }
 
-[comment]: <> (}])
+}]
 
-[comment]: <> (```)
+```
 
-[comment]: <> (### Get Ledger Balances ```GET```)
+### Get Ledger Balances ```GET```
 
-[comment]: <> (```/ledgers/balances/{ID}```)
+```/ledgers/balances/{ID}```
 
-[comment]: <> (**Response**)
+**Response**
 
-[comment]: <> (```json)
+```json
 
-[comment]: <> ({)
+{
 
-[comment]: <> (  "port": "4100",)
+  "port": "4100",
 
-[comment]: <> (  "project_name": "MyWallet",)
+  "project_name": "MyWallet",
 
-[comment]: <> (  "default_currency": "NGN",)
+  "default_currency": "NGN",
 
-[comment]: <> (  "data_source": {)
+  "data_source": {
 
-[comment]: <> (    "name": "MONGO",)
+    "name": "MONGO",
 
-[comment]: <> (    "dns":"")
+    "dns":""
 
-[comment]: <> (  })
+  }
 
-[comment]: <> (})
+}
 
-[comment]: <> (```)
+```
 
-[comment]: <> (### Record Transaction ```POST```)
+### Record Transaction ```POST```
 
-[comment]: <> (```/transactions```)
+```/transactions```
 
-[comment]: <> (**Request**)
+**Request**
 
-[comment]: <> (```json)
+```json
 
-[comment]: <> ({)
+{
 
-[comment]: <> (  "port": "4100",)
+  "port": "4100",
 
-[comment]: <> (  "project_name": "MyWallet",)
+  "project_name": "MyWallet",
 
-[comment]: <> (  "default_currency": "NGN",)
+  "default_currency": "NGN",
 
-[comment]: <> (  "data_source": {)
+  "data_source": {
 
-[comment]: <> (    "name": "MONGO",)
+    "name": "MONGO",
 
-[comment]: <> (    "dns":"")
+    "dns":""
 
-[comment]: <> (  })
+  }
 
-[comment]: <> (})
+}
 
-[comment]: <> (```)
+```
 
-[comment]: <> (**Response**)
+**Response**
 
-[comment]: <> (```json)
+```json
 
-[comment]: <> ({)
+{
 
-[comment]: <> (  "port": "4100",)
+  "port": "4100",
 
-[comment]: <> (  "project_name": "MyWallet",)
+  "project_name": "MyWallet",
 
-[comment]: <> (  "default_currency": "NGN",)
+  "default_currency": "NGN",
 
-[comment]: <> (  "data_source": {)
+  "data_source": {
 
-[comment]: <> (    "name": "MONGO",)
+    "name": "MONGO",
 
-[comment]: <> (    "dns":"")
+    "dns":""
 
-[comment]: <> (  })
+  }
 
-[comment]: <> (})
+}
 
-[comment]: <> (```)
+```
 
 
-[comment]: <> (### Get Recorded Transactions ```GET```)
+### Get Recorded Transactions ```GET```
 
-[comment]: <> (```/transactions```)
+```/transactions```
 
-[comment]: <> (**Response**)
+**Response**
 
-[comment]: <> (```json)
+```json
 
-[comment]: <> ({)
+{
 
-[comment]: <> (  "port": "4100",)
+  "port": "4100",
 
-[comment]: <> (  "project_name": "MyWallet",)
+  "project_name": "MyWallet",
 
-[comment]: <> (  "default_currency": "NGN",)
+  "default_currency": "NGN",
 
-[comment]: <> (  "data_source": {)
+  "data_source": {
 
-[comment]: <> (    "name": "MONGO",)
+    "name": "MONGO",
 
-[comment]: <> (    "dns":"")
+    "dns":""
 
-[comment]: <> (  })
+  }
 
-[comment]: <> (})
+}
 
-[comment]: <> (```)
+```
