@@ -80,7 +80,7 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 | 2 | BTC  | 100000000 | 0 | 1 | 100000000
 
 ### Grouping
-Group balances by using a common group identifier (such as a ```group_id```) can be a useful way to associate related balances together. This can be particularly useful when dealing with transactions that have associated fees, as it allows you to easily track and manage the fees that are associated with a particular transaction.
+Grouping balances by using a common group identifier (such as a ```group_id```) can be a useful way to associate related balances together.
 
 For example, if you have a wallet system that enable a customer have multiple ```wallets``` you can use grouping to merge or fetch all balances associated with a customer
 
