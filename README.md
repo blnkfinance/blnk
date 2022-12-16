@@ -41,6 +41,7 @@ Balances are calculated for very new transaction entry to a ledger. A ledger can
 | 1 | NGN| 1,000.00| CR 
 | 1 | GHS| 1,000.00| CR
 | 1 | USD| 50.00| DR 
+| 1 | BTC| 1| DR
 
 
 **Computed Balances**
@@ -50,11 +51,67 @@ Balances are calculated for very new transaction entry to a ledger. A ledger can
 | 1 | 1 | USD  | 150.00 | 50.00 | 100.00
 | 1 | 2 | NGN  | 51,000.00 | 0.00 | 150.00
 | 1 | 3 | GHS  | 1,000.00 | 0.00 | 150.00
+| 1 | 4 | BTC  | 1 | 0.00 | 1
 
+
+### Multiplier
+Multipliers are used to convert balance to it's lowest currency denomination. Balances are multiplied by the multiplier and the result is stored as the balance value in the db```balance * multiplier```
+
+**Before multiplier is applied**
+
+| BalanceID | Currency | Credit Balance | Debit Balance | Balance | Multiplier
+| ------ | ------ | ------ | ------ | ------ | ------ |
+| 1 | USD  | 150.00 | 50.00 | 100.00 | 100
+| 1 | BTC  | 1 | 1 | 1 | 100000000
+
+
+**After multiplier is applied**
+
+| BalanceID | Currency | Credit Balance | Debit Balance | Balance | Multiplier
+| ------ | ------ | ------ | ------ | ------ | ------ |
+| 1 | USD  | 15000 | 0 | 15000 | 100
+| 2 | BTC  | 100000000 | 0 | 1 | 100000000
+
+### Balance Properties
+
+| Property | Description | Type |
+| ------ | ------ | --- |
+| id | Balance ID | string |
+| ledger_id | The Ledger the balance belongs to | string |
+| created | Timestamp of when the balance was created. | Time |
+| currency | Balance currency | String
+| balance | Derived from the summation of ```credit_balance``` and ```debit_balance``` | int64 |
+| credit_balance | Credit Balance  | int64 |
+| debit_balance |  Debit Balance | int64 |
+| multiplier | Balance Multiplier | int64 |
 
 
 ## Transactions
-Transaction 
+Transactions record all events that happen to a ledger. Transaction fall into two major categories. ```Debit(DR)``` ```Credit(CR)```
+
+- transaction Id
+- ledger ID
+- reference
+- tag
+- status
+  - settled
+  - pending
+  - reversed
+- desctiption
+- metadata
+- group id - to group transactions together. this can be used for fees
+
+### Immutability
+
+
+### Idempotency
+
+
+### Grouping
+
+
+
+### Tags
 
 
 ## Fault Tolerance
