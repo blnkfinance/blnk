@@ -13,7 +13,7 @@ Saifu is an open-source financial ledger server that enables you build financial
 # How Saifu works
 
 # Ledgers
-Yes, ledgers are a common feature of financial systems, and are used to record and track transactions and balances for a particular entity. In a system such as Saifu, ledgers might be used to track the financial transactions and balances of customers, as well as other financial entities such as banks, businesses, or governments.
+Ledgers are a common feature of financial systems, and are used to record and track transactions and balances for a particular entity. In a system such as Saifu, ledgers might be used to track the financial transactions and balances of customers, as well as other financial entities such as banks, businesses, or governments.
 
 To create a new ledger in a system like Saifu, you would typically need to specify an identity for the ledger. This identity could be the customer's name or account number, or the name or identification number of another financial entity. The identity of the ledger is used to uniquely identify the ledger within the system, and to associate it with the appropriate transactions and balances.
 
