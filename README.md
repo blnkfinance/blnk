@@ -74,8 +74,8 @@ $ git clone https://github.com/jerry-enebeli/saifu && cd saifu
 $ make build
 ```
 
-## Get Started Saifu
-Saifu is a RESTful server. It exposes interact with your saifu server. The API exposes the following endpoints
+## Get Started with Saiffu
+Saifu is a RESTFUL server. It exposes interact with your saifu server. The API exposes the following endpoints
 
 ### Create ledger ```POST```
 ```/ledgers```
