@@ -54,14 +54,15 @@ Balances are calculated for very new transaction entry to a ledger. A ledger can
 
 
 ## Transactions
+Transaction 
 
 
-## Write Ahead Log
+## Fault Tolerance
 
 
-## How To Install
+# How To Install
 
-### Option 1: Docker Image
+## Option 1: Docker Image
 ```bash
 $ docker run \
 	-p 5005:5005 \
@@ -71,7 +72,7 @@ $ docker run \
 	docker.cloudsmith.io/saifu/saifu:latest
 ```
 
-### Option 2: Building from source
+## Option 2: Building from source
 To build saifu from source code, you need:
 * Go [version 1.16 or greater](https://golang.org/doc/install).
 
@@ -80,7 +81,7 @@ $ git clone https://github.com/jerry-enebeli/saifu && cd saifu
 $ make build
 ```
 
-## Get Started with Saiffu
+# Get Started with Saiffu
 Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The API exposes the following endpoints
 
 
