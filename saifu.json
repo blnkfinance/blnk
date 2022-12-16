@@ -1,9 +1,0 @@
-{
-  "port": "4100",
-  "project_name": "Eyowo",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
-}
