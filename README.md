@@ -44,7 +44,7 @@ Saifu is a financial ledger tool that enables you build financial products easil
 | data_source.name | Name of preferred database. Saifu currently supports a couple of databases. |
 | data_source.name | DNS of database|
 
-### Databases
+## Supported Databases
 | Data Base | Support |
 | ------ | ------ |
 | Postgres | ✅ |
@@ -74,7 +74,7 @@ $ git clone https://github.com/jerry-enebeli/saifu && cd saifu
 $ make build
 ```
 
-## Accessing Saifu
+## Get Started Saifu
 Saifu is a RESTful server. It exposes interact with your saifu server. The API exposes the following endpoints
 
 ### Create ledger ```POST```
