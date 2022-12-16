@@ -113,17 +113,17 @@ Transactions record all ledger events. Transaction are recorded as either  ```De
 
 | Property | Description | Type |
 | ------ | ------ | --- |
-| id | Balance ID | string |
-| amount | The Ledger the balance belongs to | int64 |
-| currency | Balance currency | String
-| ledger_id | The Ledger the balance belongs to | string |
-| balance_id | The Ledger the balance belongs to | string |
-| status | The Ledger the balance belongs to | string |
-| reference | The Ledger the balance belongs to | string |
-| tag | The Ledger the balance belongs to | string |
+| id | Transaction ID | string |
+| amount | Transaction Amount| int64 |
+| DRCR | Credit or Debit indicator| string |
+| currency | Transaction currency | String
+| ledger_id | The Ledger the transaction belongs to | string |
+| balance_id | The balance the belongs to | string |
+| status | The status of the transaction. Transaction status are grouped into ```Successful```, ```Pending```, ```Reversed``` | string |
+| reference | Unique Transaction referecence | string |
 | group | A group identifier | string |
-| description | The Ledger the balance belongs to | string |
-| meta_data | The Ledger the balance belongs to | Object |
+| description | Transaction description | string |
+| meta_data | Custom metadata | Object |
 
 ### Immutability
 Transactions are immutable, this means that the records of the transaction cannot be altered or tampered with once they have been recorded. This is an important feature of transactions, as it ensures that the record of a transaction remains accurate and unchanged, even if the transaction itself is modified or reversed at a later time.
@@ -145,9 +145,6 @@ Group transactions by using a common group identifier (such as a ```group_id```)
 Using a group_id to link transactions can also be useful in other contexts, such as when dealing with transactions that are part of a larger process or workflow. By using a group_id, you can easily track and manage all of the transactions that are associated with a particular process, making it easier to track the progress of the process and identify any issues that may arise.
 
 Overall, grouping transactions using a common group_id can be a useful way to manage and track related transactions, and can help to make it easier to view and analyze transactions in your system.
-
-### Tags
-
 
 # Fault Tolerance
 Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors
