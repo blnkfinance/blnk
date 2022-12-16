@@ -155,9 +155,6 @@ Fault tolerance is a key aspect of any system design, as it helps ensure that th
 **By enabling fault tolerance in the config, Saifu temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
 
 
-###Recovery
-
-
 # How To Install
 
 ## Option 1: Docker Image
