@@ -196,7 +196,7 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The AP
 | port | Preferred port number for the server. default is  ```4300``` |
 | project_name | Project Name. |
 | default_currency |  The default currency for new transaction entries. This would be used if a currency is not passed when creating a new transaction record. |
-| enable_wal | Enable write-ahead log. default is false. |
+| enable_ft | Enable fault tolerance. default is false. |
 | data_source | Database of your choice.  |
 | data_source.name | Name of preferred database. Saifu currently supports a couple of databases. |
 | data_source.name | DNS of database|
