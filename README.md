@@ -82,7 +82,7 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 ### Grouping
 Grouping balances by using a common group identifier (such as a ```group_id```) can be a useful way to associate related balances together.
 
-For example, if you have a wallet application that enable a customer have multiple ```wallets``` you can use grouping to merge or fetch all balances associated with a customer
+For example, if you have a wallet application that enable a customer have multiple ```wallet balances``` you can use grouping to merge or fetch all balances associated with a customer
 
 Overall, grouping balances using a common group_id can be a useful way to manage and track related balances, and can help to make it easier to view and analyze balances in your system.
 
