@@ -226,7 +226,7 @@ curl --location --request POST 'localhost:4100/balance' \
 "id": "jerry_wallet",
 "currency": "NGN",
 "ledger_id": "ledger1",
-"currency_multiplier": 10000
+"currency_multiplier": 100
 }'
 ```
 
