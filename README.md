@@ -22,7 +22,7 @@ Once a ledger has been created, all transactions and balances for that ledger ca
 ## Balances
 Balances are typically calculated for each  ledger, and represent the total amount of that asset that is available for use or transfer. Balances are typically updated every time a new transaction is recorded in the ledger, and can be used to track the flow of assets between accounts and to ensure that the ledger remains in balance.
 
-### Type of Balances
+### A balance consist of Balances three sub balances.
 
 | Name | Description |
 | ------ | ------ |
@@ -34,7 +34,7 @@ Balances are typically calculated for each  ledger, and represent the total amou
 ### Computing Balances
 Balances are calculated for very new transaction entry to a ledger.
 
-A ledger can have multiple balances, depending on the types of accounts and assets that it tracks. For example, a ledger might have separate balances for different currencies, or for different types of financial assets such as stocks or bonds.
+A ledger can have multiple balances, depending on the types of accounts and assets that it tracks. For example, a ledger might have separate balances for different currencies.
 
 ### Example
 
@@ -62,14 +62,14 @@ A ledger can have multiple balances, depending on the types of accounts and asse
 
 
 ### Balance Multiplier
-Multipliers are used to convert balance to it's lowest currency denomination. Balances are multiplied by the multiplier and the result is stored as the balance value in the db```balance * multiplier```
+Multipliers are used to convert balance to it's lowest currency denomination. Balances are multiplied by the multiplier and the result is stored as the balance value in the database.
 
 **Before multiplier is applied**
 
 | BalanceID | Currency | Credit Balance | Debit Balance | Balance | Multiplier
 | ------ | ------ | ------ | ------ | ------ | ------ |
 | 1 | USD  | 150.00 | 0.00 | 150.00 | 100
-| 1 | BTC  | 1 | 1 | 1 | 100000000
+| 1 | BTC  | 1 | 0 | 1 | 100000000
 
 
 **After multiplier is applied**
