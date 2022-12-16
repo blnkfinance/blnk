@@ -5,8 +5,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/jerry-enebeli/saifu/model"
-
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -45,24 +43,4 @@ type mongoDataSource struct {
 
 func newMongoDataSource(dns string) DataSource {
 	return &mongoDataSource{conn: connect(dns)}
-}
-
-func (m mongoDataSource) CreateWallet() (model.Wallet, error) {
-	panic("implement me")
-}
-
-func (m mongoDataSource) GetWalletByIdentifier(identifier model.WalletIdentifier) (model.Wallet, error) {
-	panic("implement me")
-}
-
-func (m mongoDataSource) GetAllWallets(filter model.WalletFilter) ([]model.Wallet, error) {
-	panic("implement me")
-}
-
-func (m mongoDataSource) UpdateWallet(identifier model.WalletIdentifier, wallet model.Wallet) ([]model.Wallet, error) {
-	panic("implement me")
-}
-
-func (m mongoDataSource) DeleteWallet(identifier model.WalletIdentifier) ([]model.Wallet, error) {
-	panic("implement me")
 }
