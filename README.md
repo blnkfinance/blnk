@@ -2,7 +2,7 @@
 
 Saifu is a financial ledger server that enables you build financial products easily.
 
-# Use Cases
+## Use Cases
 
 - Banking
 - Digital wallets
@@ -10,26 +10,24 @@ Saifu is a financial ledger server that enables you build financial products eas
 # How Saifu works
 
 ## Ledgers
-ledgers are the entry point of saifu. They are mostly tied to an entity(user). Ledgers are connected to Balances. Every entry to a ledger either create a new balance or recompute and existing balance. 
+Ledgers are the entry point of Saifu. Every transaction entry and balances are tied to a ledger. Ledgers are created by passing an identity.Ledger Identity can be of a customer or any financial entity in your system.
+
+### Ledger Identity
 
 ## Balances
-Balances are update to date reflection of all entries in a ledger. Balances are precalculated for very new entry to a ledger
-
-### Creating a Balance
-Balances are auto created when a new transaction entry is recorded for a ledger. A ledger can have multiple balances. Balances are composed of ```Currency``` and ```LedgerID```
+Balances show the balance actual balance(s) of a ledger. Balances are pre-computed on every new entry to a ledger.
 
 ### Type of Balances
-Balances in Saifu are made of of three major balance.
 
 | Name | Description |
 | ------ | ------ |
-| Credit Balance | Credit balance hold the sum of all credit transactions recorded |
-| Debit Balance | Debit balance hold the sum of all debit transactions recorded  |
-| Balance | This is calculated by summing the Credit Balance and Debit Balance |
+| Credit Balance | Credit balance holds the sum of all credit transactions recorded|
+| Debit Balance | Debit balance holds the sum of all debit transactions recorded  |
+| Balance | The actual Balance is calculated by summing the Credit Balance and Debit Balance|
 
 
 ### Computing Balances
-Balances are precalculated for very new transaction entry to a ledger
+Balances are calculated for very new transaction entry to a ledger. A ledger can have multiple balances. Balances are composed of ```Currency``` and ```LedgerID```
 
 ### Example
 
@@ -76,9 +74,9 @@ Balances are precalculated for very new transaction entry to a ledger
 
 | Property | Description |
 | ------ | ------ |
-| port | preferred port number for the server. default is  ```4300``` |
-| project_name | Name of your project. |
-| default_currency | Default currency for new transaction entries. This would be used if a currency is not passed |
+| port | Preferred port number for the server. default is  ```4300``` |
+| project_name | Project Name. |
+| default_currency |  The default currency for new transaction entries. This would be used if a currency is not passed when creating a new transaction record. |
 | enable_wal | Enable write-ahead log. default is false. |
 | data_source | Database of your choice.  |
 | data_source.name | Name of preferred database. Saifu currently supports a couple of databases. |
@@ -115,7 +113,7 @@ $ make build
 ```
 
 ## Get Started with Saiffu
-Saifu is a RESTFUL server. It exposes interact with your saifu server. The API exposes the following endpoints
+Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The API exposes the following endpoints
 
 ### Create ledger ```POST```
 ```/ledgers```
