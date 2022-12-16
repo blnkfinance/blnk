@@ -1,6 +1,6 @@
 # Intro
 
-Saifu is a financial ledger tool that allows users to build financial products such as bank accounts and digital wallets. Saifu
+Saifu is a financial ledger tool that enables you build financial products easily.
 
 # Use Cases
 
