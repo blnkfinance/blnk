@@ -77,7 +77,7 @@ $ make build
 ## Accessing Saifu
 Saifu is a RESTful server. It exposes interact with your saifu server. The API exposes the following endpoints
 
-###Create ledger ```POST```
+### Create ledger ```POST```
 ```/ledgers```
 
 **Request**
@@ -106,7 +106,7 @@ Saifu is a RESTful server. It exposes interact with your saifu server. The API e
 }
 ```
 
-###Get Ledgers ```GET```
+### Get Ledgers ```GET```
 ```/ledgers```
 
 **Response**
@@ -122,7 +122,7 @@ Saifu is a RESTful server. It exposes interact with your saifu server. The API e
 }
 ```
 
-###Get Ledger Balances ```GET```
+### Get Ledger Balances ```GET```
 ```/ledgers/balances/{ID}```
 
 **Response**
@@ -138,7 +138,7 @@ Saifu is a RESTful server. It exposes interact with your saifu server. The API e
 }
 ```
 
-###Record Transaction ```POST```
+### Record Transaction ```POST```
 ```/transactions```
 
 **Request**
@@ -168,7 +168,7 @@ Saifu is a RESTful server. It exposes interact with your saifu server. The API e
 ```
 
 
-###Get Recorded Transactions ```GET```
+### Get Recorded Transactions ```GET```
 ```/transactions```
 
 **Response**
