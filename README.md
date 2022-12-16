@@ -58,38 +58,6 @@ Balances are calculated for very new transaction entry to a ledger. A ledger can
 
 ## Write Ahead Log
 
-## Config file
-
-```json
-{
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
-}
-```
-
-| Property | Description |
-| ------ | ------ |
-| port | Preferred port number for the server. default is  ```4300``` |
-| project_name | Project Name. |
-| default_currency |  The default currency for new transaction entries. This would be used if a currency is not passed when creating a new transaction record. |
-| enable_wal | Enable write-ahead log. default is false. |
-| data_source | Database of your choice.  |
-| data_source.name | Name of preferred database. Saifu currently supports a couple of databases. |
-| data_source.name | DNS of database|
-
-## Supported Databases
-| Data Base | Support |
-| ------ | ------ |
-| Postgres | ✅ |
-| MYSQL | ✅ |
-| MongoDB | ✅ |
-| Redis | ✅ |
-
 
 ## How To Install
 
@@ -114,6 +82,43 @@ $ make build
 
 ## Get Started with Saiffu
 Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The API exposes the following endpoints
+
+
+## Create Config file ``saifu.json``
+
+```json
+{
+  "port": "4100",
+  "project_name": "MyWallet",
+  "default_currency": "NGN",
+  "data_source": {
+    "name": "MONGO",
+    "dns":""
+  }
+}
+```
+
+| Property | Description |
+| ------ | ------ |
+| port | Preferred port number for the server. default is  ```4300``` |
+| project_name | Project Name. |
+| default_currency |  The default currency for new transaction entries. This would be used if a currency is not passed when creating a new transaction record. |
+| enable_wal | Enable write-ahead log. default is false. |
+| data_source | Database of your choice.  |
+| data_source.name | Name of preferred database. Saifu currently supports a couple of databases. |
+| data_source.name | DNS of database|
+
+
+### Supported Databases
+| Data Base | Support |
+| ------ | ------ |
+| Postgres | ✅ |
+| MYSQL | ✅ |
+| MongoDB | ✅ |
+| Redis | ✅ |
+
+
+## Endpoints
 
 ### Create ledger ```POST```
 ```/ledgers```
