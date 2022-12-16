@@ -116,14 +116,14 @@ Transactions record all ledger events. Transaction are recorded as either  ```De
 | id | Transaction ID | string |
 | amount | Transaction Amount| int64 |
 | DRCR | Credit or Debit indicator| string |
-| currency | Transaction currency | String
+| currency | Transaction currency | string
 | ledger_id | The Ledger the transaction belongs to | string |
 | balance_id | The balance the belongs to | string |
 | status | The status of the transaction. Transaction status are grouped into ```Successful```, ```Pending```, ```Reversed``` | string |
 | reference | Unique Transaction referecence | string |
 | group | A group identifier | string |
 | description | Transaction description | string |
-| meta_data | Custom metadata | Object |
+| meta_data | Custom metadata | object |
 
 ### Immutability
 Transactions are immutable, this means that the records of the transaction cannot be altered or tampered with once they have been recorded. This is an important feature of transactions, as it ensures that the record of a transaction remains accurate and unchanged, even if the transaction itself is modified or reversed at a later time.
