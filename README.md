@@ -1,6 +1,6 @@
 # Intro
 
-Saifu is a financial ledger server that enables you build financial products easily.
+Saifu is an open-source financial ledger server that enables you build financial products easily.
 
 ## Use Cases
 
@@ -13,12 +13,14 @@ Saifu is a financial ledger server that enables you build financial products eas
 # How Saifu works
 
 ## Ledgers
-Ledgers are the entry point of Saifu. Every transaction entry and balances are tied to a ledger. Ledgers are created by passing an identity.Ledger Identity can be of a customer or any financial entity in your system.
+Yes, ledgers are a common feature of financial systems, and are used to record and track transactions and balances for a particular entity. In a system such as Saifu, ledgers might be used to track the financial transactions and balances of customers, as well as other financial entities such as banks, businesses, or governments.
 
-### Ledger Identity
+To create a new ledger in a system like Saifu, you would typically need to specify an identity for the ledger. This identity could be the customer's name or account number, or the name or identification number of another financial entity. The identity of the ledger is used to uniquely identify the ledger within the system, and to associate it with the appropriate transactions and balances.
+
+Once a ledger has been created, all transactions and balances for that ledger can be recorded and tracked within the system. This might include recording and updating the balances for various accounts or financial assets, as well as tracking the flow of assets between accounts. By maintaining accurate and up-to-date ledgers, it is possible to track the financial activity of a particular entity and to ensure the integrity and accuracy of financial transactions.
 
 ## Balances
-Balances show the balance actual balance(s) of a ledger. Balances are pre-computed on every new entry to a ledger.
+Balances are typically calculated for each  ledger, and represent the total amount of that asset that is available for use or transfer. Balances are typically updated every time a new transaction is recorded in the ledger, and can be used to track the flow of assets between accounts and to ensure that the ledger remains in balance.
 
 ### Type of Balances
 
@@ -30,7 +32,9 @@ Balances show the balance actual balance(s) of a ledger. Balances are pre-comput
 
 
 ### Computing Balances
-Balances are calculated for very new transaction entry to a ledger. A ledger can have multiple balances. Balances are composed of ```Currency``` and ```LedgerID```
+Balances are calculated for very new transaction entry to a ledger.
+
+A ledger can have multiple balances, depending on the types of accounts and assets that it tracks. For example, a ledger might have separate balances for different currencies, or for different types of financial assets such as stocks or bonds.
 
 ### Example
 
@@ -198,99 +202,169 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The AP
 | Redis | ✅ |
 
 
-## Endpoints
+[comment]: <> (## Endpoints)
 
-### Create ledger ```POST```
-```/ledgers```
+[comment]: <> (### Create ledger ```POST```)
 
-**Request**
-```json
-{
-  "id": "cu_ghjoipeysnsfu24"
-}
-```
+[comment]: <> (```/ledgers```)
 
-**Response**
-```json
-{
-  "id": "cu_ghjoipeysnsfu24"
-}
-```
+[comment]: <> (**Request**)
 
-### Get Ledgers ```GET```
-```/ledgers```
+[comment]: <> (```json)
 
-**Response**
-```json
-[{
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
-}]
-```
+[comment]: <> ({)
 
-### Get Ledger Balances ```GET```
-```/ledgers/balances/{ID}```
+[comment]: <> (  "id": "cu_ghjoipeysnsfu24")
 
-**Response**
-```json
-{
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
-}
-```
+[comment]: <> (})
 
-### Record Transaction ```POST```
-```/transactions```
+[comment]: <> (```)
 
-**Request**
-```json
-{
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
-}
-```
+[comment]: <> (**Response**)
 
-**Response**
-```json
-{
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
-}
-```
+[comment]: <> (```json)
+
+[comment]: <> ({)
+
+[comment]: <> (  "id": "cu_ghjoipeysnsfu24")
+
+[comment]: <> (})
+
+[comment]: <> (```)
+
+[comment]: <> (### Get Ledgers ```GET```)
+
+[comment]: <> (```/ledgers```)
+
+[comment]: <> (**Response**)
+
+[comment]: <> (```json)
+
+[comment]: <> ([{)
+
+[comment]: <> (  "port": "4100",)
+
+[comment]: <> (  "project_name": "MyWallet",)
+
+[comment]: <> (  "default_currency": "NGN",)
+
+[comment]: <> (  "data_source": {)
+
+[comment]: <> (    "name": "MONGO",)
+
+[comment]: <> (    "dns":"")
+
+[comment]: <> (  })
+
+[comment]: <> (}])
+
+[comment]: <> (```)
+
+[comment]: <> (### Get Ledger Balances ```GET```)
+
+[comment]: <> (```/ledgers/balances/{ID}```)
+
+[comment]: <> (**Response**)
+
+[comment]: <> (```json)
+
+[comment]: <> ({)
+
+[comment]: <> (  "port": "4100",)
+
+[comment]: <> (  "project_name": "MyWallet",)
+
+[comment]: <> (  "default_currency": "NGN",)
+
+[comment]: <> (  "data_source": {)
+
+[comment]: <> (    "name": "MONGO",)
+
+[comment]: <> (    "dns":"")
+
+[comment]: <> (  })
+
+[comment]: <> (})
+
+[comment]: <> (```)
+
+[comment]: <> (### Record Transaction ```POST```)
+
+[comment]: <> (```/transactions```)
+
+[comment]: <> (**Request**)
+
+[comment]: <> (```json)
+
+[comment]: <> ({)
+
+[comment]: <> (  "port": "4100",)
+
+[comment]: <> (  "project_name": "MyWallet",)
+
+[comment]: <> (  "default_currency": "NGN",)
+
+[comment]: <> (  "data_source": {)
+
+[comment]: <> (    "name": "MONGO",)
+
+[comment]: <> (    "dns":"")
+
+[comment]: <> (  })
+
+[comment]: <> (})
+
+[comment]: <> (```)
+
+[comment]: <> (**Response**)
+
+[comment]: <> (```json)
+
+[comment]: <> ({)
+
+[comment]: <> (  "port": "4100",)
+
+[comment]: <> (  "project_name": "MyWallet",)
+
+[comment]: <> (  "default_currency": "NGN",)
+
+[comment]: <> (  "data_source": {)
+
+[comment]: <> (    "name": "MONGO",)
+
+[comment]: <> (    "dns":"")
+
+[comment]: <> (  })
+
+[comment]: <> (})
+
+[comment]: <> (```)
 
 
-### Get Recorded Transactions ```GET```
-```/transactions```
+[comment]: <> (### Get Recorded Transactions ```GET```)
 
-**Response**
-```json
-{
-  "port": "4100",
-  "project_name": "MyWallet",
-  "default_currency": "NGN",
-  "data_source": {
-    "name": "MONGO",
-    "dns":""
-  }
-}
-```
+[comment]: <> (```/transactions```)
+
+[comment]: <> (**Response**)
+
+[comment]: <> (```json)
+
+[comment]: <> ({)
+
+[comment]: <> (  "port": "4100",)
+
+[comment]: <> (  "project_name": "MyWallet",)
+
+[comment]: <> (  "default_currency": "NGN",)
+
+[comment]: <> (  "data_source": {)
+
+[comment]: <> (    "name": "MONGO",)
+
+[comment]: <> (    "dns":"")
+
+[comment]: <> (  })
+
+[comment]: <> (})
+
+[comment]: <> (```)
