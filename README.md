@@ -90,7 +90,12 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 
 
 ## Transactions
-Transactions record all events that happen to a ledger. Transaction fall into two major categories. ```Debit(DR)``` ```Credit(CR)```
+Transactions record all ledger events. Transaction are recorded as both  ```Debit(DR)``` ```Credit(CR)```.
+
+
+### Debit/Credit
+
+```Debits``` and ```Credits``` are used to record all of the events that happen to a ledger, and to ensure that the ledger remains in balance. By using debits and credits, it is possible to track the movement of money between accounts and to maintain an accurate record of financial transactions.
 
 ### Transaction Properties
 
