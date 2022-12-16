@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jerry-enebeli/saifu"
@@ -66,7 +67,12 @@ func (a api) RecordTransaction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
 	resp, err := a.ledger.RecordTransaction(transaction)
+	mutex.Unlock()
+
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
