@@ -6,6 +6,9 @@ Saifu is a financial ledger server that enables you build financial products eas
 
 - Banking
 - Digital wallets
+- Card processing
+- Brokerage systems
+
 
 # How Saifu works
 

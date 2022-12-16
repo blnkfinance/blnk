@@ -1,6 +1,17 @@
-package ledger
+package saifu
 
 import "time"
+
+type Service interface {
+	CreateLedger()
+	CreateBalance()
+	RecordTransaction()
+	GetLedgers()
+	GetBalances()
+}
+
+type Tools interface {
+}
 
 type Filter struct {
 	Status string
