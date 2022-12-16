@@ -133,14 +133,14 @@ Transactions are idempotent, "idempotent" means that the effect of a particular 
 
 Idempotence is an important property of transactions, as it ensures that the outcome of the transaction is predictable and consistent, regardless of how many times it is performed. This can be particularly useful in situations where a transaction may be repeated due to network errors or other issues that may cause the transaction to fail.
 
->For example, consider a transaction that involves transferring money from one bank account to another. If the transaction is idempotent, then it will not matter how many times the transaction is repeated – the end result will always be the same. This helps to prevent unintended consequences, such as multiple transfers occurring or funds being mistakenly credited or debited multiple times.
+**For example, consider a transaction that involves transferring money from one bank account to another. If the transaction is idempotent, then it will not matter how many times the transaction is repeated – the end result will always be the same. This helps to prevent unintended consequences, such as multiple transfers occurring or funds being mistakenly credited or debited multiple times.**
 
 Saifu ensures Idempotency by leveraging ```refereces```. Every transaction is expected to have a unique reference. Saifu ensures no two transactions are stored with the same reference. This helps to ensure that the outcome of the transaction is consistent, regardless of how many times the transaction is performed.
 
 ### Grouping
 Grouping transactions by using a common group identifier (such as a ```group_id```) can be a useful way to associate related transactions together. This can be particularly useful when dealing with transactions that have associated fees, as it allows you to easily track and manage the fees that are associated with a particular transaction.
 
->For example, if you have a system that processes financial transactions, you might use a ```group_id``` to link a main transaction with any associated fees. This would allow you to easily fetch all transactions that are associated with a given group, allowing you to view the main transaction and all associated fees in a single view.
+**For example, if you have a system that processes financial transactions, you might use a ```group_id``` to link a main transaction with any associated fees. This would allow you to easily fetch all transactions that are associated with a given group, allowing you to view the main transaction and all associated fees in a single view.**
 
 Using a group_id to link transactions can also be useful in other contexts, such as when dealing with transactions that are part of a larger process or workflow. By using a group_id, you can easily track and manage all of the transactions that are associated with a particular process, making it easier to track the progress of the process and identify any issues that may arise.
 
@@ -152,7 +152,7 @@ Overall, grouping transactions using a common group_id can be a useful way to ma
 ## Fault Tolerance
 Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors
 
->By enabling fault tolerance in the config, Saifu temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.
+**By enabling fault tolerance in the config, Saifu temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
 
 
 ###Recovery
