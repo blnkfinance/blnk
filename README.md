@@ -207,7 +207,7 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The ap
 | Postgres | ✅ |
 | MYSQL | ✅ |
 | MongoDB | ✅ |
-| Redis | ✅ |
+| Redis | ⌛  |
 
 ## Create Ledger
 ```shell
