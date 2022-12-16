@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 
 	"github.com/jerry-enebeli/saifu/config"
@@ -24,7 +23,7 @@ func configCommands() *cobra.Command {
 				log.Fatalf("Error printing config: %v\n", err)
 			}
 
-			fmt.Println(string(data))
+			log.Println(string(data))
 		},
 	}
 	return cmd

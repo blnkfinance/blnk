@@ -3,7 +3,6 @@ package datasources
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 
 	"github.com/uptrace/bun/dialect/mssqldialect"
@@ -35,8 +34,11 @@ type relationalDB struct {
 }
 
 func createTables(orm *bun.DB) error {
-	//TODO manage errors
-	orm.NewCreateTable().Model((*saifu.Ledger)(nil)).Exec(context.Background())
+	_, err := orm.NewCreateTable().Model((*saifu.Ledger)(nil)).Exec(context.Background())
+
+	if err != nil {
+		log.Println(err)
+	}
 
 	orm.NewCreateTable().Model((*saifu.Balance)(nil)).Exec(context.Background())
 
@@ -133,7 +135,6 @@ func (p relationalDB) UpdateBalance(balanceID string, update saifu.BalanceUpdate
 		Where("id = ?", balanceID).
 		Exec(context.Background())
 
-	fmt.Println(err, balanceID, update)
 	if err != nil {
 		return saifu.BalanceUpdate{}, err
 	}

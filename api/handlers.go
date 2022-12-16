@@ -27,7 +27,7 @@ func (a api) Router() *gin.Engine {
 
 func NewAPI(ledger saifu.Service) *api {
 	r := gin.Default()
-	gin.SetMode(gin.ReleaseMode)
+	gin.SetMode(gin.DebugMode)
 	return &api{ledger: ledger, router: r}
 }
 

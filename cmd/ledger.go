@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 
 	"github.com/spf13/cobra"
 )
@@ -13,7 +13,7 @@ func walletCommands() *cobra.Command {
 		Use:   "wallet create",
 		Short: "manage wallets",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(args, id)
+			log.Println(args, id)
 		},
 	}
 	walletCmd.Flags().StringVar(&id, "id", "id", "external identify for a new wallet")

@@ -182,11 +182,20 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The ap
 ```json
 {
   "port": "4100",
-  "project_name": "MyWallet",
+  "project_name": "Payme",
   "default_currency": "NGN",
   "data_source": {
-    "name": "MONGO",
-    "dns":""
+    "name": "POSTGRES",
+    "dns":"postgres://postgres:@localhost:5432/saifu?sslmode=disable"
+  },
+  "notification": {
+    "slack": {
+      "webhook_url": ""
+    },
+    "webhook": {
+      "url": "",
+      "headers": {}
+    }
   }
 }
 ```

@@ -23,6 +23,15 @@ type Configuration struct {
 		Name string `json:"name,omitempty"`
 		DNS  string `json:"dns,omitempty"`
 	} `json:"data_source"`
+	Notification struct {
+		Slack struct {
+			WebhookURL string `json:"webhook_url"`
+		} `json:"slack"`
+		WebHook struct {
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
+		} `json:"webhook"`
+	} `json:"notification"`
 }
 
 func loadConfigFromFile(file string) error {
