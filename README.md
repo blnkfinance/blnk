@@ -209,7 +209,7 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The ap
 | MongoDB | ✅ |
 | Redis | ✅ |
 
-##Create Ledger
+## Create Ledger
 ```shell
 curl --location --request POST 'localhost:4100/ledger' \
 --header 'Content-Type: application/json' \
