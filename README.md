@@ -152,7 +152,7 @@ Overall, grouping transactions using a common group_id can be a useful way to ma
 ## Fault Tolerance
 Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors
 
-**By enabling fault tolerance in the config, Saifu temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
+**By ```enabling fault tolerance in the config```, Saifu temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
 
 
 # How To Install
