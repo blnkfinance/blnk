@@ -1,6 +1,13 @@
 package saifu
 
-import "github.com/uptrace/bun"
+import (
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/uptrace/bun"
+)
 
 type Service interface {
 	CreateLedger(ledger Ledger) (Ledger, error)
@@ -22,17 +29,38 @@ type Filter struct {
 type Transaction struct {
 	bun.BaseModel `bun:"table:transactions,alias:t"`
 
-	ID        string                 `json:"id"`
-	Tag       string                 `json:"tag"`
-	Reference string                 `json:"reference"`
-	Amount    int64                  `json:"amount"`
-	Currency  string                 `json:"currency"`
-	DRCR      string                 `json:"drcr"`
-	Status    string                 `json:"status"` //successful, pending, encumbrance
-	LedgerID  string                 `json:"ledger_id"`
-	BalanceID string                 `json:"balance_id"`
-	Created   int64                  `json:"created"`
-	MetaData  map[string]interface{} `json:"meta_data"`
+	ID                  string                 `json:"id"`
+	Tag                 string                 `json:"tag"`
+	Reference           string                 `json:"reference"`
+	Amount              int64                  `json:"amount"`
+	Currency            string                 `json:"currency"`
+	DRCR                string                 `json:"drcr"`
+	Status              string                 `json:"status"` //successful, pending, encumbrance
+	LedgerID            string                 `json:"ledger_id"`
+	BalanceID           string                 `json:"balance_id"`
+	CreditBalanceBefore int64                  `json:"credit_balance_before"`
+	DebitBalanceBefore  int64                  `json:"debit_balance_before"`
+	CreditBalanceAfter  int64                  `json:"credit_balance_after"`
+	DebitBalanceAfter   int64                  `json:"debit_balance_after"`
+	BalanceBefore       int64                  `json:"balance_before"`
+	BalanceAfter        int64                  `json:"balance_after"`
+	Created             int64                  `json:"created"`
+	MetaData            map[string]interface{} `json:"meta_data"`
+}
+
+type TransactionFilter struct {
+	ID                       string    `json:"id"`
+	Tag                      string    `json:"tag"`
+	DRCR                     string    `json:"drcr"`
+	AmountRange              int64     `json:"amount_range"`
+	CreditBalanceBeforeRange int64     `json:"credit_balance_before_range"`
+	DebitBalanceBeforeRange  int64     `json:"debit_balance_before_range"`
+	CreditBalanceAfterRange  int64     `json:"credit_balance_after_range"`
+	DebitBalanceAfterRange   int64     `json:"debit_balance_after_range"`
+	BalanceBeforeRange       int64     `json:"balance_before"`
+	BalanceAfterRange        int64     `json:"balance_after"`
+	From                     time.Time `json:"from"`
+	To                       time.Time `json:"to"`
 }
 
 type Balance struct {
@@ -49,13 +77,16 @@ type Balance struct {
 	ModificationRef    string                 `json:"modification_ref"`
 	MetaData           map[string]interface{} `json:"meta_data"`
 }
-type BalanceUpdate struct {
-	bun.BaseModel `bun:"table:balances,alias:b"`
 
-	Balance         int64  `json:"balance"`
-	CreditBalance   int64  `json:"credit_balance"`
-	DebitBalance    int64  `json:"debit_balance"`
-	ModificationRef string `json:"modification_ref"`
+type BalanceFilter struct {
+	ID                 string    `json:"id"`
+	BalanceRange       string    `json:"balance_range"`
+	CreditBalanceRange string    `json:"credit_balance_range"`
+	DebitBalanceRange  string    `json:"debit_balance_range"`
+	Currency           string    `json:"currency"`
+	LedgerID           string    `json:"ledger_id"`
+	From               time.Time `json:"from"`
+	To                 time.Time `json:"to"`
 }
 
 type Ledger struct {
@@ -66,24 +97,50 @@ type Ledger struct {
 	MetaData map[string]interface{} `json:"meta_data"`
 }
 
-func (balance *BalanceUpdate) computeCreditBalance(amount int64) {
+type LedgerFilter struct {
+	ID   string    `json:"id"`
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+}
+
+func (balance *Balance) computeCreditBalance(amount int64) {
 	balance.CreditBalance = balance.CreditBalance + amount
 }
 
-func (balance *BalanceUpdate) computeDebitBalance(amount int64) {
+func (balance *Balance) computeDebitBalance(amount int64) {
 	balance.DebitBalance = balance.DebitBalance + amount
 }
 
-func (balance *BalanceUpdate) computeBalance() {
+func (balance *Balance) computeBalance() {
 	balance.Balance = balance.CreditBalance + -balance.DebitBalance
 }
 
-func (balance *BalanceUpdate) ComputeNewBalances(drcr string, amount int64) {
-	if drcr == "Credit" {
-		balance.computeCreditBalance(amount)
-	} else {
-		balance.computeDebitBalance(amount)
-	}
+func (balance *Balance) attachBalanceBefore(transaction *Transaction) {
+	transaction.DebitBalanceBefore = balance.DebitBalance
+	transaction.CreditBalanceBefore = balance.CreditBalance
+	transaction.BalanceBefore = balance.Balance
 
+}
+
+func (balance *Balance) attachBalanceAfter(transaction *Transaction) {
+	transaction.DebitBalanceAfter = balance.DebitBalance
+	transaction.CreditBalanceAfter = balance.CreditBalance
+	transaction.BalanceAfter = balance.Balance
+}
+
+func (balance *Balance) ComputeNewBalances(transaction *Transaction) {
+	balance.attachBalanceBefore(transaction)
+	drcr := transaction.DRCR
+	if drcr == "Credit" {
+		balance.computeCreditBalance(transaction.Amount)
+	} else {
+		balance.computeDebitBalance(transaction.Amount)
+	}
 	balance.computeBalance()
+	balance.attachBalanceAfter(transaction)
+}
+
+func (transaction *Transaction) Defaults() {
+	transaction.Created = time.Now().UnixNano()
+	transaction.ID = fmt.Sprintf("trans_%s", uuid.New().String())
 }

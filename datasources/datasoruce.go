@@ -16,7 +16,7 @@ type DataSource interface {
 	GetBalance(BalanceID string) (saifu.Balance, error)
 	GetTransaction(TransactionID string) (saifu.Transaction, error)
 	GetTransactionByRef(reference string) (saifu.Transaction, error)
-	UpdateBalance(balanceID string, update saifu.BalanceUpdate) (saifu.BalanceUpdate, error)
+	UpdateBalance(balanceID string, update saifu.Balance) (saifu.Balance, error)
 }
 
 func NewDataSource(configuration *config.Configuration) DataSource {

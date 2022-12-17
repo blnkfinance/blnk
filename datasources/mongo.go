@@ -101,17 +101,52 @@ func (m mongoDataSource) GetLedger(LedgerID string) (saifu.Ledger, error) {
 }
 
 func (m mongoDataSource) GetBalance(BalanceID string) (saifu.Balance, error) {
-	panic("")
+	coll := m.getCollection("saifu", "balances")
+
+	var balance saifu.Balance
+
+	err := coll.FindOne(context.Background(), bson.M{"id": BalanceID}).Decode(&balance)
+	if err != nil {
+		return saifu.Balance{}, err
+	}
+
+	return balance, nil
 }
 
 func (m mongoDataSource) GetTransaction(TransactionID string) (saifu.Transaction, error) {
-	panic("")
+	coll := m.getCollection("saifu", "transactions")
+
+	var transaction saifu.Transaction
+
+	err := coll.FindOne(context.Background(), bson.M{"id": TransactionID}).Decode(&transaction)
+	if err != nil {
+		return saifu.Transaction{}, err
+	}
+
+	return transaction, nil
 }
 
-func (p mongoDataSource) GetTransactionByRef(reference string) (saifu.Transaction, error) {
-	panic("")
+func (m mongoDataSource) GetTransactionByRef(reference string) (saifu.Transaction, error) {
+	coll := m.getCollection("saifu", "transactions")
+
+	var transaction saifu.Transaction
+
+	err := coll.FindOne(context.Background(), bson.M{"reference": reference}).Decode(&transaction)
+	if err != nil {
+		return saifu.Transaction{}, err
+	}
+
+	return transaction, nil
 }
 
-func (p mongoDataSource) UpdateBalance(balanceID string, update saifu.BalanceUpdate) (saifu.BalanceUpdate, error) {
-	panic("")
+func (m mongoDataSource) UpdateBalance(balanceID string, update saifu.Balance) (saifu.Balance, error) {
+	coll := m.getCollection("saifu", "balances")
+
+	err := coll.FindOneAndUpdate(context.Background(), bson.M{"id": balanceID}, bson.M{"$set": update}).Decode(&update)
+
+	if err != nil {
+		return saifu.Balance{}, err
+	}
+
+	return update, nil
 }

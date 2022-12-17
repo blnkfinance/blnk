@@ -129,14 +129,14 @@ func (p relationalDB) GetTransactionByRef(reference string) (saifu.Transaction, 
 	return transaction, nil
 }
 
-func (p relationalDB) UpdateBalance(balanceID string, update saifu.BalanceUpdate) (saifu.BalanceUpdate, error) {
+func (p relationalDB) UpdateBalance(balanceID string, update saifu.Balance) (saifu.Balance, error) {
 	_, err := p.orm.NewUpdate().
 		Model(&update).
 		Where("id = ?", balanceID).
 		Exec(context.Background())
 
 	if err != nil {
-		return saifu.BalanceUpdate{}, err
+		return saifu.Balance{}, err
 	}
 
 	return update, nil

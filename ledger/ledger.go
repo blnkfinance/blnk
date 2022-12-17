@@ -2,11 +2,8 @@ package ledger
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/jerry-enebeli/saifu"
 	"github.com/jerry-enebeli/saifu/config"
@@ -37,76 +34,80 @@ func (l ledger) writeToDisk(transaction saifu.Transaction) {
 }
 
 func (l ledger) validateBalance(transaction *saifu.Transaction) (saifu.Balance, error) {
-
 	balance, err := l.datasource.GetBalance(transaction.BalanceID)
 	if err != nil {
 		return saifu.Balance{}, err
 	}
-
 	if balance.Currency != transaction.Currency {
 		//todo write flagged transactions table
 		return balance, errors.New("currency mismatch")
 	}
-
 	return balance, nil
 }
 
 func (l ledger) CreateLedger(ledger saifu.Ledger) (saifu.Ledger, error) {
 	ledger.Created = time.Now().UnixNano()
-
 	currentLedger, err := l.datasource.GetLedger(ledger.ID)
 	log.Println(currentLedger, err)
 	if currentLedger.ID != "" {
 		return saifu.Ledger{}, errors.New("ledger id already in use")
 	}
-
 	return l.datasource.CreateLedger(ledger)
 }
 
 func (l ledger) CreateBalance(balance saifu.Balance) (saifu.Balance, error) {
 	balance.Created = time.Now().UnixNano()
-
 	//todo validateBalanceBefore creation. Prevent Duplicate
-
 	return l.datasource.CreateBalance(balance)
 }
 
-func (l ledger) RecordTransaction(transaction saifu.Transaction) (saifu.Transaction, error) {
-	//TODO Roll back operations, create transaction, update balance. if update balance fails roll back create transaction
-	transaction.Created = time.Now().UnixNano()
-	transaction.ID = fmt.Sprintf("trans_%s", uuid.New().String())
-
+func (l ledger) validateTransaction(transaction saifu.Transaction) (saifu.Balance, error) {
 	transactionData, err := l.GetTransactionByRef(transaction.Reference)
 	if transactionData.ID != "" {
-		return saifu.Transaction{}, errors.New("reference already used")
-	}
-
+		return saifu.Balance{}, errors.New("reference already used")
+	} //ensures reference does not exist
 	balance, err := l.validateBalance(&transaction)
 	if err != nil {
 		log.Println("validate balance error", err)
-		return saifu.Transaction{}, err
-	}
-
+		return saifu.Balance{}, err
+	} //ensures balance exist
 	_, err = l.datasource.GetLedger(balance.LedgerID)
 	if err != nil {
 		log.Println("get ledger error", err)
-		return saifu.Transaction{}, err
-	}
+		return saifu.Balance{}, err
+	} //ensure ledger exist
 
-	transaction.LedgerID = balance.LedgerID
-	transaction, err = l.datasource.RecordTransaction(transaction)
+	balance.ComputeNewBalances(&transaction)
+	balance.ModificationRef = transaction.ID //set the last balance modifier to the transaction id
+
+	return balance, nil
+}
+
+func (l ledger) recordTransaction(LedgerID string, transaction saifu.Transaction) error {
+	transaction.LedgerID = LedgerID
+	transaction, err := l.datasource.RecordTransaction(transaction)
 	if err != nil {
 		go l.writeToDisk(transaction)
 		log.Println("record transaction error", err)
+		return err
+	}
+	return nil
+}
+
+func (l ledger) RecordTransaction(transaction saifu.Transaction) (saifu.Transaction, error) {
+	transaction.Defaults()
+	balance, err := l.validateTransaction(transaction)
+	if err != nil {
 		return saifu.Transaction{}, err
 	}
-
-	balanceUpdate := saifu.BalanceUpdate{ModificationRef: transaction.ID, DebitBalance: balance.DebitBalance, CreditBalance: balance.CreditBalance, Balance: balance.Balance}
-	balanceUpdate.ComputeNewBalances(transaction.DRCR, transaction.Amount)
-
-	_, err = l.datasource.UpdateBalance(transaction.BalanceID, balanceUpdate)
+	err = l.recordTransaction(balance.LedgerID, transaction)
+	if err != nil {
+		return saifu.Transaction{}, err
+	}
+	_, err = l.datasource.UpdateBalance(transaction.BalanceID, balance)
 	if err != nil {
 		log.Println("update balance error", err)
+		return saifu.Transaction{}, err
 	}
 	return transaction, nil
 }
