@@ -35,9 +35,7 @@ func NewCLI() *wLite {
 	}
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "./saifu.json", "Configuration file for wallet lite")
 	rootCmd.PersistentPreRun = preRun
-	rootCmd.AddCommand(configCommands())
 	rootCmd.AddCommand(serverCommands())
-	rootCmd.AddCommand(walletCommands())
 	return &wLite{cmd: rootCmd}
 }
 
