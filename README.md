@@ -159,7 +159,7 @@ Fault tolerance is a key aspect of any system design, as it helps ensure that th
 
 ## Option 1: Docker Image
 ```bash
-$ docker run -v `pwd`/saifu.json:/saifu.json -p 4300:4100 jerryenebeli/saifu:latest
+$ docker run -v `pwd`/saifu.json:/saifu.json -p 4100:4100 jerryenebeli/saifu:latest
 ```
 
 ## Option 2: Building from source
