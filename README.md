@@ -57,7 +57,7 @@ A ledger can have multiple balances, depending on the types of accounts and asse
 | ------ | ------ | ------ | ------ | ------ | ------ |
 | 1 | 1 | USD  | 150.00 | 50.00 | 100.00
 | 1 | 2 | NGN  | 51,000.00 | 0.00 | 51,000.00
-| 1 | 3 | GHS  | 1,000.00 | 0.00 | 1,0000.00
+| 1 | 3 | GHS  | 1,000.00 | 0.00 | 1,000.00
 | 1 | 4 | BTC  | 1 | 0.00 | 1
 
 
