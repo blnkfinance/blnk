@@ -1,3 +1,5 @@
+![example workflow](https://github.com/jerry-enebeli/saifu/actions/workflows/go.yml/badge.svg)
+
 # Intro
 
 Saifu is an open-source financial ledger server that enables you build financial products easily.
