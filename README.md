@@ -1,4 +1,5 @@
-![example workflow](https://github.com/jerry-enebeli/saifu/actions/workflows/go.yml/badge.svg)
+![Buil and Test](https://github.com/jerry-enebeli/saifu/actions/workflows/go.yml/badge.svg)
+![Deploy To Docker](https://github.com/jerry-enebeli/saifu/actions/workflows/docker-publish.yml/badge.svg)
 
 # Intro
 
@@ -158,12 +159,7 @@ Fault tolerance is a key aspect of any system design, as it helps ensure that th
 
 ## Option 1: Docker Image
 ```bash
-$ docker run \
-	-p 5005:5005 \
-	--name saifu \
-    --network=host \
-	-v `pwd`/saifu.json:/saifu.json \
-	docker.cloudsmith.io/saifu/saifu:latest
+$ docker run -v `pwd`/saifu.json:/saifu.json -p 4300:4100 jerryenebeli/saifu:latest
 ```
 
 ## Option 2: Building from source
