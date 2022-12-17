@@ -239,7 +239,7 @@ curl --location --request POST 'localhost:4100/balance' \
 }'
 ```
 
-## Record Transaction
+## Record Credit Transaction
 ```shell
 curl --location --request POST 'localhost:4100/transaction' \
 --header 'Content-Type: application/json' \
@@ -248,10 +248,45 @@ curl --location --request POST 'localhost:4100/transaction' \
     "tag": "CARD_PAYMENT",
     "reference": "ref-1",
     "currency": "NGN",
-    "ledger_id": "ledger1",
     "balance_id": "jerry_wallet",
     "amount": 5000,
     "drcr": "Credit",
     "status": "Successful"
 }'
+```
+
+## Record Debit Transaction
+```shell
+curl --location --request POST 'localhost:4100/transaction' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "tag": "BANK_TRANSFER",
+    "reference": "ehrrelkkffklodrjjloeddrodrkreo",
+    "currency": "NGN",
+    "balance_id": "jerrry_wallet",
+    "amount": 5000,
+    "drcr": "Debit",
+    "status": "Pending",
+    "meta_data": {"internal_id": "helloworld"}
+}'
+```
+
+## Get Ledger By ID
+```shell
+curl --location --request GET 'localhost:4100/ledger/:id' 
+```
+
+## Get Balance By ID
+```shell
+curl --location --request GET 'localhost:4100/balance/:id'
+```
+
+## Get Transaction By ID
+```shell
+curl --location --request GET 'localhost:4100/transaction/:id'
+```
+
+## Get Transaction By Ref
+```shell
+curl --location --request GET 'localhost:4100/balance/:id'
 ```

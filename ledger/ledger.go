@@ -2,8 +2,11 @@ package ledger
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jerry-enebeli/saifu"
 	"github.com/jerry-enebeli/saifu/config"
@@ -47,6 +50,7 @@ func (l ledger) validateBalance(transaction *saifu.Transaction) (saifu.Balance, 
 
 	return balance, nil
 }
+
 func (l ledger) CreateLedger(ledger saifu.Ledger) (saifu.Ledger, error) {
 	ledger.Created = time.Now().UnixNano()
 
@@ -70,25 +74,31 @@ func (l ledger) CreateBalance(balance saifu.Balance) (saifu.Balance, error) {
 func (l ledger) RecordTransaction(transaction saifu.Transaction) (saifu.Transaction, error) {
 	//TODO Roll back operations, create transaction, update balance. if update balance fails roll back create transaction
 	transaction.Created = time.Now().UnixNano()
-	err := l.verifyTransactionRef(transaction.Reference)
-	if err != nil {
-		log.Println("verify ref error", err)
+	transaction.ID = fmt.Sprintf("trans_%s", uuid.New().String())
+
+	transactionData, err := l.GetTransactionByRef(transaction.Reference)
+	if transactionData.ID != "" {
+		return saifu.Transaction{}, errors.New("reference already used")
 	}
+
+	balance, err := l.validateBalance(&transaction)
+	if err != nil {
+		log.Println("validate balance error", err)
+		return saifu.Transaction{}, err
+	}
+
+	_, err = l.datasource.GetLedger(balance.LedgerID)
+	if err != nil {
+		log.Println("get ledger error", err)
+		return saifu.Transaction{}, err
+	}
+
+	transaction.LedgerID = balance.LedgerID
 	transaction, err = l.datasource.RecordTransaction(transaction)
 	if err != nil {
 		go l.writeToDisk(transaction)
 		log.Println("record transaction error", err)
 		return saifu.Transaction{}, err
-	}
-
-	_, err = l.datasource.GetLedger(transaction.LedgerID)
-	if err != nil {
-		log.Println("get ledger error", err)
-	}
-
-	balance, err := l.validateBalance(&transaction)
-	if err != nil {
-		log.Println("valdidate balance error", err)
 	}
 
 	balanceUpdate := saifu.BalanceUpdate{ModificationRef: transaction.ID, DebitBalance: balance.DebitBalance, CreditBalance: balance.CreditBalance, Balance: balance.Balance}
