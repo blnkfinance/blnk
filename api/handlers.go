@@ -5,11 +5,11 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/saifu"
+	blnk "github.com/jerry-enebeli/blnk"
 )
 
 type api struct {
-	ledger saifu.Service
+	ledger blnk.Service
 	router *gin.Engine
 }
 
@@ -25,14 +25,14 @@ func (a api) Router() *gin.Engine {
 	return a.router
 }
 
-func NewAPI(ledger saifu.Service) *api {
+func NewAPI(ledger blnk.Service) *api {
 	r := gin.Default()
 	gin.SetMode(gin.DebugMode)
 	return &api{ledger: ledger, router: r}
 }
 
 func (a api) CreateLedger(c *gin.Context) {
-	var ledger saifu.Ledger
+	var ledger blnk.Ledger
 	if err := c.ShouldBindJSON(&ledger); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -47,7 +47,7 @@ func (a api) CreateLedger(c *gin.Context) {
 }
 
 func (a api) CreateBalance(c *gin.Context) {
-	var balance saifu.Balance
+	var balance blnk.Balance
 	if err := c.ShouldBindJSON(&balance); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -62,7 +62,7 @@ func (a api) CreateBalance(c *gin.Context) {
 }
 
 func (a api) RecordTransaction(c *gin.Context) {
-	var transaction saifu.Transaction
+	var transaction blnk.Transaction
 	if err := c.ShouldBindJSON(&transaction); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

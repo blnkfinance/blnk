@@ -3,16 +3,16 @@ package main
 import (
 	"log"
 
-	"github.com/jerry-enebeli/saifu/api"
-	"github.com/jerry-enebeli/saifu/config"
-	"github.com/jerry-enebeli/saifu/ledger"
+	"github.com/jerry-enebeli/blnk/api"
+	"github.com/jerry-enebeli/blnk/config"
+	"github.com/jerry-enebeli/blnk/ledger"
 	"github.com/spf13/cobra"
 )
 
 func serverCommands() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "start wallet server",
+		Short: "start blnk server",
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg, err := config.Fetch()
 			if err != nil {

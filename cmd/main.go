@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/jerry-enebeli/saifu/config"
+	"github.com/jerry-enebeli/blnk/config"
 	"github.com/spf13/cobra"
 )
 
@@ -22,18 +22,17 @@ func preRun(rootcmd *cobra.Command, args []string) {
 	if err == nil {
 		log.Println("config loaded ✅")
 	}
-	//wallets.NewWalletService()
 }
 
 func NewCLI() *wLite {
 	var configFile string
 
 	var rootCmd = &cobra.Command{
-		Use:   "saifu",
+		Use:   "blnk",
 		Short: "Open source wallet as a service",
 		Run:   func(cmd *cobra.Command, args []string) {},
 	}
-	rootCmd.PersistentFlags().StringVar(&configFile, "config", "./saifu.json", "Configuration file for wallet lite")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "./blnk.json", "Configuration file for wallet lite")
 	rootCmd.PersistentPreRun = preRun
 	rootCmd.AddCommand(serverCommands())
 	return &wLite{cmd: rootCmd}

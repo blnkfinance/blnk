@@ -1,4 +1,4 @@
-package saifu
+package blnk
 
 import (
 	"fmt"

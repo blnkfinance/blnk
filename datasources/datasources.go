@@ -3,20 +3,20 @@ package datasources
 import (
 	"log"
 
-	"github.com/jerry-enebeli/saifu"
+	blnk "github.com/jerry-enebeli/blnk"
 
-	"github.com/jerry-enebeli/saifu/config"
+	"github.com/jerry-enebeli/blnk/config"
 )
 
 type DataSource interface {
-	CreateLedger(ledger saifu.Ledger) (saifu.Ledger, error)
-	CreateBalance(balance saifu.Balance) (saifu.Balance, error)
-	RecordTransaction(transaction saifu.Transaction) (saifu.Transaction, error)
-	GetLedger(LedgerID string) (saifu.Ledger, error)
-	GetBalance(BalanceID string) (saifu.Balance, error)
-	GetTransaction(TransactionID string) (saifu.Transaction, error)
-	GetTransactionByRef(reference string) (saifu.Transaction, error)
-	UpdateBalance(balanceID string, update saifu.Balance) (saifu.Balance, error)
+	CreateLedger(ledger blnk.Ledger) (blnk.Ledger, error)
+	CreateBalance(balance blnk.Balance) (blnk.Balance, error)
+	RecordTransaction(transaction blnk.Transaction) (blnk.Transaction, error)
+	GetLedger(LedgerID string) (blnk.Ledger, error)
+	GetBalance(BalanceID string) (blnk.Balance, error)
+	GetTransaction(TransactionID string) (blnk.Transaction, error)
+	GetTransactionByRef(reference string) (blnk.Transaction, error)
+	UpdateBalance(balanceID string, update blnk.Balance) (blnk.Balance, error)
 }
 
 func NewDataSource(configuration *config.Configuration) DataSource {

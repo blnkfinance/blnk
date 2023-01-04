@@ -1,9 +1,9 @@
-![Buil and Test](https://github.com/jerry-enebeli/saifu/actions/workflows/go.yml/badge.svg)
-![Deploy To Docker](https://github.com/jerry-enebeli/saifu/actions/workflows/docker-publish.yml/badge.svg)
+![Buil and Test](https://github.com/jerry-enebeli/Blnk/actions/workflows/go.yml/badge.svg)
+![Deploy To Docker](https://github.com/jerry-enebeli/Blnk/actions/workflows/docker-publish.yml/badge.svg)
 
 # Intro
 
-Saifu is an open-source financial ledger server that enables you build financial products easily.
+Blnk is an open-source financial ledger server that enables you build financial products easily.
 
 ## Use Cases
 
@@ -13,12 +13,12 @@ Saifu is an open-source financial ledger server that enables you build financial
 - Brokerage systems
 
 
-# How Saifu works
+# How Blnk works
 
 # Ledgers
-Ledgers are a common feature of financial systems, and are used to record and track transactions and balances for a particular entity. In a system such as Saifu, ledgers might be used to track the financial transactions and balances of customers, as well as other financial entities such as banks, businesses, or governments.
+Ledgers are a common feature of financial systems, and are used to record and track transactions and balances for a particular entity. In a system such as Blnk, ledgers might be used to track the financial transactions and balances of customers, as well as other financial entities such as banks, businesses, or governments.
 
-To create a new ledger in a system like Saifu, you would typically need to specify an identity for the ledger. This identity could be the customer's name or account number, or the name or identification number of another financial entity. The identity of the ledger is used to uniquely identify the ledger within the system, and to associate it with the appropriate transactions and balances.
+To create a new ledger in a system like Blnk, you would typically need to specify an identity for the ledger. This identity could be the customer's name or account number, or the name or identification number of another financial entity. The identity of the ledger is used to uniquely identify the ledger within the system, and to associate it with the appropriate transactions and balances.
 
 Once a ledger has been created, all transactions and balances for that ledger can be recorded and tracked within the system. This might include recording and updating the balances for various accounts or financial assets, as well as tracking the flow of assets between accounts. By maintaining accurate and up-to-date ledgers, it is possible to track the financial activity of a particular entity and to ensure the integrity and accuracy of financial transactions.
 
@@ -138,7 +138,7 @@ Idempotence is an important property of transactions, as it ensures that the out
 
 **For example, consider a transaction that involves transferring money from one bank account to another. If the transaction is idempotent, then it will not matter how many times the transaction is repeated – the end result will always be the same. This helps to prevent unintended consequences, such as multiple transfers occurring or funds being mistakenly credited or debited multiple times.**
 
-Saifu ensures Idempotency by leveraging ```refereces```. Every transaction is expected to have a unique reference. Saifu ensures no two transactions are stored with the same reference. This helps to ensure that the outcome of the transaction is consistent, regardless of how many times the transaction is performed.
+Blnk ensures Idempotency by leveraging ```refereces```. Every transaction is expected to have a unique reference. Blnk ensures no two transactions are stored with the same reference. This helps to ensure that the outcome of the transaction is consistent, regardless of how many times the transaction is performed.
 
 ### Grouping Transactions
 Group transactions by using a common group identifier (such as a ```group_id```) can be a useful way to associate related transactions together. This can be particularly useful when dealing with transactions that have associated fees, as it allows you to easily track and manage the fees that are associated with a particular transaction.
@@ -152,30 +152,30 @@ Overall, grouping transactions using a common group_id can be a useful way to ma
 # Fault Tolerance
 Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors
 
-**By ```enabling fault tolerance in the config```, Saifu temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
+**By ```enabling fault tolerance in the config```, Blnk temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
 
 
 # How To Install
 
 ## Option 1: Docker Image
 ```bash
-$ docker run -v `pwd`/saifu.json:/saifu.json -p 4100:4100 jerryenebeli/saifu:latest
+$ docker run -v `pwd`/Blnk.json:/Blnk.json -p 4100:4100 jerryenebeli/Blnk:latest
 ```
 
 ## Option 2: Building from source
-To build saifu from source code, you need:
+To build Blnk from source code, you need:
 * Go [version 1.16 or greater](https://golang.org/doc/install).
 
 ```bash
-$ git clone https://github.com/jerry-enebeli/saifu && cd saifu
+$ git clone https://github.com/jerry-enebeli/Blnk && cd Blnk
 $ make build
 ```
 
 # Get Started with Saiffu
-Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The api exposes the following endpoints
+Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api exposes the following endpoints
 
 
-## Create Config file ``saifu.json``
+## Create Config file ``blnk.json``
 
 ```json
 {
@@ -184,7 +184,7 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The ap
   "default_currency": "NGN",
   "data_source": {
     "name": "POSTGRES",
-    "dns":"postgres://postgres:@localhost:5432/saifu?sslmode=disable"
+    "dns":"postgres://postgres:@localhost:5432/Blnk?sslmode=disable"
   },
   "notification": {
     "slack": {
@@ -205,7 +205,7 @@ Saifu is a RESTFUL server. It exposes interaction with your Saifu server. The ap
 | default_currency |  The default currency for new transaction entries. This would be used if a currency is not passed when creating a new transaction record. |
 | enable_ft | Enable fault tolerance. default is false. |
 | data_source | Database of your choice.  |
-| data_source.name | Name of preferred database. Saifu currently supports a couple of databases. |
+| data_source.name | Name of preferred database. Blnk currently supports a couple of databases. |
 | data_source.name | DNS of database|
 
 ### Supported Databases

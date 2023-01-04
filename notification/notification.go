@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jerry-enebeli/saifu/request"
+	"github.com/jerry-enebeli/blnk/request"
 
-	"github.com/jerry-enebeli/saifu/config"
+	"github.com/jerry-enebeli/blnk/config"
 )
 
 func SlackNotification(err error) {
@@ -20,7 +20,7 @@ func SlackNotification(err error) {
 			"type": "header",
 			"text": {
 				"type": "plain_text",
-				"text": "Error From Saifu 🐞",
+				"text": "Error From Blnk 🐞",
 				"emoji": true
 			}
 		},

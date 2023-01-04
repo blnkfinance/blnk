@@ -5,15 +5,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/jerry-enebeli/saifu"
+	blnk "github.com/jerry-enebeli/blnk"
 )
 
-func getBalanceMock(credit, debit, balance int64) saifu.Balance {
-	return saifu.Balance{CreditBalance: credit, DebitBalance: debit, Balance: balance}
+func getBalanceMock(credit, debit, balance int64) blnk.Balance {
+	return blnk.Balance{CreditBalance: credit, DebitBalance: debit, Balance: balance}
 }
 
-func getTransactionMock(amount int64, currency, DRCR string) saifu.Transaction {
-	transaction := saifu.Transaction{Amount: amount, Currency: currency, DRCR: DRCR}
+func getTransactionMock(amount int64, currency, DRCR string) blnk.Transaction {
+	transaction := blnk.Transaction{Amount: amount, Currency: currency, DRCR: DRCR}
 	return transaction
 }
 
@@ -21,8 +21,8 @@ func TestComputeBalanceTest(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		balance     saifu.Balance
-		transaction saifu.Transaction
+		balance     blnk.Balance
+		transaction blnk.Transaction
 		want        struct {
 			Balance       int64
 			CreditBalance int64

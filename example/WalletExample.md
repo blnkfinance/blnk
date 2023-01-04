@@ -1,4 +1,4 @@
-# Building a Wallet Solution With Saifu
+# Building a Wallet Solution With Blnk
 
 ## Step 1: Create ledger. Assume this is your main wallet project
 Create ledger with an id. we can pass ```wirepay``` as the ledger id 
@@ -6,7 +6,7 @@ Create ledger with an id. we can pass ```wirepay``` as the ledger id
 ## Step 2: create customer wallet
 Assuming you have collected your customer data and have it saved in your db. Creating a wallet for that customer is as easy as 
   - Get unique id for the newly created customer
-  - Create Saifu Balance and us the customer id as the balance id
+  - Create Blnk Balance and us the customer id as the balance id
   - Repeat this step for as many customers as you have
 
 ## Step 3: Credit customer wallet after a topup is made

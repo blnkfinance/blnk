@@ -68,7 +68,7 @@ func Fetch() (*Configuration, error) {
 	config := configStore.Load()
 	c, ok := config.(*Configuration)
 	if !ok {
-		return nil, errors.New("config not loaded from file. Create a json file called saifu.json with your config ❌")
+		return nil, errors.New("config not loaded from file. Create a json file called blnk.json with your config ❌")
 	}
 
 	return c, nil

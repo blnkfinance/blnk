@@ -1,4 +1,4 @@
-PROJECT=saifu
+PROJECT=blnk
 
 printProject:
 	echo ${PROJECT}
@@ -16,7 +16,7 @@ build:
 	go build -o ${PROJECT} ./cmd/*.go
 
 docker_run:
-	docker run -v `pwd`/saifu.json:/saifu.json -p 4300:4100 jerryenebeli/saifu:main
+	docker run -v `pwd`/blnk.json:/blnk.json -p 4300:4100 jerryenebeli/blnk:main
 
 run:
 	./${PROJECT}
