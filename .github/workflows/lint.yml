@@ -1,5 +1,4 @@
-name: golangci-lint
-on:
+name: Golang Lint
   push:
     tags:
       - v*
