@@ -1,4 +1,5 @@
-name: Golang Lint
+name: Linter
+on:
   push:
     tags:
       - v*
