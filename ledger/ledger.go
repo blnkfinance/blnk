@@ -19,7 +19,6 @@ func NewLedger() *ledger {
 	configuration, err := config.Fetch()
 	if err != nil {
 		panic(err)
-		return nil
 	}
 	dataSource := datasources.NewDataSource(configuration)
 	return &ledger{datasource: dataSource, config: configuration}
@@ -58,10 +57,11 @@ func (l ledger) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
 }
 
 func (l ledger) validateTransaction(transaction blnk.Transaction) (blnk.Balance, error) {
-	transactionData, err := l.GetTransactionByRef(transaction.Reference)
-	if transactionData.ID != "" {
+	_, err := l.GetTransactionByRef(transaction.Reference)
+	if err != nil {
 		return blnk.Balance{}, errors.New("reference already used")
 	} //ensures reference does not exist
+
 	balance, err := l.validateBalance(&transaction)
 	if err != nil {
 		return blnk.Balance{}, err

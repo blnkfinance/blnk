@@ -21,7 +21,11 @@ func serverCommands() *cobra.Command {
 
 			api := api.NewAPI(ledger.NewLedger()).Router()
 
-			api.Run(":" + cfg.Port)
+			err = api.Run(":" + cfg.Port)
+
+			if err != nil {
+				panic(err)
+			}
 		},
 	}
 

@@ -38,13 +38,19 @@ func createTables(orm *bun.DB) error {
 	_, err := orm.NewCreateTable().Model((*blnk.Ledger)(nil)).Exec(context.Background())
 
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 
-	orm.NewCreateTable().Model((*blnk.Balance)(nil)).Exec(context.Background())
+	_, err = orm.NewCreateTable().Model((*blnk.Balance)(nil)).Exec(context.Background())
 
-	orm.NewCreateTable().Model((*blnk.Transaction)(nil)).Exec(context.Background())
+	if err != nil {
+		return err
+	}
 
+	_, err = orm.NewCreateTable().Model((*blnk.Transaction)(nil)).Exec(context.Background())
+	if err != nil {
+		return err
+	}
 	return nil
 
 }
@@ -58,7 +64,11 @@ func newRelationalDataSource(db, dns string) DataSource {
 		orm = bun.NewDB(connect, pgdialect.New())
 	}
 
-	createTables(orm)
+	err := createTables(orm)
+
+	if err != nil {
+		panic(err)
+	}
 
 	return &relationalDB{conn: connect, orm: orm}
 }

@@ -66,13 +66,13 @@ func SlackNotification(err error) {
 
 }
 
-func WebhookNotification(err error) {
+func WebhookNotification(systemError error) {
 	conf, err := config.Fetch()
 	if err != nil {
 		log.Println(err)
 	}
 
-	data := map[string]interface{}{"error": err.Error()}
+	data := map[string]interface{}{"error": systemError.Error()}
 	payload, err := request.ToJsonReq(&data)
 
 	if err != nil {
@@ -98,7 +98,6 @@ func WebhookNotification(err error) {
 }
 
 func NotifyError(systemError error) {
-	log.Println(systemError)
 
 	conf, err := config.Fetch()
 	if err != nil {

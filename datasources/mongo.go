@@ -29,7 +29,7 @@ func connectMongo(dns string) *mongo.Client {
 		return nil
 	}
 
-	err = client.Ping(nil, nil)
+	err = client.Ping(context.Background(), nil)
 	if err != nil {
 		log.Println("mongodb connection error ❌", err)
 		return nil
