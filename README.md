@@ -1,5 +1,6 @@
 ![Buil and Test](https://github.com/jerry-enebeli/Blnk/actions/workflows/go.yml/badge.svg)
 ![Deploy To Docker](https://github.com/jerry-enebeli/Blnk/actions/workflows/docker-publish.yml/badge.svg)
+![Linter](https://github.com/jerry-enebeli/Blnk/actions/workflows/lint.yml/badge.svg)
 
 # Intro
 
