@@ -159,7 +159,7 @@ Fault tolerance is a key aspect of any system design, as it helps ensure that th
 
 ## Option 1: Docker Image
 ```bash
-$ docker run -v `pwd`/Blnk.json:/Blnk.json -p 4100:4100 jerryenebeli/Blnk:latest
+$ docker run -v `pwd`/Blnk.json:/Blnk.json -p 4100:4100 jerryenebeli/blnk:latest
 ```
 
 ## Option 2: Building from source
