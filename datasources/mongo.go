@@ -21,7 +21,8 @@ func connectMongo(dns string) *mongo.Client {
 	}
 	client, _ := mongo.NewClient(options.Client().ApplyURI(dns))
 
-	ctx, _ := context.WithTimeout(context.Background(), 50*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	defer cancel()
 	err := client.Connect(ctx)
 
 	if err != nil {
