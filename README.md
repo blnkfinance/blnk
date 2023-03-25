@@ -123,7 +123,7 @@ Transactions record all ledger events. Transaction are recorded as either  ```De
 | currency | Transaction currency | string
 | ledger_id | The Ledger the transaction belongs to | string |
 | balance_id | The balance the belongs to | string |
-| status | The status of the transaction. Transaction status are grouped into ```Successful```, ```Pending```, ```Reversed``` | string |
+| status | The status of the transaction. example: ```Successful```, ```Pending```, ```Failed``` | string |
 | reference | Unique Transaction referecence | string |
 | group | A group identifier | string |
 | description | Transaction description | string |
@@ -213,9 +213,6 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
 | Data Base | Support |
 | ------ | ------ |
 | Postgres | ✅ |
-| MYSQL | ✅ |
-| MongoDB | ✅ |
-| Redis | ⌛  |
 
 ## Create Ledger
 ```shell

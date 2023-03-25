@@ -3,9 +3,10 @@ package main
 import (
 	"log"
 
+	"github.com/jerry-enebeli/blnk/pkg"
+
 	"github.com/jerry-enebeli/blnk/api"
 	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/ledger"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +20,7 @@ func serverCommands() *cobra.Command {
 				log.Fatalf("Error getting config: %v\n", err)
 			}
 
-			api := api.NewAPI(ledger.NewLedger()).Router()
+			api := api.NewAPI(pkg.NewBlnk()).Router()
 
 			err = api.Run(":" + cfg.Port)
 

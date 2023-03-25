@@ -2,14 +2,17 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 
+	"github.com/jerry-enebeli/blnk"
+	"github.com/jerry-enebeli/blnk/pkg"
+
 	"github.com/gin-gonic/gin"
-	blnk "github.com/jerry-enebeli/blnk"
 )
 
 type api struct {
-	ledger blnk.Service
+	blnk   *pkg.Blnk
 	router *gin.Engine
 }
 
@@ -21,14 +24,14 @@ func (a api) Router() *gin.Engine {
 	router.GET("/ledger/:id", a.GetLedger)
 	router.GET("/balance/:id", a.GetBalance)
 	router.GET("/transaction/:id", a.GetTransaction)
-
+	router.GET("/transaction/group/currency", a.GroupTransactionsByCurrency)
 	return a.router
 }
 
-func NewAPI(ledger blnk.Service) *api {
+func NewAPI(blnk *pkg.Blnk) *api {
 	r := gin.Default()
 	gin.SetMode(gin.DebugMode)
-	return &api{ledger: ledger, router: r}
+	return &api{blnk: blnk, router: r}
 }
 
 func (a api) CreateLedger(c *gin.Context) {
@@ -37,7 +40,7 @@ func (a api) CreateLedger(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	resp, err := a.ledger.CreateLedger(ledger)
+	resp, err := a.blnk.CreateLedger(ledger)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -52,7 +55,7 @@ func (a api) CreateBalance(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	resp, err := a.ledger.CreateBalance(balance)
+	resp, err := a.blnk.CreateBalance(balance)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -70,7 +73,7 @@ func (a api) RecordTransaction(c *gin.Context) {
 	mutex := sync.Mutex{}
 
 	mutex.Lock()
-	resp, err := a.ledger.RecordTransaction(transaction)
+	resp, err := a.blnk.RecordTransaction(transaction)
 	mutex.Unlock()
 
 	if err != nil {
@@ -89,7 +92,9 @@ func (a api) GetLedger(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.ledger.GetLedger(id)
+	idInt, _ := strconv.Atoi(id)
+
+	resp, err := a.blnk.GetLedgerByID(int64(idInt))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -106,7 +111,9 @@ func (a api) GetBalance(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.ledger.GetBalance(id)
+	idInt, _ := strconv.Atoi(id)
+
+	resp, err := a.blnk.GetBalance(int64(idInt))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -123,7 +130,18 @@ func (a api) GetTransaction(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.ledger.GetTransaction(id)
+	resp, err := a.blnk.GetTransaction(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (a api) GroupTransactionsByCurrency(c *gin.Context) {
+
+	resp, err := a.blnk.GroupTransactionsByCurrency()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

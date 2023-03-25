@@ -1,43 +1,24 @@
 package blnk
 
 import (
-	"fmt"
+	"errors"
 	"time"
-
-	"github.com/google/uuid"
-
-	"github.com/uptrace/bun"
 )
-
-type Service interface {
-	CreateLedger(ledger Ledger) (Ledger, error)
-	CreateBalance(balance Balance) (Balance, error)
-	RecordTransaction(transaction Transaction) (Transaction, error)
-	GetLedger(ledgerID string) (Ledger, error)
-	GetBalance(balanceID string) (Balance, error)
-	GetTransaction(transactionID string) (Transaction, error)
-	GetTransactionByRef(reference string) (Transaction, error)
-}
-
-type Tools interface {
-}
 
 type Filter struct {
 	Status string
 }
 
 type Transaction struct {
-	bun.BaseModel `bun:"table:transactions,alias:t"`
-
-	ID                  string                 `json:"id"`
+	ID                  int64                  `json:"id"`
 	Tag                 string                 `json:"tag"`
 	Reference           string                 `json:"reference"`
 	Amount              int64                  `json:"amount"`
 	Currency            string                 `json:"currency"`
 	DRCR                string                 `json:"drcr"`
-	Status              string                 `json:"status"` //successful, pending, encumbrance
-	LedgerID            string                 `json:"ledger_id"`
-	BalanceID           string                 `json:"balance_id"`
+	Status              string                 `json:"status"`
+	LedgerID            int64                  `json:"ledger_id"`
+	BalanceID           int64                  `json:"balance_id"`
 	CreditBalanceBefore int64                  `json:"credit_balance_before"`
 	DebitBalanceBefore  int64                  `json:"debit_balance_before"`
 	CreditBalanceAfter  int64                  `json:"credit_balance_after"`
@@ -45,11 +26,11 @@ type Transaction struct {
 	BalanceBefore       int64                  `json:"balance_before"`
 	BalanceAfter        int64                  `json:"balance_after"`
 	Created             int64                  `json:"created"`
-	MetaData            map[string]interface{} `json:"meta_data"`
+	MetaData            map[string]interface{} `json:"meta_data,omitempty"`
 }
 
 type TransactionFilter struct {
-	ID                       string    `json:"id"`
+	ID                       int64     `json:"id"`
 	Tag                      string    `json:"tag"`
 	DRCR                     string    `json:"drcr"`
 	AmountRange              int64     `json:"amount_range"`
@@ -64,22 +45,20 @@ type TransactionFilter struct {
 }
 
 type Balance struct {
-	bun.BaseModel `bun:"table:balances,alias:b"`
-
-	ID                 string                 `json:"id"`
+	ID                 int64                  `json:"id"`
 	Balance            int64                  `json:"balance"`
 	CreditBalance      int64                  `json:"credit_balance"`
 	DebitBalance       int64                  `json:"debit_balance"`
 	Currency           string                 `json:"currency"`
 	CurrencyMultiplier int64                  `json:"currency_multiplier"`
-	LedgerID           string                 `json:"ledger_id"`
-	Created            int64                  `json:"created"`
-	ModificationRef    string                 `json:"modification_ref"`
+	LedgerID           int64                  `json:"ledger_id"`
+	Created            time.Time              `json:"created"`
+	ModificationRef    int64                  `json:"modification_ref"`
 	MetaData           map[string]interface{} `json:"meta_data"`
 }
 
 type BalanceFilter struct {
-	ID                 string    `json:"id"`
+	ID                 int64     `json:"id"`
 	BalanceRange       string    `json:"balance_range"`
 	CreditBalanceRange string    `json:"credit_balance_range"`
 	DebitBalanceRange  string    `json:"debit_balance_range"`
@@ -90,57 +69,65 @@ type BalanceFilter struct {
 }
 
 type Ledger struct {
-	bun.BaseModel `bun:"table:ledgers,alias:l"`
-
-	ID       string                 `json:"id"`
-	Created  int64                  `json:"created"`
-	MetaData map[string]interface{} `json:"meta_data"`
+	ID       int64                  `json:"id,omitempty"`
+	Created  time.Time              `json:"created,omitempty"`
+	MetaData map[string]interface{} `json:"meta_data,omitempty"`
 }
 
 type LedgerFilter struct {
-	ID   string    `json:"id"`
+	ID   int64     `json:"id"`
 	From time.Time `json:"from"`
 	To   time.Time `json:"to"`
 }
 
-func (balance *Balance) computeCreditBalance(amount int64) {
-	balance.CreditBalance = balance.CreditBalance + amount
+func (balance *Balance) AddCredit(amount int64) {
+	balance.CreditBalance += amount
 }
 
-func (balance *Balance) computeDebitBalance(amount int64) {
-	balance.DebitBalance = balance.DebitBalance + amount
+func (balance *Balance) AddDebit(amount int64) {
+	balance.DebitBalance += amount
 }
 
-func (balance *Balance) computeBalance() {
-	balance.Balance = balance.CreditBalance + -balance.DebitBalance
+func (balance *Balance) ComputeBalance() {
+	balance.Balance = balance.CreditBalance - balance.DebitBalance
 }
 
-func (balance *Balance) attachBalanceBefore(transaction *Transaction) {
+func (balance *Balance) AttachBalanceBefore(transaction *Transaction) {
 	transaction.DebitBalanceBefore = balance.DebitBalance
 	transaction.CreditBalanceBefore = balance.CreditBalance
 	transaction.BalanceBefore = balance.Balance
-
 }
 
-func (balance *Balance) attachBalanceAfter(transaction *Transaction) {
+func (balance *Balance) AttachBalanceAfter(transaction *Transaction) {
 	transaction.DebitBalanceAfter = balance.DebitBalance
 	transaction.CreditBalanceAfter = balance.CreditBalance
 	transaction.BalanceAfter = balance.Balance
 }
 
-func (balance *Balance) ComputeNewBalances(transaction *Transaction) {
-	balance.attachBalanceBefore(transaction)
-	drcr := transaction.DRCR
-	if drcr == "Credit" {
-		balance.computeCreditBalance(transaction.Amount)
-	} else {
-		balance.computeDebitBalance(transaction.Amount)
+func (balance *Balance) UpdateBalances(transaction *Transaction) error {
+	// Validate transaction
+	err := transaction.validate()
+	if err != nil {
+		return err
 	}
-	balance.computeBalance()
-	balance.attachBalanceAfter(transaction)
+	balance.AttachBalanceBefore(transaction)
+	if transaction.DRCR == "Credit" {
+		balance.AddCredit(transaction.Amount)
+	} else {
+		balance.AddDebit(transaction.Amount)
+	}
+	balance.ComputeBalance()
+
+	balance.AttachBalanceAfter(transaction)
+	return nil
 }
 
-func (transaction *Transaction) Defaults() {
-	transaction.Created = time.Now().UnixNano()
-	transaction.ID = fmt.Sprintf("trans_%s", uuid.New().String())
+func (transaction *Transaction) validate() error {
+	if transaction.Amount <= 0 {
+		return errors.New("transaction amount must be positive")
+	}
+	if transaction.DRCR != "Credit" && transaction.DRCR != "Debit" {
+		return errors.New("transaction DRCR must be 'Credit' or 'Debit'")
+	}
+	return nil
 }

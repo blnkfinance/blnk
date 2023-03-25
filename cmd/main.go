@@ -5,12 +5,22 @@ import (
 	"log"
 	"os"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/jerry-enebeli/blnk/config"
 	"github.com/spf13/cobra"
 )
 
 type wLite struct {
 	cmd *cobra.Command
+}
+
+func recoverPanic() {
+
+	if rec := recover(); rec != nil {
+		logrus.Error(rec)
+		os.Exit(1)
+	}
 }
 
 func preRun(rootcmd *cobra.Command, args []string) {
@@ -46,6 +56,7 @@ func (w wLite) executeCLI() {
 }
 
 func main() {
+	defer recoverPanic()
 	cli := NewCLI()
 	cli.executeCLI()
 	_, err := config.Fetch()

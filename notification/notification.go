@@ -13,7 +13,6 @@ import (
 )
 
 func SlackNotification(err error) {
-
 	data := json.RawMessage(fmt.Sprintf(`{
 	"blocks": [
 		{
@@ -104,7 +103,6 @@ func NotifyError(systemError error) {
 		log.Println(err)
 	}
 
-	fmt.Println("got here", conf)
 	if conf.Notification.Slack.WebhookURL != "" {
 		SlackNotification(systemError)
 	}

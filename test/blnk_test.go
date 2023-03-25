@@ -17,7 +17,7 @@ func getTransactionMock(amount int64, currency, DRCR string) blnk.Transaction {
 	return transaction
 }
 
-func TestComputeBalanceTest(t *testing.T) {
+func TestUpdateBalances(t *testing.T) {
 
 	tests := []struct {
 		name        string
@@ -54,7 +54,8 @@ func TestComputeBalanceTest(t *testing.T) {
 			balance := tt.balance
 			transaction := tt.transaction
 
-			balance.ComputeNewBalances(&transaction)
+			err := balance.UpdateBalances(&transaction)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want.Balance, balance.Balance)
 			assert.Equal(t, tt.want.CreditBalance, balance.CreditBalance)
 			assert.Equal(t, tt.want.DebitBalance, balance.DebitBalance)
