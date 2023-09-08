@@ -11,12 +11,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type api struct {
+type Api struct {
 	blnk   *pkg.Blnk
 	router *gin.Engine
 }
 
-func (a api) Router() *gin.Engine {
+func (a Api) Router() *gin.Engine {
 	router := a.router
 	router.POST("/ledger", a.CreateLedger)
 	router.POST("/balance", a.CreateBalance)
@@ -28,13 +28,13 @@ func (a api) Router() *gin.Engine {
 	return a.router
 }
 
-func NewAPI(blnk *pkg.Blnk) *api {
+func NewAPI(blnk *pkg.Blnk) *Api {
 	r := gin.Default()
 	gin.SetMode(gin.DebugMode)
-	return &api{blnk: blnk, router: r}
+	return &Api{blnk: blnk, router: r}
 }
 
-func (a api) CreateLedger(c *gin.Context) {
+func (a Api) CreateLedger(c *gin.Context) {
 	var ledger blnk.Ledger
 	if err := c.ShouldBindJSON(&ledger); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -49,7 +49,7 @@ func (a api) CreateLedger(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-func (a api) CreateBalance(c *gin.Context) {
+func (a Api) CreateBalance(c *gin.Context) {
 	var balance blnk.Balance
 	if err := c.ShouldBindJSON(&balance); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -64,7 +64,7 @@ func (a api) CreateBalance(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-func (a api) RecordTransaction(c *gin.Context) {
+func (a Api) RecordTransaction(c *gin.Context) {
 	var transaction blnk.Transaction
 	if err := c.ShouldBindJSON(&transaction); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -84,7 +84,7 @@ func (a api) RecordTransaction(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-func (a api) GetLedger(c *gin.Context) {
+func (a Api) GetLedger(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 
 	if !passed {
@@ -103,7 +103,7 @@ func (a api) GetLedger(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func (a api) GetBalance(c *gin.Context) {
+func (a Api) GetBalance(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 
 	if !passed {
@@ -122,7 +122,7 @@ func (a api) GetBalance(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func (a api) GetTransaction(c *gin.Context) {
+func (a Api) GetTransaction(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 
 	if !passed {
@@ -139,7 +139,7 @@ func (a api) GetTransaction(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func (a api) GroupTransactionsByCurrency(c *gin.Context) {
+func (a Api) GroupTransactionsByCurrency(c *gin.Context) {
 
 	resp, err := a.blnk.GroupTransactionsByCurrency()
 	if err != nil {

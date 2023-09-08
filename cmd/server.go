@@ -20,9 +20,12 @@ func serverCommands() *cobra.Command {
 				log.Fatalf("Error getting config: %v\n", err)
 			}
 
-			api := api.NewAPI(pkg.NewBlnk()).Router()
-
-			err = api.Run(":" + cfg.Port)
+			newBlnk, err := pkg.NewBlnk()
+			if err != nil {
+				log.Fatalf("Error creating blnk: %v\n", err)
+			}
+			router := api.NewAPI(newBlnk).Router()
+			err = router.Run(":" + cfg.Port)
 
 			if err != nil {
 				panic(err)
