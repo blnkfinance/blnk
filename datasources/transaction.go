@@ -42,6 +42,10 @@ func (d datasource) RecordTransaction(txn blnk.Transaction) (blnk.Transaction, e
 		metaDataJSON,
 	)
 
+	if err != nil {
+		return txn, err
+	}
+
 	return txn, nil
 }
 
