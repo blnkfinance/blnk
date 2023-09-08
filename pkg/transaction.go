@@ -55,16 +55,23 @@ func (l Blnk) RecordTransaction(transaction blnk.Transaction) (blnk.Transaction,
 	if err != nil {
 		return blnk.Transaction{}, err
 	}
-	balance.UpdateBalances(&transaction)
-	balance.ModificationRef = transaction.ID //set the last balance modifier to the transaction id
+
+	err = balance.UpdateBalances(&transaction)
+	if err != nil {
+		return blnk.Transaction{}, err
+	}
+
+	balance.ModificationRef = transaction.ID //update the balance with the last transaction id that modified it.
 	err = l.recordTransaction(balance.LedgerID, transaction)
 	if err != nil {
 		return blnk.Transaction{}, err
 	}
+
 	err = l.datasource.UpdateBalance(&balance)
 	if err != nil {
 		return blnk.Transaction{}, err
 	}
+
 	return transaction, nil
 }
 

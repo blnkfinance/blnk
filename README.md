@@ -26,7 +26,7 @@ Once a ledger has been created, all transactions and balances for that ledger ca
 # Balances
 Balances are typically calculated for each  ledger, and represent the total amount of that asset that is available for use or transfer. Balances are typically updated every time a new transaction is recorded in the ledger, and can be used to track the flow of assets between accounts and to ensure that the ledger remains in balance.
 
-### A balance consist of Balances three sub balances.
+### A balance consist of three sub balances.
 
 | Name | Description |
 | ------ | ------ |
@@ -172,7 +172,7 @@ $ git clone https://github.com/jerry-enebeli/Blnk && cd Blnk
 $ make build
 ```
 
-# Get Started with Saiffu
+# Get Started with Blnk
 Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api exposes the following endpoints
 
 

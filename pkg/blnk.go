@@ -10,10 +10,14 @@ type Blnk struct {
 	config     *config.Configuration
 }
 
-func NewBlnk() *Blnk {
+func NewBlnk() (*Blnk, error) {
 	configuration, err := config.Fetch()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return &Blnk{datasource: datasources.NewDataSource(configuration), config: configuration}
+	db, err := datasources.NewDataSource(configuration)
+	if err != nil {
+		return nil, err
+	}
+	return &Blnk{datasource: db, config: configuration}, nil
 }

@@ -43,24 +43,37 @@ type datasource struct {
 	conn *sql.DB
 }
 
-func NewDataSource(configuration *config.Configuration) DataSource {
-	return &datasource{conn: connectDB(configuration.DataSource.DNS)}
+func NewDataSource(configuration *config.Configuration) (DataSource, error) {
+	con, err := connectDB(configuration.DataSource.DNS)
+	if err != nil {
+		return nil, err
+	}
+	return &datasource{conn: con}, nil
 }
 
-func connectDB(dns string) *sql.DB {
+func connectDB(dns string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", dns)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	err = db.Ping()
 	if err != nil {
 		log.Printf("database connection error ❌: %v", err)
-		return nil
+		return nil, err
 	}
-	createLedgerTable(db)
-	createBalanceTable(db)
-	createTransactionTable(db)
-	return db
+	err = createLedgerTable(db)
+	if err != nil {
+		return nil, err
+	}
+	err = createBalanceTable(db)
+	if err != nil {
+		return nil, err
+	}
+	err = createTransactionTable(db)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }
 
 // createTransactionTable creates a PostgreSQL table for the Transaction struct

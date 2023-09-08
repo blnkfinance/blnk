@@ -10,23 +10,24 @@ type Filter struct {
 }
 
 type Transaction struct {
-	ID                  int64                  `json:"id"`
-	Tag                 string                 `json:"tag"`
-	Reference           string                 `json:"reference"`
-	Amount              int64                  `json:"amount"`
-	Currency            string                 `json:"currency"`
-	DRCR                string                 `json:"drcr"`
-	Status              string                 `json:"status"`
-	LedgerID            int64                  `json:"ledger_id"`
-	BalanceID           int64                  `json:"balance_id"`
-	CreditBalanceBefore int64                  `json:"credit_balance_before"`
-	DebitBalanceBefore  int64                  `json:"debit_balance_before"`
-	CreditBalanceAfter  int64                  `json:"credit_balance_after"`
-	DebitBalanceAfter   int64                  `json:"debit_balance_after"`
-	BalanceBefore       int64                  `json:"balance_before"`
-	BalanceAfter        int64                  `json:"balance_after"`
-	Created             int64                  `json:"created"`
-	MetaData            map[string]interface{} `json:"meta_data,omitempty"`
+	ID                     int64                  `json:"id"`
+	Tag                    string                 `json:"tag"`
+	Reference              string                 `json:"reference"`
+	Amount                 int64                  `json:"amount"`
+	Currency               string                 `json:"currency"`
+	DRCR                   string                 `json:"drcr"`
+	Status                 string                 `json:"status"`
+	LedgerID               int64                  `json:"ledger_id"`
+	BalanceID              int64                  `json:"balance_id"`
+	CreditBalanceBefore    int64                  `json:"credit_balance_before"`
+	DebitBalanceBefore     int64                  `json:"debit_balance_before"`
+	CreditBalanceAfter     int64                  `json:"credit_balance_after"`
+	DebitBalanceAfter      int64                  `json:"debit_balance_after"`
+	BalanceBefore          int64                  `json:"balance_before"`
+	BalanceAfter           int64                  `json:"balance_after"`
+	Created                int64                  `json:"created"`
+	ApplyBalanceMultiplier float64                `json:"apply_balance_multiplier"`
+	MetaData               map[string]interface{} `json:"meta_data,omitempty"`
 }
 
 type TransactionFilter struct {

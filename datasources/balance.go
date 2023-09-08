@@ -24,17 +24,23 @@ func (d datasource) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
 
 // GetBalanceByID retrieves a balance from the database by ID
 func (d datasource) GetBalanceByID(id int64) (*blnk.Balance, error) {
+	// start a transaction
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return nil, err
+	}
+
 	// select balance from database by ID
-	row := d.conn.QueryRow(`
+	row := tx.QueryRow(`
 		SELECT id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created, modification_ref, meta_data
 		FROM balances
-		WHERE id = $1
+		WHERE id = $1 FOR UPDATE
 	`, id)
 
 	// parse metadata from JSON
 	balance := &blnk.Balance{}
 	var metaDataJSON []byte
-	err := row.Scan(
+	err = row.Scan(
 		&balance.ID,
 		&balance.Balance,
 		&balance.CreditBalance,
@@ -47,11 +53,21 @@ func (d datasource) GetBalanceByID(id int64) (*blnk.Balance, error) {
 		&metaDataJSON,
 	)
 	if err != nil {
+		// if error occurs, roll back the transaction
+		_ = tx.Rollback()
 		return nil, err
 	}
 
 	// convert metadata from JSON to map
 	err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+	if err != nil {
+		// if error occurs, roll back the transaction
+		_ = tx.Rollback()
+		return nil, err
+	}
+
+	// commit the transaction
+	err = tx.Commit()
 	if err != nil {
 		return nil, err
 	}
