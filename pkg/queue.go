@@ -127,8 +127,8 @@ func Enqueue(transaction blnk.Transaction) error {
 				if ev.TopicPartition.Error != nil {
 					fmt.Printf("Failed to deliver message: %v\n", ev.TopicPartition)
 				} else {
-					//fmt.Printf("Produced event to topic %s: key = %-10s value = %s\n",
-					//*ev.TopicPartition.Topic, string(ev.Key), string(ev.Value))
+					fmt.Printf("Produced event to topic %s: key = %-10s value = %s\n",
+						*ev.TopicPartition.Topic, string(ev.Key), string(ev.Value))
 				}
 			}
 		}
@@ -148,6 +148,9 @@ func Dequeue(messageChan chan blnk.Transaction) error {
 		log.Printf("Error: Error getting queue name: %v", err)
 	}
 	err = c.SubscribeTopics([]string{topic}, nil)
+	if err != nil {
+		return err
+	}
 	for {
 		ev := c.Poll(100)
 		switch e := ev.(type) {
