@@ -5,12 +5,18 @@ import (
 	"errors"
 	"log"
 	"os"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 //todo validate config before load. check for empty values in required fields(data source), trim white spaces, set default values(port)
+
+const (
+	DEFAULT_PORT = "5001"
+)
 
 var configStore atomic.Value
 
@@ -19,7 +25,14 @@ type Configuration struct {
 	Port            string `json:"port,omitempty"`
 	DefaultCurrency string `json:"default_currency,omitempty"`
 	EndPointSecret  string `json:"end_point_secret"`
-	DataSource      struct {
+	ConfluentKafka  struct {
+		Server       string        `json:"server"`
+		APIKEY       string        `json:"api_key"`
+		SecretKey    string        `json:"secret_key"`
+		QueueName    string        `json:"queue_name"`
+		PullWaitTime time.Duration `json:"pull_wait_time"`
+	} `json:"confluent_kafka"`
+	DataSource struct {
 		Name string `json:"name,omitempty"`
 		DNS  string `json:"dns,omitempty"`
 	} `json:"data_source"`
@@ -55,12 +68,16 @@ func loadConfigFromFile(file string) error {
 		return err
 	}
 
+	err = validateAndAddDefaults(&cnf)
+	if err != nil {
+		return err
+	}
 	configStore.Store(&cnf)
 	return err
 }
 
 func InitConfig(configFile string) error {
-	logger()
+	//logger()
 	return loadConfigFromFile(configFile)
 }
 
@@ -72,6 +89,54 @@ func Fetch() (*Configuration, error) {
 	}
 
 	return c, nil
+}
+
+func validateAndAddDefaults(cnf *Configuration) error {
+	// Check for empty values in required fields
+	if cnf.Name == "" {
+		log.Println("Warning: Project name is empty. Setting a default name.")
+		cnf.Name = "Blnk Server"
+	}
+
+	if cnf.EndPointSecret == "" {
+		log.Println("Error: Endpoint secret is empty. It's a required field.")
+		return errors.New("Endpoint secret is required")
+	}
+
+	if cnf.ConfluentKafka.Server == "" {
+		log.Println("Error: Confluent Kafka server is empty. It's a required field.")
+		return errors.New("Confluent Kafka server is required")
+	}
+
+	if cnf.DataSource.Name == "" {
+		log.Println("Error: Data source name is empty. It's a required field.")
+		return errors.New("Data source name is required")
+	}
+
+	if cnf.DataSource.DNS == "" {
+		log.Println("Error: Data source DNS is empty. It's a required field.")
+		return errors.New("Data source DNS is required")
+	}
+
+	// Trim white spaces from fields
+	cnf.Name = strings.TrimSpace(cnf.Name)
+	cnf.Port = strings.TrimSpace(cnf.Port)
+	cnf.DefaultCurrency = strings.TrimSpace(cnf.DefaultCurrency)
+	cnf.EndPointSecret = strings.TrimSpace(cnf.EndPointSecret)
+	cnf.ConfluentKafka.Server = strings.TrimSpace(cnf.ConfluentKafka.Server)
+	cnf.ConfluentKafka.APIKEY = strings.TrimSpace(cnf.ConfluentKafka.APIKEY)
+	cnf.ConfluentKafka.SecretKey = strings.TrimSpace(cnf.ConfluentKafka.SecretKey)
+	cnf.ConfluentKafka.QueueName = strings.TrimSpace(cnf.ConfluentKafka.QueueName)
+	cnf.DataSource.Name = strings.TrimSpace(cnf.DataSource.Name)
+	cnf.DataSource.DNS = strings.TrimSpace(cnf.DataSource.DNS)
+
+	// Set default value for Port if it's empty
+	if cnf.Port == "" {
+		cnf.Port = DEFAULT_PORT
+		log.Printf("Warning: Port not specified in config. Setting default port: %s", DEFAULT_PORT)
+	}
+
+	return nil
 }
 
 func logger() {

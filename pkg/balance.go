@@ -8,7 +8,7 @@ func (l Blnk) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
 	return l.datasource.CreateBalance(balance)
 }
 
-func (l Blnk) GetBalance(id int64) (*blnk.Balance, error) {
+func (l Blnk) GetBalance(id string) (*blnk.Balance, error) {
 	return l.datasource.GetBalanceByID(id)
 }
 

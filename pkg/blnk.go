@@ -19,5 +19,9 @@ func NewBlnk() (*Blnk, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Blnk{datasource: db, config: configuration}, nil
+
+	newBlnk := &Blnk{datasource: db, config: configuration}
+	go newBlnk.ProcessTransactionFromQueue()
+	newBlnk.GetScheduledTransaction()
+	return newBlnk, nil
 }

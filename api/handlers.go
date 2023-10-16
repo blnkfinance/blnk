@@ -2,8 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
-	"sync"
 
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/pkg"
@@ -21,8 +19,11 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/ledger", a.CreateLedger)
 	router.POST("/balance", a.CreateBalance)
 	router.POST("/transaction", a.RecordTransaction)
+	router.POST("/transaction-queue", a.QueueTransaction)
+	router.POST("/refund-transaction/:id", a.RefundTransaction)
 	router.GET("/ledger/:id", a.GetLedger)
 	router.GET("/balance/:id", a.GetBalance)
+
 	router.GET("/transaction/:id", a.GetTransaction)
 	router.GET("/transaction/group/currency", a.GroupTransactionsByCurrency)
 	return a.router
@@ -70,11 +71,39 @@ func (a Api) RecordTransaction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	mutex := sync.Mutex{}
-
-	mutex.Lock()
 	resp, err := a.blnk.RecordTransaction(transaction)
-	mutex.Unlock()
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
+}
+
+func (a Api) QueueTransaction(c *gin.Context) {
+	var transaction blnk.Transaction
+	if err := c.ShouldBindJSON(&transaction); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := a.blnk.QueueTransaction(transaction)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
+}
+
+func (a Api) RefundTransaction(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+	resp, err := a.blnk.RefundTransaction(id)
 
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -92,9 +121,7 @@ func (a Api) GetLedger(c *gin.Context) {
 		return
 	}
 
-	idInt, _ := strconv.Atoi(id)
-
-	resp, err := a.blnk.GetLedgerByID(int64(idInt))
+	resp, err := a.blnk.GetLedgerByID(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -111,9 +138,7 @@ func (a Api) GetBalance(c *gin.Context) {
 		return
 	}
 
-	idInt, _ := strconv.Atoi(id)
-
-	resp, err := a.blnk.GetBalance(int64(idInt))
+	resp, err := a.blnk.GetBalance(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

@@ -12,6 +12,6 @@ func (l Blnk) GetAllLedgers() ([]blnk.Ledger, error) {
 	return l.datasource.GetAllLedgers()
 }
 
-func (l Blnk) GetLedgerByID(id int64) (*blnk.Ledger, error) {
+func (l Blnk) GetLedgerByID(id string) (*blnk.Ledger, error) {
 	return l.datasource.GetLedgerByID(id)
 }

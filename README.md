@@ -83,13 +83,6 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 | 1 | USD  | 15000 | 0 | 15000 | 100
 | 2 | BTC  | 100000000 | 0 | 1 | 100000000
 
-### Grouping Balance
-Group balances by using a common group identifier (such as a ```group_id```) can be a useful way to associate related balances together.
-
-**For example, if you have a wallet application that enable a customer have multiple ```wallet balances``` you can use grouping to merge or fetch all balances associated with a customer**
-
-Overall, grouping balances using a common group_id can be a useful way to manage and track related balances, and can help to make it easier to view and analyze balances in your system.
-
 
 ### Balance Properties
 
@@ -141,19 +134,61 @@ Idempotence is an important property of transactions, as it ensures that the out
 
 Blnk ensures Idempotency by leveraging ```reference```. Every transaction is expected to have a unique reference. Blnk ensures no two transactions are stored with the same reference. This helps to ensure that the outcome of the transaction is consistent, regardless of how many times the transaction is performed.
 
-### Grouping Transactions
-Group transactions by using a common group identifier (such as a ```group_id```) can be a useful way to associate related transactions together. This can be particularly useful when dealing with transactions that have associated fees, as it allows you to easily track and manage the fees that are associated with a particular transaction.
 
-**For example, if you have a system that processes financial transactions, you might use a ```group_id``` to link a main transaction with any associated fees. This would allow you to easily fetch all transactions that are associated with a given group, allowing you to view the main transaction and all associated fees in a single view.**
+### Queuing Translations
 
-Using a group_id to link transactions can also be useful in other contexts, such as when dealing with transactions that are part of a larger process or workflow. By using a group_id, you can easily track and manage all of the transactions that are associated with a particular process, making it easier to track the progress of the process and identify any issues that may arise.
+Queuing plays a vital role in managing and optimizing transactions within Blnk. It enhances performance and ensures synchronization, allowing only one transaction to act on a balance at any given time. This section provides key insights into how Blnk leverages queues for efficient transaction processing.
 
-Overall, grouping transactions using a common group_id can be a useful way to manage and track related transactions, and can help to make it easier to view and analyze transactions in your system.
+#### Key Notes
+
+1. **Partitioning for Similar Transactions**: Blnk employs a partitioning strategy where similar transactions belonging to the same balance are grouped together. This ensures that related transactions are processed sequentially, maintaining data consistency and reducing the likelihood of conflicts.
+
+2. **Idempotency and Queue Transactions**: The idempotent nature of transactions, as discussed earlier, complements queue support seamlessly. By combining idempotency with queues, Blnk guarantees that even if a transaction is repeated, the outcome remains consistent. This is crucial in scenarios where network errors or other issues may cause a transaction to be reattempted.
+
+#### Architecture Overview
+
+To provide a visual representation of how queue support fits into the Blnk architecture, refer to the diagram below:
+
+![Blnk Architecture](https://file.notion.so/f/f/f0185458-4dc8-492c-bbf6-bc76f76882e8/5c1568d5-0e89-4318-a659-706e0b385c11/Screenshot_2023-10-08_at_20.22.40.png?id=f4aa4953-ee28-443f-ac52-a754e5329034&table=block&spaceId=f0185458-4dc8-492c-bbf6-bc76f76882e8&expirationTimestamp=1696881600000&signature=DfHFdDtSzW9_c8HoLsVYlO1La2L5GG2oOv15s_RRz_c&downloadName=Screenshot+2023-10-08+at+20.22.40.png)
+
+#### Supported Queue Systems
+
+Blnk provides support for various queue systems to cater to different deployment and scalability requirements. As of the latest update, the following queue systems are supported:
+
+1. **Confluent Kafka**: Blnk seamlessly integrates with Confluent Kafka, enabling efficient and reliable messaging for transaction processing.
+
+2. **AWS SQS (Amazon Simple Queue Service)**: Support for AWS SQS is currently under development (⌛). This integration will extend Blnk's compatibility with cloud-based queue systems, allowing users to leverage AWS infrastructure for their transaction processing needs.
+
+---
+
+This expanded section should provide a more comprehensive understanding of how queue support enhances the Blnk system's performance and reliability while offering clear details on supported queue systems.
+
+
+### Scheduling Transactions for Future Processing
+Blnk offers a powerful feature that allows you to schedule transactions for future execution with ease. By including the "scheduled_for" parameter in your transaction payload, you can precisely specify when you want a transaction to take place. Here's a breakdown of how it works:
+
+```json
+{
+    "amount": 10000,
+    "tag": "Commission Earned",
+    "reference": "ref",
+    "drcr": "Credit",
+    "currency": "NGN",
+    "ledger_id": "ldg_3fa24854-211f-4248-9611-a7744aeaefcd",
+    "balance_id": "bln_0abdbf91-d4b7-4917-bfdc-7fdf1680a3ca",
+    "scheduled_for": "2023-10-08T19:48:00Z"
+}
+```
+
 
 # Fault Tolerance
 Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors
 
 **By ```enabling fault tolerance in the config```, Blnk temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
+
+# Hooks To Transactions Agent 🤖
+An AI agent that takes in any transaction webhook payload from any payment provider and coverts them to blnk transaction payload. Write onece connect to any payment providers with ease
+
 
 
 # How To Install
@@ -180,16 +215,25 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
 
 ```json
 {
-  "port": "4100",
-  "project_name": "Payme",
+  "port": "",
+  "project_name": "",
   "default_currency": "NGN",
+  "end_point_secret": "secret",
+  "synchronization_method": "db lock | queue",
   "data_source": {
     "name": "POSTGRES",
-    "dns":"postgres://postgres:@localhost:5432/Blnk?sslmode=disable"
+    "dns": "postgres://postgres:@localhost:5432/blnk?sslmode=disable"
+  },
+  "confluent_kafka": {
+    "server": "",
+    "api_key": "",
+    "secret_key": "",
+    "queue_name": "transactions",
+    "pull_wait_time": 100
   },
   "notification": {
     "slack": {
-      "webhook_url": ""
+      "webhook_url": "https://webhook.test"
     },
     "webhook": {
       "url": "",
@@ -213,76 +257,3 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
 | Data Base | Support |
 | ------ | ------ |
 | Postgres | ✅ |
-
-## Create Ledger
-```shell
-curl --location --request POST 'localhost:4100/ledger' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "id": "ledger1"
-}'
-```
-
-## Create Balance
-```shell
-curl --location --request POST 'localhost:4100/balance' \
---header 'Content-Type: application/json' \
---data-raw '{
-"id": "jerry_wallet",
-"currency": "NGN",
-"ledger_id": "ledger1",
-"currency_multiplier": 100
-}'
-```
-
-## Record Credit Transaction
-```shell
-curl --location --request POST 'localhost:4100/transaction' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "id":"transaction_1",
-    "tag": "CARD_PAYMENT",
-    "reference": "ref-1",
-    "currency": "NGN",
-    "balance_id": "jerry_wallet",
-    "amount": 5000,
-    "drcr": "Credit",
-    "status": "Successful"
-}'
-```
-
-## Record Debit Transaction
-```shell
-curl --location --request POST 'localhost:4100/transaction' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "tag": "BANK_TRANSFER",
-    "reference": "ehrrelkkffklodrjjloeddrodrkreo",
-    "currency": "NGN",
-    "balance_id": "jerrry_wallet",
-    "amount": 5000,
-    "drcr": "Debit",
-    "status": "Pending",
-    "meta_data": {"internal_id": "helloworld"}
-}'
-```
-
-## Get Ledger By ID
-```shell
-curl --location --request GET 'localhost:4100/ledger/:id' 
-```
-
-## Get Balance By ID
-```shell
-curl --location --request GET 'localhost:4100/balance/:id'
-```
-
-## Get Transaction By ID
-```shell
-curl --location --request GET 'localhost:4100/transaction/:id'
-```
-
-## Get Transaction By Ref
-```shell
-curl --location --request GET 'localhost:4100/balance/:id'
-```

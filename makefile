@@ -19,7 +19,7 @@ docker_run:
 	docker run -v `pwd`/blnk.json:/blnk.json -p 4300:4100 jerryenebeli/blnk:main
 
 run:
-	./${PROJECT}
+	./${PROJECT} start
 
 build_run:
 	make build

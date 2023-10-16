@@ -97,7 +97,6 @@ func WebhookNotification(systemError error) {
 }
 
 func NotifyError(systemError error) {
-
 	conf, err := config.Fetch()
 	if err != nil {
 		log.Println(err)

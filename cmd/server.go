@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/jerry-enebeli/blnk/pkg"
@@ -19,16 +20,15 @@ func serverCommands() *cobra.Command {
 			if err != nil {
 				log.Fatalf("Error getting config: %v\n", err)
 			}
-
+			fmt.Println(cfg.Port)
 			newBlnk, err := pkg.NewBlnk()
 			if err != nil {
 				log.Fatalf("Error creating blnk: %v\n", err)
 			}
 			router := api.NewAPI(newBlnk).Router()
 			err = router.Run(":" + cfg.Port)
-
 			if err != nil {
-				panic(err)
+				log.Fatal(err)
 			}
 		},
 	}

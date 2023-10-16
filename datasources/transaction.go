@@ -2,6 +2,7 @@ package datasources
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/jerry-enebeli/blnk"
 
@@ -14,16 +15,19 @@ func (d datasource) RecordTransaction(txn blnk.Transaction) (blnk.Transaction, e
 	if err != nil {
 		return txn, err
 	}
+
+	txn.TransactionID = GenerateUUIDWithSuffix("txn")
+	txn.CreatedAt = time.Now()
 	// insert into database
 	_, err = d.conn.Exec(
 		`
 		INSERT INTO public.transactions (
-			id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+			transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
 			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
-			balance_before, balance_after, created, meta_data
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			balance_before, balance_after, created_at, meta_data,scheduled_for
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,$18)
 	`,
-		txn.ID,
+		txn.TransactionID,
 		txn.Tag,
 		txn.Reference,
 		txn.Amount,
@@ -38,8 +42,9 @@ func (d datasource) RecordTransaction(txn blnk.Transaction) (blnk.Transaction, e
 		txn.DebitBalanceAfter,
 		txn.BalanceBefore,
 		txn.BalanceAfter,
-		txn.Created,
+		txn.CreatedAt,
 		metaDataJSON,
+		txn.ScheduledFor,
 	)
 
 	if err != nil {
@@ -52,11 +57,11 @@ func (d datasource) RecordTransaction(txn blnk.Transaction) (blnk.Transaction, e
 func (d datasource) GetTransaction(id string) (blnk.Transaction, error) {
 	// retrieve from database
 	row := d.conn.QueryRow(`
-		SELECT id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
 			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
-			balance_before, balance_after, created, meta_data
+			balance_before, balance_after, created_at, meta_data
 		FROM transactions
-		WHERE id = $1
+		WHERE transaction_id = $1
 	`, id)
 
 	// create a transaction instance
@@ -64,10 +69,10 @@ func (d datasource) GetTransaction(id string) (blnk.Transaction, error) {
 
 	// scan database row into transaction instance
 	var metaDataJSON []byte
-	err := row.Scan(&txn.ID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
+	err := row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
 		&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
 		&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
-		&txn.Created, &metaDataJSON)
+		&txn.CreatedAt, &metaDataJSON)
 
 	if err != nil {
 		return blnk.Transaction{}, err
@@ -85,9 +90,9 @@ func (d datasource) GetTransaction(id string) (blnk.Transaction, error) {
 func (d datasource) GetTransactionByRef(reference string) (blnk.Transaction, error) {
 	// retrieve from database
 	row := d.conn.QueryRow(`
-		SELECT id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
 			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
-			balance_before, balance_after, created, meta_data
+			balance_before, balance_after, created_at, meta_data
 		FROM transactions
 		WHERE reference = $1
 	`, reference)
@@ -97,10 +102,10 @@ func (d datasource) GetTransactionByRef(reference string) (blnk.Transaction, err
 
 	// scan database row into transaction instance
 	var metaDataJSON []byte
-	err := row.Scan(&txn.ID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
+	err := row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
 		&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
 		&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
-		&txn.Created, &metaDataJSON)
+		&txn.CreatedAt, &metaDataJSON)
 	if err != nil {
 		return blnk.Transaction{}, err
 	}
@@ -119,7 +124,7 @@ func (d datasource) UpdateTransactionStatus(id string, status string) error {
 	_, err := d.conn.Exec(`
 		UPDATE transactions
 		SET status = $2
-		WHERE id = $1
+		WHERE transaction_id = $1
 	`, id, status)
 
 	return err
@@ -169,7 +174,7 @@ func (d datasource) GroupTransactionsByCurrency() (map[string]struct {
 func (d datasource) GetAllTransactions() ([]blnk.Transaction, error) {
 	// select all transactions from database
 	rows, err := d.conn.Query(`
-		SELECT id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id, credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after, balance_before, balance_after, created, meta_data
+		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id, credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after, balance_before, balance_after, created_at, meta_data
 		FROM transactions
 	`)
 	if err != nil {
@@ -185,7 +190,7 @@ func (d datasource) GetAllTransactions() ([]blnk.Transaction, error) {
 		transaction := blnk.Transaction{}
 		var metaDataJSON []byte
 		err = rows.Scan(
-			&transaction.ID,
+			&transaction.TransactionID,
 			&transaction.Tag,
 			&transaction.Reference,
 			&transaction.Amount,
@@ -200,7 +205,7 @@ func (d datasource) GetAllTransactions() ([]blnk.Transaction, error) {
 			&transaction.DebitBalanceAfter,
 			&transaction.BalanceBefore,
 			&transaction.BalanceAfter,
-			&transaction.Created,
+			&transaction.CreatedAt,
 			&metaDataJSON,
 		)
 		if err != nil {
@@ -217,4 +222,54 @@ func (d datasource) GetAllTransactions() ([]blnk.Transaction, error) {
 	}
 
 	return transactions, nil
+}
+
+func (d datasource) GetScheduledTransactions() ([]blnk.Transaction, error) {
+	// Get the current time in the database's timezone (assuming the database uses UTC)
+	currentTime := time.Now()
+
+	// Query transactions with scheduled_for equal to the current time
+	rows, err := d.conn.Query(`
+		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
+			balance_before, balance_after, created_at, meta_data,scheduled_for
+		FROM transactions
+		WHERE scheduled_for <= $1 AND status = $2
+	`, currentTime, "SCHEDULED")
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Create a slice to store scheduled transactions
+	var scheduledTransactions []blnk.Transaction
+
+	// Iterate through the result set
+	for rows.Next() {
+		// Create a transaction instance
+		txn := &blnk.Transaction{}
+
+		// Scan the database row into the transaction instance (similar to your GetTransaction code)
+		var metaDataJSON []byte
+		err := rows.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
+			&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
+			&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
+			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor)
+
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert metadata from JSONB to map
+		err = json.Unmarshal(metaDataJSON, &txn.MetaData)
+		if err != nil {
+			return nil, err
+		}
+
+		// Append the scheduled transaction to the slice
+		scheduledTransactions = append(scheduledTransactions, *txn)
+	}
+
+	return scheduledTransactions, nil
 }

@@ -1,7 +1,9 @@
 package datasources
 
 import (
+	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jerry-enebeli/blnk"
 )
@@ -13,43 +15,49 @@ func (d datasource) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
 	if err != nil {
 		return balance, err
 	}
+
+	balance.BalanceID = GenerateUUIDWithSuffix("bln")
+	balance.CreatedAt = time.Now()
+
 	// insert into database
 	_, err = d.conn.Exec(`
-		INSERT INTO balances (balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, modification_ref, meta_data)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.ModificationRef, metaDataJSON)
+		INSERT INTO balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, meta_data)
+		VALUES ($8,$1, $2, $3, $4, $5, $6, $7)
+	`, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, metaDataJSON, balance.BalanceID)
 
 	return balance, err
 }
 
 // GetBalanceByID retrieves a balance from the database by ID
-func (d datasource) GetBalanceByID(id int64) (*blnk.Balance, error) {
+func (d datasource) GetBalanceByID(id string) (*blnk.Balance, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel() // Ensure the context is canceled when the function exits
+
 	// start a transaction
-	tx, err := d.conn.Begin()
+	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	// select balance from database by ID
 	row := tx.QueryRow(`
-		SELECT id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created, modification_ref, meta_data
+		SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
 		FROM balances
-		WHERE id = $1 FOR UPDATE
+		WHERE balance_id = $1 FOR UPDATE SKIP LOCKED
 	`, id)
 
 	// parse metadata from JSON
 	balance := &blnk.Balance{}
 	var metaDataJSON []byte
 	err = row.Scan(
-		&balance.ID,
+		&balance.BalanceID,
 		&balance.Balance,
 		&balance.CreditBalance,
 		&balance.DebitBalance,
 		&balance.Currency,
 		&balance.CurrencyMultiplier,
 		&balance.LedgerID,
-		&balance.Created,
-		&balance.ModificationRef,
+		&balance.CreatedAt,
 		&metaDataJSON,
 	)
 	if err != nil {
@@ -79,7 +87,7 @@ func (d datasource) GetBalanceByID(id int64) (*blnk.Balance, error) {
 func (d datasource) GetAllBalances() ([]blnk.Balance, error) {
 	// select all balances from database
 	rows, err := d.conn.Query(`
-		SELECT id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created, modification_ref, meta_data
+		SELECT id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, modification_ref, meta_data
 		FROM balances
 	`)
 	if err != nil {
@@ -95,15 +103,14 @@ func (d datasource) GetAllBalances() ([]blnk.Balance, error) {
 		balance := blnk.Balance{}
 		var metaDataJSON []byte
 		err = rows.Scan(
-			&balance.ID,
+			&balance.BalanceID,
 			&balance.Balance,
 			&balance.CreditBalance,
 			&balance.DebitBalance,
 			&balance.Currency,
 			&balance.CurrencyMultiplier,
 			&balance.LedgerID,
-			&balance.Created,
-			&balance.ModificationRef,
+			&balance.CreatedAt,
 			&metaDataJSON,
 		)
 		if err != nil {
@@ -133,9 +140,9 @@ func (d datasource) UpdateBalance(balance *blnk.Balance) error {
 	// update balance in database
 	_, err = d.conn.Exec(`
 		UPDATE balances
-		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created = $8, modification_ref = $9, meta_data = $10
-		WHERE id = $1
-	`, balance.ID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.Created, balance.ModificationRef, metaDataJSON)
+		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
+		WHERE balance_id = $1
+	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
 
 	return err
 }

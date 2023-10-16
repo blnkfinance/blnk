@@ -3,6 +3,7 @@ package datasources
 import (
 	"database/sql"
 	"encoding/json"
+	"time"
 
 	"github.com/jerry-enebeli/blnk"
 )
@@ -14,11 +15,15 @@ func (d datasource) CreateLedger(ledger blnk.Ledger) (blnk.Ledger, error) {
 		return blnk.Ledger{}, err
 	}
 
+	ledger.LedgerID = GenerateUUIDWithSuffix("ldg")
+	ledger.CreatedAt = time.Now()
+
 	// insert into database
 	_, err = d.conn.Exec(`
-		INSERT INTO ledgers (meta_data)
-		VALUES ($1)
-	`, metaDataJSON)
+		INSERT INTO ledgers (meta_data, ledger_id)
+		VALUES ($1,$2)
+
+	`, metaDataJSON, ledger.LedgerID)
 
 	if err != nil {
 		return blnk.Ledger{}, err
@@ -31,7 +36,7 @@ func (d datasource) CreateLedger(ledger blnk.Ledger) (blnk.Ledger, error) {
 func (d datasource) GetAllLedgers() ([]blnk.Ledger, error) {
 	// select all ledgers from database
 	rows, err := d.conn.Query(`
-		SELECT id, created, meta_data
+		SELECT id, created_at, meta_data
 		FROM ledgers
 	`)
 	if err != nil {
@@ -46,7 +51,7 @@ func (d datasource) GetAllLedgers() ([]blnk.Ledger, error) {
 	for rows.Next() {
 		ledger := blnk.Ledger{}
 		var metaDataJSON []byte
-		err = rows.Scan(&ledger.ID, &ledger.Created, &metaDataJSON)
+		err = rows.Scan(&ledger.LedgerID, &ledger.CreatedAt, &metaDataJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -64,17 +69,17 @@ func (d datasource) GetAllLedgers() ([]blnk.Ledger, error) {
 }
 
 // GetLedgerByID retrieves a single ledger from the database by ID
-func (d datasource) GetLedgerByID(id int64) (*blnk.Ledger, error) {
+func (d datasource) GetLedgerByID(id string) (*blnk.Ledger, error) {
 	// select ledger from database by ID
 	row := d.conn.QueryRow(`
-		SELECT id, created, meta_data
+		SELECT ledger_id, created_at, meta_data
 		FROM ledgers
-		WHERE id = $1
+		WHERE ledger_id = $1
 	`, id)
 
 	ledger := blnk.Ledger{}
 	var metaDataJSON []byte
-	err := row.Scan(&ledger.ID, &ledger.Created, &metaDataJSON)
+	err := row.Scan(&ledger.LedgerID, &ledger.CreatedAt, &metaDataJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// ledger not found, return nil

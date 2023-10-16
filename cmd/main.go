@@ -29,9 +29,10 @@ func preRun(rootcmd *cobra.Command, args []string) {
 		log.Println(err)
 	}
 	err = config.InitConfig(filePath)
-	if err == nil {
-		log.Println("config loaded ✅")
+	if err != nil {
+		log.Fatal("error loading config", err)
 	}
+	log.Println("config loaded ✅")
 }
 
 func NewCLI() *wLite {
