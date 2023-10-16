@@ -3,6 +3,7 @@ package pkg
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -144,6 +145,7 @@ func Dequeue(messageChan chan blnk.Transaction) error {
 	}
 	topic, err := getQueueName()
 	if err != nil {
+		log.Printf("Error: Error getting queue name: %v", err)
 	}
 	err = c.SubscribeTopics([]string{topic}, nil)
 	for {

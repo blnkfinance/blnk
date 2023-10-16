@@ -174,6 +174,7 @@ func (l Blnk) QueueTransaction(transaction blnk.Transaction) (blnk.Transaction, 
 	go func() {
 		err = Enqueue(transaction) //send transaction to kafka
 		if err != nil {
+			log.Printf("Error: Error re-queuing transaction: %v", err)
 		}
 	}()
 
@@ -182,7 +183,12 @@ func (l Blnk) QueueTransaction(transaction blnk.Transaction) (blnk.Transaction, 
 
 func (l Blnk) ProcessTransactionFromQueue() {
 	messageChan := make(chan blnk.Transaction)
-	go Dequeue(messageChan)
+	go func() {
+		err := Dequeue(messageChan)
+		if err != nil {
+
+		}
+	}()
 	for {
 		transaction, ok := <-messageChan
 		if !ok {
@@ -191,8 +197,10 @@ func (l Blnk) ProcessTransactionFromQueue() {
 
 		err := l.applyBalanceToQueuedTransaction(transaction)
 		if err != nil {
-			Enqueue(transaction) //requeue transaction due to error processing it.
-			return
+			err := Enqueue(transaction)
+			if err != nil {
+
+			} //requeue transaction due to error processing it.
 		}
 
 	}

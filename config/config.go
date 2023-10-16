@@ -77,7 +77,7 @@ func loadConfigFromFile(file string) error {
 }
 
 func InitConfig(configFile string) error {
-	//logger()
+	logger()
 	return loadConfigFromFile(configFile)
 }
 

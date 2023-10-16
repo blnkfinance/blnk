@@ -181,14 +181,18 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 ```
 
 
-# Fault Tolerance
-Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors
+[//]: # (# Fault Tolerance)
 
-**By ```enabling fault tolerance in the config```, Blnk temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**
+[//]: # (Fault tolerance is a key aspect of any system design, as it helps ensure that the system can continue to function even in the event of failures or errors)
 
-# Hooks To Transactions Agent 🤖
-An AI agent that takes in any transaction webhook payload from any payment provider and coverts them to blnk transaction payload. Write onece connect to any payment providers with ease
+[//]: # ()
+[//]: # (**By ```enabling fault tolerance in the config```, Blnk temporarily writes transactions to disk if they cannot be written to the database. This can help ensure that no transaction records are lost and that the system can continue to function even if the database experiences issues.**)
 
+[//]: # (# Hooks To Transactions Agent 🤖)
+
+[//]: # (An AI agent that takes in any transaction webhook payload from any payment provider and coverts them to blnk transaction payload. Write onece connect to any payment providers with ease)
+
+[//]: # ()
 
 
 # How To Install
@@ -243,15 +247,15 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
 }
 ```
 
-| Property | Description |
-| ------ | ------ |
-| port | Preferred port number for the server. default is  ```4300``` |
-| project_name | Project Name. |
-| default_currency |  The default currency for new transaction entries. This would be used if a currency is not passed when creating a new transaction record. |
-| enable_ft | Enable fault tolerance. default is false. |
-| data_source | Database of your choice.  |
-| data_source.name | Name of preferred database. Blnk currently supports a couple of databases. |
-| data_source.name | DNS of database|
+| Property | Description                                                                                                                              |
+| ------ |------------------------------------------------------------------------------------------------------------------------------------------|
+| port | Preferred port number for the server. default is  ```5100```                                                                             |
+| project_name | Project Name.                                                                                                                            |
+| default_currency | The default currency for new transaction entries. This would be used if a currency is not passed when creating a new transaction record. |
+| enable_ft | Enable fault tolerance. default is false.                                                                                                |
+| data_source | Database of your choice.                                                                                                                 |
+| data_source.name | Name of preferred database. Blnk currently supports a couple of databases.                                                               |
+| data_source.name | DNS of database                                                                                                                          |
 
 ### Supported Databases
 | Data Base | Support |
