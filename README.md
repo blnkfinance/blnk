@@ -149,7 +149,7 @@ Queuing plays a vital role in managing and optimizing transactions within Blnk. 
 
 To provide a visual representation of how queue support fits into the Blnk architecture, refer to the diagram below:
 
-![Blnk Architecture](https://file.notion.so/f/f/f0185458-4dc8-492c-bbf6-bc76f76882e8/5c1568d5-0e89-4318-a659-706e0b385c11/Screenshot_2023-10-08_at_20.22.40.png?id=f4aa4953-ee28-443f-ac52-a754e5329034&table=block&spaceId=f0185458-4dc8-492c-bbf6-bc76f76882e8&expirationTimestamp=1696881600000&signature=DfHFdDtSzW9_c8HoLsVYlO1La2L5GG2oOv15s_RRz_c&downloadName=Screenshot+2023-10-08+at+20.22.40.png)
+![Blnk Architecture](https://res.cloudinary.com/dp8bwjdvg/image/upload/v1697446181/lopw0lqnqwsyo5nul79z.png)
 
 #### Supported Queue Systems
 
