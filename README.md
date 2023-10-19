@@ -217,7 +217,7 @@ To provide a visual representation of how queue support fits into the Blnk archi
 
 Blnk provides support for various queue systems to cater to different deployment and scalability requirements. As of the latest update, the following queue systems are supported:
 
-1. **Confluent Kafka**: Blnk seamlessly integrates with Confluent Kafka, enabling efficient and reliable messaging for transaction processing.
+1. **Confluent Kafka** ✅: Blnk seamlessly integrates with Confluent Kafka, enabling efficient and reliable messaging for transaction processing.
 
 2. **AWS SQS (Amazon Simple Queue Service)**: Support for AWS SQS is currently under development (⌛). This integration will extend Blnk's compatibility with cloud-based queue systems, allowing users to leverage AWS infrastructure for their transaction processing needs.
 
