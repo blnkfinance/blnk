@@ -3,6 +3,7 @@ package datasources
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jerry-enebeli/blnk"
@@ -82,10 +83,12 @@ func (d datasource) GetLedgerByID(id string) (*blnk.Ledger, error) {
 	err := row.Scan(&ledger.LedgerID, &ledger.CreatedAt, &metaDataJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// ledger not found, return nil
-			return nil, nil
+			// Handle no rows error
+			return nil, fmt.Errorf("ledger with ID '%s' not found", id)
+		} else {
+			// Handle other errors
+			return nil, err
 		}
-		return nil, err
 	}
 
 	// convert metadata from JSONB to map

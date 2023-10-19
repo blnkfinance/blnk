@@ -141,10 +141,15 @@ func (d datasource) GetBalanceByID(id string, include []string) (*blnk.Balance, 
 	var queryBuilder strings.Builder
 	query := prepareQueries(queryBuilder, include)
 	row := tx.QueryRow(query, id)
-
 	balance, err := scanRow(row, tx, include)
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows {
+			// Handle no rows error
+			return nil, fmt.Errorf("balance with ID '%s' not found", id)
+		} else {
+			// Handle other errors
+			return nil, err
+		}
 	}
 	err = tx.Commit()
 	if err != nil {

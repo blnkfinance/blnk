@@ -3,6 +3,7 @@ package pkg
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -28,7 +29,7 @@ func (l Blnk) validateBlnCurrency(transaction *blnk.Transaction) (blnk.Balance, 
 	}
 	if balance.Currency != transaction.Currency {
 		//todo write flagged transactions table
-		return blnk.Balance{}, errors.New("currency mismatch")
+		return blnk.Balance{}, errors.New("transaction currency does not match the balance currency. Please ensure they are consistent")
 	}
 	return *balance, nil
 }
@@ -94,19 +95,13 @@ func (l Blnk) validateTxnAndReturnBalance(transaction blnk.Transaction) (blnk.Ba
 	}
 
 	if errors.Is(err, nil) && txn.TransactionID != "" {
-		return blnk.Balance{}, errors.New("reference already used")
+		return blnk.Balance{}, fmt.Errorf("this reference has already been used. Please use a unique reference")
 	}
 
 	balance, err := l.validateBlnCurrency(&transaction)
 	if err != nil {
 		return blnk.Balance{}, err
 	}
-
-	_, err = l.datasource.GetLedgerByID(balance.LedgerID)
-	if err != nil {
-		return blnk.Balance{}, err
-	}
-
 	return balance, nil
 }
 
@@ -132,13 +127,13 @@ func (l Blnk) RecordTransaction(transaction blnk.Transaction) (blnk.Transaction,
 		return blnk.Transaction{}, err
 	}
 
+	transaction.LedgerID = balance.LedgerID
 	err = l.applyTransactionToBalance(&balance, &transaction)
 	if err != nil {
 		return blnk.Transaction{}, err
 	}
 
 	transaction.Status = STATUS_SUCCESSFUL
-
 	err = l.scheduleTransaction(&transaction) //checks if it's a scheduled transaction and updates the status to scheduled
 	if err != nil {
 		return blnk.Transaction{}, err

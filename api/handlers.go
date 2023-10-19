@@ -3,6 +3,9 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"reflect"
+
+	"github.com/go-playground/validator/v10"
 
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/pkg"
@@ -44,10 +47,29 @@ func NewAPI(blnk *pkg.Blnk) *Api {
 	return &Api{blnk: blnk, router: r}
 }
 
+func ExtractValidationErrors(instance interface{}, errs validator.ValidationErrors) string {
+	var errorMessages string
+
+	for _, e := range errs {
+		field, _ := reflect.TypeOf(instance).Elem().FieldByName(e.StructField())
+		errorMessage := field.Tag.Get("error")
+
+		if errorMessage == "" {
+			errorMessage = e.Error() // Use the default error message from the validator
+		}
+
+		errorMessages = errorMessage
+	}
+
+	return errorMessages
+}
+
 func (a Api) CreateLedger(c *gin.Context) {
 	var ledger blnk.Ledger
 	if err := c.ShouldBindJSON(&ledger); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		validationErrors := err.(validator.ValidationErrors)
+		errorMessages := ExtractValidationErrors(&ledger, validationErrors)
+		c.JSON(http.StatusBadRequest, gin.H{"errors": errorMessages})
 		return
 	}
 	resp, err := a.blnk.CreateLedger(ledger)
@@ -62,7 +84,9 @@ func (a Api) CreateLedger(c *gin.Context) {
 func (a Api) CreateBalance(c *gin.Context) {
 	var balance blnk.Balance
 	if err := c.ShouldBindJSON(&balance); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		validationErrors := err.(validator.ValidationErrors)
+		errorMessages := ExtractValidationErrors(&balance, validationErrors)
+		c.JSON(http.StatusBadRequest, gin.H{"errors": errorMessages})
 		return
 	}
 	resp, err := a.blnk.CreateBalance(balance)
@@ -77,7 +101,9 @@ func (a Api) CreateBalance(c *gin.Context) {
 func (a Api) RecordTransaction(c *gin.Context) {
 	var transaction blnk.Transaction
 	if err := c.ShouldBindJSON(&transaction); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		validationErrors := err.(validator.ValidationErrors)
+		errorMessages := ExtractValidationErrors(&transaction, validationErrors)
+		c.JSON(http.StatusBadRequest, gin.H{"errors": errorMessages})
 		return
 	}
 	resp, err := a.blnk.RecordTransaction(transaction)
@@ -107,7 +133,6 @@ func (a Api) QueueTransaction(c *gin.Context) {
 
 func (a Api) RefundTransaction(c *gin.Context) {
 	id, passed := c.Params.Get("id")
-
 	if !passed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
