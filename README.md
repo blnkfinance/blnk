@@ -282,8 +282,7 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
 ```json
 {
   "port": "5001",
-  "project_name": "",
-  "default_currency": "NGN",
+  "project_name": "My Fintech",
   "end_point_secret": "secret",
   "data_source": {
     "name": "POSTGRES",
