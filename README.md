@@ -261,7 +261,7 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 
 ## Option 1: Docker Image
 ```bash
-$ docker run -v `pwd`/blnk.json:/blnk.json -p 4100:4100 jerryenebeli/blnk:latest
+$ docker run -v `pwd`/blnk.json:/blnk.json -p 5001:5001 jerryenebeli/blnk:latest
 ```
 
 ## Option 2: Building from source
@@ -281,11 +281,10 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
 
 ```json
 {
-  "port": "",
+  "port": "5001",
   "project_name": "",
   "default_currency": "NGN",
   "end_point_secret": "secret",
-  "synchronization_method": "db lock | queue",
   "data_source": {
     "name": "POSTGRES",
     "dns": "postgres://postgres:@localhost:5432/blnk?sslmode=disable"
