@@ -16,6 +16,7 @@ type DataSource interface {
 	transaction
 	ledger
 	balance
+	identity
 }
 
 type transaction interface {
@@ -38,9 +39,17 @@ type ledger interface {
 
 type balance interface {
 	CreateBalance(balance blnk.Balance) (blnk.Balance, error)
-	GetBalanceByID(id string) (*blnk.Balance, error)
+	GetBalanceByID(id string, include []string) (*blnk.Balance, error)
 	GetAllBalances() ([]blnk.Balance, error)
 	UpdateBalance(balance *blnk.Balance) error
+}
+
+type identity interface {
+	CreateIdentity(identity blnk.Identity) (blnk.Identity, error)
+	GetIdentityByID(id string) (*blnk.Identity, error)
+	GetAllIdentities() ([]blnk.Identity, error)
+	UpdateIdentity(identity *blnk.Identity) error
+	DeleteIdentity(id string) error
 }
 
 type datasource struct {
@@ -69,6 +78,10 @@ func connectDB(dns string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = createIdentityTable(db)
+	if err != nil {
+		return nil, err
+	}
 	err = createBalanceTable(db)
 	if err != nil {
 		return nil, err
@@ -77,10 +90,7 @@ func connectDB(dns string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = createCustomerTable(db)
-	if err != nil {
-		return nil, err
-	}
+
 	return db, nil
 }
 
@@ -153,6 +163,7 @@ func createBalanceTable(db *sql.DB) error {
 			currency TEXT NOT NULL,
 			currency_multiplier BIGINT NOT NULL,
 			ledger_id TEXT NOT NULL REFERENCES ledgers(ledger_id),
+			identity_id TEXT REFERENCES identity(identity_id),
 			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 			modification_ref TEXT,
 			meta_data JSONB
@@ -162,12 +173,11 @@ func createBalanceTable(db *sql.DB) error {
 	return err
 }
 
-// createCustomerTable creates a PostgreSQL table for the Customer struct
-func createCustomerTable(db *sql.DB) error {
+func createIdentityTable(db *sql.DB) error {
 	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS customers (
+		CREATE TABLE IF NOT EXISTS identity (
 			id SERIAL PRIMARY KEY,
-			customer_id TEXT NOT NULL UNIQUE,
+			identity_id TEXT NOT NULL UNIQUE,
 			first_name TEXT NOT NULL,
 			last_name TEXT NOT NULL,
 			other_names TEXT,
@@ -176,6 +186,14 @@ func createCustomerTable(db *sql.DB) error {
 			email_address TEXT,
 			phone_number TEXT,
 			nationality TEXT,
+			street TEXT,
+			country TEXT,
+			state TEXT,
+			organization_name TEXT,
+			category TEXT,
+			identity_type TEXT,
+			post_code TEXT,
+			city TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 			meta_data JSONB
 		)

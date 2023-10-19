@@ -57,6 +57,9 @@ type Balance struct {
 	Currency           string                 `json:"currency"`
 	CurrencyMultiplier int64                  `json:"currency_multiplier"`
 	LedgerID           string                 `json:"ledger_id"`
+	IdentityID         string                 `json:"identity_id"`
+	Identity           *Identity              `json:"identity,omitempty"`
+	Ledger             *Ledger                `json:"ledger,omitempty"`
 	CreatedAt          time.Time              `json:"created_at"`
 	MetaData           map[string]interface{} `json:"meta_data"`
 }
@@ -96,19 +99,42 @@ type Policy struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Customer struct {
-	Id           int64                  `json:"-"`
-	CustomerID   string                 `json:"id"`
-	FirstName    string                 `json:"first_name"`
-	LastName     string                 `json:"last_name"`
-	OtherNames   string                 `json:"other_names"`
-	Gender       string                 `json:"gender"`
-	DOB          string                 `json:"dob"`
-	EmailAddress string                 `json:"email_address"`
-	PhoneNumber  string                 `json:"phone_number"`
-	Nationality  string                 `json:"nationality"`
+type Identity struct {
+	IdentityID   string                 `json:"identity_id"`
+	IdentityType string                 `json:"identity_type"` // "individual" or "organization"
+	Individual   Individual             `json:"individual"`
+	Organization Organization           `json:"organization"`
+	Street       string                 `json:"street"`
+	Country      string                 `json:"country"`
+	State        string                 `json:"state"`
+	PostCode     string                 `json:"post_code"`
+	City         string                 `json:"city"`
 	CreatedAt    time.Time              `json:"created_at"`
 	MetaData     map[string]interface{} `json:"meta_data"`
+}
+
+type Account struct {
+	AccountID string                 `json:"account_id"`
+	Name      string                 `json:"name"`
+	Number    string                 `json:"number"`
+	BankName  string                 `json:"bank_name"`
+	MetaData  map[string]interface{} `json:"meta_data"`
+}
+
+type Individual struct {
+	FirstName    string    `json:"first_name"`
+	LastName     string    `json:"last_name"`
+	OtherNames   string    `json:"other_names"`
+	Gender       string    `json:"gender"`
+	DOB          time.Time `json:"dob"`
+	EmailAddress string    `json:"email_address"`
+	PhoneNumber  string    `json:"phone_number"`
+	Nationality  string    `json:"nationality"`
+}
+
+type Organization struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
 }
 
 func (balance *Balance) AddCredit(amount int64) {

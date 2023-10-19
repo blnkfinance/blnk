@@ -8,8 +8,8 @@ func (l Blnk) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
 	return l.datasource.CreateBalance(balance)
 }
 
-func (l Blnk) GetBalance(id string) (*blnk.Balance, error) {
-	return l.datasource.GetBalanceByID(id)
+func (l Blnk) GetBalanceByID(id string, include []string) (*blnk.Balance, error) {
+	return l.datasource.GetBalanceByID(id, include)
 }
 
 func (l Blnk) GetAllBalances() ([]blnk.Balance, error) {

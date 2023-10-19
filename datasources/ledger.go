@@ -20,10 +20,10 @@ func (d datasource) CreateLedger(ledger blnk.Ledger) (blnk.Ledger, error) {
 
 	// insert into database
 	_, err = d.conn.Exec(`
-		INSERT INTO ledgers (meta_data, ledger_id)
-		VALUES ($1,$2)
+		INSERT INTO ledgers (meta_data, name, ledger_id)
+		VALUES ($1, $2,$3)
 
-	`, metaDataJSON, ledger.LedgerID)
+	`, metaDataJSON, ledger.Name, ledger.LedgerID)
 
 	if err != nil {
 		return blnk.Ledger{}, err

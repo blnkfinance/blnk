@@ -98,6 +98,68 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 | multiplier | Balance Multiplier | int64 |
 | group | A group identifier | string |
 
+# Identity
+The Identity feature in Blnk provides a robust mechanism to attach a unique identity to each balance, ensuring every financial activity is traceable and structured. Whether it's individual customers or larger organizations, every transaction can be attributed to a specific entity, enhancing transparency and accountability.
+
+## Linking Identity to Balance in Blnk
+
+In Blnk, each balance can be associated with a unique identity, ensuring clear attribution of financial activities. This association enhances the traceability and accountability of transactions and balances within the system.
+
+### How to Link an Identity to a Balance
+
+1. **Create an Identity**: Before you can link an identity to a balance, the identity (be it an individual or an organization) must be created and stored in Blnk. Upon creation, every identity is assigned a unique `identity_id`.
+
+2. **Create a Balance with an Identity**: When creating a new balance, you can link it to an existing identity by passing the `identity_id` in the balance creation payload.
+
+Here's a sample payload to create a balance and link it to an identity:
+
+```json
+{
+    "ledger_id": "ldg_db5eabf0-4152-47cf-8353-d1729a491962",
+    "identity_id": "idt_0501db5c-baf9-4be1-a931-f4bae7f3a41d",
+    "currency": "NGN"
+}
+```
+
+In this payload:
+
+- `ledger_id`: Represents the unique ID of the ledger where the balance is to be created.
+- `identity_id`: The unique ID of the identity you want to link to the balance.
+- `currency`: The currency of the balance.
+
+Once the balance is created with the above payload, it will be intrinsically linked to the specified identity through the `identity_id`. This linkage ensures that all transactions and activities associated with this balance can be traced back to the specified identity, adding an extra layer of transparency to the financial operations in Blnk.
+## Identity Attributes
+
+| Property      | Description                                                      | Type                                        |
+| ------------- | ---------------------------------------------------------------- |---------------------------------------------|
+| IdentityType  | Distinguishes if the identity is an individual or organization   | string (`"individual"` or `"organization"`) |
+| Individual    | Contains details if the identity type is an individual           | `Individual` attributes (see below)         |
+| Organization  | Details if the identity type is an organization                  | `Organization` attributes (see below)       |
+| Street        | Street address of the identity                                   | string                                      |
+| Country       | Country where the identity resides                               | string                                      |
+| State         | State of residence of the identity                               | string                                      |
+| PostCode      | Postal code related to the identity                              | string                                      |
+| City          | City of residence of the identity                                | string                                      |
+| MetaData      | Custom metadata linked to the identity                           | Object                                      |
+
+## Individual Attributes
+| Property       | Description                                                      | Type   |
+| -------------- | ---------------------------------------------------------------- |--------|
+| FirstName      | First name of the individual                                     | string |
+| LastName       | Last name of the individual                                      | string |
+| OtherNames     | Any other names linked to the individual                          | string |
+| Gender         | Gender of the individual                                          | string |
+| DOB            | Date of birth of the individual                                  | Date   |
+| EmailAddress   | Email ID of the individual                                        | string |
+| PhoneNumber    | Contact number of the individual                                  | string |
+| Nationality    | Nationality of the individual                                     | string |
+
+## Organization Attributes
+| Property   | Description                                      | Type   |
+| ---------- | ------------------------------------------------ | ------ |
+| Name       | Name of the organization                         | string |
+| Category   | Category or type of the organization (e.g., "Bank", "Retail", "Tech") | string |
+
 # Transactions
 Transactions record all ledger events. Transaction are recorded as either  ```Debit(DR)``` ```Credit(CR)```.
 

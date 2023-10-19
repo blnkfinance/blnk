@@ -22,7 +22,7 @@ const (
 )
 
 func (l Blnk) validateBlnCurrency(transaction *blnk.Transaction) (blnk.Balance, error) {
-	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID)
+	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID, nil)
 	if err != nil {
 		return blnk.Balance{}, err
 	}
@@ -62,7 +62,7 @@ func inverseDRCR(drcr string) string {
 
 func (l Blnk) applyBalanceToQueuedTransaction(transaction blnk.Transaction) error {
 	//gets balance to apply transaction to
-	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID)
+	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID, nil)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (l Blnk) GetScheduledTransaction() {
 		if err != nil {
 			return
 		}
-		log.Printf("Message: Got %d scheduled transactions...", len(transactions))
+		//log.Printf("Message: Got %d scheduled transactions...", len(transactions))
 		for _, transaction := range transactions {
 			err = Enqueue(transaction) //send transaction to kafka
 			if err != nil {
