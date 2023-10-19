@@ -23,6 +23,7 @@ To create a new ledger in a system like Blnk, you would typically need to specif
 
 Once a ledger has been created, all transactions and balances for that ledger can be recorded and tracked within the system. This might include recording and updating the balances for various accounts or financial assets, as well as tracking the flow of assets between accounts. By maintaining accurate and up-to-date ledgers, it is possible to track the financial activity of a particular entity and to ensure the integrity and accuracy of financial transactions.
 
+---
 # Balances
 Balances are typically calculated for each  ledger, and represent the total amount of that asset that is available for use or transfer. Balances are typically updated every time a new transaction is recorded in the ledger, and can be used to track the flow of assets between accounts and to ensure that the ledger remains in balance.
 
@@ -98,6 +99,8 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 | multiplier | Balance Multiplier | int64 |
 | group | A group identifier | string |
 
+
+---
 ## Balance Monitoring
 Balance monitoring is a crucial component in the fintech world. With transactions being processed every second, it's essential to ensure that balances remain accurate, updated, and within expected thresholds. BLNK offers an efficient way to monitor these balances in real-time, ensuring that financial operations run smoothly and anomalies are detected promptly.
 
@@ -130,7 +133,6 @@ Here's how you can create a balance monitor:
 In the example above, a monitor is set up for the balance with ID `bln_c1750613-b4b0-4cde-9793-459165a8715f`. The condition checks if the `debit_balance` exceeds 100,000. If this condition is met, BLNK will trigger the predefined action, such as sending a webhook event.
 
 #### Supported Fields
-
 BLNK supports monitoring on the following fields:
 
 - `balance`: The total balance.
@@ -143,6 +145,7 @@ Imagine a fintech platform that processes high-value transactions for institutio
 
 Using BLNK's balance monitoring feature, the platform can set up monitors for each institutional client's account. If a debit exceeds a certain threshold, say $1,000,000, BLNK will instantly send a webhook event. This can be integrated into the platform's notification system to alert the client via email, SMS, or a mobile app notification.
 
+---
 # Identity
 The Identity feature in Blnk provides a robust mechanism to attach a unique identity to each balance, ensuring every financial activity is traceable and structured. Whether it's individual customers or larger organizations, every transaction can be attributed to a specific entity, enhancing transparency and accountability.
 
@@ -205,6 +208,7 @@ Once the balance is created with the above payload, it will be intrinsically lin
 | Name       | Name of the organization                         | string |
 | Category   | Category or type of the organization (e.g., "Bank", "Retail", "Tech") | string |
 
+---
 # Transactions
 Transactions record all ledger events. Transaction are recorded as either  ```Debit(DR)``` ```Credit(CR)```.
 
@@ -215,19 +219,19 @@ Transactions record all ledger events. Transaction are recorded as either  ```De
 
 ### Transaction Properties
 
-| Property | Description | Type |
-| ------ | ------ | --- |
-| id | Transaction ID | string |
-| amount | Transaction Amount| int64 |
-| DRCR | Credit or Debit indicator| string |
-| currency | Transaction currency | string
-| ledger_id | The Ledger the transaction belongs to | string |
-| balance_id | The balance the belongs to | string |
-| status | The status of the transaction. example: ```Successful```, ```Pending```, ```Failed``` | string |
-| reference | Unique Transaction referecence | string |
-| group | A group identifier | string |
-| description | Transaction description | string |
-| meta_data | Custom metadata | object |
+| Property | Description                                                                          | Type |
+| ------ |--------------------------------------------------------------------------------------| --- |
+| id | Transaction ID                                                                       | string |
+| amount | Transaction Amount                                                                   | int64 |
+| DRCR | Credit or Debit indicator                                                            | string |
+| currency | Transaction currency                                                                 | string
+| ledger_id | The Ledger the transaction belongs to                                                | string |
+| balance_id | The balance the belongs to                                                           | string |
+| status | The status of the transaction. example: ```APPLIED```, ```QUEUED```, ```SCHEDULED``` | string |
+| reference | Unique Transaction referecence                                                       | string |
+| group | A group identifier                                                                   | string |
+| description | Transaction description                                                              | string |
+| meta_data | Custom metadata                                                                      | object |
 
 ### Immutability
 Transactions are immutable, this means that the records of the transaction cannot be altered or tampered with once they have been recorded. This is an important feature of transactions, as it ensures that the record of a transaction remains accurate and unchanged, even if the transaction itself is modified or reversed at a later time.
@@ -302,6 +306,66 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 [//]: # ()
 
 Certainly! Let's simplify and provide a more developer-centric explanation:
+
+---
+# Fraud Detection
+Blnk's fraud detection module is designed to compute a "fraud score" for financial transactions, providing a risk assessment metric. This documentation section will delve deep into the algorithm behind this essential feature.
+
+### **Constants Overview**
+
+- **maxChangeFrequency**: Maximum number of transactions observed in a day for any account.
+- **maxTransactionAmount**: Highest transaction value recorded across all accounts.
+- **maxBalance**: Peak account balance observed in the system.
+- **maxCreditBalance**: Maximum credit balance ever recorded.
+- **maxDebitBalance**: Largest debit balance observed.
+
+### **Normalization Process**
+
+Normalization standardizes varying financial parameters to a scale of 0-1, where 0 represents no or minimal risk and 1 signifies the highest possible risk. The function:
+
+```pseudo
+function normalize(value, min=0, max) {
+    return (value - min) / (max - min)
+}
+```
+is employed for this purpose. This ensures each parameter contributes proportionally to the final fraud score.
+
+### **Fraud Score Computation**
+
+1. **Input Normalization**: Parameters like transaction amount, balance, etc., are normalized using the constants.
+2. **Weight Assignment**: Each normalized parameter gets a weight, defining its influence on the final score.
+3. **Score Calculation**: The fraud score is the sum of the product of each parameter and its weight, ensuring it remains between 0 (minimal risk) and 1 (maximum risk).
+
+Absolutely. Here's the revised documentation using `risk_tolerance_threshold`.
+
+
+## **Applying Blnk's Fraud Detection Module**
+
+### **Using the `risk_tolerance_threshold` Field**:
+
+1. **risk_tolerance_threshold**:
+    - Type: Float (Range: 0 to 1)
+    - Description: Represents the maximum acceptable risk level for the transaction. A score of `0` indicates no risk, while a score of `1` denotes maximum risk. By setting this value, you instruct the system to evaluate the transaction's risk level and compare it against your threshold.
+    - Example: If you set `risk_tolerance_threshold` to `0.7`, any transaction with a computed fraud score above 0.7 will be flagged or denied, while transactions with a score of 0.7 or below will be processed.
+
+### **Steps to Apply Fraud Detection**:
+
+1. **Initiate a Transaction**:
+    - When initiating a financial transaction, include all necessary fields in the JSON payload, such as `amount`, `tag`, `reference`, `drcr`, `currency`, and `balance_id`.
+
+2. **Include `risk_tolerance_threshold`**:
+    - Decide on the maximum risk you're willing to accept for this transaction.
+    - Add the `risk_tolerance_threshold` field to your transaction payload and set it to your chosen value.
+
+3. **Process the Transaction**:
+    - Send the transaction payload to Blnk's system.
+    - Blnk's fraud detection module will compute the transaction's fraud score.
+    - If the computed score is below or equal to your specified `risk_tolerance_threshold`, the transaction will proceed. Otherwise, it will be flagged or denied based on the system's configured response to high-risk transactions.
+
+4. **Review and Respond**:
+    - For flagged transactions, review the details and decide whether to approve or deny them. You can adjust the `risk_tolerance_threshold` for future transactions based on your comfort level and observed transaction patterns.
+
+**Note**: Adjusting the `risk_tolerance_threshold` allows you to fine-tune the sensitivity of the fraud detection system. A lower value makes the system more stringent, flagging more transactions, while a higher value makes it more lenient.
 
 ---
 

@@ -11,26 +11,28 @@ type Filter struct {
 }
 
 type Transaction struct {
-	ID                  int64                  `json:"-"`
-	TransactionID       string                 `json:"id"`
-	Tag                 string                 `json:"tag"`
-	Reference           string                 `json:"reference" binding:"required" error:"Please provide a reference."`
-	Amount              int64                  `json:"amount" binding:"required" error:"Please provide an amount."`
-	Currency            string                 `json:"currency" binding:"required" error:"Please provide a valid currency."`
-	DRCR                string                 `json:"drcr" binding:"required" error:"Please provide a 'drcr' value. It must be either 'Credit' or 'Debit'."`
-	Status              string                 `json:"status"`
-	LedgerID            string                 `json:"ledger_id"`
-	BalanceID           string                 `json:"balance_id" binding:"required" error:"amount is required: please provide an amount."`
-	CreditBalanceBefore int64                  `json:"credit_balance_before"`
-	DebitBalanceBefore  int64                  `json:"debit_balance_before"`
-	CreditBalanceAfter  int64                  `json:"credit_balance_after"`
-	DebitBalanceAfter   int64                  `json:"debit_balance_after"`
-	BalanceBefore       int64                  `json:"balance_before"`
-	BalanceAfter        int64                  `json:"balance_after"`
-	CreatedAt           time.Time              `json:"created_at"`
-	ScheduledFor        time.Time              `json:"scheduled_for,omitempty"`
-	SkipBalanceUpdate   bool                   `json:"-"`
-	MetaData            map[string]interface{} `json:"meta_data,omitempty"`
+	ID                     int64                  `json:"-"`
+	TransactionID          string                 `json:"id"`
+	Tag                    string                 `json:"tag"`
+	Reference              string                 `json:"reference" binding:"required" error:"Please provide a reference."`
+	Amount                 int64                  `json:"amount" binding:"required" error:"Please provide an amount."`
+	Currency               string                 `json:"currency" binding:"required" error:"Please provide a valid currency."`
+	DRCR                   string                 `json:"drcr" binding:"required" error:"Please provide a 'drcr' value. It must be either 'Credit' or 'Debit'."`
+	Status                 string                 `json:"status"`
+	LedgerID               string                 `json:"ledger_id"`
+	BalanceID              string                 `json:"balance_id" binding:"required" error:"amount is required: please provide an amount."`
+	CreditBalanceBefore    int64                  `json:"credit_balance_before"`
+	DebitBalanceBefore     int64                  `json:"debit_balance_before"`
+	CreditBalanceAfter     int64                  `json:"credit_balance_after"`
+	DebitBalanceAfter      int64                  `json:"debit_balance_after"`
+	BalanceBefore          int64                  `json:"balance_before"`
+	BalanceAfter           int64                  `json:"balance_after"`
+	CreatedAt              time.Time              `json:"created_at"`
+	ScheduledFor           time.Time              `json:"scheduled_for,omitempty"`
+	RiskToleranceThreshold float64                `json:"risk_tolerance_threshold"`
+	RiskScore              float64                `json:"risk_score"`
+	SkipBalanceUpdate      bool                   `json:"-"`
+	MetaData               map[string]interface{} `json:"meta_data,omitempty"`
 }
 
 type TransactionFilter struct {

@@ -8,6 +8,7 @@ import (
 type Blnk struct {
 	datasource datasources.DataSource
 	config     *config.Configuration
+	bt         *BalanceTracker
 }
 
 func NewBlnk() (*Blnk, error) {
@@ -20,7 +21,8 @@ func NewBlnk() (*Blnk, error) {
 		return nil, err
 	}
 
-	newBlnk := &Blnk{datasource: db, config: configuration}
+	bt := NewBalanceTracker()
+	newBlnk := &Blnk{datasource: db, config: configuration, bt: bt}
 	go newBlnk.ProcessTransactionFromQueue()
 	newBlnk.GetScheduledTransaction()
 	return newBlnk, nil
