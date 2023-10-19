@@ -222,3 +222,95 @@ func (d datasource) UpdateBalance(balance *blnk.Balance) error {
 
 	return err
 }
+
+func (d datasource) CreateMonitor(monitor blnk.BalanceMonitor) (blnk.BalanceMonitor, error) {
+	monitor.MonitorID = GenerateUUIDWithSuffix("mon")
+	monitor.CreatedAt = time.Now()
+
+	_, err := d.conn.Exec(`
+		INSERT INTO balance_monitors (monitor_id, balance_id, field, operator, value, description, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CreatedAt)
+
+	return monitor, err
+}
+
+func (d datasource) GetMonitorByID(id string) (*blnk.BalanceMonitor, error) {
+	row := d.conn.QueryRow(`
+		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
+		FROM balance_monitors WHERE monitor_id = $1
+	`, id)
+
+	monitor := &blnk.BalanceMonitor{}
+	condition := &blnk.AlertCondition{}
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	monitor.Condition = *condition
+	return monitor, nil
+}
+
+func (d datasource) GetAllMonitors() ([]blnk.BalanceMonitor, error) {
+	rows, err := d.conn.Query(`
+		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
+		FROM balance_monitors
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var monitors []blnk.BalanceMonitor
+	for rows.Next() {
+		monitor := blnk.BalanceMonitor{}
+		condition := blnk.AlertCondition{}
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		monitor.Condition = condition
+		monitors = append(monitors, monitor)
+	}
+	return monitors, nil
+}
+
+func (d datasource) GetBalanceMonitors(balanceID string) ([]blnk.BalanceMonitor, error) {
+	rows, err := d.conn.Query(`
+		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
+		FROM balance_monitors WHERE balance_id= $1
+	`, balanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var monitors []blnk.BalanceMonitor
+	for rows.Next() {
+		monitor := blnk.BalanceMonitor{}
+		condition := blnk.AlertCondition{}
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		monitor.Condition = condition
+		monitors = append(monitors, monitor)
+	}
+	return monitors, nil
+}
+
+func (d datasource) UpdateMonitor(monitor *blnk.BalanceMonitor) error {
+	_, err := d.conn.Exec(`
+		UPDATE balance_monitors
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, created_at = $7
+		WHERE monitor_id = $1
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CreatedAt)
+	return err
+}
+
+func (d datasource) DeleteMonitor(id string) error {
+	_, err := d.conn.Exec(`
+		DELETE FROM balance_monitors WHERE monitor_id = $1
+	`, id)
+	return err
+}

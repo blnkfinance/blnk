@@ -61,6 +61,17 @@ func inverseDRCR(drcr string) string {
 	return "Debit"
 }
 
+func (l Blnk) updateBalance(balance blnk.Balance) error {
+	err := l.datasource.UpdateBalance(&balance)
+	if err != nil {
+		return err
+	}
+	go func() {
+		l.checkBalanceMonitors(&balance)
+	}()
+	return nil
+}
+
 func (l Blnk) applyBalanceToQueuedTransaction(transaction blnk.Transaction) error {
 	//gets balance to apply transaction to
 	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID, nil)
@@ -80,7 +91,7 @@ func (l Blnk) applyBalanceToQueuedTransaction(transaction blnk.Transaction) erro
 
 	}
 	//updates balance in the db
-	err = l.datasource.UpdateBalance(balance)
+	err = l.updateBalance(*balance)
 	if err != nil {
 		return err
 	}
@@ -133,7 +144,9 @@ func (l Blnk) RecordTransaction(transaction blnk.Transaction) (blnk.Transaction,
 		return blnk.Transaction{}, err
 	}
 
-	transaction.Status = STATUS_SUCCESSFUL
+	if transaction.Status == "" {
+		transaction.Status = STATUS_SUCCESSFUL
+	}
 	err = l.scheduleTransaction(&transaction) //checks if it's a scheduled transaction and updates the status to scheduled
 	if err != nil {
 		return blnk.Transaction{}, err
@@ -146,7 +159,7 @@ func (l Blnk) RecordTransaction(transaction blnk.Transaction) (blnk.Transaction,
 	//if SkipBalanceUpdate is true it skips the db update leave the balance as it was before the transaction was processed.
 	//This is useful for when we want to store a transaction record but don't compute the balance. it's used in places like scheduling transactions
 	if !transaction.SkipBalanceUpdate {
-		err = l.datasource.UpdateBalance(&balance)
+		err = l.updateBalance(balance)
 		if err != nil {
 			return blnk.Transaction{}, err
 		}

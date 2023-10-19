@@ -64,6 +64,20 @@ type Balance struct {
 	MetaData           map[string]interface{} `json:"meta_data"`
 }
 
+type AlertCondition struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    int64  `json:"value"`
+}
+
+type BalanceMonitor struct {
+	MonitorID   string         `json:"monitor_id"`
+	BalanceID   string         `json:"balance_id"`
+	Condition   AlertCondition `json:"condition"`
+	Description string         `json:"description"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
 type BalanceFilter struct {
 	ID                 int64     `json:"id"`
 	BalanceRange       string    `json:"balance_range"`
@@ -137,6 +151,20 @@ type Organization struct {
 	Category string `json:"category"`
 }
 
+type EventMapper struct {
+	MapperID           string            `json:"mapper_id"`
+	Name               string            `json:"name"`
+	CreatedAt          time.Time         `json:"created_at"`
+	MappingInstruction map[string]string `json:"mapping_instruction"`
+}
+
+type Event struct {
+	MapperID  string                 `json:"mapper_id"`
+	Drcr      string                 `json:"drcr"`
+	BalanceID string                 `json:"balance_id"`
+	Data      map[string]interface{} `json:"data"`
+}
+
 func (balance *Balance) AddCredit(amount int64) {
 	balance.CreditBalance += amount
 }
@@ -200,6 +228,34 @@ func (transaction *Transaction) validate() error {
 
 func (transaction *Transaction) ToJSON() ([]byte, error) {
 	return json.Marshal(transaction)
+}
+
+func (bm *BalanceMonitor) CheckCondition(b *Balance) bool {
+	switch bm.Condition.Field {
+	case "debit_balance":
+		return compare(b.DebitBalance, bm.Condition.Operator, bm.Condition.Value)
+	case "credit_balance":
+		return compare(b.CreditBalance, bm.Condition.Operator, bm.Condition.Value)
+	case "balance":
+		return compare(b.Balance, bm.Condition.Operator, bm.Condition.Value)
+	}
+	return false
+}
+
+func compare(value int64, condition string, compareTo int64) bool {
+	switch condition {
+	case ">":
+		return value > compareTo
+	case "<":
+		return value < compareTo
+	case ">=":
+		return value >= compareTo
+	case "<=":
+		return value <= compareTo
+	case "==":
+		return value == compareTo
+	}
+	return false
 }
 
 //balance, balance before, balance after, credit balance, debit balance, credit balance before, credit balance after, debit balance before, debit balance after

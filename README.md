@@ -98,6 +98,51 @@ Multipliers are used to convert balance to it's lowest currency denomination. Ba
 | multiplier | Balance Multiplier | int64 |
 | group | A group identifier | string |
 
+## Balance Monitoring
+Balance monitoring is a crucial component in the fintech world. With transactions being processed every second, it's essential to ensure that balances remain accurate, updated, and within expected thresholds. BLNK offers an efficient way to monitor these balances in real-time, ensuring that financial operations run smoothly and anomalies are detected promptly.
+
+### Why Monitor Balances?
+
+In the fintech space, monitoring balances is vital for several reasons:
+
+1. **Fraud Detection**: Unusual balance changes can be an early indication of fraudulent activities. Monitoring can trigger alerts for suspicious transactions, enabling timely intervention.
+2. **Regulatory Compliance**: Many financial regulations require institutions to maintain specific balance thresholds. Real-time monitoring ensures compliance with these regulations.
+3. **Customer Notifications**: Customers can be notified in real-time if their account balance goes below a certain threshold, helping them manage their finances better.
+4. **Operational Efficiency**: Instantly knowing when a balance reaches a certain threshold can trigger automatic actions, such as transferring funds between accounts or purchasing assets.
+
+### Creating a Balance Monitor with BLNK
+
+BLNK simplifies the process of setting up balance monitors. With a straightforward API, you can set conditions that, when met, trigger specific actions, such as sending a webhook event.
+
+Here's how you can create a balance monitor:
+
+```json
+{
+    "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+    "condition": {
+        "field": "debit_balance",
+        "operator": ">",
+        "value": 100000
+    }
+}
+```
+
+In the example above, a monitor is set up for the balance with ID `bln_c1750613-b4b0-4cde-9793-459165a8715f`. The condition checks if the `debit_balance` exceeds 100,000. If this condition is met, BLNK will trigger the predefined action, such as sending a webhook event.
+
+#### Supported Fields
+
+BLNK supports monitoring on the following fields:
+
+- `balance`: The total balance.
+- `credit_balance`: The total credit balance.
+- `debit_balance`: The total debit balance.
+
+### Use Case: Real-time Alert for High-Value Transactions
+
+Imagine a fintech platform that processes high-value transactions for institutional clients. These clients need to be immediately informed if a large debit occurs in their accounts to ensure that it's an authorized transaction.
+
+Using BLNK's balance monitoring feature, the platform can set up monitors for each institutional client's account. If a debit exceeds a certain threshold, say $1,000,000, BLNK will instantly send a webhook event. This can be integrated into the platform's notification system to alert the client via email, SMS, or a mobile app notification.
+
 # Identity
 The Identity feature in Blnk provides a robust mechanism to attach a unique identity to each balance, ensuring every financial activity is traceable and structured. Whether it's individual customers or larger organizations, every transaction can be attributed to a specific entity, enhancing transparency and accountability.
 
@@ -256,6 +301,82 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 
 [//]: # ()
 
+Certainly! Let's simplify and provide a more developer-centric explanation:
+
+---
+
+## Events & Mappers
+
+The fintech domain is vast, with diverse systems speaking different "data languages." Integrating them can be a challenge. Blnk tackles this with **Events** and **Mappers**, making integrations smoother and more consistent.
+### Events
+
+**Events** in Blnk are external financial activities that need to be documented or processed. Think of them as real-time notifications about transactions, verifications, or any other significant activity.These could be anything from a successful card transaction to a transfer verification.
+
+### Mappers
+
+While events notify Blnk about an activity, **Mappers** ensure Blnk understands this information. They act as "translators," converting data from various external systems into a standardized format that Blnk can process.
+
+### Quick Example:
+
+Let's say you're connecting Blnk to different payment processors like Bloc and Stripe. Each sends transaction details differently.
+
+Instead of tweaking Blnk for each system, you use **Mappers**. For a `transaction.new` event from Bloc with fields like `data.amount` and `data.reference`, a mapper translates this into Blnk's language.
+
+### Code Samples:
+
+**Creating a Mapper for Bloc**:
+```json
+{
+    "name": "Bloc transaction webhook mapping",
+    "mapping_instruction": {
+        "amount": "{data.amount}",
+        "reference": "{data.reference}",
+        "currency": "{data.currency}"
+    }
+}
+```
+
+**Creating an Event using the created Bloc Mapper**:
+```json
+{
+    "mapper_id": "map_3db6f05a-8f5a-43e4-a91c-b5a6c5e7d5a1",
+    "drcr": "Credit",
+    "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+    "data": {
+        "event": "transaction.new",
+        "data": {
+            "amount": 30000,
+            "currency": "NGN",
+            "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+            "source": "Collection Account",
+            "status": "successful"
+        }
+    }
+}
+```
+
+**Generates and records transaction for processing**:
+```json
+{
+  "id": "txn_9da2b9bc-a0f4-4832-bb2a-5a493eedb5b3",
+  "tag": "",
+  "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+  "amount": 30000,
+  "currency": "NGN",
+  "drcr": "Credit",
+  "status": "QUEUED",
+  "ledger_id": "ldg_db5eabf0-4152-47cf-8353-d1729a491962",
+  "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+  "credit_balance_before": 246000,
+  "debit_balance_before": 0,
+  "credit_balance_after": 276000,
+  "debit_balance_after": 0,
+  "balance_before": 246000,
+  "balance_after": 276000,
+  "created_at": "2023-10-19T07:59:22.052869+01:00",
+  "scheduled_for": "0001-01-01T00:00:00Z"
+}
+```
 
 # How To Install
 

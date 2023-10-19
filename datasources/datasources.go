@@ -17,6 +17,8 @@ type DataSource interface {
 	ledger
 	balance
 	identity
+	balanceMonitor
+	eventMapper
 }
 
 type transaction interface {
@@ -44,12 +46,29 @@ type balance interface {
 	UpdateBalance(balance *blnk.Balance) error
 }
 
+type balanceMonitor interface {
+	CreateMonitor(monitor blnk.BalanceMonitor) (blnk.BalanceMonitor, error)
+	GetMonitorByID(id string) (*blnk.BalanceMonitor, error)
+	GetAllMonitors() ([]blnk.BalanceMonitor, error)
+	GetBalanceMonitors(balanceID string) ([]blnk.BalanceMonitor, error)
+	UpdateMonitor(monitor *blnk.BalanceMonitor) error
+	DeleteMonitor(id string) error
+}
+
 type identity interface {
 	CreateIdentity(identity blnk.Identity) (blnk.Identity, error)
 	GetIdentityByID(id string) (*blnk.Identity, error)
 	GetAllIdentities() ([]blnk.Identity, error)
 	UpdateIdentity(identity *blnk.Identity) error
 	DeleteIdentity(id string) error
+}
+
+type eventMapper interface {
+	CreateEventMapper(mapper blnk.EventMapper) (blnk.EventMapper, error)
+	GetAllEventMappers() ([]blnk.EventMapper, error)
+	GetEventMapperByID(id string) (*blnk.EventMapper, error)
+	UpdateEventMapper(mapper blnk.EventMapper) error
+	DeleteEventMapper(id string) error
 }
 
 type datasource struct {
@@ -86,11 +105,18 @@ func connectDB(dns string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = createBalanceMonitorTable(db)
+	if err != nil {
+		return nil, err
+	}
 	err = createTransactionTable(db)
 	if err != nil {
 		return nil, err
 	}
-
+	err = createEventMapperTable(db)
+	if err != nil {
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -173,6 +199,24 @@ func createBalanceTable(db *sql.DB) error {
 	return err
 }
 
+// createBalanceMonitorTable creates a PostgreSQL table for the BalanceMonitor struct
+func createBalanceMonitorTable(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS balance_monitors (
+		    id SERIAL PRIMARY KEY,
+			monitor_id TEXT NOT NULL UNIQUE,
+			balance_id TEXT NOT NULL REFERENCES balances(balance_id),
+			field TEXT NOT NULL CHECK (field IN ('debit_balance', 'credit_balance', 'balance')),
+			operator TEXT NOT NULL CHECK (operator IN ('>', '<', '>=', '<=', '=')),
+			value BIGINT NOT NULL,
+			description TEXT,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW()
+		)
+	`)
+	log.Println(err)
+	return err
+}
+
 func createIdentityTable(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS identity (
@@ -196,6 +240,21 @@ func createIdentityTable(db *sql.DB) error {
 			city TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 			meta_data JSONB
+		)
+	`)
+	log.Println(err)
+	return err
+}
+
+// createEventMapperTable creates a PostgreSQL table for the EventMapper struct
+func createEventMapperTable(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS event_mappers (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			mapper_id TEXT NOT NULL UNIQUE,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			mapping_instruction JSONB NOT NULL
 		)
 	`)
 	log.Println(err)

@@ -8,5 +8,5 @@ RUN go build -o blnk ./cmd/*.go
 FROM gcr.io/distroless/base
 COPY --from=build-env /go/src/blnk/blnk .
 
-EXPOSE 8080
+EXPOSE 5001
 CMD ["./blnk", "start"]

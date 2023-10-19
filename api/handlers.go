@@ -38,6 +38,20 @@ func (a Api) Router() *gin.Engine {
 	router.DELETE("/identity/:id", a.DeleteIdentity)
 	router.GET("/identities", a.GetAllIdentities)
 
+	router.POST("/event", a.CreateEvent)
+	router.POST("/event-mapper", a.CreateEventMapper)
+	router.GET("/event-mapper/:id", a.GetEventMapperByID)
+	router.GET("/event-mappers", a.GetAllEventMappers)
+	router.PUT("/event-mapper/:id", a.UpdateEventMapper)
+	router.DELETE("/event-mapper/:id", a.DeleteEventMapper)
+
+	router.POST("/balance-monitor", a.CreateBalanceMonitor)
+	router.GET("/balance-monitor/:id", a.GetBalanceMonitor)
+	router.GET("/balance-monitors", a.GetAllBalanceMonitors)
+	router.GET("/balance-monitors/balance/:balance_id", a.GetBalanceMonitorsByBalanceID)
+	router.PUT("/balance-monitor/:id", a.UpdateBalanceMonitor)
+	router.DELETE("/balance-monitor/:id", a.DeleteBalanceMonitor)
+
 	return a.router
 }
 
@@ -289,4 +303,200 @@ func (a Api) GetAllIdentities(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, identities)
+}
+
+func (a Api) CreateEvent(c *gin.Context) {
+	var event blnk.Event
+	if err := c.ShouldBindJSON(&event); err != nil {
+		validationErrors := err.(validator.ValidationErrors)
+		errorMessages := ExtractValidationErrors(&event, validationErrors)
+		c.JSON(http.StatusBadRequest, gin.H{"errors": errorMessages})
+		return
+	}
+	resp, err := a.blnk.CreatEvent(event)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
+}
+
+func (a Api) CreateEventMapper(c *gin.Context) {
+	var mapper blnk.EventMapper
+	if err := c.ShouldBindJSON(&mapper); err != nil {
+		validationErrors := err.(validator.ValidationErrors)
+		errorMessages := ExtractValidationErrors(&mapper, validationErrors)
+		c.JSON(http.StatusBadRequest, gin.H{"errors": errorMessages})
+		return
+	}
+	resp, err := a.blnk.CreateEventMapper(mapper)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
+}
+
+func (a Api) GetAllEventMappers(c *gin.Context) {
+	mappers, err := a.blnk.GetAllEventMappers()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, mappers)
+}
+
+func (a Api) GetEventMapperByID(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	resp, err := a.blnk.GetEventMapperByID(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (a Api) UpdateEventMapper(c *gin.Context) {
+	var mapper blnk.EventMapper
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	if err := c.ShouldBindJSON(&mapper); err != nil {
+		validationErrors := err.(validator.ValidationErrors)
+		errorMessages := ExtractValidationErrors(&mapper, validationErrors)
+		c.JSON(http.StatusBadRequest, gin.H{"errors": errorMessages})
+		return
+	}
+
+	mapper.MapperID = id // Ensure the mapper object has the correct ID
+	err := a.blnk.UpdateEventMapper(mapper)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "EventMapper updated successfully"})
+}
+
+func (a Api) DeleteEventMapper(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	err := a.blnk.DeleteEventMapperByID(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "EventMapper deleted successfully"})
+}
+
+func (a Api) CreateBalanceMonitor(c *gin.Context) {
+	var monitor blnk.BalanceMonitor
+	if err := c.ShouldBindJSON(&monitor); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := a.blnk.CreateMonitor(monitor)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
+}
+
+func (a Api) GetBalanceMonitor(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	resp, err := a.blnk.GetMonitorByID(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (a Api) GetAllBalanceMonitors(c *gin.Context) {
+	monitors, err := a.blnk.GetAllMonitors()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, monitors)
+}
+
+func (a Api) GetBalanceMonitorsByBalanceID(c *gin.Context) {
+	balanceID, passed := c.Params.Get("balance_id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "balance_id is required. pass balance_id in the route /:balance_id"})
+		return
+	}
+
+	monitors, err := a.blnk.GetMonitorByID(balanceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, monitors)
+}
+
+func (a Api) UpdateBalanceMonitor(c *gin.Context) {
+	var monitor blnk.BalanceMonitor
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	if err := c.ShouldBindJSON(&monitor); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	monitor.MonitorID = id
+	err := a.blnk.UpdateMonitor(&monitor)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "BalanceMonitor updated successfully"})
+}
+
+func (a Api) DeleteBalanceMonitor(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	err := a.blnk.DeleteMonitor(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "BalanceMonitor deleted successfully"})
 }
