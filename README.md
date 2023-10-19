@@ -261,7 +261,7 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 
 ## Option 1: Docker Image
 ```bash
-$ docker run -v `pwd`/Blnk.json:/Blnk.json -p 4100:4100 jerryenebeli/blnk:latest
+$ docker run -v `pwd`/blnk.json:/blnk.json -p 4100:4100 jerryenebeli/blnk:latest
 ```
 
 ## Option 2: Building from source
