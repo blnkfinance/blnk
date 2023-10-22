@@ -302,7 +302,6 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 
 [//]: # ()
 
-Certainly! Let's simplify and provide a more developer-centric explanation:
 
 ---
 # Fraud Detection
