@@ -272,9 +272,6 @@ Blnk provides support for various queue systems to cater to different deployment
 
 ---
 
-This expanded section should provide a more comprehensive understanding of how queue support enhances the Blnk system's performance and reliability while offering clear details on supported queue systems.
-
-
 ### Scheduling Transactions for Future Processing
 Blnk offers a powerful feature that allows you to schedule transactions for future execution with ease. By including the "scheduled_for" parameter in your transaction payload, you can precisely specify when you want a transaction to take place. Here's a breakdown of how it works:
 
