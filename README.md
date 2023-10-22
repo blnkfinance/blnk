@@ -331,10 +331,6 @@ is employed for this purpose. This ensures each parameter contributes proportion
 1. **Input Normalization**: Parameters like transaction amount, balance, etc., are normalized using the constants.
 2. **Weight Assignment**: Each normalized parameter gets a weight, defining its influence on the final score.
 3. **Score Calculation**: The fraud score is the sum of the product of each parameter and its weight, ensuring it remains between 0 (minimal risk) and 1 (maximum risk).
-
-Absolutely. Here's the revised documentation using `risk_tolerance_threshold`.
-
-
 ## **Applying Blnk's Fraud Detection Module**
 
 ### **Using the `risk_tolerance_threshold` Field**:
