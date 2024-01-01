@@ -358,9 +358,6 @@ Blnk provides support for various queue systems to cater to different deployment
 
 ---
 
-This expanded section should provide a more comprehensive understanding of how queue support enhances the Blnk system's performance and reliability while offering clear details on supported queue systems.
-
-
 ### Scheduling Transactions for Future Processing
 Blnk offers a powerful feature that allows you to schedule transactions for future execution with ease. By including the "scheduled_for" parameter in your transaction payload, you can precisely specify when you want a transaction to take place. Here's a breakdown of how it works:
 
@@ -391,7 +388,6 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 
 [//]: # ()
 
-Certainly! Let's simplify and provide a more developer-centric explanation:
 
 ---
 # Fraud Detection
@@ -421,10 +417,6 @@ is employed for this purpose. This ensures each parameter contributes proportion
 1. **Input Normalization**: Parameters like transaction amount, balance, etc., are normalized using the constants.
 2. **Weight Assignment**: Each normalized parameter gets a weight, defining its influence on the final score.
 3. **Score Calculation**: The fraud score is the sum of the product of each parameter and its weight, ensuring it remains between 0 (minimal risk) and 1 (maximum risk).
-
-Absolutely. Here's the revised documentation using `risk_tolerance_threshold`.
-
-
 ## **Applying Blnk's Fraud Detection Module**
 
 ### **Using the `risk_tolerance_threshold` Field**:
