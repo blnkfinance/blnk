@@ -208,6 +208,92 @@ Once the balance is created with the above payload, it will be intrinsically lin
 | Name       | Name of the organization                         | string |
 | Category   | Category or type of the organization (e.g., "Bank", "Retail", "Tech") | string |
 
+
+---
+# Accounts in Blnk
+
+Blnk provides robust account management capabilities, enabling the creation and management of external accounts seamlessly. This feature is essential for fintech products that offer account number issuance to their customers.
+
+## Creating and Managing Accounts
+
+Accounts in Blnk can be easily created and managed. They can be tied to a balance, allowing transactions recorded on an account to reflect on the associated balance. This connection enhances the transparency and consistency of financial records.
+
+To create an account, the following JSON structure is used:
+
+```json
+{
+    "bank_name": "Blnk bank",
+    "number": "30888888832",
+    "identity_id": "idt_0501db5c-baf9-4be1-a931-f4bae7f3a41d",
+    "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f"
+}
+```
+
+In this example:
+- `bank_name` specifies the name of the bank.
+- `number` is the unique account number.
+- `identity_id` links the account to a specific identity in Blnk.
+- `balance_id` associates the account with a particular balance.
+---
+
+## Account-Balance Linkage
+Accounts in Blnk can be directly tied to specific balances. This linkage ensures that transactions recorded on an account are accurately reflected in the associated balance, providing a comprehensive view of financial activities.
+
+### External Account Generation
+Blnk supports automated account number generation through external sources. This feature allows Blnk to fetch new account numbers from a specified RESTful service whenever a new account is created.
+
+#### Configuration for External Account Generation
+To enable external account number generation, include the following configuration in your Blnk config:
+
+```json
+"account_number_generation": {
+    "http_service": {
+        "url": "https://example.com/generate_account_number",
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer some_auth_token"
+        }
+    }
+}
+```
+
+#### Expected Response Format
+The response from the external account generation service should follow this format:
+
+```json
+{
+    "account_number": "<generated_account_number>",
+    "bank_name": "<associated_bank_name>"
+}
+```
+
+## Benefits
+
+- **Flexibility**: Blnk's agnostic approach to account number generation means it can integrate with various external services, providing flexibility in account management.
+- **Ease of Use**: The straightforward JSON structure for account creation and management simplifies the process, making it accessible for developers.
+- **Seamless Integration**: By tying accounts to balances, Blnk ensures seamless integration of transaction data, enhancing the financial management capabilities of your application.
+
+## Recording Transactions for an Account
+
+```json
+{
+    "amount": 10000,
+    "tag": "Commission Earned",
+    "reference": "ref",
+    "drcr": "Credit",
+    "currency": "NGN",
+    "account_id": "acc_3fa24854-211f-4248-9611-a7744aeaefcd"
+}
+```
+### Attributes Description
+- **amount**: The monetary value of the transaction (e.g., 10000).
+- **tag**: A label or description of the transaction (e.g., "Commission Earned").
+- **reference**: A unique identifier for the transaction (e.g., "ref").
+- **drcr**: Indicates whether the transaction is a debit (DR) or credit (CR) to the account.
+- **currency**: The currency in which the transaction is made (e.g., "NGN").
+- **account_id**: The unique identifier of the account to which the transaction belongs.
+
 ---
 # Transactions
 Transactions record all ledger events. Transaction are recorded as either  ```Debit(DR)``` ```Credit(CR)```.
@@ -442,6 +528,12 @@ Instead of tweaking Blnk for each system, you use **Mappers**. For a `transactio
 }
 ```
 
+# Blnk UI (WIP 🚧)
+
+can be accessible by visiting localhost:5001(replace port with your port).
+![Blnk UI](https://res.cloudinary.com/dp8bwjdvg/image/upload/v1704124733/Screenshot_2024-01-01_at_16.56.47_cesuac.png)
+
+
 # How To Install
 
 ## Option 1: Docker Image
@@ -466,29 +558,42 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
 
 ```json
 {
-  "port": "5001",
-  "project_name": "My Fintech",
-  "end_point_secret": "secret",
-  "data_source": {
-    "name": "POSTGRES",
-    "dns": "postgres://postgres:@localhost:5432/blnk?sslmode=disable"
-  },
-  "confluent_kafka": {
-    "server": "",
-    "api_key": "",
-    "secret_key": "",
-    "queue_name": "transactions",
-    "pull_wait_time": 100
-  },
-  "notification": {
-    "slack": {
-      "webhook_url": "https://webhook.test"
-    },
-    "webhook": {
-      "url": "",
-      "headers": {}
-    }
-  }
+   "port": "50001",
+   "project_name": "Blnk",
+   "default_currency": "NGN",
+   "end_point_secret": "secret",
+   "data_source": {
+      "name": "POSTGRES",
+      "dns": "postgres://postgres:@localhost:5432/blnk?sslmode=disable"
+   },
+   "account": {
+      "default_bank": "Blnk MFB"
+   },
+   "account_number_generation": {
+      "http_service": {
+         "url": "https://example.com/generate_account_number",
+         "method": "POST",
+         "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer some_auth_token"
+         }
+      }
+   },
+   "confluent_kafka": {
+      "server": "",
+      "api_key": "",
+      "secret_key": "",
+      "queue_name": "",
+   },
+   "notification": {
+      "slack": {
+         "webhook_url": ""
+      },
+      "webhook": {
+         "url": "",
+         "headers": {}
+      }
+   }
 }
 ```
 

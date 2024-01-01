@@ -1,0 +1,16 @@
+{
+  "name": "blnk-ui",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "source": "index.html",
+  "scripts": {
+    "start": "parcel",
+    "build": "parcel build"
+  },
+  "dependencies": {
+    "flowbite": "^1.8.1",
+    "htmx.org": "^1.9.6",
+    "parcel": "^2.10.0"
+  }
+}

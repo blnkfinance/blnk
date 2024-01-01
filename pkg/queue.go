@@ -68,7 +68,7 @@ func initKafkaConfigs() {
 		"sasl.mechanisms":    "PLAIN",
 		"session.timeout.ms": 45000,
 		"sasl.password":      config.ConfluentKafka.SecretKey,
-		"sasl.username":      config.ConfluentKafka.APIKEY,
+		"sasl.username":      config.ConfluentKafka.ApiKey,
 		"security.protocol":  "SASL_SSL",
 		"acks":               "all",
 	}
@@ -78,7 +78,7 @@ func initKafkaConfigs() {
 		"sasl.mechanisms":    "PLAIN",
 		"session.timeout.ms": 45000,
 		"sasl.password":      config.ConfluentKafka.SecretKey,
-		"sasl.username":      config.ConfluentKafka.APIKEY,
+		"sasl.username":      config.ConfluentKafka.ApiKey,
 		"security.protocol":  "SASL_SSL",
 		"group.id":           "blnk-transactions",
 		"auto.offset.reset":  "earliest",

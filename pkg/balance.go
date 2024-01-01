@@ -42,7 +42,7 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *blnk.Balance) {
 	for _, monitor := range monitors {
 		if monitor.CheckCondition(updatedBalance) {
 			fmt.Printf("Condition met for balance: %s\n", monitor.MonitorID)
-			// Here, you can also add logic to send notifications or take other actions.
+			//todo Here, you can also add logic to send notifications or take other actions.
 		}
 	}
 

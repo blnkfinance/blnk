@@ -31,7 +31,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	// Append fields and joins based on 'include'
 	if contains(include, "identity") {
 		selectFields = append(selectFields,
-			"i.identity_id", "i.first_name", "i.organization_name", "i.category", "i.last_name", "i.other_names",
+			"i.identity_id", "i.first_name", "i_name", "i.category", "i.last_name", "i.other_names",
 			"i.gender", "i.dob", "i.email_address", "i.phone_number",
 			"i.nationality", "i.street", "i.country", "i.state",
 			"i.post_code", "i.city", "i.created_at")
@@ -76,9 +76,9 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*blnk.Balance, error) 
 		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON)
 
 	if contains(include, "identity") {
-		scanArgs = append(scanArgs, &identity.IdentityID, &identity.Individual.FirstName, &identity.Organization.Name, &identity.Organization.Category, &identity.Individual.LastName,
-			&identity.Individual.OtherNames, &identity.Individual.Gender, &identity.Individual.DOB, &identity.Individual.EmailAddress,
-			&identity.Individual.PhoneNumber, &identity.Individual.Nationality, &identity.Street, &identity.Country,
+		scanArgs = append(scanArgs, &identity.IdentityID, &identity.FirstName, &identity.OrganizationName, &identity.Category, &identity.LastName,
+			&identity.OtherNames, &identity.Gender, &identity.DOB, &identity.EmailAddress,
+			&identity.PhoneNumber, &identity.Nationality, &identity.Street, &identity.Country,
 			&identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt)
 	}
 

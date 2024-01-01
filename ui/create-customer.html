@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="/static/output.css" rel="stylesheet">
+</head>
+<body>
+
+<header class="antialiased">
+    <nav class="bg-white border-gray-200 px-4 lg:px-6 py-2.5 dark:bg-gray-800">
+    </nav>
+</header>
+<section class=" dark:bg-gray-900" id="section">
+    <div class="py-8 px-4 mx-auto max-w-2xl lg:py-16">
+        <div class="mb-8">
+            <a href="/" class="mb-4 text-xl text-gray-400 dark:text-white pb-6">
+                <svg class="w-6 h-6 text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"  fill="currentColor" viewBox="0 0 14 10">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5H1m0 0 4 4M1 5l4-4"/>
+                </svg>
+                </a>
+        </div>
+
+        <h2 class="mb-4 text-xl font-extrabold text-gray-900 dark:text-white">Create a new customer</h2>
+        <form action="#">
+            <div class="grid gap-4 sm:grid-cols-2 sm:gap-6">
+                <div class="sm:col-span-2">
+                    <label for="identity_type" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select
+                        customer type</label>
+                    <select  name="identity_type" id="identity_type"
+                            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+                        <option selected>Choose a type</option>
+                        <option value="individual">Individual</option>
+                        <option value="organization">Organization</option>
+                    </select>
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label for="organization_name" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Organization
+                        Name</label>
+                    <input type="text" name="organization_name" id="organization_name"
+                           class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                           placeholder="Type ledger name" required="">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label for="first_name" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">First
+                        Name</label>
+                    <input type="text" name="first_name" id="first_name"
+                           class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                           placeholder="Type ledger name" required="">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label for="last_name" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Last
+                        Name</label>
+                    <input type="text" name="last_name" id="last_name"
+                           class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                           placeholder="Type ledger name" required="">
+                </div>
+
+
+                <div class="sm:col-span-2">
+                    <label for="other_name" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Other
+                        Name</label>
+                    <input type="text" name="other_name" id="other_name"
+                           class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                           placeholder="Type ledger name" required="">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label for="gender"
+                           class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Gender</label>
+                    <select name="gender" id="gender"
+                            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+                        <option selected>Choose a gender</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                    </select></div>
+
+                <div class="sm:col-span-2">
+                    <label for="phone_number" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Phone
+                        Number</label>
+                    <input type="text" name="phone_number" id="phone_number"
+                           class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                           placeholder="Type ledger name" required="">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label for="email_address" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Email
+                        Address</label>
+                    <input type="email" name="email_address" id="email_address"
+                           class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                           placeholder="Type ledger name" required="">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label for="description" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Address</label>
+                    <textarea id="description" rows="8"
+                              class="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                              placeholder="Your description here"></textarea>
+                </div>
+            </div>
+
+            <button hx-post="/create-customer"
+                    hx-trigger="click"
+                    hx-target="#section"
+                    hx-confirm="Are you sure you wish to create a new customer?"
+                    class="inline-flex items-center px-5 py-2.5 mt-4 sm:mt-6 text-sm font-medium text-center text-white bg-primary-700 rounded-lg focus:ring-4 focus:ring-primary-200 dark:focus:ring-primary-900 hover:bg-primary-800">
+                Create account
+            </button>
+        </form>
+    </div>
+</section>
+
+<script src="/static/node_modules/flowbite/dist/flowbite.min.js"></script>
+<script src="https://unpkg.com/htmx.org@1.9.6"
+        integrity="sha384-FhXw7b6AlE/jyjlZH5iHa/tTe9EpJ1Y55RjcgPbjeWMskSxZt1v9qkxLJWNJaGni"
+        crossorigin="anonymous"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Get the select element and the organization name input
+        var identitySelect = document.getElementById('identity_type');
+        var organizationNameInput = document.getElementById('organization_name').parentNode;
+
+        // Function to toggle the visibility of the organization name input
+        function toggleOrganizationNameInput() {
+            if (identitySelect.value === 'individual') {
+                organizationNameInput.style.display = 'none';
+            } else {
+                organizationNameInput.style.display = 'block';
+            }
+        }
+
+        // Event listener for changes in the select element
+        identitySelect.addEventListener('change', toggleOrganizationNameInput);
+
+        // Initial check on page load
+        toggleOrganizationNameInput();
+    });
+</script>
+</body>
+</html>

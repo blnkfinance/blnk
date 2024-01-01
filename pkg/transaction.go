@@ -228,6 +228,10 @@ func (l Blnk) GetTransaction(TransactionID string) (blnk.Transaction, error) {
 	return l.datasource.GetTransaction(TransactionID)
 }
 
+func (l Blnk) GetAllTransactions() ([]blnk.Transaction, error) {
+	return l.datasource.GetAllTransactions()
+}
+
 func (l Blnk) GetScheduledTransaction() {
 	log.Println("Message: Fetching scheduled transactions...")
 	s := gocron.NewScheduler(time.UTC)

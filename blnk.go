@@ -116,41 +116,37 @@ type Policy struct {
 }
 
 type Identity struct {
-	IdentityID   string                 `json:"identity_id"`
-	IdentityType string                 `json:"identity_type"` // "individual" or "organization"
-	Individual   Individual             `json:"individual"`
-	Organization Organization           `json:"organization"`
-	Street       string                 `json:"street"`
-	Country      string                 `json:"country"`
-	State        string                 `json:"state"`
-	PostCode     string                 `json:"post_code"`
-	City         string                 `json:"city"`
-	CreatedAt    time.Time              `json:"created_at"`
-	MetaData     map[string]interface{} `json:"meta_data"`
+	IdentityID       string                 `json:"identity_id" form:"identity_id"`
+	IdentityType     string                 `json:"identity_type" form:"identity_type"` // "individual" or "organization"
+	OrganizationName string                 `json:"organization_name" form:"organization_name"`
+	Category         string                 `json:"category" form:"category"`
+	FirstName        string                 `json:"first_name" form:"first_name"`
+	LastName         string                 `json:"last_name" form:"last_name"`
+	OtherNames       string                 `json:"other_names" form:"other_names"`
+	Gender           string                 `json:"gender" form:"gender"`
+	DOB              time.Time              `json:"dob" form:"dob"`
+	EmailAddress     string                 `json:"email_address" form:"email_address"`
+	PhoneNumber      string                 `json:"phone_number" form:"phone_number"`
+	Nationality      string                 `json:"nationality" form:"nationality"`
+	Street           string                 `json:"street" form:"street"`
+	Country          string                 `json:"country" form:"country"`
+	State            string                 `json:"state" form:"state"`
+	PostCode         string                 `json:"post_code" form:"postCode"`
+	City             string                 `json:"city" form:"city"`
+	CreatedAt        time.Time              `json:"created_at" form:"createdAt"`
+	MetaData         map[string]interface{} `json:"meta_data" form:"metaData"`
 }
 
 type Account struct {
-	AccountID string                 `json:"account_id"`
-	Name      string                 `json:"name"`
-	Number    string                 `json:"number"`
-	BankName  string                 `json:"bank_name"`
-	MetaData  map[string]interface{} `json:"meta_data"`
-}
-
-type Individual struct {
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	OtherNames   string    `json:"other_names"`
-	Gender       string    `json:"gender"`
-	DOB          time.Time `json:"dob"`
-	EmailAddress string    `json:"email_address"`
-	PhoneNumber  string    `json:"phone_number"`
-	Nationality  string    `json:"nationality"`
-}
-
-type Organization struct {
-	Name     string `json:"name"`
-	Category string `json:"category"`
+	AccountID  string                 `json:"account_id"`
+	Name       string                 `json:"name" form:"name"`
+	Number     string                 `json:"number" form:"number"`
+	BankName   string                 `json:"bank_name"`
+	CreatedAt  time.Time              `json:"created_at"`
+	BalanceID  string                 `json:"balance_id" error:"Please provide a ledger ID." `
+	IdentityID string                 `json:"identity_id" binding:"required" error:"Please provide a ledger ID." form:"identity_id"`
+	LedgerID   string                 `json:"ledger_id" error:"Please provide a ledger ID."`
+	MetaData   map[string]interface{} `json:"meta_data"`
 }
 
 type EventMapper struct {
@@ -259,11 +255,3 @@ func compare(value int64, condition string, compareTo int64) bool {
 	}
 	return false
 }
-
-//balance, balance before, balance after, credit balance, debit balance, credit balance before, credit balance after, debit balance before, debit balance after
-//amount
-//apply_on: credit, debit
-//action: allow, deny
-//if amount > 1000 && credit balance < 500000 allow
-//if credit_balance <= 4000 deny
-//

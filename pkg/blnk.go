@@ -23,7 +23,7 @@ func NewBlnk() (*Blnk, error) {
 
 	bt := NewBalanceTracker()
 	newBlnk := &Blnk{datasource: db, config: configuration, bt: bt}
-	go newBlnk.ProcessTransactionFromQueue()
+	//go newBlnk.ProcessTransactionFromQueue()
 	newBlnk.GetScheduledTransaction()
 	return newBlnk, nil
 }

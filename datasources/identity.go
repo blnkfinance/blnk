@@ -21,7 +21,7 @@ func (d datasource) CreateIdentity(identity blnk.Identity) (blnk.Identity, error
 	_, err = d.conn.Exec(`
 		INSERT INTO identity (identity_id,identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-	`, identity.IdentityID, identity.IdentityType, identity.Individual.FirstName, identity.Individual.LastName, identity.Individual.OtherNames, identity.Individual.Gender, identity.Individual.DOB, identity.Individual.EmailAddress, identity.Individual.PhoneNumber, identity.Individual.Nationality, identity.Organization.Name, identity.Organization.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
+	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
 
 	return identity, err
 }
@@ -46,8 +46,8 @@ func (d datasource) GetIdentityByID(id string) (*blnk.Identity, error) {
 	var metaDataJSON []byte
 	err = row.Scan(
 		&identity.IdentityID, &identity.IdentityType,
-		&identity.Individual.FirstName, &identity.Individual.LastName, &identity.Individual.OtherNames, &identity.Individual.Gender, &identity.Individual.DOB, &identity.Individual.EmailAddress, &identity.Individual.PhoneNumber, &identity.Individual.Nationality,
-		&identity.Organization.Name, &identity.Organization.Category,
+		&identity.FirstName, &identity.LastName, &identity.OtherNames, &identity.Gender, &identity.DOB, &identity.EmailAddress, &identity.PhoneNumber, &identity.Nationality,
+		&identity.OrganizationName, &identity.Category,
 		&identity.Street, &identity.Country, &identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt, &metaDataJSON,
 	)
 	if err != nil {
@@ -74,6 +74,7 @@ func (d datasource) GetAllIdentities() ([]blnk.Identity, error) {
 	rows, err := d.conn.Query(`
 	SELECT identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data
 	FROM identity
+	ORDER BY created_at DESC
 `)
 	if err != nil {
 		return nil, err
@@ -86,8 +87,8 @@ func (d datasource) GetAllIdentities() ([]blnk.Identity, error) {
 		var metaDataJSON []byte
 		err = rows.Scan(
 			&identity.IdentityID, &identity.IdentityType,
-			&identity.Individual.FirstName, &identity.Individual.LastName, &identity.Individual.OtherNames, &identity.Individual.Gender, &identity.Individual.DOB, &identity.Individual.EmailAddress, &identity.Individual.PhoneNumber, &identity.Individual.Nationality,
-			&identity.Organization.Name, &identity.Organization.Category,
+			&identity.FirstName, &identity.LastName, &identity.OtherNames, &identity.Gender, &identity.DOB, &identity.EmailAddress, &identity.PhoneNumber, &identity.Nationality,
+			&identity.OrganizationName, &identity.Category,
 			&identity.Street, &identity.Country, &identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt, &metaDataJSON,
 		)
 		if err != nil {
@@ -116,7 +117,7 @@ func (d datasource) UpdateIdentity(identity *blnk.Identity) error {
 		UPDATE identity
 		SET identity_type = $2, first_name = $3, last_name = $4, other_names = $5, gender = $6, dob = $7, email_address = $8, phone_number = $9, nationality = $10, organization_name = $11, category = $12, street = $13, country = $14, state = $15, post_code = $16, city = $17, created_at = $18, meta_data = $19
 		WHERE identity_id = $1
-	`, identity.IdentityID, identity.IdentityType, identity.Individual.FirstName, identity.Individual.LastName, identity.Individual.OtherNames, identity.Individual.Gender, identity.Individual.DOB, identity.Individual.EmailAddress, identity.Individual.PhoneNumber, identity.Individual.Nationality, identity.Organization.Name, identity.Organization.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
+	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
 
 	return err
 }

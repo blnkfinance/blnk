@@ -19,6 +19,7 @@ type DataSource interface {
 	identity
 	balanceMonitor
 	eventMapper
+	account
 }
 
 type transaction interface {
@@ -44,6 +45,15 @@ type balance interface {
 	GetBalanceByID(id string, include []string) (*blnk.Balance, error)
 	GetAllBalances() ([]blnk.Balance, error)
 	UpdateBalance(balance *blnk.Balance) error
+}
+
+type account interface {
+	CreateAccount(account blnk.Account) (blnk.Account, error)
+	GetAccountByID(id string) (*blnk.Account, error)
+	GetAllAccounts() ([]blnk.Account, error)
+	GetAccountByNumber(number string) (*blnk.Account, error)
+	UpdateAccount(account *blnk.Account) error
+	DeleteAccount(id string) error
 }
 
 type balanceMonitor interface {
@@ -76,7 +86,7 @@ type datasource struct {
 }
 
 func NewDataSource(configuration *config.Configuration) (DataSource, error) {
-	con, err := connectDB(configuration.DataSource.DNS)
+	con, err := connectDB(configuration.DataSource.Dns)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +112,10 @@ func connectDB(dns string) (*sql.DB, error) {
 		return nil, err
 	}
 	err = createBalanceTable(db)
+	if err != nil {
+		return nil, err
+	}
+	err = createAccountTable(db)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +210,28 @@ func createBalanceTable(db *sql.DB) error {
 		)
 	`)
 	log.Println(err)
+	return err
+}
+
+// createAccountTable creates a PostgreSQL table for the Account struct
+func createAccountTable(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS accounts (
+			id SERIAL PRIMARY KEY,
+			account_id TEXT NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			number TEXT NOT NULL UNIQUE,
+			bank_name TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+		    ledger_id TEXT NOT NULL REFERENCES ledgers(ledger_id),
+		    identity_id TEXT NOT NULL REFERENCES identity(identity_id),
+			balance_id TEXT NOT NULL REFERENCES balances(balance_id),
+			meta_data JSONB
+		)
+	`)
+	if err != nil {
+		log.Printf("Error creating accounts table: %v", err)
+	}
 	return err
 }
 

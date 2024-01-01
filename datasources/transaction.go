@@ -176,6 +176,7 @@ func (d datasource) GetAllTransactions() ([]blnk.Transaction, error) {
 	rows, err := d.conn.Query(`
 		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id, credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after, balance_before, balance_after, created_at, meta_data
 		FROM transactions
+		ORDER BY created_at DESC
 	`)
 	if err != nil {
 		return nil, err

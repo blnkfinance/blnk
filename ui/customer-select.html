@@ -1,0 +1,8 @@
+<option selected>Select a customer</option>
+{{range .customers}}
+    {{if eq .IdentityType "individual"}}
+      <option value="{{.IdentityID}}">{{.FirstName}} {{.LastName}}</option>
+    {{else}}
+      <option value="{{.IdentityID}}">{{.OrganizationName}}</option>
+    {{end}}
+{{end}}
