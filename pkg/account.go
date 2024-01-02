@@ -3,8 +3,6 @@ package pkg
 import (
 	"fmt"
 
-	"github.com/jerry-enebeli/blnk/config"
-
 	"github.com/jerry-enebeli/blnk"
 )
 
@@ -19,16 +17,6 @@ func (l Blnk) CreateAccount(account blnk.Account) (blnk.Account, error) {
 			account.Name = identity.OrganizationName
 		} else {
 			account.Name = fmt.Sprintf("%s %s", identity.FirstName, identity.LastName)
-		}
-	}
-
-	if account.Number == "" {
-		cnf, err := config.Fetch()
-		if err != nil {
-			return blnk.Account{}, err
-		}
-		if cnf.AccountNumberGeneration.HttpService.Url != "" {
-
 		}
 	}
 	return l.datasource.CreateAccount(account)

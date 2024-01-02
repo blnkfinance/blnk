@@ -4,33 +4,18 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"time"
+
+	"github.com/jerry-enebeli/blnk/pkg"
 
 	"github.com/go-playground/validator/v10"
 
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/pkg"
-
 	"github.com/gin-gonic/gin"
+	"github.com/jerry-enebeli/blnk"
 )
 
 type Api struct {
 	blnk   *pkg.Blnk
 	router *gin.Engine
-}
-
-type createCustomer struct {
-	IdentityType string    `json:"identity_type"` // "individual" or "organization"
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	OtherNames   string    `json:"other_names"`
-	Gender       string    `json:"gender"`
-	DOB          time.Time `json:"dob"`
-	EmailAddress string    `json:"email_address"`
-	PhoneNumber  string    `json:"phone_number"`
-	Nationality  string    `json:"nationality"`
-	Name         string    `json:"name"`
-	Category     string    `json:"category"`
 }
 
 func (a Api) Router() *gin.Engine {

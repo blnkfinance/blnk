@@ -54,9 +54,8 @@ type Configuration struct {
 			WebhookUrl string `json:"webhook_url"`
 		} `json:"slack"`
 		Webhook struct {
-			Url     string `json:"url"`
-			Headers struct {
-			} `json:"headers"`
+			Url     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
 		} `json:"webhook"`
 	} `json:"notification"`
 }

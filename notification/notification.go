@@ -78,9 +78,9 @@ func WebhookNotification(systemError error) {
 		log.Println(err)
 	}
 
-	req, err := http.NewRequest("POST", conf.Notification.WebHook.URL, payload)
+	req, err := http.NewRequest("POST", conf.Notification.Webhook.Url, payload)
 
-	for i, i2 := range conf.Notification.WebHook.Headers {
+	for i, i2 := range conf.Notification.Webhook.Headers {
 		req.Header.Set(i, i2)
 	}
 
@@ -102,11 +102,11 @@ func NotifyError(systemError error) {
 		log.Println(err)
 	}
 
-	if conf.Notification.Slack.WebhookURL != "" {
+	if conf.Notification.Slack.WebhookUrl != "" {
 		SlackNotification(systemError)
 	}
 
-	if conf.Notification.WebHook.URL != "" {
+	if conf.Notification.Webhook.Url != "" {
 		WebhookNotification(systemError)
 	}
 
