@@ -1,4 +1,4 @@
-package datasources
+package database
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jerry-enebeli/blnk"
+	"github.com/jerry-enebeli/blnk/model"
 )
 
 func contains(slice []string, val string) bool {
@@ -64,10 +64,10 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	return queryBuilder.String()
 }
 
-func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*blnk.Balance, error) {
-	balance := &blnk.Balance{}
-	identity := &blnk.Identity{}
-	ledger := &blnk.Ledger{}
+func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error) {
+	balance := &model.Balance{}
+	identity := &model.Identity{}
+	ledger := &model.Ledger{}
 	metaDataJSON := []byte{}
 	var scanArgs []interface{}
 	// Add scan arguments for default fields
@@ -110,7 +110,7 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*blnk.Balance, error) 
 }
 
 // CreateBalance inserts a new Balance into the database
-func (d datasource) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
+func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) {
 	// convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	if err != nil {
@@ -120,20 +120,26 @@ func (d datasource) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
 	balance.BalanceID = GenerateUUIDWithSuffix("bln")
 	balance.CreatedAt = time.Now()
 
+	// Replace empty string with null for identity_id
+	var identityID interface{} = balance.IdentityID
+	if balance.IdentityID == "" {
+		identityID = nil
+	}
+
 	// insert into database
-	_, err = d.conn.Exec(`
+	_, err = d.Conn.Exec(`
 		INSERT INTO balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, balance.CreatedAt, &metaDataJSON)
+	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, balance.CreatedAt, &metaDataJSON)
 
 	return balance, err
 }
 
-func (d datasource) GetBalanceByID(id string, include []string) (*blnk.Balance, error) {
+func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.Conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -160,9 +166,9 @@ func (d datasource) GetBalanceByID(id string, include []string) (*blnk.Balance, 
 }
 
 // GetAllBalances retrieves all balances from the database
-func (d datasource) GetAllBalances() ([]blnk.Balance, error) {
+func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 	// select all balances from database
-	rows, err := d.conn.Query(`
+	rows, err := d.Conn.Query(`
 		SELECT id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, modification_ref, meta_data
 		FROM balances
 	`)
@@ -172,11 +178,11 @@ func (d datasource) GetAllBalances() ([]blnk.Balance, error) {
 	defer rows.Close()
 
 	// create slice to store balances
-	var balances []blnk.Balance
+	var balances []model.Balance
 
 	// iterate through result set and parse metadata from JSON
 	for rows.Next() {
-		balance := blnk.Balance{}
+		balance := model.Balance{}
 		var metaDataJSON []byte
 		err = rows.Scan(
 			&balance.BalanceID,
@@ -206,7 +212,7 @@ func (d datasource) GetAllBalances() ([]blnk.Balance, error) {
 }
 
 // UpdateBalance updates a balance in the database
-func (d datasource) UpdateBalance(balance *blnk.Balance) error {
+func (d Datasource) UpdateBalance(balance *model.Balance) error {
 	// convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	if err != nil {
@@ -214,7 +220,7 @@ func (d datasource) UpdateBalance(balance *blnk.Balance) error {
 	}
 
 	// update balance in database
-	_, err = d.conn.Exec(`
+	_, err = d.Conn.Exec(`
 		UPDATE balances
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
 		WHERE balance_id = $1
@@ -223,26 +229,29 @@ func (d datasource) UpdateBalance(balance *blnk.Balance) error {
 	return err
 }
 
-func (d datasource) CreateMonitor(monitor blnk.BalanceMonitor) (blnk.BalanceMonitor, error) {
+func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMonitor, error) {
 	monitor.MonitorID = GenerateUUIDWithSuffix("mon")
 	monitor.CreatedAt = time.Now()
 
-	_, err := d.conn.Exec(`
+	_, err := d.Conn.Exec(`
 		INSERT INTO balance_monitors (monitor_id, balance_id, field, operator, value, description, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CreatedAt)
 
+	if err != nil {
+		return monitor, err
+	}
 	return monitor, err
 }
 
-func (d datasource) GetMonitorByID(id string) (*blnk.BalanceMonitor, error) {
-	row := d.conn.QueryRow(`
+func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
+	row := d.Conn.QueryRow(`
 		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
 		FROM balance_monitors WHERE monitor_id = $1
 	`, id)
 
-	monitor := &blnk.BalanceMonitor{}
-	condition := &blnk.AlertCondition{}
+	monitor := &model.BalanceMonitor{}
+	condition := &model.AlertCondition{}
 	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -251,8 +260,8 @@ func (d datasource) GetMonitorByID(id string) (*blnk.BalanceMonitor, error) {
 	return monitor, nil
 }
 
-func (d datasource) GetAllMonitors() ([]blnk.BalanceMonitor, error) {
-	rows, err := d.conn.Query(`
+func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
+	rows, err := d.Conn.Query(`
 		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
 		FROM balance_monitors
 	`)
@@ -261,10 +270,10 @@ func (d datasource) GetAllMonitors() ([]blnk.BalanceMonitor, error) {
 	}
 	defer rows.Close()
 
-	var monitors []blnk.BalanceMonitor
+	var monitors []model.BalanceMonitor
 	for rows.Next() {
-		monitor := blnk.BalanceMonitor{}
-		condition := blnk.AlertCondition{}
+		monitor := model.BalanceMonitor{}
+		condition := model.AlertCondition{}
 		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
 		if err != nil {
 			return nil, err
@@ -275,8 +284,8 @@ func (d datasource) GetAllMonitors() ([]blnk.BalanceMonitor, error) {
 	return monitors, nil
 }
 
-func (d datasource) GetBalanceMonitors(balanceID string) ([]blnk.BalanceMonitor, error) {
-	rows, err := d.conn.Query(`
+func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
+	rows, err := d.Conn.Query(`
 		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
 		FROM balance_monitors WHERE balance_id= $1
 	`, balanceID)
@@ -285,10 +294,10 @@ func (d datasource) GetBalanceMonitors(balanceID string) ([]blnk.BalanceMonitor,
 	}
 	defer rows.Close()
 
-	var monitors []blnk.BalanceMonitor
+	var monitors []model.BalanceMonitor
 	for rows.Next() {
-		monitor := blnk.BalanceMonitor{}
-		condition := blnk.AlertCondition{}
+		monitor := model.BalanceMonitor{}
+		condition := model.AlertCondition{}
 		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
 		if err != nil {
 			return nil, err
@@ -299,8 +308,8 @@ func (d datasource) GetBalanceMonitors(balanceID string) ([]blnk.BalanceMonitor,
 	return monitors, nil
 }
 
-func (d datasource) UpdateMonitor(monitor *blnk.BalanceMonitor) error {
-	_, err := d.conn.Exec(`
+func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
+	_, err := d.Conn.Exec(`
 		UPDATE balance_monitors
 		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, created_at = $7
 		WHERE monitor_id = $1
@@ -308,8 +317,8 @@ func (d datasource) UpdateMonitor(monitor *blnk.BalanceMonitor) error {
 	return err
 }
 
-func (d datasource) DeleteMonitor(id string) error {
-	_, err := d.conn.Exec(`
+func (d Datasource) DeleteMonitor(id string) error {
+	_, err := d.Conn.Exec(`
 		DELETE FROM balance_monitors WHERE monitor_id = $1
 	`, id)
 	return err

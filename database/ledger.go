@@ -1,4 +1,4 @@
-package datasources
+package database
 
 import (
 	"database/sql"
@@ -6,37 +6,37 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jerry-enebeli/blnk"
+	"github.com/jerry-enebeli/blnk/model"
 )
 
-func (d datasource) CreateLedger(ledger blnk.Ledger) (blnk.Ledger, error) {
+func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 	// convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(ledger.MetaData)
 	if err != nil {
-		return blnk.Ledger{}, err
+		return model.Ledger{}, err
 	}
 
 	ledger.LedgerID = GenerateUUIDWithSuffix("ldg")
 	ledger.CreatedAt = time.Now()
 
 	// insert into database
-	_, err = d.conn.Exec(`
+	_, err = d.Conn.Exec(`
 		INSERT INTO ledgers (meta_data, name, ledger_id)
 		VALUES ($1, $2,$3)
 
 	`, metaDataJSON, ledger.Name, ledger.LedgerID)
 
 	if err != nil {
-		return blnk.Ledger{}, err
+		return model.Ledger{}, err
 	}
 
 	return ledger, nil
 }
 
 // GetAllLedgers retrieves all ledgers from the database
-func (d datasource) GetAllLedgers() ([]blnk.Ledger, error) {
+func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 	// select all ledgers from database
-	rows, err := d.conn.Query(`
+	rows, err := d.Conn.Query(`
 		SELECT id, created_at, meta_data
 		FROM ledgers
 	`)
@@ -46,11 +46,11 @@ func (d datasource) GetAllLedgers() ([]blnk.Ledger, error) {
 	defer rows.Close()
 
 	// create slice to store ledgers
-	ledgers := []blnk.Ledger{}
+	ledgers := []model.Ledger{}
 
 	// iterate through result set and parse metadata from JSONB
 	for rows.Next() {
-		ledger := blnk.Ledger{}
+		ledger := model.Ledger{}
 		var metaDataJSON []byte
 		err = rows.Scan(&ledger.LedgerID, &ledger.CreatedAt, &metaDataJSON)
 		if err != nil {
@@ -70,15 +70,15 @@ func (d datasource) GetAllLedgers() ([]blnk.Ledger, error) {
 }
 
 // GetLedgerByID retrieves a single ledger from the database by ID
-func (d datasource) GetLedgerByID(id string) (*blnk.Ledger, error) {
+func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	// select ledger from database by ID
-	row := d.conn.QueryRow(`
+	row := d.Conn.QueryRow(`
 		SELECT ledger_id, created_at, meta_data
 		FROM ledgers
 		WHERE ledger_id = $1
 	`, id)
 
-	ledger := blnk.Ledger{}
+	ledger := model.Ledger{}
 	var metaDataJSON []byte
 	err := row.Scan(&ledger.LedgerID, &ledger.CreatedAt, &metaDataJSON)
 	if err != nil {

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="/static/output.css" rel="stylesheet">
+</head>
+<body>
+
+<div class="antialiased bg-gray-50 dark:bg-gray-900  h-screen">
+    <header>
+        <nav
+                class="bg-white border-b border-gray-200 px-4 py-2.5 dark:bg-gray-800 dark:border-gray-700"
+        >
+            <div class="flex flex-wrap justify-between items-center">
+                <div class="flex justify-start items-center">
+                    <a href="" class="flex mr-4">
+                        <span
+                                class="self-center text-2xl font-semibold whitespace-nowrap dark:text-white"
+                        >Blnk</span
+                        >
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+    </header>
+    <main id="tabContent" class="dark:bg-gray-900 flex-1 p-4">
+            {{template "accountDetailsCard" .}}
+            <div>
+                {{template "accountTransactions" .}}
+            </div>
+    </main>
+</div>
+<script src="/static/node_modules/flowbite/dist/flowbite.min.js"></script>
+<script src="https://unpkg.com/htmx.org@1.9.6" integrity="sha384-FhXw7b6AlE/jyjlZH5iHa/tTe9EpJ1Y55RjcgPbjeWMskSxZt1v9qkxLJWNJaGni" crossorigin="anonymous"></script>
+<script>
+    document.querySelectorAll('[role="tab"]').forEach(tab => {
+        tab.addEventListener('click', () => {
+            console.log("got clicked")
+            document.querySelectorAll('[role="tab"]').forEach(t => t.classList.remove('border-b-2', 'border-primary-600'));
+            console.log(tab)
+            tab.classList.add('border-b-2', 'border-primary-600', 'text-primary-600');
+        });
+    });
+
+</script>
+</body>
+</html>

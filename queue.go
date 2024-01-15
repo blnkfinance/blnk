@@ -1,4 +1,4 @@
-package pkg
+package blnk
 
 import (
 	"encoding/json"
@@ -7,9 +7,10 @@ import (
 	"os"
 	"sync"
 
+	"github.com/jerry-enebeli/blnk/model"
+
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/jerry-enebeli/blnk"
-	config2 "github.com/jerry-enebeli/blnk/config"
+	"github.com/jerry-enebeli/blnk/config"
 )
 
 var (
@@ -20,7 +21,7 @@ var (
 	consumerConfig   *kafka.ConfigMap
 )
 
-func GetProducer(config *kafka.ConfigMap) (*kafka.Producer, error) {
+func getProducer(config *kafka.ConfigMap) (*kafka.Producer, error) {
 	if producerInstance != nil {
 		return producerInstance, nil
 	}
@@ -39,7 +40,7 @@ func GetProducer(config *kafka.ConfigMap) (*kafka.Producer, error) {
 	return producerInstance, nil
 }
 
-func GetConsumer(config *kafka.ConfigMap) (*kafka.Consumer, error) {
+func getConsumer(config *kafka.ConfigMap) (*kafka.Consumer, error) {
 	if consumerInstance != nil {
 		return consumerInstance, nil
 	}
@@ -59,32 +60,33 @@ func GetConsumer(config *kafka.ConfigMap) (*kafka.Consumer, error) {
 }
 
 func initKafkaConfigs() {
-	config, err := config2.Fetch()
+	cnf, err := config.Fetch()
 	if err != nil {
 		return
 	}
 	producerConfig = &kafka.ConfigMap{
-		"bootstrap.servers":  config.ConfluentKafka.Server,
+		"bootstrap.servers":  cnf.ConfluentKafka.Server,
 		"sasl.mechanisms":    "PLAIN",
 		"session.timeout.ms": 45000,
-		"sasl.password":      config.ConfluentKafka.SecretKey,
-		"sasl.username":      config.ConfluentKafka.ApiKey,
+		"sasl.password":      cnf.ConfluentKafka.SecretKey,
+		"sasl.username":      cnf.ConfluentKafka.ApiKey,
 		"security.protocol":  "SASL_SSL",
 		"acks":               "all",
 	}
 
 	consumerConfig = &kafka.ConfigMap{
-		"bootstrap.servers":  config.ConfluentKafka.Server,
+		"bootstrap.servers":  cnf.ConfluentKafka.Server,
 		"sasl.mechanisms":    "PLAIN",
 		"session.timeout.ms": 45000,
-		"sasl.password":      config.ConfluentKafka.SecretKey,
-		"sasl.username":      config.ConfluentKafka.ApiKey,
+		"sasl.password":      cnf.ConfluentKafka.SecretKey,
+		"sasl.username":      cnf.ConfluentKafka.ApiKey,
 		"security.protocol":  "SASL_SSL",
 		"group.id":           "blnk-transactions",
 		"auto.offset.reset":  "earliest",
 	}
 }
-func ReadConfig() kafka.ConfigMap {
+
+func readConfig() kafka.ConfigMap {
 	if producerConfig == nil {
 		initKafkaConfigs()
 	}
@@ -92,13 +94,13 @@ func ReadConfig() kafka.ConfigMap {
 
 }
 
-func Enqueue(transaction blnk.Transaction) error {
-	ReadConfig()
+func enqueueKafka(transaction model.Transaction) error {
+	readConfig()
 	topic, err := getQueueName()
 	if err != nil {
 		return err
 	}
-	p, err := GetProducer(producerConfig)
+	p, err := getProducer(producerConfig)
 	if err != nil {
 		return err
 	}
@@ -137,9 +139,23 @@ func Enqueue(transaction blnk.Transaction) error {
 	return nil
 }
 
-func Dequeue(messageChan chan blnk.Transaction) error {
-	ReadConfig()
-	c, err := GetConsumer(consumerConfig)
+func Enqueue(transaction model.Transaction) error {
+	cnf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+	if cnf.Queue.Queue == "kafka" {
+		err := enqueueKafka(transaction)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dequeueKafka(messageChan chan model.Transaction) error {
+	readConfig()
+	c, err := getConsumer(consumerConfig)
 	if err != nil {
 		fmt.Printf("Failed to create consumer: %s", err)
 	}
@@ -155,7 +171,7 @@ func Dequeue(messageChan chan blnk.Transaction) error {
 		ev := c.Poll(100)
 		switch e := ev.(type) {
 		case *kafka.Message:
-			var transaction blnk.Transaction
+			var transaction model.Transaction
 			err := json.Unmarshal(e.Value, &transaction)
 			if err != nil {
 				return err
@@ -167,4 +183,39 @@ func Dequeue(messageChan chan blnk.Transaction) error {
 			//fmt.Printf("Ignored %v\n", e)
 		}
 	}
+}
+
+// dequeueDB fetches queued transactions from db
+// process each transaction
+func dequeueDB(messageChan chan model.Transaction, l Blnk) error {
+	for {
+		transaction, err := l.datasource.GetNextQueuedTransaction()
+		if err != nil {
+			return err
+		}
+
+		if transaction != nil {
+			messageChan <- *transaction
+		}
+
+	}
+}
+
+func Dequeue(messageChan chan model.Transaction, l Blnk) error {
+	cnf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+	if cnf.Queue.Queue == "db" {
+		err := dequeueDB(messageChan, l)
+		if err != nil {
+			return err
+		}
+	} else if cnf.Queue.Queue == "kafka" {
+		err := dequeueKafka(messageChan)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

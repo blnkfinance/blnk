@@ -1,4 +1,4 @@
-package datasources
+package database
 
 import (
 	"database/sql"
@@ -7,100 +7,29 @@ import (
 
 	"github.com/google/uuid"
 
-	blnk "github.com/jerry-enebeli/blnk"
-
 	"github.com/jerry-enebeli/blnk/config"
 )
 
-type DataSource interface {
-	transaction
-	ledger
-	balance
-	identity
-	balanceMonitor
-	eventMapper
-	account
+type Datasource struct {
+	Conn *sql.DB
 }
 
-type transaction interface {
-	RecordTransaction(txn blnk.Transaction) (blnk.Transaction, error)
-	GetTransaction(id string) (blnk.Transaction, error)
-	GetTransactionByRef(reference string) (blnk.Transaction, error)
-	UpdateTransactionStatus(id string, status string) error
-	GroupTransactionsByCurrency() (map[string]struct {
-		TotalAmount int64 `json:"total_amount"`
-	}, error)
-	GetAllTransactions() ([]blnk.Transaction, error)
-	GetScheduledTransactions() ([]blnk.Transaction, error)
-}
-
-type ledger interface {
-	CreateLedger(ledger blnk.Ledger) (blnk.Ledger, error)
-	GetAllLedgers() ([]blnk.Ledger, error)
-	GetLedgerByID(id string) (*blnk.Ledger, error)
-}
-
-type balance interface {
-	CreateBalance(balance blnk.Balance) (blnk.Balance, error)
-	GetBalanceByID(id string, include []string) (*blnk.Balance, error)
-	GetAllBalances() ([]blnk.Balance, error)
-	UpdateBalance(balance *blnk.Balance) error
-}
-
-type account interface {
-	CreateAccount(account blnk.Account) (blnk.Account, error)
-	GetAccountByID(id string) (*blnk.Account, error)
-	GetAllAccounts() ([]blnk.Account, error)
-	GetAccountByNumber(number string) (*blnk.Account, error)
-	UpdateAccount(account *blnk.Account) error
-	DeleteAccount(id string) error
-}
-
-type balanceMonitor interface {
-	CreateMonitor(monitor blnk.BalanceMonitor) (blnk.BalanceMonitor, error)
-	GetMonitorByID(id string) (*blnk.BalanceMonitor, error)
-	GetAllMonitors() ([]blnk.BalanceMonitor, error)
-	GetBalanceMonitors(balanceID string) ([]blnk.BalanceMonitor, error)
-	UpdateMonitor(monitor *blnk.BalanceMonitor) error
-	DeleteMonitor(id string) error
-}
-
-type identity interface {
-	CreateIdentity(identity blnk.Identity) (blnk.Identity, error)
-	GetIdentityByID(id string) (*blnk.Identity, error)
-	GetAllIdentities() ([]blnk.Identity, error)
-	UpdateIdentity(identity *blnk.Identity) error
-	DeleteIdentity(id string) error
-}
-
-type eventMapper interface {
-	CreateEventMapper(mapper blnk.EventMapper) (blnk.EventMapper, error)
-	GetAllEventMappers() ([]blnk.EventMapper, error)
-	GetEventMapperByID(id string) (*blnk.EventMapper, error)
-	UpdateEventMapper(mapper blnk.EventMapper) error
-	DeleteEventMapper(id string) error
-}
-
-type datasource struct {
-	conn *sql.DB
-}
-
-func NewDataSource(configuration *config.Configuration) (DataSource, error) {
-	con, err := connectDB(configuration.DataSource.Dns)
+func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
+	con, err := ConnectDB(configuration.DataSource.Dns)
 	if err != nil {
 		return nil, err
 	}
-	return &datasource{conn: con}, nil
+	return &Datasource{Conn: con}, nil
 }
 
-func connectDB(dns string) (*sql.DB, error) {
+func ConnectDB(dns string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", dns)
 	if err != nil {
 		return nil, err
 	}
 	err = db.Ping()
 	if err != nil {
-		log.Printf("database connection error ❌: %v", err)
+		log.Printf("database Connection error ❌: %v", err)
 		return nil, err
 	}
 	err = createLedgerTable(db)
@@ -222,6 +151,7 @@ func createAccountTable(db *sql.DB) error {
 			name TEXT NOT NULL,
 			number TEXT NOT NULL UNIQUE,
 			bank_name TEXT NOT NULL,
+			currency TEXT NOT NULL,
 			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 		    ledger_id TEXT NOT NULL REFERENCES ledgers(ledger_id),
 		    identity_id TEXT NOT NULL REFERENCES identity(identity_id),

@@ -216,7 +216,7 @@ Blnk provides robust account management capabilities, enabling the creation and 
 
 ## Creating and Managing Accounts
 
-Accounts in Blnk can be easily created and managed. They can be tied to a balance, allowing transactions recorded on an account to reflect on the associated balance. This connection enhances the transparency and consistency of financial records.
+Accounts in Blnk can be easily created and managed. They can be tied to a balance, allowing transactions recorded on an account to reflect on the associated balance. This Connection enhances the transparency and consistency of financial records.
 
 To create an account, the following JSON structure is used:
 
@@ -352,9 +352,11 @@ To provide a visual representation of how queue support fits into the Blnk archi
 
 Blnk provides support for various queue systems to cater to different deployment and scalability requirements. As of the latest update, the following queue systems are supported:
 
-1. **Confluent Kafka** ✅: Blnk seamlessly integrates with Confluent Kafka, enabling efficient and reliable messaging for transaction processing.
+1. **DB Queue(Postgres)** ✅: Blnk seamlessly integrates with Confluent Kafka, enabling efficient and reliable messaging for transaction processing.
 
-2. **AWS SQS (Amazon Simple Queue Service)**: Support for AWS SQS is currently under development (⌛). This integration will extend Blnk's compatibility with cloud-based queue systems, allowing users to leverage AWS infrastructure for their transaction processing needs.
+2. **Confluent Kafka** ✅: Blnk seamlessly integrates with Confluent Kafka, enabling efficient and reliable messaging for transaction processing.
+
+3. **AWS SQS (Amazon Simple Queue Service)**: Support for AWS SQS is currently under development (⌛). This integration will extend Blnk's compatibility with cloud-based queue systems, allowing users to leverage AWS infrastructure for their transaction processing needs.
 
 ---
 
@@ -384,7 +386,7 @@ Blnk offers a powerful feature that allows you to schedule transactions for futu
 
 [//]: # (# Hooks To Transactions Agent 🤖)
 
-[//]: # (An AI agent that takes in any transaction webhook payload from any payment provider and coverts them to blnk transaction payload. Write onece connect to any payment providers with ease)
+[//]: # (An AI agent that takes in any transaction webhook payload from any payment provider and coverts them to blnk transaction payload. Write onece Connect to any payment providers with ease)
 
 [//]: # ()
 
@@ -460,7 +462,7 @@ While events notify Blnk about an activity, **Mappers** ensure Blnk understands 
 
 ### Quick Example:
 
-Let's say you're connecting Blnk to different payment processors like Bloc and Stripe. Each sends transaction details differently.
+Let's say you're Connecting Blnk to different payment processors like Bloc and Stripe. Each sends transaction details differently.
 
 Instead of tweaking Blnk for each system, you use **Mappers**. For a `transaction.new` event from Bloc with fields like `data.amount` and `data.reference`, a mapper translates this into Blnk's language.
 

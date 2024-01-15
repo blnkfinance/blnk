@@ -23,22 +23,20 @@ func ToJsonReq(payload interface{}) (*bytes.Buffer, error) {
 
 }
 
-func Call(req *http.Request, response interface{}) error {
+func Call(req *http.Request, response interface{}) (*http.Response, error) {
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
-
 	if err != nil {
-		return err
+		return resp, err
 	}
 
 	err = json.NewDecoder(resp.Body).Decode(&response)
-
 	if err != nil {
-		return err
+		return resp, err
 	}
-	return err
+	return resp, err
 }
 
 func BasicAuth(username, password string) string {

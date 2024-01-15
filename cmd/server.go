@@ -1,10 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
-	"github.com/jerry-enebeli/blnk/pkg"
+	"github.com/jerry-enebeli/blnk"
+
+	"github.com/jerry-enebeli/blnk/database"
 
 	"github.com/jerry-enebeli/blnk/api"
 	"github.com/jerry-enebeli/blnk/config"
@@ -20,8 +21,11 @@ func serverCommands() *cobra.Command {
 			if err != nil {
 				log.Fatalf("Error getting config: %v\n", err)
 			}
-			fmt.Println(cfg.Port)
-			newBlnk, err := pkg.NewBlnk()
+			db, err := database.NewDataSource(cfg)
+			if err != nil {
+				log.Fatalf("Error getting datasource: %v\n", err)
+			}
+			newBlnk, err := blnk.NewBlnk(db)
 			if err != nil {
 				log.Fatalf("Error creating blnk: %v\n", err)
 			}

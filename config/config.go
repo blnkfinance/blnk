@@ -11,8 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-//todo validate config before load. check for empty values in required fields(data source), trim white spaces, set default values(port)
-
 const (
 	DEFAULT_PORT = "5001"
 )
@@ -33,15 +31,18 @@ type Configuration struct {
 		DefaultBank string `json:"default_bank"`
 	} `json:"account"`
 	AccountNumberGeneration struct {
-		HttpService struct {
+		EnableAutoGeneration bool `json:"enable_auto_generation"`
+		HttpService          struct {
 			Url     string `json:"url"`
-			Method  string `json:"method"`
+			Timeout int    `json:"timeout"`
 			Headers struct {
-				ContentType   string `json:"Content-Type"`
 				Authorization string `json:"Authorization"`
 			} `json:"headers"`
 		} `json:"http_service"`
 	} `json:"account_number_generation"`
+	Queue struct {
+		Queue string
+	} `json:"queue"`
 	ConfluentKafka struct {
 		Server       string `json:"server"`
 		ApiKey       string `json:"api_key"`
@@ -149,7 +150,78 @@ func validateAndAddDefaults(cnf *Configuration) error {
 		log.Printf("Warning: Port not specified in config. Setting default port: %s", DEFAULT_PORT)
 	}
 
+	// Set default value for Queue if it's empty
+	if cnf.Queue.Queue == "" {
+		cnf.Queue.Queue = "db"
+		log.Println("Warning: Queue was not specified in config. Setting default queue: DB Queue(Postgres)")
+	}
+
 	return nil
+}
+
+// MockConfig sets a mock configuration for testing purposes.
+func MockConfig(enableAutoGeneration bool, url string, authorizationToken string) {
+	mockConfig := Configuration{
+		Port:                  "",
+		ProjectName:           "",
+		DefaultCurrency:       "",
+		EndPointSecret:        "",
+		SynchronizationMethod: "",
+		DataSource: struct {
+			Name string `json:"name"`
+			Dns  string `json:"dns"`
+		}{Name: "POSTGRES", Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
+		Account: struct {
+			DefaultBank string `json:"default_bank"`
+		}{},
+		AccountNumberGeneration: struct {
+			EnableAutoGeneration bool `json:"enable_auto_generation"`
+			HttpService          struct {
+				Url     string `json:"url"`
+				Timeout int    `json:"timeout"`
+				Headers struct {
+					Authorization string `json:"Authorization"`
+				} `json:"headers"`
+			} `json:"http_service"`
+		}{
+			EnableAutoGeneration: enableAutoGeneration,
+			HttpService: struct {
+				Url     string `json:"url"`
+				Timeout int    `json:"timeout"`
+				Headers struct {
+					Authorization string `json:"Authorization"`
+				} `json:"headers"`
+			}{
+				Url: url,
+				Headers: struct {
+					Authorization string `json:"Authorization"`
+				}{
+					Authorization: authorizationToken,
+				},
+			},
+		},
+		Queue: struct {
+			Queue string
+		}{},
+		ConfluentKafka: struct {
+			Server       string `json:"server"`
+			ApiKey       string `json:"api_key"`
+			SecretKey    string `json:"secret_key"`
+			QueueName    string `json:"queue_name"`
+			PullWaitTime int    `json:"pull_wait_time"`
+		}{},
+		Notification: struct {
+			Slack struct {
+				WebhookUrl string `json:"webhook_url"`
+			} `json:"slack"`
+			Webhook struct {
+				Url     string            `json:"url"`
+				Headers map[string]string `json:"headers"`
+			} `json:"webhook"`
+		}{},
+	}
+
+	configStore.Store(&mockConfig)
 }
 
 func logger() {

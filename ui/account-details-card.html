@@ -1,0 +1,44 @@
+{{define "accountDetailsCard"}}
+    <div class="flex flex-col  justify-center item py-2 sm:py-12 px-8">
+        <div class="flex justify-end mb-4 gap-4">
+            <a href="/create-ledger" type="button"  class="flex items-center justify-center text-white bg-primary-700 hover:bg-primary-800 focus:ring-4 focus:ring-primary-300 font-medium rounded-lg text-sm px-4 py-2 dark:bg-primary-600 dark:hover:bg-primary-700 focus:outline-none dark:focus:ring-primary-800">
+                <svg class="h-3.5 w-3.5 mr-2" fill="currentColor" viewbox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path clip-rule="evenodd" fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" />
+                </svg>
+                Credit account
+            </a>
+
+            <a href="/create-ledger" type="button"  class="flex items-center justify-center text-white bg-primary-700 hover:bg-primary-800 focus:ring-4 focus:ring-primary-300 font-medium rounded-lg text-sm px-4 py-2 dark:bg-primary-600 dark:hover:bg-primary-700 focus:outline-none dark:focus:ring-primary-800">
+                Debit account
+            </a>
+        </div>
+        <div class="p-4 bg-white "><h1
+                    class="mb-4 text-xl font-semibold text-gray-700 dark:text-gray-200">
+                Account Details
+            </h1>
+            <div class="grid gap-4 mb-8 md:grid-cols-2">
+                <div class="flex flex-col"><span
+                            class="text-sm text-gray-500 dark:text-gray-400">Account Name</span><span
+                            class="text-lg font-semibold">John Doe</span></div>
+                <div class="flex flex-col"><span
+                            class="text-sm text-gray-500 dark:text-gray-400">Debit Balance</span><span
+                            class="text-lg font-semibold">₦5,000.00</span></div>
+                <div class="flex flex-col"><span
+                            class="text-sm text-gray-500 dark:text-gray-400">Credit Balance</span><span
+                            class="text-lg font-semibold">₦2,000.00</span></div>
+                <div class="flex flex-col"><span class="text-sm text-gray-500 dark:text-gray-400">Balance</span><span
+                            class="text-lg font-semibold">₦3,000.00</span></div>
+                <div class="flex flex-col"><span
+                            class="text-sm text-gray-500 dark:text-gray-400">Account Number</span><span
+                            class="text-lg font-semibold">1234567890</span></div>
+                <div class="flex flex-col"><span class="text-sm text-gray-500 dark:text-gray-400">Bank Name</span><span
+                            class="text-lg font-semibold">Blnk Bank</span></div>
+                <div class="flex flex-col"><span
+                            class="text-sm text-gray-500 dark:text-gray-400">Date Created</span><span
+                            class="text-lg font-semibold">January 1, 2024</span></div>
+                <div class="flex flex-col"><span class="text-sm text-gray-500 dark:text-gray-400">Status</span><span
+                            class="text-lg font-semibold text-green-500">Active</span></div>
+            </div>
+        </div>
+    </div>
+{{end}}

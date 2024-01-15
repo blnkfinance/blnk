@@ -58,7 +58,7 @@ func SlackNotification(err error) {
 
 	var response map[string]interface{}
 
-	err = request.Call(req, &response)
+	_, err = request.Call(req, &response)
 	if err != nil {
 		log.Println(err)
 	}
@@ -90,7 +90,7 @@ func WebhookNotification(systemError error) {
 
 	var response map[string]interface{}
 
-	err = request.Call(req, &response)
+	_, err = request.Call(req, &response)
 	if err != nil {
 		log.Println(err)
 	}

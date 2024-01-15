@@ -1,12 +1,11 @@
-package pkg
+package blnk
 
 import (
 	"fmt"
 	"log"
 	"math"
-	"sync"
 
-	"github.com/jerry-enebeli/blnk"
+	"github.com/jerry-enebeli/blnk/model"
 )
 
 // Max constants for normalization
@@ -18,20 +17,14 @@ const (
 	maxDebitBalance      = 700000
 )
 
-type BalanceTracker struct {
-	balances    map[string]blnk.Balance
-	frequencies map[string]int
-	mutex       sync.Mutex
-}
-
-func NewBalanceTracker() *BalanceTracker {
-	return &BalanceTracker{
-		balances:    make(map[string]blnk.Balance),
-		frequencies: make(map[string]int),
+func NewBalanceTracker() *model.BalanceTracker {
+	return &model.BalanceTracker{
+		Balances:    make(map[string]*model.Balance),
+		Frequencies: make(map[string]int),
 	}
 }
 
-func (l Blnk) checkBalanceMonitors(updatedBalance *blnk.Balance) {
+func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 	// Fetch monitors for this balance using datasource
 	monitors, err := l.datasource.GetBalanceMonitors(updatedBalance.BalanceID)
 	if err != nil {
@@ -48,31 +41,35 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *blnk.Balance) {
 
 }
 
-func (l Blnk) CreateBalance(balance blnk.Balance) (blnk.Balance, error) {
+func (l Blnk) CreateBalance(balance model.Balance) (model.Balance, error) {
 	return l.datasource.CreateBalance(balance)
 }
 
-func (l Blnk) GetBalanceByID(id string, include []string) (*blnk.Balance, error) {
+func (l Blnk) GetBalanceByID(id string, include []string) (*model.Balance, error) {
 	return l.datasource.GetBalanceByID(id, include)
 }
 
-func (l Blnk) GetAllBalances() ([]blnk.Balance, error) {
+func (l Blnk) GetAllBalances() ([]model.Balance, error) {
 	return l.datasource.GetAllBalances()
 }
 
-func (l Blnk) CreateMonitor(monitor blnk.BalanceMonitor) (blnk.BalanceMonitor, error) {
+func (l Blnk) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMonitor, error) {
 	return l.datasource.CreateMonitor(monitor)
 }
 
-func (l Blnk) GetMonitorByID(id string) (*blnk.BalanceMonitor, error) {
+func (l Blnk) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	return l.datasource.GetMonitorByID(id)
 }
 
-func (l Blnk) GetAllMonitors() ([]blnk.BalanceMonitor, error) {
+func (l Blnk) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	return l.datasource.GetAllMonitors()
 }
 
-func (l Blnk) UpdateMonitor(monitor *blnk.BalanceMonitor) error {
+func (l Blnk) GetBalanceMonitors(balanceId string) ([]model.BalanceMonitor, error) {
+	return l.datasource.GetBalanceMonitors(balanceId)
+}
+
+func (l Blnk) UpdateMonitor(monitor *model.BalanceMonitor) error {
 	return l.datasource.UpdateMonitor(monitor)
 }
 
@@ -81,20 +78,20 @@ func (l Blnk) DeleteMonitor(id string) error {
 }
 
 // ApplyFraudScore updates the balance and computes the fraud score
-func (l Blnk) ApplyFraudScore(newBalance blnk.Balance, amount int64) float64 {
+func (l Blnk) ApplyFraudScore(newBalance *model.Balance, amount int64) float64 {
 	bt := l.bt
-	bt.mutex.Lock()
-	defer bt.mutex.Unlock()
+	bt.Mutex.Lock()
+	defer bt.Mutex.Unlock()
 
-	oldBalance, exists := bt.balances[newBalance.BalanceID]
+	oldBalance, exists := bt.Balances[newBalance.BalanceID]
 
 	if exists && (oldBalance.CreditBalance != newBalance.CreditBalance || oldBalance.DebitBalance != newBalance.DebitBalance) {
-		bt.frequencies[newBalance.BalanceID]++
+		bt.Frequencies[newBalance.BalanceID]++
 	}
 
-	bt.balances[newBalance.BalanceID] = newBalance
+	bt.Balances[newBalance.BalanceID] = newBalance
 
-	changeFrequency := float64(bt.frequencies[newBalance.BalanceID])
+	changeFrequency := float64(bt.Frequencies[newBalance.BalanceID])
 	transactionAmount := float64(amount)
 	currentBalance := float64(newBalance.Balance)
 	creditBalance := float64(newBalance.CreditBalance)

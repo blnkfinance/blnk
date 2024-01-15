@@ -1,4 +1,4 @@
-package pkg
+package blnk
 
 import (
 	"database/sql"
@@ -7,13 +7,12 @@ import (
 	"log"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/model"
+
 	"github.com/go-co-op/gocron"
 
 	config2 "github.com/jerry-enebeli/blnk/config"
-
-	"github.com/jerry-enebeli/blnk/datasources"
-
-	"github.com/jerry-enebeli/blnk"
+	"github.com/jerry-enebeli/blnk/database"
 )
 
 const (
@@ -22,14 +21,14 @@ const (
 	STATUS_APPLIED   = "APPLIED"
 )
 
-func (l Blnk) validateBlnCurrency(transaction *blnk.Transaction) (blnk.Balance, error) {
+func (l Blnk) validateBlnCurrency(transaction *model.Transaction) (model.Balance, error) {
 	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID, nil)
 	if err != nil {
-		return blnk.Balance{}, err
+		return model.Balance{}, err
 	}
 	if balance.Currency != transaction.Currency {
 		//todo write flagged transactions table
-		return blnk.Balance{}, errors.New("transaction currency does not match the balance currency. Please ensure they are consistent")
+		return model.Balance{}, errors.New("transaction currency does not match the balance currency. Please ensure they are consistent")
 	}
 	return *balance, nil
 }
@@ -43,7 +42,7 @@ func getQueueName() (string, error) {
 }
 
 // ScheduleTransaction checks if the current transaction has a scheduled date. if it does it updates the tag to SCHEDULED and set the status to scheduled.
-func (l Blnk) scheduleTransaction(transaction *blnk.Transaction) error {
+func (l Blnk) scheduleTransaction(transaction *model.Transaction) error {
 	if transaction.ScheduledFor.Year() == 1 {
 		return nil
 	}
@@ -61,7 +60,7 @@ func inverseDRCR(drcr string) string {
 	return "Debit"
 }
 
-func (l Blnk) updateBalance(balance blnk.Balance, transaction blnk.Transaction) error {
+func (l Blnk) updateBalance(balance model.Balance) error {
 	err := l.datasource.UpdateBalance(&balance)
 	if err != nil {
 		return err
@@ -73,7 +72,7 @@ func (l Blnk) updateBalance(balance blnk.Balance, transaction blnk.Transaction) 
 	return nil
 }
 
-func (l Blnk) applyBalanceToQueuedTransaction(transaction blnk.Transaction) error {
+func (l Blnk) applyBalanceToQueuedTransaction(transaction model.Transaction) error {
 	//gets balance to apply transaction to
 	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID, nil)
 	if err != nil {
@@ -92,7 +91,7 @@ func (l Blnk) applyBalanceToQueuedTransaction(transaction blnk.Transaction) erro
 
 	}
 	//updates balance in the db
-	err = l.updateBalance(*balance, transaction)
+	err = l.updateBalance(*balance)
 	if err != nil {
 		return err
 	}
@@ -100,25 +99,25 @@ func (l Blnk) applyBalanceToQueuedTransaction(transaction blnk.Transaction) erro
 	return nil
 }
 
-func (l Blnk) validateTxnAndReturnBalance(transaction blnk.Transaction) (blnk.Balance, error) {
+func (l Blnk) validateTxnAndReturnBalance(transaction model.Transaction) (model.Balance, error) {
 	txn, err := l.GetTransactionByRef(transaction.Reference)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return blnk.Balance{}, err
+		return model.Balance{}, err
 	}
 
 	if errors.Is(err, nil) && txn.TransactionID != "" {
-		return blnk.Balance{}, fmt.Errorf("this reference has already been used. Please use a unique reference")
+		return model.Balance{}, fmt.Errorf("this reference has already been used. Please use a unique reference")
 	}
 
 	balance, err := l.validateBlnCurrency(&transaction)
 	if err != nil {
-		return blnk.Balance{}, err
+		return model.Balance{}, err
 	}
 
 	return balance, nil
 }
 
-func (l Blnk) recordTransaction(LedgerID string, transaction blnk.Transaction) (blnk.Transaction, error) {
+func (l Blnk) recordTransaction(LedgerID string, transaction model.Transaction) (model.Transaction, error) {
 	transaction, err := l.datasource.RecordTransaction(transaction)
 	if err != nil {
 		return transaction, err
@@ -126,7 +125,7 @@ func (l Blnk) recordTransaction(LedgerID string, transaction blnk.Transaction) (
 	return transaction, nil
 }
 
-func (l Blnk) applyTransactionToBalance(balance *blnk.Balance, transaction *blnk.Transaction) error {
+func (l Blnk) applyTransactionToBalance(balance *model.Balance, transaction *model.Transaction) error {
 	err := balance.UpdateBalances(transaction)
 	if err != nil {
 		return err
@@ -134,23 +133,22 @@ func (l Blnk) applyTransactionToBalance(balance *blnk.Balance, transaction *blnk
 	return nil
 }
 
-func (l Blnk) RecordTransaction(transaction blnk.Transaction) (blnk.Transaction, error) {
+func (l Blnk) RecordTransaction(transaction model.Transaction) (model.Transaction, error) {
 	balance, err := l.validateTxnAndReturnBalance(transaction)
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 
-	riskScore := l.ApplyFraudScore(balance, transaction.Amount)
-	fmt.Println("risk score for transaction", riskScore)
+	riskScore := l.ApplyFraudScore(&balance, transaction.Amount)
 	if riskScore >= transaction.RiskToleranceThreshold && transaction.RiskToleranceThreshold > 0 {
-		return blnk.Transaction{}, fmt.Errorf("this transaction has been flagged as a high risk")
+		return model.Transaction{}, fmt.Errorf("this transaction has been flagged as a high risk")
 	}
 	transaction.RiskScore = riskScore
 
 	transaction.LedgerID = balance.LedgerID
 	err = l.applyTransactionToBalance(&balance, &transaction)
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 
 	if transaction.Status == "" {
@@ -158,35 +156,35 @@ func (l Blnk) RecordTransaction(transaction blnk.Transaction) (blnk.Transaction,
 	}
 	err = l.scheduleTransaction(&transaction) //checks if it's a scheduled transaction and updates the status to scheduled
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 	transaction, err = l.recordTransaction(balance.LedgerID, transaction)
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 
 	//if SkipBalanceUpdate is true it skips the db update leave the balance as it was before the transaction was processed.
 	//This is useful for when we want to store a transaction record but don't compute the balance. it's used in places like scheduling transactions
 	if !transaction.SkipBalanceUpdate {
-		err = l.updateBalance(balance, transaction)
+		err = l.updateBalance(balance)
 		if err != nil {
-			return blnk.Transaction{}, err
+			return model.Transaction{}, err
 		}
 	}
 
 	return transaction, nil
 }
 
-func (l Blnk) QueueTransaction(transaction blnk.Transaction) (blnk.Transaction, error) {
+func (l Blnk) QueueTransaction(transaction model.Transaction) (model.Transaction, error) {
 	_, err := l.validateTxnAndReturnBalance(transaction)
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 	transaction.Status = STATUS_QUEUED
 	transaction.SkipBalanceUpdate = true                //does not apply transaction to the balance
 	transaction, err = l.RecordTransaction(transaction) //saves transaction to db
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 	go func() {
 		err = Enqueue(transaction) //send transaction to kafka
@@ -199,9 +197,10 @@ func (l Blnk) QueueTransaction(transaction blnk.Transaction) (blnk.Transaction, 
 }
 
 func (l Blnk) ProcessTransactionFromQueue() {
-	messageChan := make(chan blnk.Transaction)
+	log.Println("Message: Fetching queued transactions...")
+	messageChan := make(chan model.Transaction)
 	go func() {
-		err := Dequeue(messageChan)
+		err := Dequeue(messageChan, l)
 		if err != nil {
 			log.Println("Message: Error fetching transactions from queue")
 		}
@@ -224,11 +223,11 @@ func (l Blnk) ProcessTransactionFromQueue() {
 
 }
 
-func (l Blnk) GetTransaction(TransactionID string) (blnk.Transaction, error) {
+func (l Blnk) GetTransaction(TransactionID string) (model.Transaction, error) {
 	return l.datasource.GetTransaction(TransactionID)
 }
 
-func (l Blnk) GetAllTransactions() ([]blnk.Transaction, error) {
+func (l Blnk) GetAllTransactions() ([]model.Transaction, error) {
 	return l.datasource.GetAllTransactions()
 }
 
@@ -240,9 +239,8 @@ func (l Blnk) GetScheduledTransaction() {
 		if err != nil {
 			return
 		}
-		//log.Printf("Message: Got %d scheduled transactions...", len(transactions))
 		for _, transaction := range transactions {
-			err = Enqueue(transaction) //send transaction to kafka
+			err = Enqueue(transaction)
 			if err != nil {
 				log.Printf("Error: Error queuing scheduled transaction: %v", err)
 			}
@@ -254,7 +252,7 @@ func (l Blnk) GetScheduledTransaction() {
 	s.StartAsync()
 }
 
-func (l Blnk) GetTransactionByRef(reference string) (blnk.Transaction, error) {
+func (l Blnk) GetTransactionByRef(reference string) (model.Transaction, error) {
 	return l.datasource.GetTransactionByRef(reference)
 }
 
@@ -268,17 +266,17 @@ func (l Blnk) GroupTransactionsByCurrency() (map[string]struct {
 	return l.datasource.GroupTransactionsByCurrency()
 }
 
-func (l Blnk) RefundTransaction(transactionID string) (blnk.Transaction, error) {
+func (l Blnk) RefundTransaction(transactionID string) (model.Transaction, error) {
 	// Retrieve the original transaction by its ID
 	originalTxn, err := l.GetTransaction(transactionID)
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 
 	// Create a new inverse transaction with the opposite "drcr" value
-	refundTxn := blnk.Transaction{
+	refundTxn := model.Transaction{
 		Tag:       "Refund",
-		Reference: datasources.GenerateUUIDWithSuffix("ref"),
+		Reference: database.GenerateUUIDWithSuffix("ref"),
 		Amount:    originalTxn.Amount, // Inverse amount
 		Currency:  originalTxn.Currency,
 		DRCR:      inverseDRCR(originalTxn.DRCR), // Function to get the opposite DRCR
@@ -290,7 +288,7 @@ func (l Blnk) RefundTransaction(transactionID string) (blnk.Transaction, error) 
 	// Record the new inverse transaction
 	refundTxn, err = l.RecordTransaction(refundTxn)
 	if err != nil {
-		return blnk.Transaction{}, err
+		return model.Transaction{}, err
 	}
 
 	return refundTxn, nil
