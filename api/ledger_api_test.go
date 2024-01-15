@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +54,6 @@ func setupRouter() (*gin.Engine, *blnk.Blnk, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Println("here")
 	db, err := database.NewDataSource(cnf)
 	if err != nil {
 		return nil, nil, err

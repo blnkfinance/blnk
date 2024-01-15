@@ -77,7 +77,7 @@ func TestCreateBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
-	balance := model.Balance{Balance: 100, CreditBalance: 50, DebitBalance: 50, Currency: "USD"}
+	balance := model.Balance{Balance: 100, CreditBalance: 50, DebitBalance: 50, Currency: "USD", LedgerID: "test-id", IdentityID: "test-id"}
 
 	// Convert metadata to JSON for mocking
 	metaDataJSON, _ := json.Marshal(balance.MetaData)

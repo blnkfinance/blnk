@@ -18,10 +18,7 @@ import (
 )
 
 func newTestDataSource() (database.IDataSource, sqlmock.Sqlmock, error) {
-	err := config.InitConfig("blnk.json")
-	if err != nil {
-		log.Println("error loading config", err)
-	}
+	config.MockConfig(false, "", "")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		log.Printf("an error '%s' was not expected when opening a stub database Connection", err)
