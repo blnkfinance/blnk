@@ -305,7 +305,7 @@ func (d Datasource) GetNextQueuedTransaction() (*model.Transaction, error) {
 		&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor)
 
 	if err != nil {
-		tx.Rollback() // Roll back in case of any error
+		err := tx.Rollback() // Roll back in case of any error
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -314,14 +314,14 @@ func (d Datasource) GetNextQueuedTransaction() (*model.Transaction, error) {
 	// Convert metadata from JSONB to map
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
-		tx.Rollback()
+		err := tx.Rollback()
 		return nil, err
 	}
 
 	// Update the status of the transaction to "PROCESSING"
 	_, err = tx.Exec(`UPDATE transactions SET status = 'PROCESSING' WHERE transaction_id = $1`, txn.TransactionID)
 	if err != nil {
-		tx.Rollback()
+		err := tx.Rollback()
 		return nil, err
 	}
 
