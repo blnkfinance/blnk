@@ -279,7 +279,6 @@ The response from the external account generation service should follow this for
 ```json
 {
     "amount": 10000,
-    "tag": "Commission Earned",
     "reference": "ref",
     "drcr": "Credit",
     "currency": "NGN",
@@ -315,7 +314,6 @@ Transactions record all ledger events. Transaction are recorded as either  ```De
 | balance_id | The balance the belongs to                                                           | string |
 | status | The status of the transaction. example: ```APPLIED```, ```QUEUED```, ```SCHEDULED``` | string |
 | reference | Unique Transaction referecence                                                       | string |
-| group | A group identifier                                                                   | string |
 | description | Transaction description                                                              | string |
 | meta_data | Custom metadata                                                                      | object |
 
