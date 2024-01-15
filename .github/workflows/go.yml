@@ -17,7 +17,7 @@ jobs:
         env:
           POSTGRES_DB: blnk
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD:
+          POSTGRES_PASSWORD: password
         ports:
           - 5432:5432
         options: >-

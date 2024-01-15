@@ -566,9 +566,7 @@ Blnk is a RESTFUL server. It exposes interaction with your Blnk server. The api 
    "account_number_generation": {
       "http_service": {
          "url": "https://example.com/generate_account_number",
-         "method": "POST",
          "headers": {
-            "Content-Type": "application/json",
             "Authorization": "Bearer some_auth_token"
          }
       }
