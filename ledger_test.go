@@ -2,10 +2,13 @@ package blnk
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"testing"
 	"time"
+
+	"github.com/brianvoe/gofakeit/v6"
+
+	"github.com/jerry-enebeli/blnk/cache"
 
 	"github.com/jerry-enebeli/blnk/model"
 
@@ -23,7 +26,11 @@ func newTestDataSource() (database.IDataSource, sqlmock.Sqlmock, error) {
 	if err != nil {
 		log.Printf("an error '%s' was not expected when opening a stub database Connection", err)
 	}
-	return &database.Datasource{Conn: db}, mock, nil
+	newCache, err := cache.NewCache()
+	if err != nil {
+		log.Printf("an error '%s' was not expected", err)
+	}
+	return &database.Datasource{Conn: db, Cache: newCache}, mock, nil
 }
 
 func TestCreateLedger(t *testing.T) {
@@ -47,7 +54,6 @@ func TestCreateLedger(t *testing.T) {
 
 	// Execute the test function
 	result, err := d.CreateLedger(ledger)
-	fmt.Println(result)
 	// Assertions
 	assert.NoError(t, err)
 	assert.NotEmpty(t, result.LedgerID)
@@ -97,11 +103,11 @@ func TestGetLedgerByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
-	testID := "test-id"
-	row := sqlmock.NewRows([]string{"ledger_id", "created_at", "meta_data"}).
-		AddRow(testID, time.Now(), `{"key":"value"}`)
+	testID := gofakeit.UUID()
+	row := sqlmock.NewRows([]string{gofakeit.UUID(), "name", "created_at", "meta_data"}).
+		AddRow(testID, "test-name", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT ledger_id, created_at, meta_data FROM ledgers WHERE ledger_id =").
+	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM ledgers WHERE ledger_id =").
 		WithArgs(testID).
 		WillReturnRows(row)
 

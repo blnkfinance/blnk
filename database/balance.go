@@ -26,7 +26,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	selectFields = append(selectFields,
 		"b.balance_id", "b.balance", "b.credit_balance", "b.debit_balance",
 		"b.currency", "b.currency_multiplier", "b.ledger_id",
-		"b.identity_id", "b.created_at", "b.meta_data")
+		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data")
 
 	// Append fields and joins based on 'include'
 	if contains(include, "identity") {
@@ -139,6 +139,14 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
+	var cachedBalance model.Balance
+
+	// Check if ledger exists in cache
+	cacheErr := d.Cache.Get(ctx, id, &cachedBalance)
+	if cacheErr == nil && cachedBalance.BalanceID != "" {
+		return &cachedBalance, nil
+	}
+
 	tx, err := d.Conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -160,6 +168,12 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 	err = tx.Commit()
 	if err != nil {
 		return nil, err
+	}
+
+	// Store the fetched balance in cache
+	cacheSetErr := d.Cache.Set(context.Background(), id, balance, 1*time.Hour)
+	if cacheSetErr != nil {
+		fmt.Println("Failed to set balance in cache:", cacheSetErr)
 	}
 
 	return balance, nil
@@ -225,6 +239,14 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
 		WHERE balance_id = $1
 	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
+
+	go func(id string) {
+		//update balance in cache
+		cacheSetErr := d.Cache.Set(context.Background(), id, balance, 1*time.Hour)
+		if cacheSetErr != nil {
+			fmt.Println("Failed to set balance in cache:", cacheSetErr)
+		}
+	}(balance.BalanceID)
 
 	return err
 }

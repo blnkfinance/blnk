@@ -2,15 +2,16 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jerry-enebeli/blnk/internal/request"
+
 	"github.com/brianvoe/gofakeit/v6"
 	model2 "github.com/jerry-enebeli/blnk/api/model"
-
-	"github.com/jerry-enebeli/blnk/request"
 
 	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/model"
@@ -38,6 +39,7 @@ func SetUpTestRequest(s TestRequest) (*httptest.ResponseRecorder, error) {
 		req.Header.Set(key, value)
 
 	}
+	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	s.Router.ServeHTTP(resp, req)
 
@@ -88,4 +90,32 @@ func TestCreateLedger(t *testing.T) {
 		return
 	}
 	assert.Equal(t, http.StatusCreated, resp.Code)
+}
+
+func TestGetLedger(t *testing.T) {
+	router, b, _ := setupRouter()
+	validPayload := model.Ledger{Name: gofakeit.Name()}
+	newLedger, err := b.CreateLedger(validPayload)
+	if err != nil {
+		return
+	}
+	fmt.Println(newLedger)
+	var response model.Ledger
+	testRequest := TestRequest{
+		Payload:  nil,
+		Response: &response,
+		Method:   "GET",
+		Route:    fmt.Sprintf("/ledger/%s", newLedger.LedgerID),
+		Auth:     "",
+		Router:   router,
+	}
+	resp, err := SetUpTestRequest(testRequest)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	fmt.Println(response)
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, response.LedgerID, newLedger.LedgerID)
+	assert.Equal(t, response.Name, newLedger.Name)
 }

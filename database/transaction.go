@@ -23,16 +23,18 @@ func (d Datasource) RecordTransaction(txn model.Transaction) (model.Transaction,
 	_, err = d.Conn.Exec(
 		`
 		INSERT INTO public.transactions (
-			transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+			transaction_id, tag, reference, amount, currency,payment_method, description, drcr, status, ledger_id, balance_id,
 			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
 			balance_before, balance_after, created_at, meta_data,scheduled_for
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,$18)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,$18,$19,$20)
 	`,
 		txn.TransactionID,
 		txn.Tag,
 		txn.Reference,
 		txn.Amount,
 		txn.Currency,
+		txn.PaymentMethod,
+		txn.Description,
 		txn.DRCR,
 		txn.Status,
 		txn.LedgerID,
@@ -58,7 +60,7 @@ func (d Datasource) RecordTransaction(txn model.Transaction) (model.Transaction,
 func (d Datasource) GetTransaction(id string) (model.Transaction, error) {
 	// retrieve from database
 	row := d.Conn.QueryRow(`
-		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+		SELECT transaction_id, tag, reference, amount, currency,payment_method, description, drcr, status, ledger_id, balance_id,
 			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
 			balance_before, balance_after, created_at, meta_data
 		FROM transactions
@@ -70,7 +72,7 @@ func (d Datasource) GetTransaction(id string) (model.Transaction, error) {
 
 	// scan database row into transaction instance
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
+	err := row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.PaymentMethod, &txn.Description, &txn.DRCR,
 		&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
 		&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
 		&txn.CreatedAt, &metaDataJSON)
@@ -91,7 +93,7 @@ func (d Datasource) GetTransaction(id string) (model.Transaction, error) {
 func (d Datasource) GetTransactionByRef(reference string) (model.Transaction, error) {
 	// retrieve from database
 	row := d.Conn.QueryRow(`
-		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+		SELECT transaction_id, tag, reference, amount, currency,payment_method, description, drcr, status, ledger_id, balance_id,
 			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
 			balance_before, balance_after, created_at, meta_data
 		FROM transactions
@@ -103,7 +105,7 @@ func (d Datasource) GetTransactionByRef(reference string) (model.Transaction, er
 
 	// scan database row into transaction instance
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
+	err := row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.PaymentMethod, &txn.Description, &txn.DRCR,
 		&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
 		&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
 		&txn.CreatedAt, &metaDataJSON)
@@ -175,7 +177,7 @@ func (d Datasource) GroupTransactionsByCurrency() (map[string]struct {
 func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 	// select all transactions from database
 	rows, err := d.Conn.Query(`
-		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id, credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after, balance_before, balance_after, created_at, meta_data
+		SELECT transaction_id, tag, reference, amount, currency,payment_method, description, drcr, status, ledger_id, balance_id, credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after, balance_before, balance_after, created_at, meta_data
 		FROM transactions
 		ORDER BY created_at DESC
 	`)
@@ -196,6 +198,8 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 			&transaction.Tag,
 			&transaction.Reference,
 			&transaction.Amount,
+			&transaction.Currency,
+			&transaction.PaymentMethod,
 			&transaction.Currency,
 			&transaction.DRCR,
 			&transaction.Status,
@@ -232,7 +236,7 @@ func (d Datasource) GetScheduledTransactions() ([]model.Transaction, error) {
 
 	// Query transactions with scheduled_for equal to the current time
 	rows, err := d.Conn.Query(`
-		SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+		SELECT transaction_id, tag, reference, amount, currency,payment_method, description, drcr, status, ledger_id, balance_id,
 			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
 			balance_before, balance_after, created_at, meta_data,scheduled_for
 		FROM transactions
@@ -254,7 +258,7 @@ func (d Datasource) GetScheduledTransactions() ([]model.Transaction, error) {
 
 		// Scan the database row into the transaction instance (similar to your GetTransaction code)
 		var metaDataJSON []byte
-		err := rows.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
+		err := rows.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.PaymentMethod, &txn.Description, &txn.DRCR,
 			&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
 			&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
 			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor)
@@ -285,7 +289,7 @@ func (d Datasource) GetNextQueuedTransaction() (*model.Transaction, error) {
 
 	// Query to select the earliest transaction from the queue
 	row := tx.QueryRow(`
-        SELECT transaction_id, tag, reference, amount, currency, drcr, status, ledger_id, balance_id,
+        SELECT transaction_id, tag, reference, amount, currency,payment_method, description, drcr, status, ledger_id, balance_id,
                credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
                balance_before, balance_after, created_at, meta_data, scheduled_for
         FROM transactions
@@ -299,7 +303,7 @@ func (d Datasource) GetNextQueuedTransaction() (*model.Transaction, error) {
 	var metaDataJSON []byte
 
 	// Scan the database row into the transaction instance
-	err = row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.DRCR,
+	err = row.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.PaymentMethod, &txn.Description, &txn.DRCR,
 		&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
 		&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
 		&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor)

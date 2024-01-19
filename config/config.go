@@ -18,18 +18,14 @@ const (
 var configStore atomic.Value
 
 type Configuration struct {
-	Port                  string `json:"port"`
-	ProjectName           string `json:"project_name"`
-	DefaultCurrency       string `json:"default_currency"`
-	EndPointSecret        string `json:"end_point_secret"`
-	SynchronizationMethod string `json:"synchronization_method"`
-	DataSource            struct {
-		Name string `json:"name"`
-		Dns  string `json:"dns"`
+	Port        string `json:"port"`
+	ProjectName string `json:"project_name"`
+	DataSource  struct {
+		Dns string `json:"dns"`
 	} `json:"data_source"`
-	Account struct {
-		DefaultBank string `json:"default_bank"`
-	} `json:"account"`
+	Redis struct {
+		Dns string `json:"dns"`
+	}
 	AccountNumberGeneration struct {
 		EnableAutoGeneration bool `json:"enable_auto_generation"`
 		HttpService          struct {
@@ -112,37 +108,25 @@ func validateAndAddDefaults(cnf *Configuration) error {
 		cnf.ProjectName = "Blnk Server"
 	}
 
-	if cnf.EndPointSecret == "" {
-		log.Println("Error: Endpoint secret is empty. It's a required field.")
-		return errors.New("Endpoint secret is required")
-	}
-
-	if cnf.ConfluentKafka.Server == "" {
-		log.Println("Error: Confluent Kafka server is empty. It's a required field.")
-		return errors.New("Confluent Kafka server is required")
-	}
-
-	if cnf.DataSource.Name == "" {
-		log.Println("Error: Data source name is empty. It's a required field.")
-		return errors.New("Data source name is required")
-	}
-
 	if cnf.DataSource.Dns == "" {
 		log.Println("Error: Data source DNS is empty. It's a required field.")
-		return errors.New("Data source DNS is required")
+		return errors.New("data source DNS is required")
+	}
+
+	if cnf.Redis.Dns == "" {
+		log.Println("Error: Redis DNS is empty. It's a required field.")
+		return errors.New("redis DNS is required")
 	}
 
 	// Trim white spaces from fields
 	cnf.ProjectName = strings.TrimSpace(cnf.ProjectName)
 	cnf.Port = strings.TrimSpace(cnf.Port)
-	cnf.DefaultCurrency = strings.TrimSpace(cnf.DefaultCurrency)
-	cnf.EndPointSecret = strings.TrimSpace(cnf.EndPointSecret)
 	cnf.ConfluentKafka.Server = strings.TrimSpace(cnf.ConfluentKafka.Server)
 	cnf.ConfluentKafka.ApiKey = strings.TrimSpace(cnf.ConfluentKafka.ApiKey)
 	cnf.ConfluentKafka.SecretKey = strings.TrimSpace(cnf.ConfluentKafka.SecretKey)
 	cnf.ConfluentKafka.QueueName = strings.TrimSpace(cnf.ConfluentKafka.QueueName)
-	cnf.DataSource.Name = strings.TrimSpace(cnf.DataSource.Name)
 	cnf.DataSource.Dns = strings.TrimSpace(cnf.DataSource.Dns)
+	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
 
 	// Set default value for Port if it's empty
 	if cnf.Port == "" {
@@ -162,18 +146,14 @@ func validateAndAddDefaults(cnf *Configuration) error {
 // MockConfig sets a mock configuration for testing purposes.
 func MockConfig(enableAutoGeneration bool, url string, authorizationToken string) {
 	mockConfig := Configuration{
-		Port:                  "",
-		ProjectName:           "",
-		DefaultCurrency:       "",
-		EndPointSecret:        "",
-		SynchronizationMethod: "",
+		Port:        "",
+		ProjectName: "",
+		Redis: struct {
+			Dns string `json:"dns"`
+		}{Dns: "redis://localhost"},
 		DataSource: struct {
-			Name string `json:"name"`
-			Dns  string `json:"dns"`
-		}{Name: "POSTGRES", Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
-		Account: struct {
-			DefaultBank string `json:"default_bank"`
-		}{},
+			Dns string `json:"dns"`
+		}{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
 		AccountNumberGeneration: struct {
 			EnableAutoGeneration bool `json:"enable_auto_generation"`
 			HttpService          struct {

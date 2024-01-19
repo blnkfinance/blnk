@@ -14,6 +14,8 @@ type Transaction struct {
 	Reference              string                 `json:"reference"`
 	Amount                 int64                  `json:"amount"`
 	Currency               string                 `json:"currency"`
+	PaymentMethod          string                 `json:"payment_method"`
+	Description            string                 `json:"description"`
 	DRCR                   string                 `json:"drcr"`
 	Status                 string                 `json:"status"`
 	LedgerID               string                 `json:"ledger_id"`

@@ -2,9 +2,10 @@ package blnk
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
+
+	"github.com/brianvoe/gofakeit/v6"
 
 	"github.com/jerry-enebeli/blnk/model"
 
@@ -27,9 +28,9 @@ func TestCreateAccount(t *testing.T) {
 		Number:     "123456789",
 		BankName:   "Test Bank",
 		Currency:   "USD",
-		LedgerID:   "ledger_123",
+		LedgerID:   gofakeit.UUID(),
 		IdentityID: "identity_123",
-		BalanceID:  "balance_123",
+		BalanceID:  gofakeit.UUID(),
 		MetaData:   map[string]interface{}{"key": "value"},
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
@@ -56,9 +57,9 @@ func TestCreateAccount(t *testing.T) {
 
 	result, err := d.CreateAccount(account)
 	assert.NoError(t, err)
-	fmt.Println(result)
 	assert.Equal(t, account.Name, result.Name)
 	assert.Equal(t, account.Number, result.Number)
+	assert.WithinDuration(t, time.Now(), result.CreatedAt, time.Second)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
@@ -87,8 +88,8 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 		Name:       "Test Account",
 		Currency:   "USD",
 		LedgerID:   "ledger_123",
-		IdentityID: "identity_123",
-		BalanceID:  "balance_123",
+		IdentityID: gofakeit.UUID(),
+		BalanceID:  gofakeit.UUID(),
 		MetaData:   map[string]interface{}{"key": "value"},
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
@@ -115,6 +116,7 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "123456789", result.Number)
 	assert.Equal(t, "Blnk Bank", result.BankName)
+	assert.WithinDuration(t, time.Now(), result.CreatedAt, time.Second)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
@@ -154,7 +156,6 @@ func TestGetAccountByID(t *testing.T) {
 	// Expect transaction to commit
 	mock.ExpectCommit()
 	result, err := d.GetAccount(testID, nil)
-	fmt.Println(result.Name, result.Number)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, testID, result.AccountID)

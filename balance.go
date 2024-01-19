@@ -97,7 +97,6 @@ func (l Blnk) ApplyFraudScore(newBalance *model.Balance, amount int64) float64 {
 	creditBalance := float64(newBalance.CreditBalance)
 	debitBalance := float64(newBalance.DebitBalance)
 
-	fmt.Println(changeFrequency, transactionAmount, currentBalance, creditBalance, debitBalance)
 	return ComputeFraudScore(changeFrequency, transactionAmount, currentBalance, creditBalance, debitBalance)
 }
 

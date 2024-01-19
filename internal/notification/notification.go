@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/request"
+	"github.com/jerry-enebeli/blnk/internal/request"
 
 	"github.com/jerry-enebeli/blnk/config"
 )

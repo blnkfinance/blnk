@@ -1,0 +1,36 @@
+{
+  "port": "",
+  "project_name": "Blnk",
+  "data_source": {
+    "name": "POSTGRES",
+    "dns": "postgres://postgres:@localhost:5432/blnk?sslmode=disable"
+  },
+  "account_number_generation": {
+    "enable_auto_generation": true,
+    "http_service": {
+      "url": "http://localhost:5001/mocked-account",
+      "headers": {
+        "Authorization": "Bearer some_auth_token"
+      }
+    }
+  },
+  "queue": {
+    "queue": ""
+  },
+  "confluent_kafka": {
+    "server": "pkc-921jm.us-east-2.aws.confluent.cloud:9092",
+    "api_key": "MH23E4UCFDT4IPHR",
+    "secret_key": "LyFdBmw/HUvZmpYbBk53UQbBkLA45XAeP8uGHuSeR36I6BRmmH8o7zZR7n68XAGW",
+    "queue_name": "transactions",
+    "pull_wait_time": 100
+  },
+  "notification": {
+    "slack": {
+      "webhook_url": "helo"
+    },
+    "webhook": {
+      "url": "",
+      "headers": {}
+    }
+  }
+}

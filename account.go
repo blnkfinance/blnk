@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jerry-enebeli/blnk/internal/request"
+
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/request"
 )
 
 // applyExternalAccount sets the account number and bank name for a given blnk.Account object.
@@ -121,7 +122,6 @@ func (l Blnk) CreateAccount(account model.Account) (model.Account, error) {
 	if err != nil {
 		return model.Account{}, err
 	}
-	fmt.Println(account.Name)
 	return l.datasource.CreateAccount(account)
 }
 

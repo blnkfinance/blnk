@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/jerry-enebeli/blnk/cache"
+
 	"github.com/google/uuid"
 
 	"github.com/jerry-enebeli/blnk/config"
 )
 
 type Datasource struct {
-	Conn *sql.DB
+	Conn  *sql.DB
+	Cache cache.Cache
 }
 
 func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
@@ -19,7 +22,11 @@ func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Datasource{Conn: con}, nil
+	newCache, err := cache.NewCache()
+	if err != nil {
+		return nil, err
+	}
+	return &Datasource{Conn: con, Cache: newCache}, nil
 }
 
 func ConnectDB(dns string) (*sql.DB, error) {
@@ -83,6 +90,8 @@ func createTransactionTable(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			transaction_id TEXT NOT NULL UNIQUE,
 			tag TEXT,
+			description TEXT,
+			payment_method TEXT,
 			reference TEXT,
 			amount BIGINT,
 			currency TEXT,

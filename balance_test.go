@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brianvoe/gofakeit/v6"
+
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -104,7 +106,7 @@ func TestGetBalanceByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
-	balanceID := "test-balance"
+	balanceID := gofakeit.UUID()
 
 	// Expect transaction to begin
 	mock.ExpectBegin()
@@ -215,7 +217,7 @@ func TestGetMonitorByID(t *testing.T) {
 	monitorID := "test-monitor"
 
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "created_at"}).
-		AddRow(monitorID, "test-balance", "field", "operator", 1000, "Test Monitor", time.Now())
+		AddRow(monitorID, gofakeit.UUID(), "field", "operator", 1000, "Test Monitor", time.Now())
 
 	mock.ExpectQuery("SELECT .* FROM balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnRows(rows)
 
@@ -240,7 +242,7 @@ func TestGetAllMonitors(t *testing.T) {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "created_at"}).
-		AddRow("test-monitor", "test-balance", "field", "operator", 100, "Test Monitor", time.Now())
+		AddRow("test-monitor", gofakeit.UUID(), "field", "operator", 100, "Test Monitor", time.Now())
 
 	mock.ExpectQuery("SELECT .* FROM balance_monitors").WillReturnRows(rows)
 
@@ -264,7 +266,7 @@ func TestGetBalanceMonitors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
-	balanceID := "test-balance"
+	balanceID := gofakeit.UUID()
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "created_at"}).
 		AddRow("test-monitor", balanceID, "field", "operator", 100, "Test Monitor", time.Now())
 

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	model2 "github.com/jerry-enebeli/blnk/api/model"
@@ -51,7 +50,6 @@ func (a Api) QueueTransaction(c *gin.Context) {
 
 func (a Api) RefundTransaction(c *gin.Context) {
 	id, passed := c.Params.Get("id")
-	fmt.Println(id, passed)
 	if !passed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return

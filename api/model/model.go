@@ -71,6 +71,8 @@ type RecordTransaction struct {
 	Tag                    string    `json:"tag"`
 	Reference              string    `json:"reference"`
 	Drcr                   string    `json:"drcr"`
+	PaymentMethod          string    `json:"payment_method"`
+	Description            string    `json:"description"`
 	Currency               string    `json:"currency"`
 	BalanceId              string    `json:"balance_id"`
 	RiskToleranceThreshold float64   `json:"risk_tolerance_threshold"`
@@ -173,11 +175,12 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.BalanceId, validation.Required),
 		validation.Field(&t.Drcr, validation.Required, validation.In("Credit", "Debit").Error("Invalid entry for 'drcr'. Allowed values are 'Credit' or 'Debit'.")),
+		validation.Field(&t.PaymentMethod, validation.Required, validation.In("Book Transfer", "Nip Transfer", "Mobile Money Transfer", "Card", "Cross Board Payment").Error("Invalid Payment Method. Allowed values are 'Book Transfer', 'Nip Transfer', 'Mobile Money Transfer', 'Card', 'Cross Board Payment'.")),
 	)
 }
 
 func (t *RecordTransaction) ToTransaction() model.Transaction {
-	return model.Transaction{BalanceID: t.BalanceId, Currency: t.Currency, Reference: t.Reference, DRCR: t.Drcr, RiskToleranceThreshold: t.RiskToleranceThreshold, ScheduledFor: t.ScheduledFor, Tag: t.Tag, Amount: t.Amount}
+	return model.Transaction{BalanceID: t.BalanceId, Currency: t.Currency, PaymentMethod: t.PaymentMethod, Description: t.Description, Reference: t.Reference, DRCR: t.Drcr, RiskToleranceThreshold: t.RiskToleranceThreshold, ScheduledFor: t.ScheduledFor, Tag: t.Tag, Amount: t.Amount}
 }
 
 func (t *CreateEventMapper) ValidateCreateEventMapper() error {

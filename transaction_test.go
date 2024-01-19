@@ -2,7 +2,6 @@ package blnk
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -25,7 +24,7 @@ func TestRecordTransaction(t *testing.T) {
 
 	txn := model.Transaction{
 		Reference: gofakeit.UUID(),
-		BalanceID: "test-id",
+		BalanceID: gofakeit.UUID(),
 		Amount:    10000,
 		Currency:  "NGN",
 		DRCR:      "Credit",
@@ -51,7 +50,7 @@ func TestRecordTransaction(t *testing.T) {
 	// Expect the transaction to be recorded in the database
 	mock.ExpectExec("INSERT INTO public.transactions").
 		WithArgs(
-			sqlmock.AnyArg(), txn.Tag, txn.Reference, txn.Amount, txn.Currency, txn.DRCR, sqlmock.AnyArg(), sqlmock.AnyArg(), txn.BalanceID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), txn.Tag, txn.Reference, txn.Amount, txn.Currency, txn.PaymentMethod, txn.Description, txn.DRCR, sqlmock.AnyArg(), sqlmock.AnyArg(), txn.BalanceID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -62,7 +61,6 @@ func TestRecordTransaction(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	recordedTxn, err := d.RecordTransaction(txn)
-	fmt.Println(recordedTxn)
 	assert.NoError(t, err)
 	assert.Equal(t, txn.Reference, recordedTxn.Reference)
 	assert.Equal(t, STATUS_APPLIED, recordedTxn.Status)
@@ -82,7 +80,7 @@ func TestRecordTransactionWithWrongCurrency(t *testing.T) {
 
 	txn := model.Transaction{
 		Reference: gofakeit.UUID(),
-		BalanceID: "test-id",
+		BalanceID: gofakeit.UUID(),
 		Amount:    10000,
 		Currency:  "NGN",
 		DRCR:      "Credit",
@@ -121,7 +119,7 @@ func TestRecordTransactionWithBalanceMultiplier(t *testing.T) {
 
 	txn := model.Transaction{
 		Reference: gofakeit.UUID(),
-		BalanceID: "test-id",
+		BalanceID: gofakeit.UUID(),
 		Amount:    100,
 		Currency:  "NGN",
 		DRCR:      "Credit",
@@ -147,7 +145,7 @@ func TestRecordTransactionWithBalanceMultiplier(t *testing.T) {
 	// Expect the transaction to be recorded in the database
 	mock.ExpectExec("INSERT INTO public.transactions").
 		WithArgs(
-			sqlmock.AnyArg(), txn.Tag, txn.Reference, txn.Amount*100, txn.Currency, txn.DRCR, sqlmock.AnyArg(), sqlmock.AnyArg(), txn.BalanceID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), txn.Tag, txn.Reference, txn.Amount*100, txn.Currency, txn.PaymentMethod, txn.Description, txn.DRCR, sqlmock.AnyArg(), sqlmock.AnyArg(), txn.BalanceID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

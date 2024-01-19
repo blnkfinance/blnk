@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -71,16 +72,23 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 
 // GetLedgerByID retrieves a single ledger from the database by ID
 func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
+	ledger := model.Ledger{}
+
+	// Check if ledger exists in cache
+	cacheErr := d.Cache.Get(context.Background(), id, &ledger)
+	if cacheErr == nil && ledger.LedgerID != "" {
+		return &ledger, nil
+	}
+
 	// select ledger from database by ID
 	row := d.Conn.QueryRow(`
-		SELECT ledger_id, created_at, meta_data
+		SELECT ledger_id, name, created_at, meta_data
 		FROM ledgers
 		WHERE ledger_id = $1
 	`, id)
 
-	ledger := model.Ledger{}
 	var metaDataJSON []byte
-	err := row.Scan(&ledger.LedgerID, &ledger.CreatedAt, &metaDataJSON)
+	err := row.Scan(&ledger.LedgerID, &ledger.Name, &ledger.CreatedAt, &metaDataJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Handle no rows error
@@ -95,6 +103,12 @@ func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	err = json.Unmarshal(metaDataJSON, &ledger.MetaData)
 	if err != nil {
 		return nil, err
+	}
+
+	// Store the fetched ledger in cache
+	cacheSetErr := d.Cache.Set(context.Background(), id, ledger, 24*time.Hour)
+	if cacheSetErr != nil {
+		fmt.Println("Failed to set ledger in cache:", cacheSetErr)
 	}
 
 	return &ledger, nil
