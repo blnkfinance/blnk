@@ -185,6 +185,7 @@ func createBalanceMonitorTable(db *sql.DB) error {
 			operator TEXT NOT NULL CHECK (operator IN ('>', '<', '>=', '<=', '=')),
 			value BIGINT NOT NULL,
 			description TEXT,
+			call_back_url TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT NOW()
 		)
 	`)

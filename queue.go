@@ -139,13 +139,18 @@ func enqueueKafka(transaction model.Transaction) error {
 	return nil
 }
 
-func Enqueue(transaction model.Transaction) error {
+func Enqueue(transaction model.Transaction, l *Blnk) error {
 	cnf, err := config.Fetch()
 	if err != nil {
 		return err
 	}
 	if cnf.Queue.Queue == "kafka" {
 		err := enqueueKafka(transaction)
+		if err != nil {
+			return err
+		}
+	} else if cnf.Queue.Queue == "db" {
+		err := l.UpdateTransactionStatus(transaction.TransactionID, STATUS_QUEUED)
 		if err != nil {
 			return err
 		}

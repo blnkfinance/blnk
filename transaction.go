@@ -187,7 +187,7 @@ func (l Blnk) QueueTransaction(transaction model.Transaction) (model.Transaction
 		return model.Transaction{}, err
 	}
 	go func() {
-		err = Enqueue(transaction) //send transaction to kafka
+		err := Enqueue(transaction, &l)
 		if err != nil {
 			log.Printf("Error: Error queuing transaction: %v", err)
 		}
@@ -213,7 +213,7 @@ func (l Blnk) ProcessTransactionFromQueue() {
 
 		err := l.applyBalanceToQueuedTransaction(transaction)
 		if err != nil {
-			err := Enqueue(transaction)
+			err := Enqueue(transaction, &l)
 			if err != nil {
 				log.Printf("Error: Error re-queuing scheduled transaction: %v", err)
 			}
@@ -240,7 +240,7 @@ func (l Blnk) GetScheduledTransaction() {
 			return
 		}
 		for _, transaction := range transactions {
-			err = Enqueue(transaction)
+			err := Enqueue(transaction, &l)
 			if err != nil {
 				log.Printf("Error: Error queuing scheduled transaction: %v", err)
 			}

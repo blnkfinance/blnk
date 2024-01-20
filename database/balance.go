@@ -139,13 +139,13 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	var cachedBalance model.Balance
+	//var cachedBalance model.Balance
 
-	// Check if ledger exists in cache
-	cacheErr := d.Cache.Get(ctx, id, &cachedBalance)
-	if cacheErr == nil && cachedBalance.BalanceID != "" {
-		return &cachedBalance, nil
-	}
+	// Check if balance exists in cache
+	//cacheErr := d.Cache.Get(ctx, id, &cachedBalance)
+	//if cacheErr == nil && cachedBalance.BalanceID != "" {
+	//	return &cachedBalance, nil
+	//}
 
 	tx, err := d.Conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -242,7 +242,7 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 
 	go func(id string) {
 		//update balance in cache
-		cacheSetErr := d.Cache.Set(context.Background(), id, balance, 1*time.Hour)
+		cacheSetErr := d.Cache.Delete(context.Background(), id)
 		if cacheSetErr != nil {
 			fmt.Println("Failed to set balance in cache:", cacheSetErr)
 		}
@@ -256,9 +256,9 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 	monitor.CreatedAt = time.Now()
 
 	_, err := d.Conn.Exec(`
-		INSERT INTO balance_monitors (monitor_id, balance_id, field, operator, value, description, created_at)
+		INSERT INTO balance_monitors (monitor_id, balance_id, field, operator, value, description, call_back_url, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CreatedAt)
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
 
 	if err != nil {
 		return monitor, err
@@ -268,13 +268,13 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	row := d.Conn.QueryRow(`
-		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
 		FROM balance_monitors WHERE monitor_id = $1
 	`, id)
 
 	monitor := &model.BalanceMonitor{}
 	condition := &model.AlertCondition{}
-	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 
 func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	rows, err := d.Conn.Query(`
-		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
 		FROM balance_monitors
 	`)
 	if err != nil {
@@ -296,7 +296,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	for rows.Next() {
 		monitor := model.BalanceMonitor{}
 		condition := model.AlertCondition{}
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -308,7 +308,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	rows, err := d.Conn.Query(`
-		SELECT monitor_id, balance_id, field, operator, value, description, created_at 
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
 		FROM balance_monitors WHERE balance_id= $1
 	`, balanceID)
 	if err != nil {
@@ -320,7 +320,7 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 	for rows.Next() {
 		monitor := model.BalanceMonitor{}
 		condition := model.AlertCondition{}
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CreatedAt)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -333,9 +333,9 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
 	_, err := d.Conn.Exec(`
 		UPDATE balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, created_at = $7
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url= $7 created_at = $8
 		WHERE monitor_id = $1
-	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CreatedAt)
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
 	return err
 }
 

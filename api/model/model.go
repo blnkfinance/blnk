@@ -175,7 +175,7 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.BalanceId, validation.Required),
 		validation.Field(&t.Drcr, validation.Required, validation.In("Credit", "Debit").Error("Invalid entry for 'drcr'. Allowed values are 'Credit' or 'Debit'.")),
-		validation.Field(&t.PaymentMethod, validation.Required, validation.In("Book Transfer", "Nip Transfer", "Mobile Money Transfer", "Card", "Cross Board Payment").Error("Invalid Payment Method. Allowed values are 'Book Transfer', 'Nip Transfer', 'Mobile Money Transfer', 'Card', 'Cross Board Payment'.")),
+		validation.Field(&t.PaymentMethod, validation.Required),
 	)
 }
 

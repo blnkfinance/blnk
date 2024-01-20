@@ -94,12 +94,12 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	// Expect transaction to begin
-	mock.ExpectBegin()
-
 	// Create a row with expected data
 	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
 		AddRow(account.BalanceID, 100, 50, 50, "USD", 100, account.LedgerID, account.IdentityID, time.Now(), `{"key":"value"}`)
+
+	// Expect transaction to begin
+	mock.ExpectBegin()
 
 	mock.ExpectQuery("SELECT .* FROM balances WHERE balance_id =").
 		WithArgs(account.BalanceID).

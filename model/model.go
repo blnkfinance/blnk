@@ -51,7 +51,7 @@ type TransactionFilter struct {
 
 type Balance struct {
 	ID                 int64                  `json:"-"`
-	BalanceID          string                 `json:"id"`
+	BalanceID          string                 `json:"balance_id"`
 	Balance            int64                  `json:"balance"`
 	CreditBalance      int64                  `json:"credit_balance"`
 	DebitBalance       int64                  `json:"debit_balance"`
@@ -76,6 +76,7 @@ type BalanceMonitor struct {
 	BalanceID   string         `json:"balance_id"`
 	Condition   AlertCondition `json:"condition"`
 	Description string         `json:"description"`
+	CallBackURL string         `json:"call_back_url"`
 	CreatedAt   time.Time      `json:"created_at"`
 }
 

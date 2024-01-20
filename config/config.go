@@ -182,7 +182,9 @@ func MockConfig(enableAutoGeneration bool, url string, authorizationToken string
 		},
 		Queue: struct {
 			Queue string
-		}{},
+		}{
+			Queue: "db",
+		},
 		ConfluentKafka: struct {
 			Server       string `json:"server"`
 			ApiKey       string `json:"api_key"`
