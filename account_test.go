@@ -143,11 +143,11 @@ func TestGetAccountByID(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	// Expect transaction to begin
-	mock.ExpectBegin()
-
 	rows := sqlmock.NewRows([]string{"account_id", "name", "number", "bank_name", "currency", "ledger_id", "identity_id", "balance_id", "created_at", "meta_data"}).
 		AddRow(testID, account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, time.Now(), metaDataJSON)
+
+	// Expect transaction to begin
+	mock.ExpectBegin()
 
 	mock.ExpectQuery("SELECT .* FROM accounts WHERE account_id =").
 		WithArgs(testID).
