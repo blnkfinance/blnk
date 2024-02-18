@@ -64,25 +64,35 @@ func loadConfigFromFile(file string) error {
 	var cnf Configuration
 	_, err := os.Stat(file)
 	if err != nil {
+		log.Println(err)
+
 		return err
 	}
 
 	f, err := os.Open(file)
 
 	if err != nil {
+		log.Println(err)
+
 		return err
 	}
 
 	err = json.NewDecoder(f).Decode(&cnf)
 	if err != nil {
+		log.Println(err)
+
 		return err
 	}
 
 	err = validateAndAddDefaults(&cnf)
 	if err != nil {
+		log.Println(err)
+
 		return err
 	}
+
 	configStore.Store(&cnf)
+
 	return err
 }
 

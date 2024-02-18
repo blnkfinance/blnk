@@ -1,6 +1,8 @@
 module github.com/jerry-enebeli/blnk
 
-go 1.18
+go 1.21
+
+toolchain go1.22.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.1
@@ -15,6 +17,7 @@ require (
 	github.com/jarcoal/httpmock v1.3.1
 	github.com/lib/pq v1.10.7
 	github.com/mitchellh/mapstructure v1.5.0
+	github.com/redis/go-redis/v9 v9.0.0-rc.4
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.8.4
@@ -39,7 +42,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.6 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/redis/go-redis/v9 v9.0.0-rc.4 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/ugorji/go/codec v1.2.7 // indirect
