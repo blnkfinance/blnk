@@ -1,0 +1,25 @@
+name: "blnk"
+version: "3"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_volume:/var/lib/postgres
+    environment:
+      - POSTGRES_DB=blnk
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+
+  redis:
+    image: redis:alpine
+    ports:
+      - 6379:6379
+    volumes:
+      - redis_volume:/data
+
+volumes:
+  postgres_volume:
+  redis_volume:
