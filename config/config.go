@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -14,6 +15,8 @@ import (
 const (
 	DEFAULT_PORT = "5001"
 )
+
+var DEFAULT_UI_ENABLED bool = false
 
 var configStore atomic.Value
 
@@ -55,6 +58,7 @@ type Configuration struct {
 			Headers map[string]string `json:"headers"`
 		} `json:"webhook"`
 	} `json:"notification"`
+	UiEnabled *bool `json:"ui_enabled,omitempty"`
 }
 
 func loadConfigFromFile(file string) error {
@@ -138,6 +142,11 @@ func validateAndAddDefaults(cnf *Configuration) error {
 	if cnf.Queue.Queue == "" {
 		cnf.Queue.Queue = "db"
 		log.Println("Warning: Queue was not specified in config. Setting default queue: DB Queue(Postgres)")
+	}
+
+	if cnf.UiEnabled == nil {
+		cnf.UiEnabled = &DEFAULT_UI_ENABLED
+		log.Printf("Warning: UiEnabled was not specified in config. Setting default: UiEnabled(%s)", strconv.FormatBool(DEFAULT_UI_ENABLED))
 	}
 
 	return nil
