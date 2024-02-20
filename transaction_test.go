@@ -63,7 +63,7 @@ func TestRecordTransaction(t *testing.T) {
 	recordedTxn, err := d.RecordTransaction(txn)
 	assert.NoError(t, err)
 	assert.Equal(t, txn.Reference, recordedTxn.Reference)
-	assert.Equal(t, STATUS_APPLIED, recordedTxn.Status)
+	assert.Equal(t, StatusApplied, recordedTxn.Status)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)

@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -74,12 +73,6 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	ledger := model.Ledger{}
 
-	// Check if ledger exists in cache
-	cacheErr := d.Cache.Get(context.Background(), id, &ledger)
-	if cacheErr == nil && ledger.LedgerID != "" {
-		return &ledger, nil
-	}
-
 	// select ledger from database by ID
 	row := d.Conn.QueryRow(`
 		SELECT ledger_id, name, created_at, meta_data
@@ -103,12 +96,6 @@ func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	err = json.Unmarshal(metaDataJSON, &ledger.MetaData)
 	if err != nil {
 		return nil, err
-	}
-
-	// Store the fetched ledger in cache
-	cacheSetErr := d.Cache.Set(context.Background(), id, ledger, 24*time.Hour)
-	if cacheSetErr != nil {
-		fmt.Println("Failed to set ledger in cache:", cacheSetErr)
 	}
 
 	return &ledger, nil

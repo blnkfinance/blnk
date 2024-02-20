@@ -32,6 +32,7 @@ type Transaction struct {
 	RiskScore              float64                `json:"risk_score"`
 	SkipBalanceUpdate      bool                   `json:"-"`
 	MetaData               map[string]interface{} `json:"meta_data,omitempty"`
+	GroupIds               []string               `json:"group_ids"`
 }
 
 type TransactionFilter struct {

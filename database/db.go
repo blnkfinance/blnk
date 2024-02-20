@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/jerry-enebeli/blnk/cache"
 
@@ -12,21 +13,45 @@ import (
 	"github.com/jerry-enebeli/blnk/config"
 )
 
+// Declare a package-level variable to hold the singleton instance.
+// Ensure the instance is not accessible outside the package.
+var instance *Datasource
+var once sync.Once
+
 type Datasource struct {
 	Conn  *sql.DB
 	Cache cache.Cache
 }
 
 func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
-	con, err := ConnectDB(configuration.DataSource.Dns)
+	con, err := GetDBConnection(configuration)
 	if err != nil {
 		return nil, err
 	}
-	newCache, err := cache.NewCache()
+	return con, nil
+}
+
+// GetDBConnection provides a global access point to the instance and initializes it if it's not already.
+func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
+	var err error
+	once.Do(func() {
+		con, errConn := ConnectDB(configuration.DataSource.Dns)
+		if errConn != nil {
+			err = errConn
+			return
+		}
+		// Assuming cache initialization is uncommented and properly implemented.
+		//newCache, errCache := cache.NewCache()
+		//if errCache != nil {
+		//	err = errCache
+		//	return
+		//}
+		instance = &Datasource{Conn: con, Cache: nil} // or Cache: newCache if cache is used
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &Datasource{Conn: con, Cache: newCache}, nil
+	return instance, nil
 }
 
 func ConnectDB(dns string) (*sql.DB, error) {

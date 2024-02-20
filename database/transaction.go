@@ -230,56 +230,6 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 	return transactions, nil
 }
 
-func (d Datasource) GetScheduledTransactions() ([]model.Transaction, error) {
-	// Get the current time in the database's timezone (assuming the database uses UTC)
-	currentTime := time.Now()
-
-	// Query transactions with scheduled_for equal to the current time
-	rows, err := d.Conn.Query(`
-		SELECT transaction_id, tag, reference, amount, currency,payment_method, description, drcr, status, ledger_id, balance_id,
-			credit_balance_before, debit_balance_before, credit_balance_after, debit_balance_after,
-			balance_before, balance_after, created_at, meta_data,scheduled_for
-		FROM transactions
-		WHERE scheduled_for <= $1 AND status = $2
-	`, currentTime, "SCHEDULED")
-
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	// Create a slice to store scheduled transactions
-	var scheduledTransactions []model.Transaction
-
-	// Iterate through the result set
-	for rows.Next() {
-		// Create a transaction instance
-		txn := &model.Transaction{}
-
-		// Scan the database row into the transaction instance (similar to your GetTransaction code)
-		var metaDataJSON []byte
-		err := rows.Scan(&txn.TransactionID, &txn.Tag, &txn.Reference, &txn.Amount, &txn.Currency, &txn.PaymentMethod, &txn.Description, &txn.DRCR,
-			&txn.Status, &txn.LedgerID, &txn.BalanceID, &txn.CreditBalanceBefore, &txn.DebitBalanceBefore,
-			&txn.CreditBalanceAfter, &txn.DebitBalanceAfter, &txn.BalanceBefore, &txn.BalanceAfter,
-			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor)
-
-		if err != nil {
-			return nil, err
-		}
-
-		// Convert metadata from JSONB to map
-		err = json.Unmarshal(metaDataJSON, &txn.MetaData)
-		if err != nil {
-			return nil, err
-		}
-
-		// Append the scheduled transaction to the slice
-		scheduledTransactions = append(scheduledTransactions, *txn)
-	}
-
-	return scheduledTransactions, nil
-}
-
 func (d Datasource) GetNextQueuedTransaction() (*model.Transaction, error) {
 	// Start a transaction
 	tx, err := d.Conn.Begin()

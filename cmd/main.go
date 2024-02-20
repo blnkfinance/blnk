@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type wLite struct {
+type Blnk struct {
 	cmd *cobra.Command
 }
 
@@ -35,7 +35,7 @@ func preRun(rootcmd *cobra.Command, args []string) {
 	log.Println("config loaded ✅")
 }
 
-func NewCLI() *wLite {
+func NewCLI() *Blnk {
 	var configFile string
 
 	var rootCmd = &cobra.Command{
@@ -46,10 +46,11 @@ func NewCLI() *wLite {
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "./blnk.json", "Configuration file for wallet lite")
 	rootCmd.PersistentPreRun = preRun
 	rootCmd.AddCommand(serverCommands())
-	return &wLite{cmd: rootCmd}
+	rootCmd.AddCommand(workerCommands())
+	return &Blnk{cmd: rootCmd}
 }
 
-func (w wLite) executeCLI() {
+func (w Blnk) executeCLI() {
 	if err := w.cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -64,4 +65,5 @@ func main() {
 	if err != nil {
 		log.Println(err)
 	}
+
 }

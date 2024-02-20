@@ -29,7 +29,7 @@ func applyExternalAccount(account *model.Account) error {
 	}
 
 	// Check if automatic account number generation is enabled in the configuration.
-	if cnf.AccountNumberGeneration.EnableAutoGeneration {
+	if cnf.AccountNumberGeneration.EnableAutoGeneration && account.Number == "" {
 		req, err := http.NewRequest("GET", cnf.AccountNumberGeneration.HttpService.Url, nil)
 		if err != nil {
 			return err

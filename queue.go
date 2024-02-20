@@ -2,192 +2,58 @@ package blnk
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
-	"os"
-	"sync"
+	"time"
 
-	"github.com/jerry-enebeli/blnk/model"
-
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/jerry-enebeli/blnk/config"
+
+	"github.com/hibiken/asynq"
+	"github.com/jerry-enebeli/blnk/model"
 )
 
-var (
-	producerInstance *kafka.Producer
-	consumerInstance *kafka.Consumer
-	mutex            sync.Mutex
-	producerConfig   *kafka.ConfigMap
-	consumerConfig   *kafka.ConfigMap
-)
-
-func getProducer(config *kafka.ConfigMap) (*kafka.Producer, error) {
-	if producerInstance != nil {
-		return producerInstance, nil
-	}
-
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	if producerInstance == nil {
-		p, err := kafka.NewProducer(config)
-		if err != nil {
-			return nil, err
-		}
-		producerInstance = p
-	}
-
-	return producerInstance, nil
+type Queue struct {
+	client    *asynq.Client
+	inspector *asynq.Inspector
 }
 
-func getConsumer(config *kafka.ConfigMap) (*kafka.Consumer, error) {
-	if consumerInstance != nil {
-		return consumerInstance, nil
-	}
-
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	if consumerInstance == nil {
-		c, err := kafka.NewConsumer(config)
-		if err != nil {
-			return nil, err
-		}
-		consumerInstance = c
-	}
-
-	return consumerInstance, nil
+type TransactionTypePayload struct {
+	Data model.Transaction
 }
 
-func initKafkaConfigs() {
-	cnf, err := config.Fetch()
-	if err != nil {
-		return
-	}
-	producerConfig = &kafka.ConfigMap{
-		"bootstrap.servers":  cnf.ConfluentKafka.Server,
-		"sasl.mechanisms":    "PLAIN",
-		"session.timeout.ms": 45000,
-		"sasl.password":      cnf.ConfluentKafka.SecretKey,
-		"sasl.username":      cnf.ConfluentKafka.ApiKey,
-		"security.protocol":  "SASL_SSL",
-		"acks":               "all",
-	}
-
-	consumerConfig = &kafka.ConfigMap{
-		"bootstrap.servers":  cnf.ConfluentKafka.Server,
-		"sasl.mechanisms":    "PLAIN",
-		"session.timeout.ms": 45000,
-		"sasl.password":      cnf.ConfluentKafka.SecretKey,
-		"sasl.username":      cnf.ConfluentKafka.ApiKey,
-		"security.protocol":  "SASL_SSL",
-		"group.id":           "blnk-transactions",
-		"auto.offset.reset":  "earliest",
+func NewQueue(conf *config.Configuration) *Queue {
+	client := asynq.NewClient(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
+	return &Queue{
+		client:    client,
+		inspector: inspector,
 	}
 }
 
-func readConfig() kafka.ConfigMap {
-	if producerConfig == nil {
-		initKafkaConfigs()
-	}
-	return *producerConfig
-
-}
-
-func enqueueKafka(transaction model.Transaction) error {
-	readConfig()
-	topic, err := getQueueName()
+func (q *Queue) Enqueue(transaction model.Transaction, l *Blnk) error {
+	payload, err := json.Marshal(transaction)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
-	p, err := getProducer(producerConfig)
+	task := q.geTask(transaction, payload)
+	if !transaction.ScheduledFor.IsZero() {
+		task = q.getScheduledTasked(transaction, payload)
+	}
+
+	info, err := q.client.Enqueue(task)
 	if err != nil {
-		return err
+		log.Println("here", err, info)
 	}
-
-	txnJSON, err := transaction.ToJSON()
-	if err != nil {
-		return err
-	}
-
-	err = p.Produce(&kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-		Key:            []byte(transaction.BalanceID), //ensures all transactions belonging to a balance goes to the same partition. this way they are consumed together and in sequence
-		Value:          txnJSON,
-	}, nil)
-
-	if err != nil {
-		return err
-	}
-
-	// Go-routine to handle message delivery reports and
-	// possibly other event types (errors, stats, etc)
-	go func() {
-		for e := range p.Events() {
-			switch ev := e.(type) {
-			case *kafka.Message:
-				if ev.TopicPartition.Error != nil {
-					fmt.Printf("Failed to deliver message: %v\n", ev.TopicPartition)
-				} else {
-					fmt.Printf("Produced event to topic %s: key = %-10s value = %s\n",
-						*ev.TopicPartition.Topic, string(ev.Key), string(ev.Value))
-				}
-			}
-		}
-	}()
+	log.Printf(" [*] Successfully enqueued task: %+v", transaction.TransactionID)
 
 	return nil
 }
 
-func Enqueue(transaction model.Transaction, l *Blnk) error {
-	cnf, err := config.Fetch()
-	if err != nil {
-		return err
-	}
-	if cnf.Queue.Queue == "kafka" {
-		err := enqueueKafka(transaction)
-		if err != nil {
-			return err
-		}
-	} else if cnf.Queue.Queue == "db" {
-		err := l.UpdateTransactionStatus(transaction.TransactionID, STATUS_QUEUED)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+func (q *Queue) geTask(transaction model.Transaction, payload []byte) *asynq.Task {
+	return asynq.NewTask("new:transaction", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID))
 }
 
-func dequeueKafka(messageChan chan model.Transaction) error {
-	readConfig()
-	c, err := getConsumer(consumerConfig)
-	if err != nil {
-		fmt.Printf("Failed to create consumer: %s", err)
-	}
-	topic, err := getQueueName()
-	if err != nil {
-		log.Printf("Error: Error getting queue name: %v", err)
-	}
-	err = c.SubscribeTopics([]string{topic}, nil)
-	if err != nil {
-		return err
-	}
-	for {
-		ev := c.Poll(100)
-		switch e := ev.(type) {
-		case *kafka.Message:
-			var transaction model.Transaction
-			err := json.Unmarshal(e.Value, &transaction)
-			if err != nil {
-				return err
-			}
-			messageChan <- transaction
-		case kafka.Error:
-			fmt.Fprintf(os.Stderr, "%% Error: %v\n", e)
-		default:
-			//fmt.Printf("Ignored %v\n", e)
-		}
-	}
+func (q *Queue) getScheduledTasked(transaction model.Transaction, payload []byte) *asynq.Task {
+	return asynq.NewTask("new:transaction", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
 }
 
 // dequeueDB fetches queued transactions from db
@@ -198,7 +64,6 @@ func dequeueDB(messageChan chan model.Transaction, l Blnk) error {
 		if err != nil {
 			return err
 		}
-
 		if transaction != nil {
 			messageChan <- *transaction
 		}
@@ -207,20 +72,9 @@ func dequeueDB(messageChan chan model.Transaction, l Blnk) error {
 }
 
 func Dequeue(messageChan chan model.Transaction, l Blnk) error {
-	cnf, err := config.Fetch()
+	err := dequeueDB(messageChan, l)
 	if err != nil {
 		return err
-	}
-	if cnf.Queue.Queue == "db" {
-		err := dequeueDB(messageChan, l)
-		if err != nil {
-			return err
-		}
-	} else if cnf.Queue.Queue == "kafka" {
-		err := dequeueKafka(messageChan)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }

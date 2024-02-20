@@ -23,7 +23,6 @@ type transaction interface {
 		TotalAmount int64 `json:"total_amount"`
 	}, error)
 	GetAllTransactions() ([]model.Transaction, error)
-	GetScheduledTransactions() ([]model.Transaction, error)
 	GetNextQueuedTransaction() (*model.Transaction, error)
 }
 

@@ -72,7 +72,7 @@ func prepareAccountQueries(queryBuilder strings.Builder, include []string) strin
 		selectFields = append(selectFields,
 			"b.balance_id", "b.balance", "b.credit_balance", "b.debit_balance",
 			"b.currency", "b.currency_multiplier", "b.ledger_id",
-			"b.identity_id", "b.created_at", "b.meta_data")
+			"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data")
 	}
 
 	if contains(include, "identity") {

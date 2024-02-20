@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  server:
+    build: .
+    restart: on-failure
+    ports:
+      - "5001:5001"
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./blnk.json:/blnk.json
+
+  worker:
+    build: .
+    entrypoint: [ "./blnk", "workers"]
+    volumes:
+      - ./blnk.json:/blnk.json
+    restart: on-failure
+    depends_on:
+      - redis
+      - postgres
+
+
+  redis:
+    image: redis:7.2.4
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:latest
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: blnk
+    volumes:
+      - blnk_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+
+volumes:
+  blnk_pg_data:

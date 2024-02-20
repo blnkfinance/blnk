@@ -1,0 +1,4646 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Blnk",
+    "contact": {},
+    "version": "1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5001",
+      "variables": {}
+    }
+  ],
+  "paths": {
+    "/ledgers": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Create ledger",
+        "operationId": "Createledger",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateledgerRequest"
+                  },
+                  {
+                    "example": {
+                      "name": "Customer wallets Ledger",
+                      "meta_data": {
+                        "project_owner": "Blnk Tech"
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "name": "Customer wallets Ledger",
+                "meta_data": {
+                  "project_owner": "Blnk Tech"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:28:03 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "128"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Createledger"
+                    },
+                    {
+                      "example": {
+                        "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "name": "Customer wallets Ledger",
+                        "created_at": "2024-02-20T05:28:03.558281542Z"
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "name": "Customer wallets Ledger",
+                  "created_at": "2024-02-20T05:28:03.558281542Z"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/identities": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Create Identity",
+        "operationId": "CreateIdentity",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateIdentityRequest"
+                  },
+                  {
+                    "example": {
+                      "identity_type": "organization",
+                      "name": "Blnk",
+                      "category": "fintech",
+                      "street": "10 Aso Villa Way",
+                      "country": "Nigeria",
+                      "state": "Lagos",
+                      "post_code": "101001",
+                      "city": "Lagos",
+                      "created_at": "2023-10-16T10:00:00Z",
+                      "meta_data": {
+                        "verified": true,
+                        "reference": "XYZ123456789"
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "identity_type": "organization",
+                "name": "Blnk",
+                "category": "fintech",
+                "street": "10 Aso Villa Way",
+                "country": "Nigeria",
+                "state": "Lagos",
+                "post_code": "101001",
+                "city": "Lagos",
+                "created_at": "2023-10-16T10:00:00Z",
+                "meta_data": {
+                  "verified": true,
+                  "reference": "XYZ123456789"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:27:44 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "479"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateIdentity"
+                    },
+                    {
+                      "example": {
+                        "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                        "identity_type": "organization",
+                        "organization_name": "",
+                        "category": "fintech",
+                        "first_name": "",
+                        "last_name": "",
+                        "other_names": "",
+                        "gender": "",
+                        "dob": "0001-01-01T00:00:00Z",
+                        "email_address": "",
+                        "phone_number": "",
+                        "nationality": "",
+                        "street": "10 Aso Villa Way",
+                        "country": "Nigeria",
+                        "state": "Lagos",
+                        "post_code": "101001",
+                        "city": "Lagos",
+                        "created_at": "2024-02-20T05:27:44.748526423Z",
+                        "meta_data": {
+                          "reference": "XYZ123456789",
+                          "verified": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                  "identity_type": "organization",
+                  "organization_name": "",
+                  "category": "fintech",
+                  "first_name": "",
+                  "last_name": "",
+                  "other_names": "",
+                  "gender": "",
+                  "dob": "0001-01-01T00:00:00Z",
+                  "email_address": "",
+                  "phone_number": "",
+                  "nationality": "",
+                  "street": "10 Aso Villa Way",
+                  "country": "Nigeria",
+                  "state": "Lagos",
+                  "post_code": "101001",
+                  "city": "Lagos",
+                  "created_at": "2024-02-20T05:27:44.748526423Z",
+                  "meta_data": {
+                    "reference": "XYZ123456789",
+                    "verified": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/identities/{id}": {
+      "put": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Update Identity",
+        "operationId": "UpdateIdentity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UpdateIdentityRequest"
+                  },
+                  {
+                    "example": {
+                      "identity_type": "individual",
+                      "first_name": "Chijioke",
+                      "last_name": "Adeola",
+                      "other_names": "Emeka",
+                      "gender": "male",
+                      "dob": "1990-01-01T00:00:00Z",
+                      "email_address": "chijioke.adeola@gmail.com",
+                      "phone_number": "+2347012345678",
+                      "nationality": "Nigerian",
+                      "street": "10 Aso Villa Way",
+                      "country": "Nigeria",
+                      "state": "Lagos",
+                      "post_code": "101001",
+                      "city": "Lagos",
+                      "created_at": "2023-10-16T10:00:00Z",
+                      "meta_data": {
+                        "verified": true,
+                        "reference": "XYZ123456789"
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "identity_type": "individual",
+                "first_name": "Chijioke",
+                "last_name": "Adeola",
+                "other_names": "Emeka",
+                "gender": "male",
+                "dob": "1990-01-01T00:00:00Z",
+                "email_address": "chijioke.adeola@gmail.com",
+                "phone_number": "+2347012345678",
+                "nationality": "Nigerian",
+                "street": "10 Aso Villa Way",
+                "country": "Nigeria",
+                "state": "Lagos",
+                "post_code": "101001",
+                "city": "Lagos",
+                "created_at": "2023-10-16T10:00:00Z",
+                "meta_data": {
+                  "verified": true,
+                  "reference": "XYZ123456789"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:28:19 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "43"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/UpdateIdentity"
+                    },
+                    {
+                      "example": {
+                        "message": "Identity updated successfully"
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "message": "Identity updated successfully"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      },
+      "get": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Get Identity",
+        "operationId": "GetIdentity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:28:41 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "530"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GetIdentity"
+                    },
+                    {
+                      "example": {
+                        "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                        "identity_type": "individual",
+                        "organization_name": "",
+                        "category": "",
+                        "first_name": "Chijioke",
+                        "last_name": "Adeola",
+                        "other_names": "Emeka",
+                        "gender": "male",
+                        "dob": "1990-01-01T00:00:00Z",
+                        "email_address": "chijioke.adeola@gmail.com",
+                        "phone_number": "+2347012345678",
+                        "nationality": "Nigerian",
+                        "street": "10 Aso Villa Way",
+                        "country": "Nigeria",
+                        "state": "Lagos",
+                        "post_code": "101001",
+                        "city": "Lagos",
+                        "created_at": "2023-10-16T10:00:00Z",
+                        "meta_data": {
+                          "reference": "XYZ123456789",
+                          "verified": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                  "identity_type": "individual",
+                  "organization_name": "",
+                  "category": "",
+                  "first_name": "Chijioke",
+                  "last_name": "Adeola",
+                  "other_names": "Emeka",
+                  "gender": "male",
+                  "dob": "1990-01-01T00:00:00Z",
+                  "email_address": "chijioke.adeola@gmail.com",
+                  "phone_number": "+2347012345678",
+                  "nationality": "Nigerian",
+                  "street": "10 Aso Villa Way",
+                  "country": "Nigeria",
+                  "state": "Lagos",
+                  "post_code": "101001",
+                  "city": "Lagos",
+                  "created_at": "2023-10-16T10:00:00Z",
+                  "meta_data": {
+                    "reference": "XYZ123456789",
+                    "verified": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/balances": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Create Balance",
+        "operationId": "CreateBalance",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateBalanceRequest"
+                  },
+                  {
+                    "example": {
+                      "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                      "currency": "NGN"
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                "currency": "NGN"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:33:01 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "282"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateBalance"
+                    },
+                    {
+                      "example": {
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "balance": 0,
+                        "credit_balance": 0,
+                        "debit_balance": 0,
+                        "currency": "NGN",
+                        "currency_multiplier": 0,
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "identity_id": "",
+                        "created_at": "2024-02-20T05:33:01.311600208Z",
+                        "meta_data": null
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "balance": 0,
+                  "credit_balance": 0,
+                  "debit_balance": 0,
+                  "currency": "NGN",
+                  "currency_multiplier": 0,
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "identity_id": "",
+                  "created_at": "2024-02-20T05:33:01.311600208Z",
+                  "meta_data": null
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/accounts": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Create Account",
+        "operationId": "CreateAccount",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateAccountRequest"
+                  },
+                  {
+                    "example": {
+                      "bank_name": "Bknk bank",
+                      "number": "30888334",
+                      "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                      "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "bank_name": "Bknk bank",
+                "number": "30888334",
+                "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:35:55 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "423"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateAccount"
+                    },
+                    {
+                      "example": {
+                        "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+                        "name": "Chijioke Adeola",
+                        "number": "294364850431",
+                        "bank_name": "Blnk Bank",
+                        "currency": "NGN",
+                        "created_at": "2024-02-20T05:35:55.720731136Z",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "meta_data": null,
+                        "ledger": null,
+                        "balance": null,
+                        "identity": null
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+                  "name": "Chijioke Adeola",
+                  "number": "294364850431",
+                  "bank_name": "Blnk Bank",
+                  "currency": "NGN",
+                  "created_at": "2024-02-20T05:35:55.720731136Z",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "meta_data": null,
+                  "ledger": null,
+                  "balance": null,
+                  "identity": null
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/accounts/{id}": {
+      "put": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Update Account",
+        "operationId": "UpdateAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UpdateAccountRequest"
+                  },
+                  {
+                    "example": {
+                      "bank_name": "Bknk bank MFB",
+                      "number": "30888334",
+                      "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                      "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "bank_name": "Bknk bank MFB",
+                "number": "30888334",
+                "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:35:55 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "423"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateAccount"
+                    },
+                    {
+                      "example": {
+                        "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+                        "name": "Chijioke Adeola",
+                        "number": "294364850431",
+                        "bank_name": "Blnk Bank",
+                        "currency": "NGN",
+                        "created_at": "2024-02-20T05:35:55.720731136Z",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "meta_data": null,
+                        "ledger": null,
+                        "balance": null,
+                        "identity": null
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+                  "name": "Chijioke Adeola",
+                  "number": "294364850431",
+                  "bank_name": "Blnk Bank",
+                  "currency": "NGN",
+                  "created_at": "2024-02-20T05:35:55.720731136Z",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "meta_data": null,
+                  "ledger": null,
+                  "balance": null,
+                  "identity": null
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      },
+      "get": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Get Account",
+        "operationId": "GetAccount",
+        "parameters": [
+          {
+            "name": "include",
+            "in": "query",
+            "description": "",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "example": "identity"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:50:24 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "1343"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GetAccount"
+                    },
+                    {
+                      "example": {
+                        "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+                        "name": "Chijioke Adeola",
+                        "number": "294364850431",
+                        "bank_name": "Blnk Bank",
+                        "currency": "NGN",
+                        "created_at": "0001-01-01T00:00:00Z",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "meta_data": {
+                          "reference": "XYZ123456789",
+                          "verified": true
+                        },
+                        "ledger": {
+                          "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                          "name": "Customer wallets Ledger",
+                          "created_at": "2024-02-20T05:28:03.563132Z"
+                        },
+                        "balance": {
+                          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                          "balance": 30300,
+                          "credit_balance": 30600,
+                          "debit_balance": 300,
+                          "currency": "NGN",
+                          "currency_multiplier": 1,
+                          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                          "identity_id": "",
+                          "created_at": "2024-02-20T05:33:01.3116Z",
+                          "meta_data": null
+                        },
+                        "identity": {
+                          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                          "identity_type": "individual",
+                          "organization_name": "",
+                          "category": "",
+                          "first_name": "Chijioke",
+                          "last_name": "Adeola",
+                          "other_names": "Emeka",
+                          "gender": "male",
+                          "dob": "1990-01-01T00:00:00Z",
+                          "email_address": "chijioke.adeola@gmail.com",
+                          "phone_number": "+2347012345678",
+                          "nationality": "Nigerian",
+                          "street": "10 Aso Villa Way",
+                          "country": "Nigeria",
+                          "state": "Lagos",
+                          "post_code": "101001",
+                          "city": "Lagos",
+                          "created_at": "2023-10-16T10:00:00Z",
+                          "meta_data": null
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+                  "name": "Chijioke Adeola",
+                  "number": "294364850431",
+                  "bank_name": "Blnk Bank",
+                  "currency": "NGN",
+                  "created_at": "0001-01-01T00:00:00Z",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "meta_data": {
+                    "reference": "XYZ123456789",
+                    "verified": true
+                  },
+                  "ledger": {
+                    "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                    "name": "Customer wallets Ledger",
+                    "created_at": "2024-02-20T05:28:03.563132Z"
+                  },
+                  "balance": {
+                    "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                    "balance": 30300,
+                    "credit_balance": 30600,
+                    "debit_balance": 300,
+                    "currency": "NGN",
+                    "currency_multiplier": 1,
+                    "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                    "identity_id": "",
+                    "created_at": "2024-02-20T05:33:01.3116Z",
+                    "meta_data": null
+                  },
+                  "identity": {
+                    "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+                    "identity_type": "individual",
+                    "organization_name": "",
+                    "category": "",
+                    "first_name": "Chijioke",
+                    "last_name": "Adeola",
+                    "other_names": "Emeka",
+                    "gender": "male",
+                    "dob": "1990-01-01T00:00:00Z",
+                    "email_address": "chijioke.adeola@gmail.com",
+                    "phone_number": "+2347012345678",
+                    "nationality": "Nigerian",
+                    "street": "10 Aso Villa Way",
+                    "country": "Nigeria",
+                    "state": "Lagos",
+                    "post_code": "101001",
+                    "city": "Lagos",
+                    "created_at": "2023-10-16T10:00:00Z",
+                    "meta_data": null
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/balance-monitors": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Create Balance Monitor",
+        "operationId": "CreateBalanceMonitor",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateBalanceMonitorRequest"
+                  },
+                  {
+                    "example": {
+                      "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                      "condition": {
+                        "field": "debit_balance",
+                        "operator": ">",
+                        "value": 100000
+                      },
+                      "call_back_url": "https://api.myapp.com/balancemonitor"
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                "condition": {
+                  "field": "debit_balance",
+                  "operator": ">",
+                  "value": 100000
+                },
+                "call_back_url": "https://api.myapp.com/balancemonitor"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:56:58 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "268"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateBalanceMonitor"
+                    },
+                    {
+                      "example": {
+                        "monitor_id": "mon_e0e77b0c-4985-472a-9bf5-76a48b0259b0",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "condition": {
+                          "field": "debit_balance",
+                          "operator": ">",
+                          "value": 100000
+                        },
+                        "description": "",
+                        "call_back_url": "https://api.myapp.com/balancemonitor",
+                        "created_at": "2024-02-20T05:56:58.257315054Z"
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "monitor_id": "mon_e0e77b0c-4985-472a-9bf5-76a48b0259b0",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "condition": {
+                    "field": "debit_balance",
+                    "operator": ">",
+                    "value": 100000
+                  },
+                  "description": "",
+                  "call_back_url": "https://api.myapp.com/balancemonitor",
+                  "created_at": "2024-02-20T05:56:58.257315054Z"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/balance-monitors/{id}": {
+      "put": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Update Balance Monitor",
+        "operationId": "UpdateBalanceMonitor",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "mon_da573822-902c-4349-86c9-2c02ab697c6e"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UpdateBalanceMonitorRequest"
+                  },
+                  {
+                    "example": {
+                      "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+                      "condition": {
+                        "field": "balance",
+                        "operator": "=",
+                        "value": 10000000
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+                "condition": {
+                  "field": "balance",
+                  "operator": "=",
+                  "value": 10000000
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {}
+          }
+        },
+        "deprecated": false
+      },
+      "get": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Get Balance Monitor",
+        "operationId": "GetBalanceMonitor",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "mon_e0e77b0c-4985-472a-9bf5-76a48b0259b0"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:59:11 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "265"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GetBalanceMonitor"
+                    },
+                    {
+                      "example": {
+                        "monitor_id": "mon_e0e77b0c-4985-472a-9bf5-76a48b0259b0",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "condition": {
+                          "field": "debit_balance",
+                          "operator": ">",
+                          "value": 100000
+                        },
+                        "description": "",
+                        "call_back_url": "https://api.myapp.com/balancemonitor",
+                        "created_at": "2024-02-20T05:56:58.257315Z"
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "monitor_id": "mon_e0e77b0c-4985-472a-9bf5-76a48b0259b0",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "condition": {
+                    "field": "debit_balance",
+                    "operator": ">",
+                    "value": 100000
+                  },
+                  "description": "",
+                  "call_back_url": "https://api.myapp.com/balancemonitor",
+                  "created_at": "2024-02-20T05:56:58.257315Z"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/transactions": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Record Transaction",
+        "operationId": "RecordTransaction",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RecordTransactionRequest"
+                  },
+                  {
+                    "example": {
+                      "amount": 300,
+                      "tag": "hello",
+                      "reference": "ref1w",
+                      "drcr": "Credit",
+                      "currency": "NGN",
+                      "balance_id": "bln_9bccf1f3-0f37-4387-860b-0a81daff213f",
+                      "risk_tolerance_threshold": 0
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "amount": 300,
+                "tag": "hello",
+                "reference": "ref1w",
+                "drcr": "Credit",
+                "currency": "NGN",
+                "balance_id": "bln_9bccf1f3-0f37-4387-860b-0a81daff213f",
+                "risk_tolerance_threshold": 0
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:37:35 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "587"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/RecordTransaction"
+                    },
+                    {
+                      "example": {
+                        "id": "txn_844c23ef-6cca-45b6-9878-0189e02334f7",
+                        "tag": "hello",
+                        "reference": "ref1w",
+                        "amount": 300,
+                        "currency": "NGN",
+                        "payment_method": "",
+                        "description": "",
+                        "drcr": "Credit",
+                        "status": "QUEUED",
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "credit_balance_before": 0,
+                        "debit_balance_before": 0,
+                        "credit_balance_after": 300,
+                        "debit_balance_after": 0,
+                        "balance_before": 0,
+                        "balance_after": 300,
+                        "created_at": "2024-02-20T05:37:35.535621126Z",
+                        "scheduled_for": "0001-01-01T00:00:00Z",
+                        "risk_tolerance_threshold": 0,
+                        "risk_score": 0.0009,
+                        "group_ids": null
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "id": "txn_844c23ef-6cca-45b6-9878-0189e02334f7",
+                  "tag": "hello",
+                  "reference": "ref1w",
+                  "amount": 300,
+                  "currency": "NGN",
+                  "payment_method": "",
+                  "description": "",
+                  "drcr": "Credit",
+                  "status": "QUEUED",
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "credit_balance_before": 0,
+                  "debit_balance_before": 0,
+                  "credit_balance_after": 300,
+                  "debit_balance_after": 0,
+                  "balance_before": 0,
+                  "balance_after": 300,
+                  "created_at": "2024-02-20T05:37:35.535621126Z",
+                  "scheduled_for": "0001-01-01T00:00:00Z",
+                  "risk_tolerance_threshold": 0,
+                  "risk_score": 0.0009,
+                  "group_ids": null
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/refund-transaction/{id}": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Refund Transaction",
+        "operationId": "RefundTransaction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "txn_5bbbe4d3-2d82-4da1-8191-aaa491d025de"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:40:52 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "713"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/RefundTransaction"
+                    },
+                    {
+                      "example": {
+                        "id": "txn_043d4ac3-4caf-4149-9c0d-927ae637d83f",
+                        "tag": "Refund",
+                        "reference": "ref_70ffd90f-7bcf-43b8-90ba-70505c113b52",
+                        "amount": 300,
+                        "currency": "NGN",
+                        "payment_method": "",
+                        "description": "",
+                        "drcr": "Debit",
+                        "status": "APPLIED",
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "credit_balance_before": 600,
+                        "debit_balance_before": 0,
+                        "credit_balance_after": 600,
+                        "debit_balance_after": 300,
+                        "balance_before": 600,
+                        "balance_after": 300,
+                        "created_at": "2024-02-20T05:40:52.630481718Z",
+                        "scheduled_for": "0001-01-01T00:00:00Z",
+                        "risk_tolerance_threshold": 0,
+                        "risk_score": 0.03108,
+                        "meta_data": {
+                          "refunded_transaction_id": "txn_5bbbe4d3-2d82-4da1-8191-aaa491d025de"
+                        },
+                        "group_ids": null
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "id": "txn_043d4ac3-4caf-4149-9c0d-927ae637d83f",
+                  "tag": "Refund",
+                  "reference": "ref_70ffd90f-7bcf-43b8-90ba-70505c113b52",
+                  "amount": 300,
+                  "currency": "NGN",
+                  "payment_method": "",
+                  "description": "",
+                  "drcr": "Debit",
+                  "status": "APPLIED",
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "credit_balance_before": 600,
+                  "debit_balance_before": 0,
+                  "credit_balance_after": 600,
+                  "debit_balance_after": 300,
+                  "balance_before": 600,
+                  "balance_after": 300,
+                  "created_at": "2024-02-20T05:40:52.630481718Z",
+                  "scheduled_for": "0001-01-01T00:00:00Z",
+                  "risk_tolerance_threshold": 0,
+                  "risk_score": 0.03108,
+                  "meta_data": {
+                    "refunded_transaction_id": "txn_5bbbe4d3-2d82-4da1-8191-aaa491d025de"
+                  },
+                  "group_ids": null
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/event-mappers": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Create Event Mapper",
+        "operationId": "CreateEventMapper",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateEventMapperRequest"
+                  },
+                  {
+                    "example": {
+                      "name": "stripe webhook mapping",
+                      "mapping_instruction": {
+                        "amount": "{{data.amount}}",
+                        "reference": "{{data.reference}}",
+                        "currency": "{{data.currency}}"
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "name": "stripe webhook mapping",
+                "mapping_instruction": {
+                  "amount": "{{data.amount}}",
+                  "reference": "{{data.reference}}",
+                  "currency": "{{data.currency}}"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:41:43 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "249"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateEventMapper"
+                    },
+                    {
+                      "example": {
+                        "mapper_id": "map_49692487-f333-4449-81d4-8333b0d958ab",
+                        "name": "stripe webhook mapping",
+                        "created_at": "2024-02-20T05:41:43.551186797Z",
+                        "mapping_instruction": {
+                          "amount": "{{data.amount}}",
+                          "currency": "{{data.currency}}",
+                          "reference": "{{data.reference}}"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "mapper_id": "map_49692487-f333-4449-81d4-8333b0d958ab",
+                  "name": "stripe webhook mapping",
+                  "created_at": "2024-02-20T05:41:43.551186797Z",
+                  "mapping_instruction": {
+                    "amount": "{{data.amount}}",
+                    "currency": "{{data.currency}}",
+                    "reference": "{{data.reference}}"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/event-mappers/{id}": {
+      "put": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Update Event Mapper",
+        "operationId": "UpdateEventMapper",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UpdateEventMapperRequest"
+                  },
+                  {
+                    "example": {
+                      "name": "stripe webhook mapping",
+                      "mapping_instruction": {
+                        "amount": "{{data.amount}}",
+                        "reference": "{{data.reference}}",
+                        "currency": "{{data.currency}}"
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "name": "stripe webhook mapping",
+                "mapping_instruction": {
+                  "amount": "{{data.amount}}",
+                  "reference": "{{data.reference}}",
+                  "currency": "{{data.currency}}"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:41:43 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "249"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/UpdateEventMapper"
+                    },
+                    {
+                      "example": {
+                        "mapper_id": "map_49692487-f333-4449-81d4-8333b0d958ab",
+                        "name": "stripe webhook mapping",
+                        "created_at": "2024-02-20T05:41:43.551186797Z",
+                        "mapping_instruction": {
+                          "amount": "{{data.amount}}",
+                          "currency": "{{data.currency}}",
+                          "reference": "{{data.reference}}"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "mapper_id": "map_49692487-f333-4449-81d4-8333b0d958ab",
+                  "name": "stripe webhook mapping",
+                  "created_at": "2024-02-20T05:41:43.551186797Z",
+                  "mapping_instruction": {
+                    "amount": "{{data.amount}}",
+                    "currency": "{{data.currency}}",
+                    "reference": "{{data.reference}}"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/events": {
+      "post": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Create Event",
+        "operationId": "CreateEvent",
+        "parameters": [],
+        "requestBody": {
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateEventRequest"
+                  },
+                  {
+                    "example": {
+                      "mapper_id": "map_3db6f05a-8f5a-43e4-a91c-b5a6c5e7d5a1",
+                      "drcr": "Credit",
+                      "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+                      "data": {
+                        "event": "transfer.success",
+                        "data": {
+                          "amount": 30000,
+                          "currency": "NGN",
+                          "domain": "test",
+                          "failures": null,
+                          "id": 37272792,
+                          "integration": {
+                            "id": 463433,
+                            "is_live": true,
+                            "business_name": "Boom Boom Industries NG"
+                          },
+                          "reason": "Have fun...",
+                          "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+                          "source": "balance",
+                          "source_details": null,
+                          "status": "success",
+                          "titan_code": null,
+                          "transfer_code": "TRF_wpl1dem4967avzm",
+                          "transferred_at": null,
+                          "recipient": {
+                            "active": true,
+                            "currency": "NGN",
+                            "description": "",
+                            "domain": "test",
+                            "email": null,
+                            "id": 8690817,
+                            "integration": 463433,
+                            "metadata": null,
+                            "name": "Jack Sparrow",
+                            "recipient_code": "RCP_a8wkxiychzdzfgs",
+                            "type": "nuban",
+                            "is_deleted": false,
+                            "details": {
+                              "account_number": "0000000000",
+                              "account_name": null,
+                              "bank_code": "011",
+                              "bank_name": "First Bank of Nigeria"
+                            },
+                            "created_at": "2020-09-03T12:11:25.000Z",
+                            "updated_at": "2020-09-03T12:11:25.000Z"
+                          },
+                          "session": {
+                            "provider": null,
+                            "id": null
+                          },
+                          "created_at": "2020-10-26T12:28:57.000Z",
+                          "updated_at": "2020-10-26T12:28:57.000Z"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "example": {
+                "mapper_id": "map_3db6f05a-8f5a-43e4-a91c-b5a6c5e7d5a1",
+                "drcr": "Credit",
+                "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+                "data": {
+                  "event": "transfer.success",
+                  "data": {
+                    "amount": 30000,
+                    "currency": "NGN",
+                    "domain": "test",
+                    "failures": null,
+                    "id": 37272792,
+                    "integration": {
+                      "id": 463433,
+                      "is_live": true,
+                      "business_name": "Boom Boom Industries NG"
+                    },
+                    "reason": "Have fun...",
+                    "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+                    "source": "balance",
+                    "source_details": null,
+                    "status": "success",
+                    "titan_code": null,
+                    "transfer_code": "TRF_wpl1dem4967avzm",
+                    "transferred_at": null,
+                    "recipient": {
+                      "active": true,
+                      "currency": "NGN",
+                      "description": "",
+                      "domain": "test",
+                      "email": null,
+                      "id": 8690817,
+                      "integration": 463433,
+                      "metadata": null,
+                      "name": "Jack Sparrow",
+                      "recipient_code": "RCP_a8wkxiychzdzfgs",
+                      "type": "nuban",
+                      "is_deleted": false,
+                      "details": {
+                        "account_number": "0000000000",
+                        "account_name": null,
+                        "bank_code": "011",
+                        "bank_name": "First Bank of Nigeria"
+                      },
+                      "created_at": "2020-09-03T12:11:25.000Z",
+                      "updated_at": "2020-09-03T12:11:25.000Z"
+                    },
+                    "session": {
+                      "provider": null,
+                      "id": null
+                    },
+                    "created_at": "2020-10-26T12:28:57.000Z",
+                    "updated_at": "2020-10-26T12:28:57.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:42:41 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "645"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateEvent"
+                    },
+                    {
+                      "example": {
+                        "id": "txn_ea438725-e677-405c-9552-4c549837c622",
+                        "tag": "",
+                        "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+                        "amount": 30000,
+                        "currency": "NGN",
+                        "payment_method": "",
+                        "description": "",
+                        "drcr": "Credit",
+                        "status": "QUEUED",
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "credit_balance_before": 600,
+                        "debit_balance_before": 300,
+                        "credit_balance_after": 30600,
+                        "debit_balance_after": 300,
+                        "balance_before": 300,
+                        "balance_after": 30300,
+                        "created_at": "2024-02-20T05:42:41.686457754Z",
+                        "scheduled_for": "0001-01-01T00:00:00Z",
+                        "risk_tolerance_threshold": 0,
+                        "risk_score": 0.12020571428571429,
+                        "group_ids": null
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "id": "txn_ea438725-e677-405c-9552-4c549837c622",
+                  "tag": "",
+                  "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+                  "amount": 30000,
+                  "currency": "NGN",
+                  "payment_method": "",
+                  "description": "",
+                  "drcr": "Credit",
+                  "status": "QUEUED",
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "credit_balance_before": 600,
+                  "debit_balance_before": 300,
+                  "credit_balance_after": 30600,
+                  "debit_balance_after": 300,
+                  "balance_before": 300,
+                  "balance_after": 30300,
+                  "created_at": "2024-02-20T05:42:41.686457754Z",
+                  "scheduled_for": "0001-01-01T00:00:00Z",
+                  "risk_tolerance_threshold": 0,
+                  "risk_score": 0.12020571428571429,
+                  "group_ids": null
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/ledgers/{id}": {
+      "get": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Get Ledger",
+        "operationId": "GetLedger",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:43:29 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "125"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GetBalance"
+                    },
+                    {
+                      "example": {
+                        "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "name": "Customer wallets Ledger",
+                        "created_at": "2024-02-20T05:28:03.563132Z"
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "name": "Customer wallets Ledger",
+                  "created_at": "2024-02-20T05:28:03.563132Z"
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    },
+    "/balances/{id}": {
+      "get": {
+        "tags": [
+          "Misc"
+        ],
+        "summary": "Get Balance",
+        "operationId": "GetBalance",
+        "parameters": [
+          {
+            "name": "include",
+            "in": "query",
+            "description": "",
+            "required": true,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "example": "ledger"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "style": "simple",
+            "schema": {
+              "type": "string",
+              "example": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Date": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "Tue, 20 Feb 2024 05:38:01 GMT"
+                  }
+                }
+              },
+              "Content-Length": {
+                "content": {
+                  "text/plain": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "example": "416"
+                  }
+                }
+              }
+            },
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GetBalance1"
+                    },
+                    {
+                      "example": {
+                        "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                        "balance": 300,
+                        "credit_balance": 300,
+                        "debit_balance": 0,
+                        "currency": "NGN",
+                        "currency_multiplier": 1,
+                        "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                        "identity_id": "",
+                        "ledger": {
+                          "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                          "name": "Customer wallets Ledger",
+                          "created_at": "2024-02-20T05:28:03.563132Z"
+                        },
+                        "created_at": "2024-02-20T05:33:01.3116Z",
+                        "meta_data": null
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+                  "balance": 300,
+                  "credit_balance": 300,
+                  "debit_balance": 0,
+                  "currency": "NGN",
+                  "currency_multiplier": 1,
+                  "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                  "identity_id": "",
+                  "ledger": {
+                    "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+                    "name": "Customer wallets Ledger",
+                    "created_at": "2024-02-20T05:28:03.563132Z"
+                  },
+                  "created_at": "2024-02-20T05:33:01.3116Z",
+                  "meta_data": null
+                }
+              }
+            }
+          }
+        },
+        "deprecated": false
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateledgerRequest": {
+        "title": "CreateledgerRequest",
+        "required": [
+          "name",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "meta_data": {
+            "$ref": "#/components/schemas/MetaData"
+          }
+        },
+        "example": {
+          "name": "Customer wallets Ledger",
+          "meta_data": {
+            "project_owner": "Blnk Tech"
+          }
+        }
+      },
+      "MetaData": {
+        "title": "MetaData",
+        "required": [
+          "project_owner"
+        ],
+        "type": "object",
+        "properties": {
+          "project_owner": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "project_owner": "Blnk Tech"
+        }
+      },
+      "Createledger": {
+        "title": "Createledger",
+        "required": [
+          "id",
+          "name",
+          "created_at"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "name": "Customer wallets Ledger",
+          "created_at": "2024-02-20T05:28:03.558281542Z"
+        }
+      },
+      "CreateIdentityRequest": {
+        "title": "CreateIdentityRequest",
+        "required": [
+          "identity_type",
+          "name",
+          "category",
+          "street",
+          "country",
+          "state",
+          "post_code",
+          "city",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "identity_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "post_code": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "$ref": "#/components/schemas/MetaData1"
+          }
+        },
+        "example": {
+          "identity_type": "organization",
+          "name": "Blnk",
+          "category": "fintech",
+          "street": "10 Aso Villa Way",
+          "country": "Nigeria",
+          "state": "Lagos",
+          "post_code": "101001",
+          "city": "Lagos",
+          "created_at": "2023-10-16T10:00:00Z",
+          "meta_data": {
+            "verified": true,
+            "reference": "XYZ123456789"
+          }
+        }
+      },
+      "MetaData1": {
+        "title": "MetaData1",
+        "required": [
+          "verified",
+          "reference"
+        ],
+        "type": "object",
+        "properties": {
+          "verified": {
+            "type": "boolean"
+          },
+          "reference": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "verified": true,
+          "reference": "XYZ123456789"
+        }
+      },
+      "CreateIdentity": {
+        "title": "CreateIdentity",
+        "required": [
+          "identity_id",
+          "identity_type",
+          "organization_name",
+          "category",
+          "first_name",
+          "last_name",
+          "other_names",
+          "gender",
+          "dob",
+          "email_address",
+          "phone_number",
+          "nationality",
+          "street",
+          "country",
+          "state",
+          "post_code",
+          "city",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string"
+          },
+          "identity_type": {
+            "type": "string"
+          },
+          "organization_name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "first_name": {
+            "type": "string"
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "other_names": {
+            "type": "string"
+          },
+          "gender": {
+            "type": "string"
+          },
+          "dob": {
+            "type": "string"
+          },
+          "email_address": {
+            "type": "string"
+          },
+          "phone_number": {
+            "type": "string"
+          },
+          "nationality": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "post_code": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "$ref": "#/components/schemas/MetaData1"
+          }
+        },
+        "example": {
+          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+          "identity_type": "organization",
+          "organization_name": "",
+          "category": "fintech",
+          "first_name": "",
+          "last_name": "",
+          "other_names": "",
+          "gender": "",
+          "dob": "0001-01-01T00:00:00Z",
+          "email_address": "",
+          "phone_number": "",
+          "nationality": "",
+          "street": "10 Aso Villa Way",
+          "country": "Nigeria",
+          "state": "Lagos",
+          "post_code": "101001",
+          "city": "Lagos",
+          "created_at": "2024-02-20T05:27:44.748526423Z",
+          "meta_data": {
+            "reference": "XYZ123456789",
+            "verified": true
+          }
+        }
+      },
+      "UpdateIdentityRequest": {
+        "title": "UpdateIdentityRequest",
+        "required": [
+          "identity_type",
+          "first_name",
+          "last_name",
+          "other_names",
+          "gender",
+          "dob",
+          "email_address",
+          "phone_number",
+          "nationality",
+          "street",
+          "country",
+          "state",
+          "post_code",
+          "city",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "identity_type": {
+            "type": "string"
+          },
+          "first_name": {
+            "type": "string"
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "other_names": {
+            "type": "string"
+          },
+          "gender": {
+            "type": "string"
+          },
+          "dob": {
+            "type": "string"
+          },
+          "email_address": {
+            "type": "string"
+          },
+          "phone_number": {
+            "type": "string"
+          },
+          "nationality": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "post_code": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "$ref": "#/components/schemas/MetaData1"
+          }
+        },
+        "example": {
+          "identity_type": "individual",
+          "first_name": "Chijioke",
+          "last_name": "Adeola",
+          "other_names": "Emeka",
+          "gender": "male",
+          "dob": "1990-01-01T00:00:00Z",
+          "email_address": "chijioke.adeola@gmail.com",
+          "phone_number": "+2347012345678",
+          "nationality": "Nigerian",
+          "street": "10 Aso Villa Way",
+          "country": "Nigeria",
+          "state": "Lagos",
+          "post_code": "101001",
+          "city": "Lagos",
+          "created_at": "2023-10-16T10:00:00Z",
+          "meta_data": {
+            "verified": true,
+            "reference": "XYZ123456789"
+          }
+        }
+      },
+      "UpdateIdentity": {
+        "title": "UpdateIdentity",
+        "required": [
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "message": "Identity updated successfully"
+        }
+      },
+      "CreateBalanceRequest": {
+        "title": "CreateBalanceRequest",
+        "required": [
+          "ledger_id",
+          "currency"
+        ],
+        "type": "object",
+        "properties": {
+          "ledger_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "currency": "NGN"
+        }
+      },
+      "CreateBalance": {
+        "title": "CreateBalance",
+        "required": [
+          "balance_id",
+          "balance",
+          "credit_balance",
+          "debit_balance",
+          "currency",
+          "currency_multiplier",
+          "ledger_id",
+          "identity_id",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "balance_id": {
+            "type": "string"
+          },
+          "balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credit_balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_multiplier": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "balance": 0,
+          "credit_balance": 0,
+          "debit_balance": 0,
+          "currency": "NGN",
+          "currency_multiplier": 0,
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "identity_id": "",
+          "created_at": "2024-02-20T05:33:01.311600208Z",
+          "meta_data": null
+        }
+      },
+      "CreateAccountRequest": {
+        "title": "CreateAccountRequest",
+        "required": [
+          "bank_name",
+          "number",
+          "balance_id",
+          "identity_id"
+        ],
+        "type": "object",
+        "properties": {
+          "bank_name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "bank_name": "Bknk bank",
+          "number": "30888334",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+        }
+      },
+      "CreateAccount": {
+        "title": "CreateAccount",
+        "required": [
+          "account_id",
+          "name",
+          "number",
+          "bank_name",
+          "currency",
+          "created_at",
+          "balance_id",
+          "identity_id",
+          "ledger_id",
+          "meta_data",
+          "ledger",
+          "balance",
+          "identity"
+        ],
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "bank_name": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "meta_data": {
+            "type": "string",
+            "nullable": true
+          },
+          "ledger": {
+            "type": "string",
+            "nullable": true
+          },
+          "balance": {
+            "type": "string",
+            "nullable": true
+          },
+          "identity": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+          "name": "Chijioke Adeola",
+          "number": "294364850431",
+          "bank_name": "Blnk Bank",
+          "currency": "NGN",
+          "created_at": "2024-02-20T05:35:55.720731136Z",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "meta_data": null,
+          "ledger": null,
+          "balance": null,
+          "identity": null
+        }
+      },
+      "UpdateAccountRequest": {
+        "title": "UpdateAccountRequest",
+        "required": [
+          "bank_name",
+          "number",
+          "balance_id",
+          "identity_id"
+        ],
+        "type": "object",
+        "properties": {
+          "bank_name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "bank_name": "Bknk bank MFB",
+          "number": "30888334",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db"
+        }
+      },
+      "CreateBalanceMonitorRequest": {
+        "title": "CreateBalanceMonitorRequest",
+        "required": [
+          "balance_id",
+          "condition",
+          "call_back_url"
+        ],
+        "type": "object",
+        "properties": {
+          "balance_id": {
+            "type": "string"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/Condition"
+          },
+          "call_back_url": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "condition": {
+            "field": "debit_balance",
+            "operator": ">",
+            "value": 100000
+          },
+          "call_back_url": "https://api.myapp.com/balancemonitor"
+        }
+      },
+      "Condition": {
+        "title": "Condition",
+        "required": [
+          "field",
+          "operator",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "example": {
+          "field": "debit_balance",
+          "operator": ">",
+          "value": 100000
+        }
+      },
+      "CreateBalanceMonitor": {
+        "title": "CreateBalanceMonitor",
+        "required": [
+          "monitor_id",
+          "balance_id",
+          "condition",
+          "description",
+          "call_back_url",
+          "created_at"
+        ],
+        "type": "object",
+        "properties": {
+          "monitor_id": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/Condition"
+          },
+          "description": {
+            "type": "string"
+          },
+          "call_back_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "monitor_id": "mon_e0e77b0c-4985-472a-9bf5-76a48b0259b0",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "condition": {
+            "field": "debit_balance",
+            "operator": ">",
+            "value": 100000
+          },
+          "description": "",
+          "call_back_url": "https://api.myapp.com/balancemonitor",
+          "created_at": "2024-02-20T05:56:58.257315054Z"
+        }
+      },
+      "UpdateBalanceMonitorRequest": {
+        "title": "UpdateBalanceMonitorRequest",
+        "required": [
+          "balance_id",
+          "condition"
+        ],
+        "type": "object",
+        "properties": {
+          "balance_id": {
+            "type": "string"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/Condition"
+          }
+        },
+        "example": {
+          "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+          "condition": {
+            "field": "balance",
+            "operator": "=",
+            "value": 10000000
+          }
+        }
+      },
+      "RecordTransactionRequest": {
+        "title": "RecordTransactionRequest",
+        "required": [
+          "amount",
+          "tag",
+          "reference",
+          "drcr",
+          "currency",
+          "balance_id",
+          "risk_tolerance_threshold"
+        ],
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "drcr": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "risk_tolerance_threshold": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "example": {
+          "amount": 300,
+          "tag": "hello",
+          "reference": "ref1w",
+          "drcr": "Credit",
+          "currency": "NGN",
+          "balance_id": "bln_9bccf1f3-0f37-4387-860b-0a81daff213f",
+          "risk_tolerance_threshold": 0
+        }
+      },
+      "RecordTransaction": {
+        "title": "RecordTransaction",
+        "required": [
+          "id",
+          "tag",
+          "reference",
+          "amount",
+          "currency",
+          "payment_method",
+          "description",
+          "drcr",
+          "status",
+          "ledger_id",
+          "balance_id",
+          "credit_balance_before",
+          "debit_balance_before",
+          "credit_balance_after",
+          "debit_balance_after",
+          "balance_before",
+          "balance_after",
+          "created_at",
+          "scheduled_for",
+          "risk_tolerance_threshold",
+          "risk_score",
+          "group_ids"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "payment_method": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "drcr": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "credit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "scheduled_for": {
+            "type": "string"
+          },
+          "risk_tolerance_threshold": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "risk_score": {
+            "type": "number"
+          },
+          "group_ids": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "id": "txn_844c23ef-6cca-45b6-9878-0189e02334f7",
+          "tag": "hello",
+          "reference": "ref1w",
+          "amount": 300,
+          "currency": "NGN",
+          "payment_method": "",
+          "description": "",
+          "drcr": "Credit",
+          "status": "QUEUED",
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "credit_balance_before": 0,
+          "debit_balance_before": 0,
+          "credit_balance_after": 300,
+          "debit_balance_after": 0,
+          "balance_before": 0,
+          "balance_after": 300,
+          "created_at": "2024-02-20T05:37:35.535621126Z",
+          "scheduled_for": "0001-01-01T00:00:00Z",
+          "risk_tolerance_threshold": 0,
+          "risk_score": 0.0009,
+          "group_ids": null
+        }
+      },
+      "ScheduleTransactionRequest": {
+        "title": "ScheduleTransactionRequest",
+        "required": [
+          "amount",
+          "tag",
+          "reference",
+          "drcr",
+          "currency",
+          "balance_id",
+          "risk_tolerance_threshold",
+          "scheduled_for"
+        ],
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "drcr": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "risk_tolerance_threshold": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scheduled_for": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "amount": 300,
+          "tag": "hello",
+          "reference": "ref3",
+          "drcr": "Credit",
+          "currency": "NGN",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "risk_tolerance_threshold": 0,
+          "scheduled_for": "2025-10-06T12:00:00Z"
+        }
+      },
+      "ScheduleTransaction": {
+        "title": "ScheduleTransaction",
+        "required": [
+          "id",
+          "tag",
+          "reference",
+          "amount",
+          "currency",
+          "payment_method",
+          "description",
+          "drcr",
+          "status",
+          "ledger_id",
+          "balance_id",
+          "credit_balance_before",
+          "debit_balance_before",
+          "credit_balance_after",
+          "debit_balance_after",
+          "balance_before",
+          "balance_after",
+          "created_at",
+          "scheduled_for",
+          "risk_tolerance_threshold",
+          "risk_score",
+          "group_ids"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "payment_method": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "drcr": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "credit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "scheduled_for": {
+            "type": "string"
+          },
+          "risk_tolerance_threshold": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "risk_score": {
+            "type": "number"
+          },
+          "group_ids": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "id": "txn_24ad5917-841a-405f-bad3-500d4c7e566a",
+          "tag": "hello",
+          "reference": "ref3",
+          "amount": 300,
+          "currency": "NGN",
+          "payment_method": "",
+          "description": "",
+          "drcr": "Credit",
+          "status": "SCHEDULED",
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "credit_balance_before": 600,
+          "debit_balance_before": 0,
+          "credit_balance_after": 900,
+          "debit_balance_after": 0,
+          "balance_before": 600,
+          "balance_after": 900,
+          "created_at": "2024-02-20T05:39:59.416068221Z",
+          "scheduled_for": "2025-10-06T12:00:00Z",
+          "risk_tolerance_threshold": 0,
+          "risk_score": 0.00108,
+          "group_ids": null
+        }
+      },
+      "RefundTransaction": {
+        "title": "RefundTransaction",
+        "required": [
+          "id",
+          "tag",
+          "reference",
+          "amount",
+          "currency",
+          "payment_method",
+          "description",
+          "drcr",
+          "status",
+          "ledger_id",
+          "balance_id",
+          "credit_balance_before",
+          "debit_balance_before",
+          "credit_balance_after",
+          "debit_balance_after",
+          "balance_before",
+          "balance_after",
+          "created_at",
+          "scheduled_for",
+          "risk_tolerance_threshold",
+          "risk_score",
+          "meta_data",
+          "group_ids"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "payment_method": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "drcr": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "credit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "scheduled_for": {
+            "type": "string"
+          },
+          "risk_tolerance_threshold": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "risk_score": {
+            "type": "number"
+          },
+          "meta_data": {
+            "$ref": "#/components/schemas/MetaData4"
+          },
+          "group_ids": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "id": "txn_043d4ac3-4caf-4149-9c0d-927ae637d83f",
+          "tag": "Refund",
+          "reference": "ref_70ffd90f-7bcf-43b8-90ba-70505c113b52",
+          "amount": 300,
+          "currency": "NGN",
+          "payment_method": "",
+          "description": "",
+          "drcr": "Debit",
+          "status": "APPLIED",
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "credit_balance_before": 600,
+          "debit_balance_before": 0,
+          "credit_balance_after": 600,
+          "debit_balance_after": 300,
+          "balance_before": 600,
+          "balance_after": 300,
+          "created_at": "2024-02-20T05:40:52.630481718Z",
+          "scheduled_for": "0001-01-01T00:00:00Z",
+          "risk_tolerance_threshold": 0,
+          "risk_score": 0.03108,
+          "meta_data": {
+            "refunded_transaction_id": "txn_5bbbe4d3-2d82-4da1-8191-aaa491d025de"
+          },
+          "group_ids": null
+        }
+      },
+      "MetaData4": {
+        "title": "MetaData4",
+        "required": [
+          "refunded_transaction_id"
+        ],
+        "type": "object",
+        "properties": {
+          "refunded_transaction_id": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "refunded_transaction_id": "txn_5bbbe4d3-2d82-4da1-8191-aaa491d025de"
+        }
+      },
+      "CreateEventMapperRequest": {
+        "title": "CreateEventMapperRequest",
+        "required": [
+          "name",
+          "mapping_instruction"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "mapping_instruction": {
+            "$ref": "#/components/schemas/MappingInstruction"
+          }
+        },
+        "example": {
+          "name": "stripe webhook mapping",
+          "mapping_instruction": {
+            "amount": "{{data.amount}}",
+            "reference": "{{data.reference}}",
+            "currency": "{{data.currency}}"
+          }
+        }
+      },
+      "MappingInstruction": {
+        "title": "MappingInstruction",
+        "required": [
+          "amount",
+          "reference",
+          "currency"
+        ],
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "amount": "{{data.amount}}",
+          "reference": "{{data.reference}}",
+          "currency": "{{data.currency}}"
+        }
+      },
+      "CreateEventMapper": {
+        "title": "CreateEventMapper",
+        "required": [
+          "mapper_id",
+          "name",
+          "created_at",
+          "mapping_instruction"
+        ],
+        "type": "object",
+        "properties": {
+          "mapper_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "mapping_instruction": {
+            "$ref": "#/components/schemas/MappingInstruction"
+          }
+        },
+        "example": {
+          "mapper_id": "map_49692487-f333-4449-81d4-8333b0d958ab",
+          "name": "stripe webhook mapping",
+          "created_at": "2024-02-20T05:41:43.551186797Z",
+          "mapping_instruction": {
+            "amount": "{{data.amount}}",
+            "currency": "{{data.currency}}",
+            "reference": "{{data.reference}}"
+          }
+        }
+      },
+      "UpdateEventMapperRequest": {
+        "title": "UpdateEventMapperRequest",
+        "required": [
+          "name",
+          "mapping_instruction"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "mapping_instruction": {
+            "$ref": "#/components/schemas/MappingInstruction"
+          }
+        },
+        "example": {
+          "name": "stripe webhook mapping",
+          "mapping_instruction": {
+            "amount": "{{data.amount}}",
+            "reference": "{{data.reference}}",
+            "currency": "{{data.currency}}"
+          }
+        }
+      },
+      "UpdateEventMapper": {
+        "title": "UpdateEventMapper",
+        "required": [
+          "mapper_id",
+          "name",
+          "created_at",
+          "mapping_instruction"
+        ],
+        "type": "object",
+        "properties": {
+          "mapper_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "mapping_instruction": {
+            "$ref": "#/components/schemas/MappingInstruction"
+          }
+        },
+        "example": {
+          "mapper_id": "map_49692487-f333-4449-81d4-8333b0d958ab",
+          "name": "stripe webhook mapping",
+          "created_at": "2024-02-20T05:41:43.551186797Z",
+          "mapping_instruction": {
+            "amount": "{{data.amount}}",
+            "currency": "{{data.currency}}",
+            "reference": "{{data.reference}}"
+          }
+        }
+      },
+      "CreateEventRequest": {
+        "title": "CreateEventRequest",
+        "required": [
+          "mapper_id",
+          "drcr",
+          "balance_id",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "mapper_id": {
+            "type": "string"
+          },
+          "drcr": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Data"
+          }
+        },
+        "example": {
+          "mapper_id": "map_3db6f05a-8f5a-43e4-a91c-b5a6c5e7d5a1",
+          "drcr": "Credit",
+          "balance_id": "bln_c1750613-b4b0-4cde-9793-459165a8715f",
+          "data": {
+            "event": "transfer.success",
+            "data": {
+              "amount": 30000,
+              "currency": "NGN",
+              "domain": "test",
+              "failures": null,
+              "id": 37272792,
+              "integration": {
+                "id": 463433,
+                "is_live": true,
+                "business_name": "Boom Boom Industries NG"
+              },
+              "reason": "Have fun...",
+              "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+              "source": "balance",
+              "source_details": null,
+              "status": "success",
+              "titan_code": null,
+              "transfer_code": "TRF_wpl1dem4967avzm",
+              "transferred_at": null,
+              "recipient": {
+                "active": true,
+                "currency": "NGN",
+                "description": "",
+                "domain": "test",
+                "email": null,
+                "id": 8690817,
+                "integration": 463433,
+                "metadata": null,
+                "name": "Jack Sparrow",
+                "recipient_code": "RCP_a8wkxiychzdzfgs",
+                "type": "nuban",
+                "is_deleted": false,
+                "details": {
+                  "account_number": "0000000000",
+                  "account_name": null,
+                  "bank_code": "011",
+                  "bank_name": "First Bank of Nigeria"
+                },
+                "created_at": "2020-09-03T12:11:25.000Z",
+                "updated_at": "2020-09-03T12:11:25.000Z"
+              },
+              "session": {
+                "provider": null,
+                "id": null
+              },
+              "created_at": "2020-10-26T12:28:57.000Z",
+              "updated_at": "2020-10-26T12:28:57.000Z"
+            }
+          }
+        }
+      },
+      "Data": {
+        "title": "Data",
+        "required": [
+          "event",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Data1"
+          }
+        },
+        "example": {
+          "event": "transfer.success",
+          "data": {
+            "amount": 30000,
+            "currency": "NGN",
+            "domain": "test",
+            "failures": null,
+            "id": 37272792,
+            "integration": {
+              "id": 463433,
+              "is_live": true,
+              "business_name": "Boom Boom Industries NG"
+            },
+            "reason": "Have fun...",
+            "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+            "source": "balance",
+            "source_details": null,
+            "status": "success",
+            "titan_code": null,
+            "transfer_code": "TRF_wpl1dem4967avzm",
+            "transferred_at": null,
+            "recipient": {
+              "active": true,
+              "currency": "NGN",
+              "description": "",
+              "domain": "test",
+              "email": null,
+              "id": 8690817,
+              "integration": 463433,
+              "metadata": null,
+              "name": "Jack Sparrow",
+              "recipient_code": "RCP_a8wkxiychzdzfgs",
+              "type": "nuban",
+              "is_deleted": false,
+              "details": {
+                "account_number": "0000000000",
+                "account_name": null,
+                "bank_code": "011",
+                "bank_name": "First Bank of Nigeria"
+              },
+              "created_at": "2020-09-03T12:11:25.000Z",
+              "updated_at": "2020-09-03T12:11:25.000Z"
+            },
+            "session": {
+              "provider": null,
+              "id": null
+            },
+            "created_at": "2020-10-26T12:28:57.000Z",
+            "updated_at": "2020-10-26T12:28:57.000Z"
+          }
+        }
+      },
+      "Data1": {
+        "title": "Data1",
+        "required": [
+          "amount",
+          "currency",
+          "domain",
+          "failures",
+          "id",
+          "integration",
+          "reason",
+          "reference",
+          "source",
+          "source_details",
+          "status",
+          "titan_code",
+          "transfer_code",
+          "transferred_at",
+          "recipient",
+          "session",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "integration": {
+            "$ref": "#/components/schemas/Integration"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_details": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "titan_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "transfer_code": {
+            "type": "string"
+          },
+          "transferred_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/Recipient"
+          },
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "amount": 30000,
+          "currency": "NGN",
+          "domain": "test",
+          "failures": null,
+          "id": 37272792,
+          "integration": {
+            "id": 463433,
+            "is_live": true,
+            "business_name": "Boom Boom Industries NG"
+          },
+          "reason": "Have fun...",
+          "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+          "source": "balance",
+          "source_details": null,
+          "status": "success",
+          "titan_code": null,
+          "transfer_code": "TRF_wpl1dem4967avzm",
+          "transferred_at": null,
+          "recipient": {
+            "active": true,
+            "currency": "NGN",
+            "description": "",
+            "domain": "test",
+            "email": null,
+            "id": 8690817,
+            "integration": 463433,
+            "metadata": null,
+            "name": "Jack Sparrow",
+            "recipient_code": "RCP_a8wkxiychzdzfgs",
+            "type": "nuban",
+            "is_deleted": false,
+            "details": {
+              "account_number": "0000000000",
+              "account_name": null,
+              "bank_code": "011",
+              "bank_name": "First Bank of Nigeria"
+            },
+            "created_at": "2020-09-03T12:11:25.000Z",
+            "updated_at": "2020-09-03T12:11:25.000Z"
+          },
+          "session": {
+            "provider": null,
+            "id": null
+          },
+          "created_at": "2020-10-26T12:28:57.000Z",
+          "updated_at": "2020-10-26T12:28:57.000Z"
+        }
+      },
+      "Integration": {
+        "title": "Integration",
+        "required": [
+          "id",
+          "is_live",
+          "business_name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "is_live": {
+            "type": "boolean"
+          },
+          "business_name": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "id": 463433,
+          "is_live": true,
+          "business_name": "Boom Boom Industries NG"
+        }
+      },
+      "Recipient": {
+        "title": "Recipient",
+        "required": [
+          "active",
+          "currency",
+          "description",
+          "domain",
+          "email",
+          "id",
+          "integration",
+          "metadata",
+          "name",
+          "recipient_code",
+          "type",
+          "is_deleted",
+          "details",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "integration": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "metadata": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "recipient_code": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "is_deleted": {
+            "type": "boolean"
+          },
+          "details": {
+            "$ref": "#/components/schemas/Details"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "active": true,
+          "currency": "NGN",
+          "description": "",
+          "domain": "test",
+          "email": null,
+          "id": 8690817,
+          "integration": 463433,
+          "metadata": null,
+          "name": "Jack Sparrow",
+          "recipient_code": "RCP_a8wkxiychzdzfgs",
+          "type": "nuban",
+          "is_deleted": false,
+          "details": {
+            "account_number": "0000000000",
+            "account_name": null,
+            "bank_code": "011",
+            "bank_name": "First Bank of Nigeria"
+          },
+          "created_at": "2020-09-03T12:11:25.000Z",
+          "updated_at": "2020-09-03T12:11:25.000Z"
+        }
+      },
+      "Details": {
+        "title": "Details",
+        "required": [
+          "account_number",
+          "account_name",
+          "bank_code",
+          "bank_name"
+        ],
+        "type": "object",
+        "properties": {
+          "account_number": {
+            "type": "string"
+          },
+          "account_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_code": {
+            "type": "string"
+          },
+          "bank_name": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "account_number": "0000000000",
+          "account_name": null,
+          "bank_code": "011",
+          "bank_name": "First Bank of Nigeria"
+        }
+      },
+      "Session": {
+        "title": "Session",
+        "required": [
+          "provider",
+          "id"
+        ],
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "provider": null,
+          "id": null
+        }
+      },
+      "CreateEvent": {
+        "title": "CreateEvent",
+        "required": [
+          "id",
+          "tag",
+          "reference",
+          "amount",
+          "currency",
+          "payment_method",
+          "description",
+          "drcr",
+          "status",
+          "ledger_id",
+          "balance_id",
+          "credit_balance_before",
+          "debit_balance_before",
+          "credit_balance_after",
+          "debit_balance_after",
+          "balance_before",
+          "balance_after",
+          "created_at",
+          "scheduled_for",
+          "risk_tolerance_threshold",
+          "risk_score",
+          "group_ids"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "payment_method": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "drcr": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "credit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_before": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balance_after": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "scheduled_for": {
+            "type": "string"
+          },
+          "risk_tolerance_threshold": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "risk_score": {
+            "type": "number"
+          },
+          "group_ids": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "id": "txn_ea438725-e677-405c-9552-4c549837c622",
+          "tag": "",
+          "reference": "1jhbs3ozmen0k7y5e333feeme3rrr33ewwedffdew",
+          "amount": 30000,
+          "currency": "NGN",
+          "payment_method": "",
+          "description": "",
+          "drcr": "Credit",
+          "status": "QUEUED",
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "credit_balance_before": 600,
+          "debit_balance_before": 300,
+          "credit_balance_after": 30600,
+          "debit_balance_after": 300,
+          "balance_before": 300,
+          "balance_after": 30300,
+          "created_at": "2024-02-20T05:42:41.686457754Z",
+          "scheduled_for": "0001-01-01T00:00:00Z",
+          "risk_tolerance_threshold": 0,
+          "risk_score": 0.12020571428571429,
+          "group_ids": null
+        }
+      },
+      "GetBalance": {
+        "title": "GetBalance",
+        "required": [
+          "id",
+          "name",
+          "created_at"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "name": "Customer wallets Ledger",
+          "created_at": "2024-02-20T05:28:03.563132Z"
+        }
+      },
+      "GetBalance1": {
+        "title": "GetBalance1",
+        "required": [
+          "balance_id",
+          "balance",
+          "credit_balance",
+          "debit_balance",
+          "currency",
+          "currency_multiplier",
+          "ledger_id",
+          "identity_id",
+          "ledger",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "balance_id": {
+            "type": "string"
+          },
+          "balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credit_balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_multiplier": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "ledger": {
+            "$ref": "#/components/schemas/Ledger"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "balance": 300,
+          "credit_balance": 300,
+          "debit_balance": 0,
+          "currency": "NGN",
+          "currency_multiplier": 1,
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "identity_id": "",
+          "ledger": {
+            "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+            "name": "Customer wallets Ledger",
+            "created_at": "2024-02-20T05:28:03.563132Z"
+          },
+          "created_at": "2024-02-20T05:33:01.3116Z",
+          "meta_data": null
+        }
+      },
+      "Ledger": {
+        "title": "Ledger",
+        "required": [
+          "id",
+          "name",
+          "created_at"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "name": "Customer wallets Ledger",
+          "created_at": "2024-02-20T05:28:03.563132Z"
+        }
+      },
+      "GetBalanceMonitor": {
+        "title": "GetBalanceMonitor",
+        "required": [
+          "monitor_id",
+          "balance_id",
+          "condition",
+          "description",
+          "call_back_url",
+          "created_at"
+        ],
+        "type": "object",
+        "properties": {
+          "monitor_id": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/Condition"
+          },
+          "description": {
+            "type": "string"
+          },
+          "call_back_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "monitor_id": "mon_e0e77b0c-4985-472a-9bf5-76a48b0259b0",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "condition": {
+            "field": "debit_balance",
+            "operator": ">",
+            "value": 100000
+          },
+          "description": "",
+          "call_back_url": "https://api.myapp.com/balancemonitor",
+          "created_at": "2024-02-20T05:56:58.257315Z"
+        }
+      },
+      "GetAccount": {
+        "title": "GetAccount",
+        "required": [
+          "account_id",
+          "name",
+          "number",
+          "bank_name",
+          "currency",
+          "created_at",
+          "balance_id",
+          "identity_id",
+          "ledger_id",
+          "meta_data",
+          "ledger",
+          "balance",
+          "identity"
+        ],
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "bank_name": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "balance_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "meta_data": {
+            "$ref": "#/components/schemas/MetaData1"
+          },
+          "ledger": {
+            "$ref": "#/components/schemas/Ledger"
+          },
+          "balance": {
+            "$ref": "#/components/schemas/Balance"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/Identity"
+          }
+        },
+        "example": {
+          "account_id": "acc_463b25b8-7b24-4e8b-aa49-7844d9074019",
+          "name": "Chijioke Adeola",
+          "number": "294364850431",
+          "bank_name": "Blnk Bank",
+          "currency": "NGN",
+          "created_at": "0001-01-01T00:00:00Z",
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "meta_data": {
+            "reference": "XYZ123456789",
+            "verified": true
+          },
+          "ledger": {
+            "id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+            "name": "Customer wallets Ledger",
+            "created_at": "2024-02-20T05:28:03.563132Z"
+          },
+          "balance": {
+            "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+            "balance": 30300,
+            "credit_balance": 30600,
+            "debit_balance": 300,
+            "currency": "NGN",
+            "currency_multiplier": 1,
+            "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+            "identity_id": "",
+            "created_at": "2024-02-20T05:33:01.3116Z",
+            "meta_data": null
+          },
+          "identity": {
+            "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+            "identity_type": "individual",
+            "organization_name": "",
+            "category": "",
+            "first_name": "Chijioke",
+            "last_name": "Adeola",
+            "other_names": "Emeka",
+            "gender": "male",
+            "dob": "1990-01-01T00:00:00Z",
+            "email_address": "chijioke.adeola@gmail.com",
+            "phone_number": "+2347012345678",
+            "nationality": "Nigerian",
+            "street": "10 Aso Villa Way",
+            "country": "Nigeria",
+            "state": "Lagos",
+            "post_code": "101001",
+            "city": "Lagos",
+            "created_at": "2023-10-16T10:00:00Z",
+            "meta_data": null
+          }
+        }
+      },
+      "Balance": {
+        "title": "Balance",
+        "required": [
+          "balance_id",
+          "balance",
+          "credit_balance",
+          "debit_balance",
+          "currency",
+          "currency_multiplier",
+          "ledger_id",
+          "identity_id",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "balance_id": {
+            "type": "string"
+          },
+          "balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credit_balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debit_balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_multiplier": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ledger_id": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
+          "balance": 30300,
+          "credit_balance": 30600,
+          "debit_balance": 300,
+          "currency": "NGN",
+          "currency_multiplier": 1,
+          "ledger_id": "ldg_073f7ffe-9dfd-42ce-aa50-d1dca1788adc",
+          "identity_id": "",
+          "created_at": "2024-02-20T05:33:01.3116Z",
+          "meta_data": null
+        }
+      },
+      "Identity": {
+        "title": "Identity",
+        "required": [
+          "identity_id",
+          "identity_type",
+          "organization_name",
+          "category",
+          "first_name",
+          "last_name",
+          "other_names",
+          "gender",
+          "dob",
+          "email_address",
+          "phone_number",
+          "nationality",
+          "street",
+          "country",
+          "state",
+          "post_code",
+          "city",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string"
+          },
+          "identity_type": {
+            "type": "string"
+          },
+          "organization_name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "first_name": {
+            "type": "string"
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "other_names": {
+            "type": "string"
+          },
+          "gender": {
+            "type": "string"
+          },
+          "dob": {
+            "type": "string"
+          },
+          "email_address": {
+            "type": "string"
+          },
+          "phone_number": {
+            "type": "string"
+          },
+          "nationality": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "post_code": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "example": {
+          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+          "identity_type": "individual",
+          "organization_name": "",
+          "category": "",
+          "first_name": "Chijioke",
+          "last_name": "Adeola",
+          "other_names": "Emeka",
+          "gender": "male",
+          "dob": "1990-01-01T00:00:00Z",
+          "email_address": "chijioke.adeola@gmail.com",
+          "phone_number": "+2347012345678",
+          "nationality": "Nigerian",
+          "street": "10 Aso Villa Way",
+          "country": "Nigeria",
+          "state": "Lagos",
+          "post_code": "101001",
+          "city": "Lagos",
+          "created_at": "2023-10-16T10:00:00Z",
+          "meta_data": null
+        }
+      },
+      "GetIdentity": {
+        "title": "GetIdentity",
+        "required": [
+          "identity_id",
+          "identity_type",
+          "organization_name",
+          "category",
+          "first_name",
+          "last_name",
+          "other_names",
+          "gender",
+          "dob",
+          "email_address",
+          "phone_number",
+          "nationality",
+          "street",
+          "country",
+          "state",
+          "post_code",
+          "city",
+          "created_at",
+          "meta_data"
+        ],
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string"
+          },
+          "identity_type": {
+            "type": "string"
+          },
+          "organization_name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "first_name": {
+            "type": "string"
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "other_names": {
+            "type": "string"
+          },
+          "gender": {
+            "type": "string"
+          },
+          "dob": {
+            "type": "string"
+          },
+          "email_address": {
+            "type": "string"
+          },
+          "phone_number": {
+            "type": "string"
+          },
+          "nationality": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "post_code": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "meta_data": {
+            "$ref": "#/components/schemas/MetaData1"
+          }
+        },
+        "example": {
+          "identity_id": "idt_0b5f333d-e0b8-4422-8e0e-5d41a767f1db",
+          "identity_type": "individual",
+          "organization_name": "",
+          "category": "",
+          "first_name": "Chijioke",
+          "last_name": "Adeola",
+          "other_names": "Emeka",
+          "gender": "male",
+          "dob": "1990-01-01T00:00:00Z",
+          "email_address": "chijioke.adeola@gmail.com",
+          "phone_number": "+2347012345678",
+          "nationality": "Nigerian",
+          "street": "10 Aso Villa Way",
+          "country": "Nigeria",
+          "state": "Lagos",
+          "post_code": "101001",
+          "city": "Lagos",
+          "created_at": "2023-10-16T10:00:00Z",
+          "meta_data": {
+            "reference": "XYZ123456789",
+            "verified": true
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Misc",
+      "description": ""
+    }
+  ]
+}

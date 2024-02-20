@@ -3,6 +3,10 @@ package main
 import (
 	"log"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/caddyserver/certmagic"
+
 	"github.com/jerry-enebeli/blnk"
 
 	"github.com/jerry-enebeli/blnk/database"
@@ -11,6 +15,21 @@ import (
 	"github.com/jerry-enebeli/blnk/config"
 	"github.com/spf13/cobra"
 )
+
+func serveTLS(router *gin.Engine, conf config.ServerConfig) error {
+	// read and agree to your CA's legal documents
+	certmagic.DefaultACME.Agreed = true
+	// provide an email address
+	certmagic.DefaultACME.Email = conf.Email
+
+	_, err := certmagic.Listen([]string{conf.Domain})
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
 
 func serverCommands() *cobra.Command {
 	cmd := &cobra.Command{
@@ -30,7 +49,14 @@ func serverCommands() *cobra.Command {
 				log.Fatalf("Error creating blnk: %v\n", err)
 			}
 			router := api.NewAPI(newBlnk).Router()
-			err = router.Run(":" + cfg.Port)
+
+			if cfg.Server.SSL {
+				err := serveTLS(router, cfg.Server)
+				if err != nil {
+					log.Fatalf("Error creating tls: %v\n", err)
+				}
+			}
+			err = router.Run(":" + cfg.Server.Port)
 			if err != nil {
 				log.Fatal(err)
 			}

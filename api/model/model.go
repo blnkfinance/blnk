@@ -47,8 +47,9 @@ type CreateBalance struct {
 }
 
 type CreateBalanceMonitor struct {
-	BalanceId string           `json:"balance_id"`
-	Condition MonitorCondition `json:"condition"`
+	BalanceId   string           `json:"balance_id"`
+	Condition   MonitorCondition `json:"condition"`
+	CallBackURL string           `json:"call_back_url"`
 }
 
 type MonitorCondition struct {
@@ -141,7 +142,7 @@ func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
 		Field:    b.Condition.Field,
 		Operator: b.Condition.Operator,
 		Value:    b.Condition.Value,
-	}}
+	}, CallBackURL: b.CallBackURL}
 }
 
 func (a *CreateAccount) ValidateCreateAccount() error {
@@ -175,7 +176,6 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.BalanceId, validation.Required),
 		validation.Field(&t.Drcr, validation.Required, validation.In("Credit", "Debit").Error("Invalid entry for 'drcr'. Allowed values are 'Credit' or 'Debit'.")),
-		validation.Field(&t.PaymentMethod, validation.Required),
 	)
 }
 

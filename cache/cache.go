@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
@@ -23,7 +24,7 @@ func NewCache() (Cache, error) {
 	if err != nil {
 		return nil, err
 	}
-	ca, err := newRedisCache([]string{cfg.Redis.Dns})
+	ca, err := newRedisCache([]string{fmt.Sprintf("redis://%s", cfg.Redis.Dns)})
 	if err != nil {
 		return nil, err
 	}

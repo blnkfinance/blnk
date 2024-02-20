@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/kelseyhightower/envconfig"
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,63 +19,70 @@ const (
 
 var configStore atomic.Value
 
+type ServerConfig struct {
+	SSL    bool   `json:"ssl" envconfig:"BLNK_SERVER_SSL"`
+	Domain string `json:"domain" envconfig:"BLNK_SERVER_SSL_DOMAIN"`
+	Email  string `json:"ssl_email" envconfig:"BLNK_SERVER_SSL_EMAIL"`
+	Port   string `json:"port" envconfig:"BLNK_SERVER_PORT"`
+}
+
+type DataSourceConfig struct {
+	Dns string `json:"dns" envconfig:"BLNK_DATA_SOURCE_DNS"`
+}
+
+type RedisConfig struct {
+	Dns string `json:"dns" envconfig:"BLNK_REDIS_DNS"`
+}
+
+type AccountNumberGenerationConfig struct {
+	EnableAutoGeneration bool `json:"enable_auto_generation"`
+	HttpService          struct {
+		Url     string `json:"url"`
+		Timeout int    `json:"timeout"`
+		Headers struct {
+			Authorization string `json:"Authorization"`
+		} `json:"headers"`
+	} `json:"http_service"`
+}
+
+type Notification struct {
+	Slack struct {
+		WebhookUrl string `json:"webhook_url"`
+	} `json:"slack"`
+	Webhook struct {
+		Url     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	} `json:"webhook"`
+}
+
 type Configuration struct {
-	Port        string `json:"port"`
-	ProjectName string `json:"project_name"`
-	DataSource  struct {
-		Dns string `json:"dns"`
-	} `json:"data_source"`
-	Redis struct {
-		Dns string `json:"dns"`
-	}
-	AccountNumberGeneration struct {
-		EnableAutoGeneration bool `json:"enable_auto_generation"`
-		HttpService          struct {
-			Url     string `json:"url"`
-			Timeout int    `json:"timeout"`
-			Headers struct {
-				Authorization string `json:"Authorization"`
-			} `json:"headers"`
-		} `json:"http_service"`
-	} `json:"account_number_generation"`
-	Queue struct {
-		Queue string
-	} `json:"queue"`
-	ConfluentKafka struct {
-		Server       string `json:"server"`
-		ApiKey       string `json:"api_key"`
-		SecretKey    string `json:"secret_key"`
-		QueueName    string `json:"queue_name"`
-		PullWaitTime int    `json:"pull_wait_time"`
-	} `json:"confluent_kafka"`
-	Notification struct {
-		Slack struct {
-			WebhookUrl string `json:"webhook_url"`
-		} `json:"slack"`
-		Webhook struct {
-			Url     string            `json:"url"`
-			Headers map[string]string `json:"headers"`
-		} `json:"webhook"`
-	} `json:"notification"`
+	ProjectName             string                        `json:"project_name" envconfig:"BLNK_PROJECT_NAME"`
+	Server                  ServerConfig                  `json:"server"`
+	DataSource              DataSourceConfig              `json:"data_source"`
+	Redis                   RedisConfig                   `json:"redis"`
+	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
+	Notification            Notification                  `json:"notification"`
 }
 
 func loadConfigFromFile(file string) error {
-	if file == "" {
-		return errors.New("config json not passed")
-	}
 	var cnf Configuration
 	_, err := os.Stat(file)
-	if err != nil {
-		return err
+	if err == nil {
+		f, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		err = json.NewDecoder(f).Decode(&cnf)
+		if err != nil {
+			return err
+		}
+
+	} else if errors.Is(err, os.ErrNotExist) {
+		log.Println("config json not passed, will use env variables")
 	}
 
-	f, err := os.Open(file)
-
-	if err != nil {
-		return err
-	}
-
-	err = json.NewDecoder(f).Decode(&cnf)
+	// override config from environment variables
+	err = envconfig.Process("blnk", &cnf)
 	if err != nil {
 		return err
 	}
@@ -82,6 +91,7 @@ func loadConfigFromFile(file string) error {
 	if err != nil {
 		return err
 	}
+
 	configStore.Store(&cnf)
 	return err
 }
@@ -97,7 +107,6 @@ func Fetch() (*Configuration, error) {
 	if !ok {
 		return nil, errors.New("config not loaded from file. Create a json file called blnk.json with your config ❌")
 	}
-
 	return c, nil
 }
 
@@ -120,24 +129,14 @@ func validateAndAddDefaults(cnf *Configuration) error {
 
 	// Trim white spaces from fields
 	cnf.ProjectName = strings.TrimSpace(cnf.ProjectName)
-	cnf.Port = strings.TrimSpace(cnf.Port)
-	cnf.ConfluentKafka.Server = strings.TrimSpace(cnf.ConfluentKafka.Server)
-	cnf.ConfluentKafka.ApiKey = strings.TrimSpace(cnf.ConfluentKafka.ApiKey)
-	cnf.ConfluentKafka.SecretKey = strings.TrimSpace(cnf.ConfluentKafka.SecretKey)
-	cnf.ConfluentKafka.QueueName = strings.TrimSpace(cnf.ConfluentKafka.QueueName)
+	cnf.Server.Port = strings.TrimSpace(cnf.Server.Port)
 	cnf.DataSource.Dns = strings.TrimSpace(cnf.DataSource.Dns)
 	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
 
 	// Set default value for Port if it's empty
-	if cnf.Port == "" {
-		cnf.Port = DEFAULT_PORT
+	if cnf.Server.Port == "" {
+		cnf.Server.Port = DEFAULT_PORT
 		log.Printf("Warning: Port not specified in config. Setting default port: %s", DEFAULT_PORT)
-	}
-
-	// Set default value for Queue if it's empty
-	if cnf.Queue.Queue == "" {
-		cnf.Queue.Queue = "db"
-		log.Println("Warning: Queue was not specified in config. Setting default queue: DB Queue(Postgres)")
 	}
 
 	return nil
@@ -146,24 +145,10 @@ func validateAndAddDefaults(cnf *Configuration) error {
 // MockConfig sets a mock configuration for testing purposes.
 func MockConfig(enableAutoGeneration bool, url string, authorizationToken string) {
 	mockConfig := Configuration{
-		Port:        "",
 		ProjectName: "",
-		Redis: struct {
-			Dns string `json:"dns"`
-		}{Dns: "redis://localhost"},
-		DataSource: struct {
-			Dns string `json:"dns"`
-		}{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
-		AccountNumberGeneration: struct {
-			EnableAutoGeneration bool `json:"enable_auto_generation"`
-			HttpService          struct {
-				Url     string `json:"url"`
-				Timeout int    `json:"timeout"`
-				Headers struct {
-					Authorization string `json:"Authorization"`
-				} `json:"headers"`
-			} `json:"http_service"`
-		}{
+		Redis:       RedisConfig{Dns: "localhost:6379"},
+		DataSource:  DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
+		AccountNumberGeneration: AccountNumberGenerationConfig{
 			EnableAutoGeneration: enableAutoGeneration,
 			HttpService: struct {
 				Url     string `json:"url"`
@@ -180,27 +165,6 @@ func MockConfig(enableAutoGeneration bool, url string, authorizationToken string
 				},
 			},
 		},
-		Queue: struct {
-			Queue string
-		}{
-			Queue: "db",
-		},
-		ConfluentKafka: struct {
-			Server       string `json:"server"`
-			ApiKey       string `json:"api_key"`
-			SecretKey    string `json:"secret_key"`
-			QueueName    string `json:"queue_name"`
-			PullWaitTime int    `json:"pull_wait_time"`
-		}{},
-		Notification: struct {
-			Slack struct {
-				WebhookUrl string `json:"webhook_url"`
-			} `json:"slack"`
-			Webhook struct {
-				Url     string            `json:"url"`
-				Headers map[string]string `json:"headers"`
-			} `json:"webhook"`
-		}{},
 	}
 
 	configStore.Store(&mockConfig)

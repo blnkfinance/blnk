@@ -21,6 +21,9 @@ docker_run:
 run:
 	./${PROJECT} start
 
+run_workers:
+	./${PROJECT} workers
+
 build_run:
 	make build
 	make run

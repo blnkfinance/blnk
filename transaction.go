@@ -5,20 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
 
-	"github.com/go-co-op/gocron"
-
-	config2 "github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/database"
 )
 
 const (
-	STATUS_SCHEDULED = "SCHEDULED"
-	STATUS_QUEUED    = "QUEUED"
-	STATUS_APPLIED   = "APPLIED"
+	StatusQueued    = "QUEUED"
+	StatusApplied   = "APPLIED"
+	StatusScheduled = "SCHEDULED"
 )
 
 func (l Blnk) validateBlnCurrency(transaction *model.Transaction) (model.Balance, error) {
@@ -31,25 +27,6 @@ func (l Blnk) validateBlnCurrency(transaction *model.Transaction) (model.Balance
 		return model.Balance{}, errors.New("transaction currency does not match the balance currency. Please ensure they are consistent")
 	}
 	return *balance, nil
-}
-
-func getQueueName() (string, error) {
-	conf, err := config2.Fetch()
-	if err != nil {
-		return "", err
-	}
-	return conf.ConfluentKafka.QueueName, nil
-}
-
-// ScheduleTransaction checks if the current transaction has a scheduled date. if it does it updates the tag to SCHEDULED and set the status to scheduled.
-func (l Blnk) scheduleTransaction(transaction *model.Transaction) error {
-	if transaction.ScheduledFor.Year() == 1 {
-		return nil
-	}
-	transaction.Status = STATUS_SCHEDULED
-	transaction.Tag = STATUS_SCHEDULED
-	transaction.SkipBalanceUpdate = true
-	return nil
 }
 
 // Helper function to get the opposite DRCR value
@@ -72,7 +49,7 @@ func (l Blnk) updateBalance(balance model.Balance) error {
 	return nil
 }
 
-func (l Blnk) applyBalanceToQueuedTransaction(transaction model.Transaction) error {
+func (l Blnk) ApplyBalanceToQueuedTransaction(transaction model.Transaction) error {
 	//gets balance to apply transaction to
 	balance, err := l.datasource.GetBalanceByID(transaction.BalanceID, nil)
 	if err != nil {
@@ -84,12 +61,21 @@ func (l Blnk) applyBalanceToQueuedTransaction(transaction model.Transaction) err
 		return err
 	}
 
-	//updates the transaction status from QUEUED to SUCCESSFUL
-	err = l.datasource.UpdateTransactionStatus(transaction.TransactionID, STATUS_APPLIED) //todo update the before and after for all balances
-	if err != nil {
-		return err
-
+	if len(transaction.GroupIds) > 0 {
+		for _, id := range transaction.GroupIds {
+			//updates the transaction status from QUEUED to SUCCESSFUL
+			err = l.datasource.UpdateTransactionStatus(id, StatusApplied)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		err = l.datasource.UpdateTransactionStatus(transaction.TransactionID, StatusApplied)
+		if err != nil {
+			return err
+		}
 	}
+
 	//updates balance in the db
 	err = l.updateBalance(*balance)
 	if err != nil {
@@ -117,7 +103,7 @@ func (l Blnk) validateTxnAndReturnBalance(transaction model.Transaction) (model.
 	return balance, nil
 }
 
-func (l Blnk) recordTransaction(LedgerID string, transaction model.Transaction) (model.Transaction, error) {
+func (l Blnk) recordTransaction(transaction model.Transaction) (model.Transaction, error) {
 	transaction, err := l.datasource.RecordTransaction(transaction)
 	if err != nil {
 		return transaction, err
@@ -152,13 +138,9 @@ func (l Blnk) RecordTransaction(transaction model.Transaction) (model.Transactio
 	}
 
 	if transaction.Status == "" {
-		transaction.Status = STATUS_APPLIED
+		transaction.Status = StatusApplied
 	}
-	err = l.scheduleTransaction(&transaction) //checks if it's a scheduled transaction and updates the status to scheduled
-	if err != nil {
-		return model.Transaction{}, err
-	}
-	transaction, err = l.recordTransaction(balance.LedgerID, transaction)
+	transaction, err = l.recordTransaction(transaction)
 	if err != nil {
 		return model.Transaction{}, err
 	}
@@ -180,14 +162,18 @@ func (l Blnk) QueueTransaction(transaction model.Transaction) (model.Transaction
 	if err != nil {
 		return model.Transaction{}, err
 	}
-	transaction.Status = STATUS_QUEUED
-	transaction.SkipBalanceUpdate = true                //does not apply transaction to the balance
+	transaction.Status = StatusQueued
+	transaction.SkipBalanceUpdate = true
+	if !transaction.ScheduledFor.IsZero() {
+		transaction.Status = StatusScheduled
+	}
+	//does not apply transaction to the balance
 	transaction, err = l.RecordTransaction(transaction) //saves transaction to db
 	if err != nil {
 		return model.Transaction{}, err
 	}
 	go func() {
-		err := Enqueue(transaction, &l)
+		err := l.queue.Enqueue(transaction, &l)
 		if err != nil {
 			log.Printf("Error: Error queuing transaction: %v", err)
 		}
@@ -196,60 +182,12 @@ func (l Blnk) QueueTransaction(transaction model.Transaction) (model.Transaction
 	return transaction, nil
 }
 
-func (l Blnk) ProcessTransactionFromQueue() {
-	log.Println("Message: Fetching queued transactions...")
-	messageChan := make(chan model.Transaction)
-	go func() {
-		err := Dequeue(messageChan, l)
-		if err != nil {
-			log.Println("Message: Error fetching transactions from queue")
-		}
-	}()
-	for {
-		transaction, ok := <-messageChan
-		if !ok {
-			log.Println("Message: No transaction from queue")
-		}
-
-		err := l.applyBalanceToQueuedTransaction(transaction)
-		if err != nil {
-			err := Enqueue(transaction, &l)
-			if err != nil {
-				log.Printf("Error: Error re-queuing scheduled transaction: %v", err)
-			}
-		}
-
-	}
-
-}
-
 func (l Blnk) GetTransaction(TransactionID string) (model.Transaction, error) {
 	return l.datasource.GetTransaction(TransactionID)
 }
 
 func (l Blnk) GetAllTransactions() ([]model.Transaction, error) {
 	return l.datasource.GetAllTransactions()
-}
-
-func (l Blnk) GetScheduledTransaction() {
-	log.Println("Message: Fetching scheduled transactions...")
-	s := gocron.NewScheduler(time.UTC)
-	_, err := s.Every(5).Seconds().Do(func() {
-		transactions, err := l.datasource.GetScheduledTransactions()
-		if err != nil {
-			return
-		}
-		for _, transaction := range transactions {
-			err := Enqueue(transaction, &l)
-			if err != nil {
-				log.Printf("Error: Error queuing scheduled transaction: %v", err)
-			}
-		}
-	})
-	if err != nil {
-		log.Printf("Error: Error starting scheduled transaction job: %v", err)
-	}
-	s.StartAsync()
 }
 
 func (l Blnk) GetTransactionByRef(reference string) (model.Transaction, error) {
