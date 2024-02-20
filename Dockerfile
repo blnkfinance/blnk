@@ -12,7 +12,7 @@ RUN go build -o blnk ./cmd/*.go
 FROM gcr.io/distroless/base
 COPY --from=build-env /go/src/blnk/blnk .
 COPY ui /ui
-COPY blnk.json /blnk.json
+
 CMD ["./blnk", "start"]
 
 EXPOSE 8080

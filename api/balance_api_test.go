@@ -30,7 +30,7 @@ func TestCreateBalance(t *testing.T) {
 		Payload:  payloadBytes,
 		Response: &response,
 		Method:   "POST",
-		Route:    "/balance",
+		Route:    "/balances",
 		Auth:     "",
 		Router:   router,
 	}
@@ -60,7 +60,7 @@ func TestGetBalance(t *testing.T) {
 		Payload:  nil,
 		Response: &response,
 		Method:   "GET",
-		Route:    fmt.Sprintf("/balance/%s", newBalance.BalanceID),
+		Route:    fmt.Sprintf("/balances/%s", newBalance.BalanceID),
 		Auth:     "",
 		Router:   router,
 	}

@@ -80,7 +80,7 @@ func TestCreateLedger(t *testing.T) {
 		Payload:  payloadBytes,
 		Response: &response,
 		Method:   "POST",
-		Route:    "/ledger",
+		Route:    "/ledgers",
 		Auth:     "",
 		Router:   router,
 	}
@@ -105,7 +105,7 @@ func TestGetLedger(t *testing.T) {
 		Payload:  nil,
 		Response: &response,
 		Method:   "GET",
-		Route:    fmt.Sprintf("/ledger/%s", newLedger.LedgerID),
+		Route:    fmt.Sprintf("/ledgers/%s", newLedger.LedgerID),
 		Auth:     "",
 		Router:   router,
 	}
