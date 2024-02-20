@@ -25,7 +25,7 @@ func (l Blnk) validateBlnCurrency(transaction *model.Transaction) (model.Balance
 		return model.Balance{}, err
 	}
 	if balance.Currency != transaction.Currency {
-		return model.Balance{}, errors.New(fmt.Sprintf("transaction %s currency %s does not match the balance %s currency %s. Please ensure they are consistent", transaction.TransactionID, transaction.Currency, balance.BalanceID, balance.Currency))
+		return model.Balance{}, fmt.Errorf("transaction %s currency %s does not match the balance %s currency %s. Please ensure they are consistent", transaction.TransactionID, transaction.Currency, balance.BalanceID, balance.Currency)
 	}
 	return *balance, nil
 }

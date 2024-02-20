@@ -2,7 +2,6 @@ package blnk
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"time"
 
@@ -52,7 +51,7 @@ func (q *Queue) Enqueue(transaction model.Transaction) error {
 func (q *Queue) geTask(transaction model.Transaction, payload []byte) *asynq.Task {
 	if transaction.DRCR == "Credit" {
 		//push to credit queue for higher priority and avoid grouping
-		return asynq.NewTask(fmt.Sprintf("new:transaction:credit"), payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"))
+		return asynq.NewTask("new:transaction:credit", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"))
 	}
 
 	return asynq.NewTask("new:transaction", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID))
@@ -62,7 +61,7 @@ func (q *Queue) getScheduledTasked(transaction model.Transaction, payload []byte
 
 	if transaction.DRCR == "Credit" {
 		//push to credit queue for higher priority and avoid grouping
-		return asynq.NewTask(fmt.Sprintf("new:transaction:credit"), payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
+		return asynq.NewTask("new:transaction:credit", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
 	}
 
 	return asynq.NewTask("new:transactions", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
