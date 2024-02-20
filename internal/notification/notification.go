@@ -44,13 +44,17 @@ func SlackNotification(err error) {
 	]
 }`, err.Error(), time.Now().Format(time.RFC822)))
 
+	conf, err := config.Fetch()
+	if err != nil {
+		return
+	}
 	payload, err := request.ToJsonReq(&data)
 
 	if err != nil {
 		log.Println(err)
 	}
 
-	req, err := http.NewRequest("POST", "https://hooks.slack.com/services/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", payload)
+	req, err := http.NewRequest("POST", conf.Notification.Slack.WebhookUrl, payload)
 
 	if err != nil {
 		log.Println(err)
@@ -65,13 +69,12 @@ func SlackNotification(err error) {
 
 }
 
-func WebhookNotification(systemError error) {
+func WebhookNotification(data map[string]interface{}) {
 	conf, err := config.Fetch()
 	if err != nil {
 		log.Println(err)
 	}
 
-	data := map[string]interface{}{"error": systemError.Error()}
 	payload, err := request.ToJsonReq(&data)
 
 	if err != nil {
@@ -79,7 +82,6 @@ func WebhookNotification(systemError error) {
 	}
 
 	req, err := http.NewRequest("POST", conf.Notification.Webhook.Url, payload)
-
 	for i, i2 := range conf.Notification.Webhook.Headers {
 		req.Header.Set(i, i2)
 	}
@@ -89,7 +91,6 @@ func WebhookNotification(systemError error) {
 	}
 
 	var response map[string]interface{}
-
 	_, err = request.Call(req, &response)
 	if err != nil {
 		log.Println(err)
@@ -107,7 +108,8 @@ func NotifyError(systemError error) {
 	}
 
 	if conf.Notification.Webhook.Url != "" {
-		WebhookNotification(systemError)
+		data := map[string]interface{}{"error": systemError.Error()}
+		WebhookNotification(data)
 	}
 
 }

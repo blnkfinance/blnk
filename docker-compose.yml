@@ -14,13 +14,14 @@ services:
 
   worker:
     build: .
-    entrypoint: [ "./blnk", "workers"]
-    volumes:
-      - ./blnk.json:/blnk.json
     restart: on-failure
+    entrypoint: [ "./blnk", "workers"]
     depends_on:
       - redis
       - postgres
+    volumes:
+      - ./blnk.json:/blnk.json
+
 
 
   redis:

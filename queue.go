@@ -2,6 +2,7 @@ package blnk
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -29,7 +30,7 @@ func NewQueue(conf *config.Configuration) *Queue {
 	}
 }
 
-func (q *Queue) Enqueue(transaction model.Transaction, l *Blnk) error {
+func (q *Queue) Enqueue(transaction model.Transaction) error {
 	payload, err := json.Marshal(transaction)
 	if err != nil {
 		log.Fatal(err)
@@ -39,7 +40,7 @@ func (q *Queue) Enqueue(transaction model.Transaction, l *Blnk) error {
 		task = q.getScheduledTasked(transaction, payload)
 	}
 
-	info, err := q.client.Enqueue(task)
+	info, err := q.client.Enqueue(task, asynq.MaxRetry(5))
 	if err != nil {
 		log.Println("here", err, info)
 	}
@@ -49,32 +50,21 @@ func (q *Queue) Enqueue(transaction model.Transaction, l *Blnk) error {
 }
 
 func (q *Queue) geTask(transaction model.Transaction, payload []byte) *asynq.Task {
+	if transaction.DRCR == "Credit" {
+		//push to credit queue for higher priority and avoid grouping
+		return asynq.NewTask(fmt.Sprintf("new:transaction:credit"), payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"))
+	}
+
 	return asynq.NewTask("new:transaction", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID))
 }
 
 func (q *Queue) getScheduledTasked(transaction model.Transaction, payload []byte) *asynq.Task {
-	return asynq.NewTask("new:transaction", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
-}
 
-// dequeueDB fetches queued transactions from db
-// process each transaction
-func dequeueDB(messageChan chan model.Transaction, l Blnk) error {
-	for {
-		transaction, err := l.datasource.GetNextQueuedTransaction()
-		if err != nil {
-			return err
-		}
-		if transaction != nil {
-			messageChan <- *transaction
-		}
-
+	if transaction.DRCR == "Credit" {
+		//push to credit queue for higher priority and avoid grouping
+		return asynq.NewTask(fmt.Sprintf("new:transaction:credit"), payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
 	}
-}
 
-func Dequeue(messageChan chan model.Transaction, l Blnk) error {
-	err := dequeueDB(messageChan, l)
-	if err != nil {
-		return err
-	}
-	return nil
+	return asynq.NewTask("new:transactions", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
+
 }

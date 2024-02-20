@@ -2,8 +2,9 @@ package blnk
 
 import (
 	"fmt"
-	"log"
 	"math"
+
+	"github.com/jerry-enebeli/blnk/internal/notification"
 
 	"github.com/jerry-enebeli/blnk/model"
 )
@@ -26,16 +27,16 @@ func NewBalanceTracker() *model.BalanceTracker {
 
 func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 	// Fetch monitors for this balance using datasource
-	monitors, err := l.datasource.GetBalanceMonitors(updatedBalance.BalanceID)
-	if err != nil {
-		log.Println("Error: Unable to get balance monitors")
-	}
-
+	monitors, _ := l.datasource.GetBalanceMonitors(updatedBalance.BalanceID)
 	// Check each monitor's condition
 	for _, monitor := range monitors {
 		if monitor.CheckCondition(updatedBalance) {
 			fmt.Printf("Condition met for balance: %s\n", monitor.MonitorID)
-			//todo Here, you can also add logic to send notifications or take other actions.
+			data := map[string]interface{}{
+				"event": "balance.monitor",
+				"data":  monitor,
+			}
+			notification.WebhookNotification(data)
 		}
 	}
 

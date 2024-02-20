@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/jerry-enebeli/blnk/internal/notification"
+
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/jerry-enebeli/blnk/database"
@@ -23,8 +25,7 @@ func (l Blnk) validateBlnCurrency(transaction *model.Transaction) (model.Balance
 		return model.Balance{}, err
 	}
 	if balance.Currency != transaction.Currency {
-		//todo write flagged transactions table
-		return model.Balance{}, errors.New("transaction currency does not match the balance currency. Please ensure they are consistent")
+		return model.Balance{}, errors.New(fmt.Sprintf("transaction %s currency %s does not match the balance %s currency %s. Please ensure they are consistent", transaction.TransactionID, transaction.Currency, balance.BalanceID, balance.Currency))
 	}
 	return *balance, nil
 }
@@ -97,6 +98,7 @@ func (l Blnk) validateTxnAndReturnBalance(transaction model.Transaction) (model.
 
 	balance, err := l.validateBlnCurrency(&transaction)
 	if err != nil {
+		notification.NotifyError(err)
 		return model.Balance{}, err
 	}
 
@@ -158,23 +160,20 @@ func (l Blnk) RecordTransaction(transaction model.Transaction) (model.Transactio
 }
 
 func (l Blnk) QueueTransaction(transaction model.Transaction) (model.Transaction, error) {
-	_, err := l.validateTxnAndReturnBalance(transaction)
-	if err != nil {
-		return model.Transaction{}, err
-	}
 	transaction.Status = StatusQueued
 	transaction.SkipBalanceUpdate = true
 	if !transaction.ScheduledFor.IsZero() {
 		transaction.Status = StatusScheduled
 	}
 	//does not apply transaction to the balance
-	transaction, err = l.RecordTransaction(transaction) //saves transaction to db
+	transaction, err := l.RecordTransaction(transaction) //saves transaction to db
 	if err != nil {
 		return model.Transaction{}, err
 	}
 	go func() {
-		err := l.queue.Enqueue(transaction, &l)
+		err := l.queue.Enqueue(transaction)
 		if err != nil {
+			notification.NotifyError(err)
 			log.Printf("Error: Error queuing transaction: %v", err)
 		}
 	}()

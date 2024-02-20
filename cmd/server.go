@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/gin-gonic/gin"
+	"github.com/jerry-enebeli/blnk/internal/notification"
 
 	"github.com/caddyserver/certmagic"
 
@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func serveTLS(router *gin.Engine, conf config.ServerConfig) error {
+func serveTLS(conf config.ServerConfig) error {
 	// read and agree to your CA's legal documents
 	certmagic.DefaultACME.Agreed = true
 	// provide an email address
@@ -42,16 +42,17 @@ func serverCommands() *cobra.Command {
 			}
 			db, err := database.NewDataSource(cfg)
 			if err != nil {
+				notification.NotifyError(err)
 				log.Fatalf("Error getting datasource: %v\n", err)
 			}
 			newBlnk, err := blnk.NewBlnk(db)
 			if err != nil {
+				notification.NotifyError(err)
 				log.Fatalf("Error creating blnk: %v\n", err)
 			}
 			router := api.NewAPI(newBlnk).Router()
-
 			if cfg.Server.SSL {
-				err := serveTLS(router, cfg.Server)
+				err := serveTLS(cfg.Server)
 				if err != nil {
 					log.Fatalf("Error creating tls: %v\n", err)
 				}

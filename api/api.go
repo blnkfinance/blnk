@@ -90,6 +90,15 @@ func NewAPI(b *blnk.Blnk) *Api {
 		})
 	})
 
+	r.POST("/webhook", func(c *gin.Context) {
+		var payload map[string]interface{}
+		err := c.Bind(&payload)
+		if err != nil {
+			return
+		}
+		fmt.Println(payload)
+	})
+
 	r.POST("/create-customer", func(c *gin.Context) {
 		var newCustomer model.Identity
 		if err := c.ShouldBind(&newCustomer); err != nil {

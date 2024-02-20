@@ -7,6 +7,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/internal/notification"
+
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/database"
 
@@ -19,7 +21,7 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func processTransaction(ctx context.Context, t *asynq.Task) error {
+func processTransaction(_ context.Context, t *asynq.Task) error {
 	var txn model.Transaction
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
 		fmt.Println("error", err)
@@ -47,8 +49,8 @@ func processTransaction(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 
-func aggregate(group string, tasks []*asynq.Task) *asynq.Task {
-	var totalAmount int64
+func aggregateDebit(_ string, tasks []*asynq.Task) *asynq.Task {
+	var totalDebit int64
 	var balanceId string
 	groupIds := make([]string, 0)
 	for _, task := range tasks {
@@ -57,35 +59,26 @@ func aggregate(group string, tasks []*asynq.Task) *asynq.Task {
 			log.Printf("Failed to unmarshal task payload: %v", err)
 			continue // Skip this task if unmarshalling fails
 		}
-		totalAmount += transaction.Amount
-		groupIds = append(groupIds, transaction.TransactionID)
-		balanceId = transaction.BalanceID
+		if transaction.DRCR == "Debit" {
+			totalDebit += transaction.Amount
+			groupIds = append(groupIds, transaction.TransactionID)
+			balanceId = transaction.BalanceID
+		}
 	}
 
-	// Create the aggregated transaction
 	aggregatedTransaction := model.Transaction{
-		Amount:    totalAmount,
+		Amount:    totalDebit,
 		BalanceID: balanceId,
 		GroupIds:  groupIds,
+		DRCR:      "Debit",
 	}
 
-	// Determine DRCR based on total amount
-	if totalAmount > 0 {
-		aggregatedTransaction.DRCR = "Credit"
-	} else {
-		aggregatedTransaction.DRCR = "Debit"
-	}
-
-	// Marshal the aggregated transaction back into JSON for the new task's payload
 	payload, err := json.Marshal(aggregatedTransaction)
 	if err != nil {
 		log.Fatalf("Failed to marshal aggregated transaction: %v", err)
 	}
 
-	// Create a new task with the aggregated transaction as its payload
-	// Assuming "aggregated:transaction" is the type for the aggregated tasks
-	aggregatedTask := asynq.NewTask("new:transaction", payload)
-
+	aggregatedTask := asynq.NewTask("new:transactions", payload)
 	return aggregatedTask
 }
 
@@ -96,16 +89,19 @@ func workerCommands() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			conf, err := config.Fetch()
 			if err != nil {
+				notification.NotifyError(err)
 				return
 			}
 			srv := asynq.NewServer(
 				asynq.RedisClientOpt{Addr: conf.Redis.Dns},
-				asynq.Config{Concurrency: 10, Queues: map[string]int{"transactions": 1}, GroupMaxDelay: time.Second,
-					GroupAggregator: asynq.GroupAggregatorFunc(aggregate)},
+				asynq.Config{Concurrency: 10, Queues: map[string]int{"transactions": 5, "credit-transactions": 5}, GroupMaxDelay: time.Second,
+					GroupAggregator: asynq.GroupAggregatorFunc(aggregateDebit)},
 			)
 			mux := asynq.NewServeMux()
+			mux.HandleFunc("new:transaction:credit", processTransaction)
 			mux.HandleFunc("new:transaction", processTransaction)
 			if err := srv.Run(mux); err != nil {
+				notification.NotifyError(err)
 				log.Fatal(err)
 			}
 		},
