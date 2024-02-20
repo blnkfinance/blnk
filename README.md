@@ -21,7 +21,8 @@ Whether you're launching a fintech startup or integrating financial functionalit
 - **Card Processing Services**: Process payments smoothly and efficiently.
 - **Brokerage Systems**: Manage investments with a reliable back-end.
 
-# Get Started
+
+## Get Started
 - [Install Blnk](https://blnk.mintlify.app)
 - [Dive Deeper into Blnk](https://github.com/jerry-enebeli/blnk/wiki)
 
