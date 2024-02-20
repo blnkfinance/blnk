@@ -21,6 +21,10 @@ func TestRecordCreditTransaction(t *testing.T) {
 	}
 
 	newBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	if err != nil {
+		t.Error(err)
+		return
+	}
 	validPayload := model2.RecordTransaction{
 		Amount:        10000,
 		Reference:     gofakeit.UUID(),
@@ -62,6 +66,10 @@ func TestRecordDebitTransaction(t *testing.T) {
 	}
 
 	newBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	if err != nil {
+		t.Error(err)
+		return
+	}
 	validPayload := model2.RecordTransaction{
 		Amount:        10000,
 		Reference:     gofakeit.UUID(),

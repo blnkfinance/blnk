@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/jerry-enebeli/blnk/model"
 )
 
@@ -178,7 +180,7 @@ func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-
+			logrus.Error(err)
 		}
 	}(rows)
 

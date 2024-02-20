@@ -73,7 +73,10 @@ func TestDelete(t *testing.T) {
 
 	key := "testKey"
 	value := "testValue"
-	mockCache.Set(ctx, key, value, 10*time.Minute)
+	err = mockCache.Set(ctx, key, value, 10*time.Minute)
+	if err != nil {
+		return
+	}
 
 	// Test deleting an existing key
 	err = mockCache.Delete(ctx, key)
