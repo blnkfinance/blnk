@@ -185,9 +185,9 @@ func TestGetAllAccounts(t *testing.T) {
 	}
 	metaDataJSON2, _ := json.Marshal(account2.MetaData)
 
-	rows := sqlmock.NewRows([]string{"account_id", "name", "number", "bank_name", "created_at", "meta_data"}).
-		AddRow(account1.AccountID, account1.Name, account1.Number, account1.BankName, time.Now(), metaDataJSON1).
-		AddRow(account2.AccountID, account2.Name, account2.Number, account2.BankName, time.Now(), metaDataJSON2)
+	rows := sqlmock.NewRows([]string{"account_id", "name", "number", "bank_name", "currency", "created_at", "meta_data"}).
+		AddRow(account1.AccountID, account1.Name, account1.Number, account1.BankName, account1.Currency, time.Now(), metaDataJSON1).
+		AddRow(account2.AccountID, account2.Name, account2.Number, account2.BankName, account1.Currency, time.Now(), metaDataJSON2)
 
 	mock.ExpectQuery("SELECT .* FROM accounts").WillReturnRows(rows)
 

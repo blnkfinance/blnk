@@ -77,10 +77,10 @@ func TestGetAllLedgers(t *testing.T) {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
 
-	rows := sqlmock.NewRows([]string{"ledger_id", "created_at", "meta_data"}).
-		AddRow("ldg_1234567", time.Now(), `{"key":"value"}`)
+	rows := sqlmock.NewRows([]string{"ledger_id", "name", "created_at", "meta_data"}).
+		AddRow("ldg_1234567", "general ledger", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT id, created_at, meta_data FROM ledgers").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT ledger_id,name, created_at, meta_data FROM ledgers LIMIT 20").WillReturnRows(rows)
 
 	result, err := d.GetAllLedgers()
 
