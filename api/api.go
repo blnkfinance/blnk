@@ -53,8 +53,17 @@ func (a Api) Router() *gin.Engine {
 	router.DELETE("/event-mappers/:id", a.DeleteEventMapper)
 
 	//ui routes
-	router.GET("/customer-list", a.GetCustomerList)
+	router.GET("/identity-list", a.GetIdentityList)
 	router.GET("/account-list", a.GetAccountList)
+	router.GET("/ledger-list", a.GetLedgerList)
+	router.GET("/ui/home", a.GetHomePage)
+	router.GET("/ui/ledger", a.GetLedgerPage)
+	router.GET("/ui/balance", a.GetBalancePage)
+	router.GET("/ui/account", a.GetAccountPage)
+	router.GET("/ui/identity", a.GetIdentityPage)
+	router.GET("/ui/audit-log", a.GetAuditPage)
+	router.GET("/ui/transaction", a.GetTransactionPage)
+	router.GET("/balance-list", a.GetBalanceList)
 	router.GET("/transaction-list", a.TransactionList)
 	router.GET("/accounts-details/:account_id", a.AccountDetails)
 	router.GET("/mocked-account", a.generateMockAccount)
@@ -65,12 +74,14 @@ func (a Api) Router() *gin.Engine {
 func NewAPI(b *blnk.Blnk) *Api {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
-	//r.LoadHTMLGlob("ui/*.html")
+
+	//r.LoadHTMLGlob("ui/**/*")
 	r.Static("/static", "ui")
+
 	r.GET("/", func(c *gin.Context) {
-		// Render the "index.html" template
-		c.HTML(200, "index.html", gin.H{
-			"title": "Home Page",
+		c.HTML(200, "layout.html", gin.H{
+			"Title":    "Home Page",
+			"template": "ledger.html",
 		})
 	})
 	r.GET("/create-ledger", func(c *gin.Context) {

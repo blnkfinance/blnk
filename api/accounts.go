@@ -80,15 +80,15 @@ func (a Api) GetAllAccounts(c *gin.Context) {
 	c.JSON(http.StatusOK, accounts)
 }
 
-func (a Api) GetCustomerList(c *gin.Context) {
+func (a Api) GetIdentityList(c *gin.Context) {
 	resp, err := a.blnk.GetAllIdentities()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.HTML(200, "customers-list.html", gin.H{
-		"customers": resp,
+	c.HTML(200, "identity-list.html", gin.H{
+		"identities": resp,
 	})
 }
 
@@ -101,6 +101,77 @@ func (a Api) GetAccountList(c *gin.Context) {
 
 	c.HTML(200, "accounts-list.html", gin.H{
 		"accounts": resp,
+	})
+}
+
+func (a Api) GetLedgerList(c *gin.Context) {
+	resp, err := a.blnk.GetAllLedgers()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.HTML(200, "ledger-list.html", gin.H{
+		"ledgers": resp,
+	})
+}
+
+func (a Api) GetLedgerPage(c *gin.Context) {
+	c.HTML(200, "layout.html", gin.H{
+		"Title":    "Ledger Page",
+		"template": "ledger.html",
+	})
+}
+
+func (a Api) GetHomePage(c *gin.Context) {
+	c.HTML(200, "layout.html", gin.H{
+		"Title":    "Home Page",
+		"template": "home.html",
+	})
+}
+
+func (a Api) GetBalancePage(c *gin.Context) {
+	c.HTML(200, "layout.html", gin.H{
+		"Title":    "Balance Page",
+		"template": "balance.html",
+	})
+}
+
+func (a Api) GetAccountPage(c *gin.Context) {
+	c.HTML(200, "layout.html", gin.H{
+		"Title":    "Account Page",
+		"template": "account.html",
+	})
+}
+
+func (a Api) GetIdentityPage(c *gin.Context) {
+	c.HTML(200, "layout.html", gin.H{
+		"Title":    "Identity Page",
+		"template": "identity.html",
+	})
+}
+
+func (a Api) GetTransactionPage(c *gin.Context) {
+	c.HTML(200, "layout.html", gin.H{
+		"Title":    "Transaction Page",
+		"template": "transactions.html",
+	})
+}
+func (a Api) GetAuditPage(c *gin.Context) {
+	c.HTML(200, "layout.html", gin.H{
+		"Title":    "Audit Page",
+		"template": "audit.html",
+	})
+}
+
+func (a Api) GetBalanceList(c *gin.Context) {
+	resp, err := a.blnk.GetAllBalances()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.HTML(200, "balance-list.html", gin.H{
+		"balances": resp,
 	})
 }
 

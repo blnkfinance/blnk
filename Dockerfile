@@ -13,6 +13,7 @@ FROM gcr.io/distroless/base
 COPY --from=build-env /go/src/blnk/blnk .
 COPY ui /ui
 
+
 CMD ["./blnk", "start"]
 
 EXPOSE 8080

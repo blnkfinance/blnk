@@ -40,12 +40,6 @@ func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
 			err = errConn
 			return
 		}
-		// Assuming cache initialization is uncommented and properly implemented.
-		//newCache, errCache := cache.NewCache()
-		//if errCache != nil {
-		//	err = errCache
-		//	return
-		//}
 		instance = &Datasource{Conn: con, Cache: nil} // or Cache: newCache if cache is used
 	})
 	if err != nil {

@@ -37,8 +37,9 @@ func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 	// select all ledgers from database
 	rows, err := d.Conn.Query(`
-		SELECT id, created_at, meta_data
+		SELECT ledger_id,name, created_at, meta_data
 		FROM ledgers
+		LIMIT 20
 	`)
 	if err != nil {
 		return nil, err
@@ -52,7 +53,7 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 	for rows.Next() {
 		ledger := model.Ledger{}
 		var metaDataJSON []byte
-		err = rows.Scan(&ledger.LedgerID, &ledger.CreatedAt, &metaDataJSON)
+		err = rows.Scan(&ledger.LedgerID, &ledger.Name, &ledger.CreatedAt, &metaDataJSON)
 		if err != nil {
 			return nil, err
 		}

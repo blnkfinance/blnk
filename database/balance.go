@@ -171,8 +171,9 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 	// select all balances from database
 	rows, err := d.Conn.Query(`
-		SELECT id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, modification_ref, meta_data
+		SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
 		FROM balances
+		LIMIT 20
 	`)
 	if err != nil {
 		return nil, err

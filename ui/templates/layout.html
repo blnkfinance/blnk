@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>{{ .Title }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.css"  rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+
+<div class="antialiased bg-white  h-screen">
+    <header>
+        <nav
+                class="bg-white border-b border-white-200 px-4 py-2.5 bg-white border-white-700"
+        >
+            <div class="flex flex-wrap justify-between items-center">
+                <div class="flex justify-start items-center">
+                    <a href="" class="flex mr-4">
+                        <span
+                                class="self-center text-2xl font-semibold whitespace-nowrap"
+                        >Blnk</span
+                        >
+                    </a>
+                </div>
+                <div class="flex items-center lg:order-2">
+                    <!-- Notifications -->
+                    <a
+                            href="https://blnk.mintlify.app"
+                            target="_blank"
+                            type="button"
+                            data-dropdown-toggle="notification-dropdown"
+                            class="p-2 mr-1 text-gray-500 rounded-lg hover:text-gray-900 hover:bg-gray-100 text-gray-400 hover:text-white hover:bg-white focus:ring-4 focus:ring-gray-300 focus:ring-gray-600"
+                    >
+                        <span class="sr-only">View notifications</span>
+                        <!-- Bell icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" height="24" width="24" id="Coding-Apps-Websites-Programming-Browser--Streamline-Pixel"><desc>Coding Apps Websites Programming Browser Streamline Icon: https://streamlinehq.com</desc><title>coding-apps-websites-programming-browser</title><g><path d="m1.1400000000000001 6.855 21.72 0 0 14.857499999999998 1.1400000000000001 0 0 -19.424999999999997 -1.1400000000000001 0 0 3.4275 -21.72 0 0 -3.4275 -1.1400000000000001 0 0 19.424999999999997 1.1400000000000001 0 0 -14.857499999999998z" fill="#34843f" stroke-width="1"></path><path d="M1.1400000000000001 21.7125h21.72v1.1475H1.1400000000000001Z" fill="#34843f" stroke-width="1"></path><path d="M3.4275 9.1425v10.290000000000001h17.145V9.1425Zm6.855 5.715h-1.1400000000000001v1.1400000000000001h-1.1400000000000001v1.1475H6.855v-1.1475h1.1475v-1.1400000000000001h1.1400000000000001v-1.1400000000000001h-1.1400000000000001v-1.1475H6.855v-1.1400000000000001h1.1475v1.1400000000000001h1.1400000000000001v1.1475h1.1400000000000001Zm6.862500000000001 0h-4.574999999999999v-1.1400000000000001h4.574999999999999Z" fill="#34843f" stroke-width="1"></path><path d="M6.855 3.4275h1.1475V4.574999999999999H6.855Z" fill="#34843f" stroke-width="1"></path><path d="M4.574999999999999 3.4275h1.1400000000000001V4.574999999999999H4.574999999999999Z" fill="#34843f" stroke-width="1"></path><path d="M2.2874999999999996 3.4275h1.1400000000000001V4.574999999999999H2.2874999999999996Z" fill="#34843f" stroke-width="1"></path><path d="M1.1400000000000001 1.1400000000000001h21.72v1.1475H1.1400000000000001Z" fill="#34843f" stroke-width="1"></path></g></svg>
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+    </header>
+
+    <div
+            class="items-center justify-center  py-5 hidden lg:flex bg-gray-50"
+    >
+        <nav
+                id="toggleMobileMenu"
+                class="border-b border-white-200  block mx-auto border-white-800 bg-gray-50"
+                data-tabs-toggle="#tabContent"
+        >
+            <div class="flex items-center ">
+                <ul class="flex flex-col mt-0 w-full text-sm font-medium lg:flex-row">
+
+                    <li class="block border-b border-gray-700 lg:inline lg:border-b-0">
+                        <a href="/ui/ledger" role="tab" class="block py-3 px-4 text-gray-500 text-gray-400 hover:text-primary-600 hover:border-b-2 hover:text-primary-500 hover:border-primary-500 hover:border-primary-600" data-tabs-target="#ledgerTab">
+                            Ledgers
+                        </a>
+                    </li>
+                    <li class="block border-b border-gray-700 lg:inline lg:border-b-0">
+                        <a href="/ui/balance" role="tab" class="block py-3 px-4 text-gray-500 text-gray-400 hover:text-primary-600 hover:border-b-2 hover:text-primary-500 hover:border-primary-500 hover:border-primary-600" data-tabs-target="#balanceTab">
+                            Balances
+                        </a>
+                    </li>
+                    <li class="block border-b border-gray-700 lg:inline lg:border-b-0">
+                        <a   data-tabs-target="#accountTab" role="tab" href="/ui/account" class="block py-3 px-4 text-gray-500 text-gray-400 hover:text-primary-600 hover:border-b-2 hover:text-primary-500 hover:border-primary-500 hover:border-primary-600">
+                            Accounts
+                        </a>
+                    </li>
+                    <li class="block border-b border-gray-700 lg:inline lg:border-b-0" >
+                        <a  data-tabs-target="#identityTab" role="tab" href="/ui/identity" class="block py-3 px-4 text-gray-500 text-gray-400 hover:text-primary-600 hover:border-b-2 hover:text-primary-500 hover:border-primary-500 hover:border-primary-600">
+                            Identities
+                        </a>
+                    </li>
+                    <li class="block border-b border-gray-700 lg:inline lg:border-b-0">
+                        <a  data-tabs-target="#transactionsTab" href="/ui/transaction" role="tab" class="block py-3 px-4 text-gray-500 text-gray-400 hover:text-primary-600 hover:border-b-2 hover:text-primary-500 hover:border-primary-500 hover:border-primary-600" >
+                            Transactions
+                        </a>
+                    </li>
+
+                    <li class="block border-b border-gray-700 lg:inline lg:border-b-0">
+                        <a  data-tabs-target="#transactionsTab" href="/ui/audit-log" role="tab" class="block py-3 px-4 text-gray-500 text-gray-400 hover:text-primary-600 hover:border-b-2 hover:text-primary-500 hover:border-primary-500 hover:border-primary-600" >
+                            Audit logs
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+    </div>
+
+    <main id="tabContent" class="bg-gray-50 flex-1 p-4 space-y-4" x-data="{ currentRoute: window.location.pathname }">
+        <div  x-show="currentRoute === '/ui/home'">
+            {{template "home" .}}
+        </div>
+        <div   x-show="currentRoute === '/ui/ledger'">
+            {{template "ledger" .}}
+        </div>
+        <div  x-show="currentRoute === '/ui/balance'">
+            {{template "balance" .}}
+        </div>
+        <div  x-show="currentRoute === '/ui/identity'">
+            {{template "identity" .}}
+        </div>
+        <div  x-show="currentRoute === '/ui/account'">
+            {{template "account" .}}
+        </div>
+        <div  x-show="currentRoute === '/ui/transaction'">
+            {{template "transactions" .}}
+        </div>
+        <div  x-show="currentRoute === '/ui/audit-log'">
+            {{template "audit" .}}
+        </div>
+    </main>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script src="https://unpkg.com/htmx.org@1.9.6" integrity="sha384-FhXw7b6AlE/jyjlZH5iHa/tTe9EpJ1Y55RjcgPbjeWMskSxZt1v9qkxLJWNJaGni" crossorigin="anonymous"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

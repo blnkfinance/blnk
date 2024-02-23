@@ -1,0 +1,18 @@
+server:
+  http_listen_port: 0
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: https://816790:glc_eyJvIjoiMTA1ODYwMiIsIm4iOiJzdGFjay04NjE5MjktaGwtd3JpdGUtYmxuayIsImsiOiJkWjBtUjl2d0UxV3hBRTYzMDI1Wkw1WTIiLCJtIjp7InIiOiJwcm9kLXVzLWVhc3QtMCJ9fQ==@logs-prod-006.grafana.net/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: varlogs
+          __path__: /var/log/*.log

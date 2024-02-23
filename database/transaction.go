@@ -200,7 +200,7 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 			&transaction.Amount,
 			&transaction.Currency,
 			&transaction.PaymentMethod,
-			&transaction.Currency,
+			&transaction.Description,
 			&transaction.DRCR,
 			&transaction.Status,
 			&transaction.LedgerID,
@@ -244,7 +244,7 @@ func (d Datasource) GetNextQueuedTransaction() (*model.Transaction, error) {
                balance_before, balance_after, created_at, meta_data, scheduled_for
         FROM transactions
         WHERE status = 'QUEUED'
-        ORDER BY created_at ASC
+        ORDER BY created_at
         FOR UPDATE SKIP LOCKED
         LIMIT 1
     `)

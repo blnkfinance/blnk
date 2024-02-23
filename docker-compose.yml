@@ -11,6 +11,7 @@ services:
       - postgres
     volumes:
       - ./blnk.json:/blnk.json
+      - ./ui:/ui
 
   worker:
     build: .
@@ -35,10 +36,10 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: pass
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: blnk
     volumes:
-      - blnk_pg_data:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD", "pg_isready", "-U", "postgres" ]
       interval: 10s
@@ -48,4 +49,4 @@ services:
 
 
 volumes:
-  blnk_pg_data:
+  pg_data:

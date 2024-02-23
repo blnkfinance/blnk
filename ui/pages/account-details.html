@@ -7,16 +7,16 @@
 </head>
 <body>
 
-<div class="antialiased bg-gray-50 dark:bg-gray-900  h-screen">
+<div class="antialiased bg-gray-50 bg-white  h-screen">
     <header>
         <nav
-                class="bg-white border-b border-gray-200 px-4 py-2.5 dark:bg-gray-800 dark:border-gray-700"
+                class="bg-white border-b border-gray-200 px-4 py-2.5 bg-white border-gray-700"
         >
             <div class="flex flex-wrap justify-between items-center">
                 <div class="flex justify-start items-center">
                     <a href="" class="flex mr-4">
                         <span
-                                class="self-center text-2xl font-semibold whitespace-nowrap dark:text-white"
+                                class="self-center text-2xl font-semibold whitespace-nowrap text-white"
                         >Blnk</span
                         >
                     </a>
@@ -25,7 +25,7 @@
         </nav>
 
     </header>
-    <main id="tabContent" class="dark:bg-gray-900 flex-1 p-4">
+    <main id="tabContent" class="bg-white flex-1 p-4">
             {{template "accountDetailsCard" .}}
             <div>
                 {{template "accountTransactions" .}}
