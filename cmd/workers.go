@@ -21,7 +21,7 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-func processTransaction(_ context.Context, t *asynq.Task) error {
+func processTransaction(cxt context.Context, t *asynq.Task) error {
 	var txn model.Transaction
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
 		fmt.Println("error", err)
@@ -41,8 +41,8 @@ func processTransaction(_ context.Context, t *asynq.Task) error {
 		log.Fatalf("Error creating blnk: %v\n", err)
 	}
 
-	log.Printf(" [*] Processing Transaction %s on balance %s", txn.TransactionID, txn.BalanceID)
-	err = newBlnk.ApplyBalanceToQueuedTransaction(txn)
+	log.Printf(" [*] Processing Transaction %s. source %s destination %s", txn.TransactionID, txn.Source, txn.Destination)
+	err = newBlnk.ApplyBalanceToQueuedTransaction(cxt, &txn)
 	if err != nil {
 		return err
 	}
@@ -50,8 +50,8 @@ func processTransaction(_ context.Context, t *asynq.Task) error {
 }
 
 func aggregateDebit(_ string, tasks []*asynq.Task) *asynq.Task {
-	var totalDebit int64
-	var balanceId string
+	var amount int64
+	var source, destination string
 	groupIds := make([]string, 0)
 	for _, task := range tasks {
 		var transaction model.Transaction
@@ -59,23 +59,24 @@ func aggregateDebit(_ string, tasks []*asynq.Task) *asynq.Task {
 			log.Printf("Failed to unmarshal task payload: %v", err)
 			continue // Skip this task if unmarshalling fails
 		}
-		if transaction.DRCR == "Debit" {
-			totalDebit += transaction.Amount
-			groupIds = append(groupIds, transaction.TransactionID)
-			balanceId = transaction.BalanceID
-		}
-	}
 
+		amount += transaction.Amount
+		groupIds = append(groupIds, transaction.TransactionID)
+		source = transaction.Source
+		destination = transaction.Destination
+
+	}
 	aggregatedTransaction := model.Transaction{
-		Amount:    totalDebit,
-		BalanceID: balanceId,
-		GroupIds:  groupIds,
-		DRCR:      "Debit",
+		Amount:      amount,
+		Source:      source,
+		Destination: destination,
+		GroupIds:    groupIds,
 	}
 
 	payload, err := json.Marshal(aggregatedTransaction)
 	if err != nil {
-		log.Fatalf("Failed to marshal aggregated transaction: %v", err)
+		log.Fatalf(
+			"Failed to marshal aggregated transaction: %v", err)
 	}
 
 	aggregatedTask := asynq.NewTask("new:transactions", payload)
@@ -89,17 +90,15 @@ func workerCommands() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			conf, err := config.Fetch()
 			if err != nil {
-				notification.NotifyError(err)
 				return
 			}
 			srv := asynq.NewServer(
 				asynq.RedisClientOpt{Addr: conf.Redis.Dns},
-				asynq.Config{Concurrency: 10, Queues: map[string]int{"transactions": 5, "credit-transactions": 5}, GroupMaxDelay: time.Second,
+				asynq.Config{Concurrency: 1, Queues: map[string]int{"transactions": 5, "credit-transactions": 5}, GroupMaxDelay: time.Second,
 					GroupAggregator: asynq.GroupAggregatorFunc(aggregateDebit)},
 			)
 			mux := asynq.NewServeMux()
-			mux.HandleFunc("new:transaction:credit", processTransaction)
-			mux.HandleFunc("new:transaction", processTransaction)
+			mux.HandleFunc(blnk.TANSACTION_QUEUE, processTransaction)
 			if err := srv.Run(mux); err != nil {
 				notification.NotifyError(err)
 				log.Fatal(err)

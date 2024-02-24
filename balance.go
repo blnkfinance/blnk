@@ -42,6 +42,28 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 
 }
 
+func (l Blnk) applyFraudScore(balance *model.Balance, amount int64) float64 {
+	bt := l.bt
+	bt.Mutex.Lock()
+	defer bt.Mutex.Unlock()
+
+	oldBalance, exists := bt.Balances[balance.BalanceID]
+
+	if exists && (oldBalance.CreditBalance != balance.CreditBalance || oldBalance.DebitBalance != balance.DebitBalance) {
+		bt.Frequencies[balance.BalanceID]++
+	}
+
+	bt.Balances[balance.BalanceID] = balance
+
+	changeFrequency := float64(bt.Frequencies[balance.BalanceID])
+	transactionAmount := float64(amount)
+	currentBalance := float64(balance.Balance)
+	creditBalance := float64(balance.CreditBalance)
+	debitBalance := float64(balance.DebitBalance)
+
+	return ComputeFraudScore(changeFrequency, transactionAmount, currentBalance, creditBalance, debitBalance)
+}
+
 func (l Blnk) CreateBalance(balance model.Balance) (model.Balance, error) {
 	return l.datasource.CreateBalance(balance)
 }
@@ -79,26 +101,20 @@ func (l Blnk) DeleteMonitor(id string) error {
 }
 
 // ApplyFraudScore updates the balance and computes the fraud score
-func (l Blnk) ApplyFraudScore(newBalance *model.Balance, amount int64) float64 {
-	bt := l.bt
-	bt.Mutex.Lock()
-	defer bt.Mutex.Unlock()
-
-	oldBalance, exists := bt.Balances[newBalance.BalanceID]
-
-	if exists && (oldBalance.CreditBalance != newBalance.CreditBalance || oldBalance.DebitBalance != newBalance.DebitBalance) {
-		bt.Frequencies[newBalance.BalanceID]++
+func (l Blnk) ApplyFraudScore(transaction *model.Transaction) float64 {
+	sourceBalance, err := l.datasource.GetBalanceByIDLite(transaction.Source)
+	if err != nil {
+		return 0
 	}
 
-	bt.Balances[newBalance.BalanceID] = newBalance
+	destinationBalance, err := l.datasource.GetBalanceByIDLite(transaction.Source)
+	if err != nil {
+		return 0
+	}
 
-	changeFrequency := float64(bt.Frequencies[newBalance.BalanceID])
-	transactionAmount := float64(amount)
-	currentBalance := float64(newBalance.Balance)
-	creditBalance := float64(newBalance.CreditBalance)
-	debitBalance := float64(newBalance.DebitBalance)
-
-	return ComputeFraudScore(changeFrequency, transactionAmount, currentBalance, creditBalance, debitBalance)
+	fmt.Println(l.applyFraudScore(destinationBalance, transaction.Amount))
+	fmt.Println(l.applyFraudScore(sourceBalance, transaction.Amount))
+	return 0 //todo rewrite
 }
 
 // Normalize function to scale values between 0 and 1
