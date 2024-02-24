@@ -10,22 +10,13 @@ import (
 type Transaction struct {
 	ID                     int64                  `json:"-"`
 	TransactionID          string                 `json:"id"`
-	Tag                    string                 `json:"tag"`
+	Source                 string                 `json:"source"`
+	Destination            string                 `json:"destination"`
 	Reference              string                 `json:"reference"`
 	Amount                 int64                  `json:"amount"`
 	Currency               string                 `json:"currency"`
-	PaymentMethod          string                 `json:"payment_method"`
 	Description            string                 `json:"description"`
-	DRCR                   string                 `json:"drcr"`
 	Status                 string                 `json:"status"`
-	LedgerID               string                 `json:"ledger_id"`
-	BalanceID              string                 `json:"balance_id"`
-	CreditBalanceBefore    int64                  `json:"credit_balance_before"`
-	DebitBalanceBefore     int64                  `json:"debit_balance_before"`
-	CreditBalanceAfter     int64                  `json:"credit_balance_after"`
-	DebitBalanceAfter      int64                  `json:"debit_balance_after"`
-	BalanceBefore          int64                  `json:"balance_before"`
-	BalanceAfter           int64                  `json:"balance_after"`
 	CreatedAt              time.Time              `json:"created_at"`
 	ScheduledFor           time.Time              `json:"scheduled_for,omitempty"`
 	RiskToleranceThreshold float64                `json:"risk_tolerance_threshold"`
@@ -33,21 +24,6 @@ type Transaction struct {
 	SkipBalanceUpdate      bool                   `json:"-"`
 	MetaData               map[string]interface{} `json:"meta_data,omitempty"`
 	GroupIds               []string               `json:"group_ids"`
-}
-
-type TransactionFilter struct {
-	ID                       int64     `json:"id"`
-	Tag                      string    `json:"tag"`
-	DRCR                     string    `json:"drcr"`
-	AmountRange              int64     `json:"amount_range"`
-	CreditBalanceBeforeRange int64     `json:"credit_balance_before_range"`
-	DebitBalanceBeforeRange  int64     `json:"debit_balance_before_range"`
-	CreditBalanceAfterRange  int64     `json:"credit_balance_after_range"`
-	DebitBalanceAfterRange   int64     `json:"debit_balance_after_range"`
-	BalanceBeforeRange       int64     `json:"balance_before"`
-	BalanceAfterRange        int64     `json:"balance_after"`
-	From                     time.Time `json:"from"`
-	To                       time.Time `json:"to"`
 }
 
 type Balance struct {
@@ -202,18 +178,6 @@ func (balance *Balance) ComputeBalance() {
 	balance.Balance = balance.CreditBalance - balance.DebitBalance
 }
 
-func (balance *Balance) AttachBalanceBefore(transaction *Transaction) {
-	transaction.DebitBalanceBefore = balance.DebitBalance
-	transaction.CreditBalanceBefore = balance.CreditBalance
-	transaction.BalanceBefore = balance.Balance
-}
-
-func (balance *Balance) AttachBalanceAfter(transaction *Transaction) {
-	transaction.DebitBalanceAfter = balance.DebitBalance
-	transaction.CreditBalanceAfter = balance.CreditBalance
-	transaction.BalanceAfter = balance.Balance
-}
-
 func (balance *Balance) applyMultiplier(transaction *Transaction) {
 	if balance.CurrencyMultiplier == 0 {
 		balance.CurrencyMultiplier = 1
@@ -221,7 +185,7 @@ func (balance *Balance) applyMultiplier(transaction *Transaction) {
 	transaction.Amount = transaction.Amount * balance.CurrencyMultiplier
 }
 
-func (balance *Balance) UpdateBalances(transaction *Transaction) error {
+func (balance *Balance) UpdateBalances(transaction *Transaction, position int) error {
 	// Validate transaction
 	err := transaction.validate()
 	if err != nil {
@@ -229,24 +193,21 @@ func (balance *Balance) UpdateBalances(transaction *Transaction) error {
 	}
 
 	balance.applyMultiplier(transaction)
-	balance.AttachBalanceBefore(transaction)
-	if transaction.DRCR == "Credit" {
-		balance.AddCredit(transaction.Amount)
-	} else {
+
+	//position is first on the array of balances whihc is the source balance
+	if position == 0 {
 		balance.AddDebit(transaction.Amount)
+	} else {
+		balance.AddCredit(transaction.Amount)
 	}
 
 	balance.ComputeBalance()
-	balance.AttachBalanceAfter(transaction)
 	return nil
 }
 
 func (transaction *Transaction) validate() error {
 	if transaction.Amount <= 0 {
 		return errors.New("transaction amount must be positive")
-	}
-	if transaction.DRCR != "Credit" && transaction.DRCR != "Debit" {
-		return errors.New("transaction DRCR must be 'Credit' or 'Debit'")
 	}
 	return nil
 }

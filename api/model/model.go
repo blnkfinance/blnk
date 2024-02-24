@@ -68,11 +68,11 @@ type CreateAccount struct {
 }
 
 type RecordTransaction struct {
-	Amount                 int64     `json:"amount"`
-	Tag                    string    `json:"tag"`
+	Amount                 float64   `json:"amount"`
+	Source                 string    `json:"source"`
 	Reference              string    `json:"reference"`
 	Drcr                   string    `json:"drcr"`
-	PaymentMethod          string    `json:"payment_method"`
+	Destination            string    `json:"destination"`
 	Description            string    `json:"description"`
 	Currency               string    `json:"currency"`
 	BalanceId              string    `json:"balance_id"`
@@ -174,13 +174,13 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Amount, validation.Required),
 		validation.Field(&t.Currency, validation.Required),
 		validation.Field(&t.Reference, validation.Required),
-		validation.Field(&t.BalanceId, validation.Required),
-		validation.Field(&t.Drcr, validation.Required, validation.In("Credit", "Debit").Error("Invalid entry for 'drcr'. Allowed values are 'Credit' or 'Debit'.")),
+		validation.Field(&t.Source, validation.Required),
+		validation.Field(&t.Destination, validation.Required),
 	)
 }
 
-func (t *RecordTransaction) ToTransaction() model.Transaction {
-	return model.Transaction{BalanceID: t.BalanceId, Currency: t.Currency, PaymentMethod: t.PaymentMethod, Description: t.Description, Reference: t.Reference, DRCR: t.Drcr, RiskToleranceThreshold: t.RiskToleranceThreshold, ScheduledFor: t.ScheduledFor, Tag: t.Tag, Amount: t.Amount}
+func (t *RecordTransaction) ToTransaction() *model.Transaction {
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, RiskToleranceThreshold: t.RiskToleranceThreshold, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: int64(t.Amount)}
 }
 
 func (t *CreateEventMapper) ValidateCreateEventMapper() error {
