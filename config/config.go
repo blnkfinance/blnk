@@ -20,10 +20,12 @@ const (
 var configStore atomic.Value
 
 type ServerConfig struct {
-	SSL    bool   `json:"ssl" envconfig:"BLNK_SERVER_SSL"`
-	Domain string `json:"domain" envconfig:"BLNK_SERVER_SSL_DOMAIN"`
-	Email  string `json:"ssl_email" envconfig:"BLNK_SERVER_SSL_EMAIL"`
-	Port   string `json:"port" envconfig:"BLNK_SERVER_PORT"`
+	SSL       bool   `json:"ssl" envconfig:"BLNK_SERVER_SSL"`
+	Secure    bool   `json:"secure" envconfig:"BLNK_SERVER_SECURE"`
+	SecretKey string `json:"secret_key" envconfig:"BLNK_SERVER_SECRET_KEY"`
+	Domain    string `json:"domain" envconfig:"BLNK_SERVER_SSL_DOMAIN"`
+	Email     string `json:"ssl_email" envconfig:"BLNK_SERVER_SSL_EMAIL"`
+	Port      string `json:"port" envconfig:"BLNK_SERVER_PORT"`
 }
 
 type DataSourceConfig struct {

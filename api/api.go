@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jerry-enebeli/blnk/config"
+
+	"github.com/jerry-enebeli/blnk/api/middleware"
+
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"github.com/jerry-enebeli/blnk/model"
@@ -75,17 +79,19 @@ func (a Api) Router() *gin.Engine {
 
 func NewAPI(b *blnk.Blnk) *Api {
 	gin.SetMode(gin.ReleaseMode)
+	conf, err := config.Fetch()
+	if err != nil {
+		return nil
+	}
 	r := gin.Default()
-
 	r.Use(otelgin.Middleware("Blnk Sever"))
-	//r.LoadHTMLGlob("ui/**/*")
-	r.Static("/static", "ui")
+
+	if conf.Server.Secure {
+		r.Use(middleware.SecretKeyAuthMiddleware())
+	}
 
 	r.GET("/", func(c *gin.Context) {
-		c.HTML(200, "layout.html", gin.H{
-			"Title":    "Home Page",
-			"template": "ledger.html",
-		})
+		c.JSON(200, "server running...")
 	})
 	r.GET("/create-ledger", func(c *gin.Context) {
 		c.HTML(200, "create-ledger.html", gin.H{
