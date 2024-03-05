@@ -1,7 +1,9 @@
 package blnk
 
 import (
-	"encoding/json"
+	"context"
+	"fmt"
+	"regexp"
 	"testing"
 	"time"
 
@@ -22,143 +24,46 @@ func TestRecordTransaction(t *testing.T) {
 	d, err := NewBlnk(datasource)
 	assert.NoError(t, err)
 
-	txn := model.Transaction{
-		Reference: gofakeit.UUID(),
-		BalanceID: gofakeit.UUID(),
-		Amount:    10000,
-		Currency:  "NGN",
-		DRCR:      "Credit",
-	}
-	metaDataJSON, _ := json.Marshal(txn.MetaData)
+	source := gofakeit.UUID()
+	destination := gofakeit.UUID()
 
-	//expect reference check
-	mock.ExpectQuery("SELECT .* FROM transactions WHERE reference = \\$1").
-		WithArgs(txn.Reference).
-		WillReturnRows(sqlmock.NewRows(nil))
-
-	//expect balance fetch
-	// Create a row with expected data
-	balanceRows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
-		AddRow(txn.BalanceID, 100, 50, 50, "NGN", 1, "test-ledger", "test-identity", time.Now(), `{"key":"value"}`)
-
-	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM balances WHERE balance_id =").
-		WithArgs(txn.BalanceID).
-		WillReturnRows(balanceRows)
-	mock.ExpectCommit()
-
-	// Expect the transaction to be recorded in the database
-	mock.ExpectExec("INSERT INTO public.transactions").
-		WithArgs(
-			sqlmock.AnyArg(), txn.Tag, txn.Reference, txn.Amount, txn.Currency, txn.PaymentMethod, txn.Description, txn.DRCR, sqlmock.AnyArg(), sqlmock.AnyArg(), txn.BalanceID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, sqlmock.AnyArg(),
-		).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	// Add expectation for UPDATE balances query
-	mock.ExpectExec("UPDATE balances SET .* WHERE balance_id = \\$1").
-		WithArgs(
-			txn.BalanceID, 10000, 10050, 50, "NGN", 1, "test-ledger", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	recordedTxn, err := d.RecordTransaction(txn)
-	assert.NoError(t, err)
-	assert.Equal(t, txn.Reference, recordedTxn.Reference)
-	assert.Equal(t, StatusApplied, recordedTxn.Status)
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("there were unfulfilled expectations: %s", err)
-	}
-}
-
-func TestRecordTransactionWithWrongCurrency(t *testing.T) {
-	// Test setup
-	datasource, mock, err := newTestDataSource()
-	assert.NoError(t, err)
-
-	d, err := NewBlnk(datasource)
-	assert.NoError(t, err)
-
-	txn := model.Transaction{
-		Reference: gofakeit.UUID(),
-		BalanceID: gofakeit.UUID(),
-		Amount:    10000,
-		Currency:  "NGN",
-		DRCR:      "Credit",
+	fmt.Println(source, destination)
+	txn := &model.Transaction{
+		Reference:   gofakeit.UUID(),
+		Source:      source,      // Dynamically generated UUID for source
+		Destination: destination, // Dynamically generated UUID for destination
+		Amount:      10,
+		Currency:    "NGN",
 	}
 
-	//expect reference check
-	mock.ExpectQuery("SELECT .* FROM transactions WHERE reference = \\$1").
-		WithArgs(txn.Reference).
-		WillReturnRows(sqlmock.NewRows(nil))
+	// Adjust your mock expectations to correctly reflect the dynamic nature of Source and Destination
+	// Ensure the SELECT query for transaction existence check is correctly mocked
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
+    `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
-	//expect balance fetch
-	//create new balance row with USD currency
-	balanceRows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
-		AddRow(txn.BalanceID, 100, 50, 50, "USD", 1, "test-ledger", "test-identity", time.Now(), `{"key":"value"}`)
+	// Correctly set up the balance query expectations for both Source and Destination
+	// Note: Separate the rows for clarity and correctness
+	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
+		AddRow(source, "NGN", 1, "ledger-id-source", 100, 50, 50, time.Now())
 
-	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM balances WHERE balance_id =").
-		WithArgs(txn.BalanceID).
-		WillReturnRows(balanceRows)
-	mock.ExpectCommit()
+	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
+		AddRow(destination, "NGN", 1, "ledger-id-destination", 200, 100, 100, time.Now())
 
-	_, err = d.RecordTransaction(txn)
-	assert.NotNil(t, err)
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("there were unfulfilled expectations: %s", err)
-	}
-}
+	balanceQuery := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE`)
+	balanceQuery2 := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE`)
 
-func TestRecordTransactionWithBalanceMultiplier(t *testing.T) {
-	// Test setup
-	datasource, mock, err := newTestDataSource()
+	// Ensure the mock expectations are correctly set for both the source and destination balances
+	mock.ExpectQuery(balanceQuery).WithArgs(source).WillReturnRows(sourceBalanceRows)
+	mock.ExpectQuery(balanceQuery2).WithArgs(destination).WillReturnRows(destinationBalanceRows)
+
+	// Mock the INSERT operation as before, ensuring it matches the expected usage
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO blnk.transactions(transaction_id, source, reference, amount, currency,destination, description, status,created_at,meta_data,scheduled_for) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)`)).WithArgs(sqlmock.AnyArg(), txn.Source, txn.Reference, txn.Amount, txn.Currency, txn.Destination, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	_, err = d.RecordTransaction(context.Background(), txn)
 	assert.NoError(t, err)
 
-	d, err := NewBlnk(datasource)
-	assert.NoError(t, err)
-
-	txn := model.Transaction{
-		Reference: gofakeit.UUID(),
-		BalanceID: gofakeit.UUID(),
-		Amount:    100,
-		Currency:  "NGN",
-		DRCR:      "Credit",
-	}
-	metaDataJSON, _ := json.Marshal(txn.MetaData)
-
-	//expect reference check
-	mock.ExpectQuery("SELECT .* FROM transactions WHERE reference = \\$1").
-		WithArgs(txn.Reference).
-		WillReturnRows(sqlmock.NewRows(nil))
-
-	//expect balance fetch
-	// Create a row with expected data
-	balanceRows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
-		AddRow(txn.BalanceID, 10000, 5000, 5000, "NGN", 100, "test-ledger", "test-identity", time.Now(), `{"key":"value"}`)
-
-	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .* FROM balances WHERE balance_id =").
-		WithArgs(txn.BalanceID).
-		WillReturnRows(balanceRows)
-	mock.ExpectCommit()
-
-	// Expect the transaction to be recorded in the database
-	mock.ExpectExec("INSERT INTO public.transactions").
-		WithArgs(
-			sqlmock.AnyArg(), txn.Tag, txn.Reference, txn.Amount*100, txn.Currency, txn.PaymentMethod, txn.Description, txn.DRCR, sqlmock.AnyArg(), sqlmock.AnyArg(), txn.BalanceID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, sqlmock.AnyArg(),
-		).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	// Add expectation for UPDATE balances query
-	mock.ExpectExec("UPDATE balances SET .* WHERE balance_id = \\$1").
-		WithArgs(
-			txn.BalanceID, 10000, 15000, 5000, "NGN", 100, "test-ledger", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	recordedTxn, err := d.RecordTransaction(txn)
-	assert.NoError(t, err)
-	assert.Equal(t, txn.Reference, recordedTxn.Reference)
-
+	// Check if all expectations were met
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}

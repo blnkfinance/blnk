@@ -1,7 +1,10 @@
 package blnk
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"testing"
 	"time"
 
@@ -13,57 +16,103 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func getBalanceMock(credit, debit, balance int64) model.Balance {
-	return model.Balance{CreditBalance: credit, DebitBalance: debit, Balance: balance}
+func getBalanceMock(credit, debit, balance int64) *model.Balance {
+	return &model.Balance{CreditBalance: credit, DebitBalance: debit, Balance: balance}
 }
 
-func getTransactionMock(amount int64, currency, DRCR string) model.Transaction {
-	transaction := model.Transaction{Amount: amount, Currency: currency, DRCR: DRCR}
+func getTransactionMock(amount int64, overdraft bool) model.Transaction {
+	transaction := model.Transaction{Amount: amount, AllowOverdraft: overdraft}
 	return transaction
 }
 
 func TestUpdateBalancesWithTransaction(t *testing.T) {
-
 	tests := []struct {
-		name        string
-		balance     model.Balance
-		transaction model.Transaction
-		want        struct {
-			Balance       int64
-			CreditBalance int64
-			DebitBalance  int64
+		name               string
+		sourceBalance      *model.Balance
+		ExpectedError      error
+		destinationBalance *model.Balance
+		transaction        model.Transaction
+		want               struct {
+			SourceBalance            int64
+			SourceCreditBalance      int64
+			SourceDebitBalance       int64
+			DestinationBalance       int64
+			DestinationCreditBalance int64
+			DestinationDebitBalance  int64
 		}
 	}{{
-		name:        "Credit 1k with starting balance of 0",
-		balance:     getBalanceMock(0, 0, 0),
-		transaction: getTransactionMock(1000, "NGN", "Credit"),
+		name:               "Send 1k from destination to source balance.",
+		ExpectedError:      nil,
+		sourceBalance:      getBalanceMock(2500, 0, 2500),
+		destinationBalance: getBalanceMock(0, 0, 0),
+		transaction:        getTransactionMock(1000, false),
 		want: struct {
-			Balance       int64
-			CreditBalance int64
-			DebitBalance  int64
-		}{Balance: 1000, CreditBalance: 1000, DebitBalance: 0},
+			SourceBalance            int64
+			SourceCreditBalance      int64
+			SourceDebitBalance       int64
+			DestinationBalance       int64
+			DestinationCreditBalance int64
+			DestinationDebitBalance  int64
+		}{SourceBalance: 1500, SourceDebitBalance: 1000, SourceCreditBalance: 2500, DestinationBalance: 1000, DestinationDebitBalance: 0, DestinationCreditBalance: 1000},
 	},
 		{
-			name:        "Credit 2k with starting credit balance of 500",
-			balance:     getBalanceMock(500, 0, 0),
-			transaction: getTransactionMock(2000, "NGN", "Credit"),
+			name:               "Debit 900m from source with start balance of 2.5b and debit balance of 500m. And destination start balance of 5k",
+			ExpectedError:      nil,
+			sourceBalance:      getBalanceMock(2500000000, 500000000, 2500000000),
+			destinationBalance: getBalanceMock(5000, 0, 5000),
+			transaction:        getTransactionMock(900000000, false),
 			want: struct {
-				Balance       int64
-				CreditBalance int64
-				DebitBalance  int64
-			}{Balance: 2500, CreditBalance: 2500, DebitBalance: 0},
-		}}
+				SourceBalance            int64
+				SourceCreditBalance      int64
+				SourceDebitBalance       int64
+				DestinationBalance       int64
+				DestinationCreditBalance int64
+				DestinationDebitBalance  int64
+			}{SourceBalance: 1100000000, SourceDebitBalance: 1400000000, SourceCreditBalance: 2500000000, DestinationBalance: 900005000, DestinationDebitBalance: 0, DestinationCreditBalance: 900005000},
+		},
+		{
+			name:               "Debit 1K from source balance with overdraft on. expect source balance to be -1k.",
+			ExpectedError:      nil,
+			sourceBalance:      getBalanceMock(0, 0, 0),
+			destinationBalance: getBalanceMock(0, 0, 0),
+			transaction:        getTransactionMock(1000, true),
+			want: struct {
+				SourceBalance            int64
+				SourceCreditBalance      int64
+				SourceDebitBalance       int64
+				DestinationBalance       int64
+				DestinationCreditBalance int64
+				DestinationDebitBalance  int64
+			}{SourceBalance: -1000, SourceDebitBalance: 1000, SourceCreditBalance: 0, DestinationBalance: 1000, DestinationDebitBalance: 0, DestinationCreditBalance: 1000},
+		},
+		{
+			name:               "Debit 1K from source balance with overdraft off. expect source balance to be 0, and error returned.",
+			ExpectedError:      fmt.Errorf("insufficient funds in source balance"),
+			sourceBalance:      getBalanceMock(0, 0, 0),
+			destinationBalance: getBalanceMock(0, 0, 0),
+			transaction:        getTransactionMock(1000, false),
+			want: struct {
+				SourceBalance            int64
+				SourceCreditBalance      int64
+				SourceDebitBalance       int64
+				DestinationBalance       int64
+				DestinationCreditBalance int64
+				DestinationDebitBalance  int64
+			}{SourceBalance: 0, SourceDebitBalance: 0, SourceCreditBalance: 0, DestinationBalance: 0, DestinationDebitBalance: 0, DestinationCreditBalance: 0},
+		},
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			balance := tt.balance
 			transaction := tt.transaction
-
-			err := balance.UpdateBalances(&transaction)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want.Balance, balance.Balance)
-			assert.Equal(t, tt.want.CreditBalance, balance.CreditBalance)
-			assert.Equal(t, tt.want.DebitBalance, balance.DebitBalance)
+			err := model.UpdateBalances(&transaction, tt.sourceBalance, tt.destinationBalance)
+			assert.Equal(t, err, tt.ExpectedError)
+			assert.Equal(t, tt.want.SourceBalance, tt.sourceBalance.Balance, "expected source balances to match")
+			assert.Equal(t, tt.want.SourceDebitBalance, tt.sourceBalance.DebitBalance, "expected source debit balances to match")
+			assert.Equal(t, tt.want.SourceCreditBalance, tt.sourceBalance.CreditBalance, "expected source credit balances to match")
+			assert.Equal(t, tt.want.DestinationBalance, tt.destinationBalance.Balance, "expected destination balances to match")
+			assert.Equal(t, tt.want.DestinationDebitBalance, tt.destinationBalance.DebitBalance, "expected destination debit balances to match")
+			assert.Equal(t, tt.want.DestinationCreditBalance, tt.destinationBalance.CreditBalance, "expected destination credit balances to match")
 		})
 	}
 
@@ -83,8 +132,8 @@ func TestCreateBalance(t *testing.T) {
 
 	// Convert metadata to JSON for mocking
 	metaDataJSON, _ := json.Marshal(balance.MetaData)
-	mock.ExpectExec("INSERT INTO balances").
-		WithArgs(sqlmock.AnyArg(), balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), metaDataJSON).
+	mock.ExpectExec("INSERT INTO blnk.balances").
+		WithArgs(sqlmock.AnyArg(), balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := d.CreateBalance(balance)
@@ -111,11 +160,12 @@ func TestGetBalanceByID(t *testing.T) {
 	// Expect transaction to begin
 	mock.ExpectBegin()
 
-	// Create a row with expected data
+	// Adjust the expected SQL to match the actual query structure and fields
+	expectedSQL := "SELECT b\\.balance_id, b\\.balance, b\\.credit_balance, b\\.debit_balance, b\\.currency, b\\.currency_multiplier, b\\.ledger_id, COALESCE\\(b\\.identity_id, ''\\) as identity_id, b\\.created_at, b\\.meta_data FROM \\( SELECT \\* FROM blnk\\.balances WHERE balance_id = \\$1 \\) AS b"
 	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
 		AddRow(balanceID, 100, 50, 50, "USD", 100, "test-ledger", "test-identity", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT .* FROM balances WHERE balance_id =").
+	mock.ExpectQuery(expectedSQL).
 		WithArgs(balanceID).
 		WillReturnRows(rows)
 
@@ -145,7 +195,7 @@ func TestGetAllBalances(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "created_at", "meta_data"}).
 		AddRow("test-balance", 100, 50, 50, "USD", 1.0, "test-ledger", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT .* FROM balances").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data FROM blnk.balances LIMIT 20").WillReturnRows(rows)
 
 	result, err := d.GetAllBalances()
 
@@ -167,12 +217,64 @@ func TestUpdateBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
-	balance := &model.Balance{BalanceID: "test-balance", Balance: 100, CreditBalance: 50, DebitBalance: 50, Currency: "USD"}
+	balance := &model.Balance{
+		BalanceID:          "test-balance",
+		Balance:            100,
+		CreditBalance:      50,
+		DebitBalance:       50,
+		Currency:           "USD",
+		CurrencyMultiplier: 1,
+		LedgerID:           gofakeit.UUID(),
+		CreatedAt:          time.Time{},              // Assuming CreatedAt is properly initialized elsewhere
+		MetaData:           map[string]interface{}{}, // Assuming MetaData is initialized, even if empty
+	}
 
+	// Assuming metaDataJSON is what you expect to be passed as the last argument
 	metaDataJSON, _ := json.Marshal(balance.MetaData)
-	mock.ExpectExec("UPDATE balances").WithArgs(balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err = d.updateBalance(*balance)
+	mock.ExpectExec(regexp.QuoteMeta(`
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
+        WHERE balance_id = $1`)).WithArgs(balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = d.datasource.UpdateBalance(balance)
+	assert.NoError(t, err)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestUpdateBalances(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+	sourceBalance := &model.Balance{BalanceID: "source-balance", Balance: 100, CreditBalance: 50, DebitBalance: 50, Currency: "USD"}
+	destinationBalance := &model.Balance{BalanceID: "destination-balance", Balance: 150, CreditBalance: 75, DebitBalance: 75, Currency: "USD"}
+
+	// Expect transaction begin
+	mock.ExpectBegin()
+
+	// Expect the first update (for sourceBalance)
+	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
+		sourceBalance.BalanceID, sourceBalance.Balance, sourceBalance.CreditBalance, sourceBalance.DebitBalance, sourceBalance.Currency, sourceBalance.CurrencyMultiplier, sourceBalance.LedgerID, sourceBalance.CreatedAt, sqlmock.AnyArg(),
+	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Expect the second update (for destinationBalance)
+	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
+		destinationBalance.BalanceID, destinationBalance.Balance, destinationBalance.CreditBalance, destinationBalance.DebitBalance, destinationBalance.Currency, destinationBalance.CurrencyMultiplier, destinationBalance.LedgerID, destinationBalance.CreatedAt, sqlmock.AnyArg(),
+	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Expect transaction commit
+	mock.ExpectCommit()
+
+	err = d.datasource.UpdateBalances(context.Background(), sourceBalance, destinationBalance)
 	assert.NoError(t, err)
 
 	if err := mock.ExpectationsWereMet(); err != nil {

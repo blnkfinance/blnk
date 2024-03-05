@@ -27,7 +27,7 @@ func TestCreateAccount(t *testing.T) {
 		Name:       "Test Account",
 		Number:     "123456789",
 		BankName:   "Test Bank",
-		Currency:   "USD",
+		Currency:   "NGN",
 		LedgerID:   gofakeit.UUID(),
 		IdentityID: "identity_123",
 		BalanceID:  gofakeit.UUID(),
@@ -35,21 +35,14 @@ func TestCreateAccount(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	// Expect transaction to begin
-	mock.ExpectBegin()
-
 	// Create a row with expected data
-	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
-		AddRow(account.BalanceID, 100, 50, 50, "USD", 100, account.LedgerID, account.IdentityID, time.Now(), `{"key":"value"}`)
-
-	mock.ExpectQuery("SELECT .* FROM balances WHERE balance_id =").
+	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
+		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 50, 50, 100, time.Now())
+	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).
 		WillReturnRows(rows)
 
-	// Expect transaction to commit
-	mock.ExpectCommit()
-
-	mock.ExpectExec("INSERT INTO accounts").
+	mock.ExpectExec("INSERT INTO blnk.accounts").
 		WithArgs(sqlmock.AnyArg(), account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, sqlmock.AnyArg(), metaDataJSON).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -86,7 +79,9 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 
 	account := model.Account{
 		Name:       "Test Account",
-		Currency:   "USD",
+		BankName:   "Blnk Bank",
+		Number:     "123456789",
+		Currency:   "NGN",
 		LedgerID:   "ledger_123",
 		IdentityID: gofakeit.UUID(),
 		BalanceID:  gofakeit.UUID(),
@@ -95,21 +90,14 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
 	// Create a row with expected data
-	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
-		AddRow(account.BalanceID, 100, 50, 50, "USD", 100, account.LedgerID, account.IdentityID, time.Now(), `{"key":"value"}`)
-
-	// Expect transaction to begin
-	mock.ExpectBegin()
-
-	mock.ExpectQuery("SELECT .* FROM balances WHERE balance_id =").
+	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
+		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 50, 50, 100, time.Now())
+	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).
 		WillReturnRows(rows)
 
-	// Expect transaction to commit
-	mock.ExpectCommit()
-
-	mock.ExpectExec("INSERT INTO accounts").
-		WithArgs(sqlmock.AnyArg(), account.Name, "123456789", "Blnk Bank", account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, sqlmock.AnyArg(), metaDataJSON).
+	mock.ExpectExec("INSERT INTO blnk.accounts").
+		WithArgs(sqlmock.AnyArg(), account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, sqlmock.AnyArg(), metaDataJSON).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := d.CreateAccount(account)
@@ -149,7 +137,7 @@ func TestGetAccountByID(t *testing.T) {
 	// Expect transaction to begin
 	mock.ExpectBegin()
 
-	mock.ExpectQuery("SELECT .* FROM accounts WHERE account_id =").
+	mock.ExpectQuery("SELECT .* FROM blnk.accounts WHERE account_id =").
 		WithArgs(testID).
 		WillReturnRows(rows)
 

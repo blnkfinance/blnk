@@ -98,18 +98,19 @@ func WebhookNotification(data map[string]interface{}) {
 }
 
 func NotifyError(systemError error) {
-	conf, err := config.Fetch()
-	if err != nil {
-		log.Println(err)
-	}
+	go func(systemError error) {
+		conf, err := config.Fetch()
+		if err != nil {
+			log.Println(err)
+		}
 
-	if conf.Notification.Slack.WebhookUrl != "" {
-		SlackNotification(systemError)
-	}
+		if conf.Notification.Slack.WebhookUrl != "" {
+			SlackNotification(systemError)
+		}
 
-	if conf.Notification.Webhook.Url != "" {
-		data := map[string]interface{}{"error": systemError.Error()}
-		WebhookNotification(data)
-	}
-
+		if conf.Notification.Webhook.Url != "" {
+			data := map[string]interface{}{"error": systemError.Error()}
+			WebhookNotification(data)
+		}
+	}(systemError)
 }

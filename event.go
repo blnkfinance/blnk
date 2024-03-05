@@ -1,6 +1,7 @@
 package blnk
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -54,7 +55,7 @@ func (l Blnk) CreatEvent(event model.Event) (model.Transaction, error) {
 	if err != nil {
 		return model.Transaction{}, err
 	}
-	var transaction model.Transaction
+	var transaction *model.Transaction
 
 	transactionRecord := processMapping(event.Data, eventMapper.MappingInstruction)
 	err = mapstructure.Decode(transactionRecord, &transaction)
@@ -62,15 +63,14 @@ func (l Blnk) CreatEvent(event model.Event) (model.Transaction, error) {
 		return model.Transaction{}, err
 	}
 
-	transaction.DRCR = event.Drcr
-	transaction.BalanceID = event.BalanceID
+	transaction.Source = event.BalanceID //todo extract source and destination from event
 
-	transaction, err = l.QueueTransaction(transaction)
+	transaction, err = l.QueueTransaction(context.Background(), transaction)
 	if err != nil {
 		return model.Transaction{}, err
 	}
 
-	return transaction, nil
+	return *transaction, nil
 }
 
 func (l Blnk) CreateEventMapper(mapper model.EventMapper) (model.EventMapper, error) {

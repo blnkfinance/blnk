@@ -55,6 +55,12 @@ type Notification struct {
 	} `json:"webhook"`
 }
 
+type OtelGrafanaCloud struct {
+	OTEL_EXPORTER_OTLP_PROTOCOL string `json:"OTEL_EXPORTER_OTLP_PROTOCOL	"`
+	OTEL_EXPORTER_OTLP_ENDPOINT string `json:"OTEL_EXPORTER_OTLP_ENDPOINT"`
+	OTEL_EXPORTER_OTLP_HEADERS  string `json:"OTEL_EXPORTER_OTLP_HEADERS"`
+}
+
 type Configuration struct {
 	ProjectName             string                        `json:"project_name" envconfig:"BLNK_PROJECT_NAME"`
 	Server                  ServerConfig                  `json:"server"`
@@ -62,6 +68,7 @@ type Configuration struct {
 	Redis                   RedisConfig                   `json:"redis"`
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
+	OtelGrafanaCloud        OtelGrafanaCloud              `json:"otel_grafana_cloud"`
 }
 
 func loadConfigFromFile(file string) error {
@@ -108,6 +115,27 @@ func Fetch() (*Configuration, error) {
 		return nil, errors.New("config not loaded from file. Create a json file called blnk.json with your config ❌")
 	}
 	return c, nil
+}
+
+func SetGrafanaExporterEnvs() error {
+	cnf, err := Fetch()
+	if err != nil {
+		return err
+	}
+	err = os.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", cnf.OtelGrafanaCloud.OTEL_EXPORTER_OTLP_PROTOCOL)
+	if err != nil {
+		return err
+	}
+	err = os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", cnf.OtelGrafanaCloud.OTEL_EXPORTER_OTLP_ENDPOINT)
+	if err != nil {
+		return err
+	}
+	err = os.Setenv("OTEL_EXPORTER_OTLP_HEADERS", cnf.OtelGrafanaCloud.OTEL_EXPORTER_OTLP_HEADERS)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func validateAndAddDefaults(cnf *Configuration) error {

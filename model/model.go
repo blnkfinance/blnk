@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -10,6 +11,7 @@ import (
 type Transaction struct {
 	ID                     int64                  `json:"-"`
 	TransactionID          string                 `json:"id"`
+	AllowOverdraft         bool                   `json:"allow_overdraft"`
 	Source                 string                 `json:"source"`
 	Destination            string                 `json:"destination"`
 	Reference              string                 `json:"reference"`
@@ -29,6 +31,7 @@ type Transaction struct {
 type Balance struct {
 	ID                 int64                  `json:"-"`
 	BalanceID          string                 `json:"balance_id"`
+	Indicator          string                 `json:"indicator"`
 	Balance            int64                  `json:"balance"`
 	CreditBalance      int64                  `json:"credit_balance"`
 	DebitBalance       int64                  `json:"debit_balance"`
@@ -185,23 +188,38 @@ func (balance *Balance) applyMultiplier(transaction *Transaction) {
 	transaction.Amount = transaction.Amount * balance.CurrencyMultiplier
 }
 
-func (balance *Balance) UpdateBalances(transaction *Transaction, position int) error {
+func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
+	if transaction.AllowOverdraft {
+		// Skip balance check if overdraft is allowed
+		return nil
+	}
+
+	// Use the provided sourceBalance for the check
+	if sourceBalance.Balance < transaction.Amount {
+		return fmt.Errorf("insufficient funds in source balance")
+	}
+
+	return nil
+}
+
+func UpdateBalances(transaction *Transaction, source, destination *Balance) error {
 	// Validate transaction
 	err := transaction.validate()
 	if err != nil {
 		return err
 	}
 
-	balance.applyMultiplier(transaction)
-
-	//position is first on the array of balances whihc is the source balance
-	if position == 0 {
-		balance.AddDebit(transaction.Amount)
-	} else {
-		balance.AddCredit(transaction.Amount)
+	err = canProcessTransaction(transaction, source)
+	if err != nil {
+		return err
 	}
 
-	balance.ComputeBalance()
+	source.applyMultiplier(transaction)
+	source.AddDebit(transaction.Amount)
+	source.ComputeBalance()
+	destination.applyMultiplier(transaction)
+	destination.AddCredit(transaction.Amount)
+	destination.ComputeBalance()
 	return nil
 }
 
@@ -209,6 +227,7 @@ func (transaction *Transaction) validate() error {
 	if transaction.Amount <= 0 {
 		return errors.New("transaction amount must be positive")
 	}
+
 	return nil
 }
 

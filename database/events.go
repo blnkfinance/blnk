@@ -22,7 +22,7 @@ func (d Datasource) CreateEventMapper(eventMapper model.EventMapper) (model.Even
 
 	// insert into database
 	_, err = d.Conn.Exec(`
-		INSERT INTO event_mappers (name, mapping_instruction, mapper_id)
+		INSERT INTO blnk.event_mappers (name, mapping_instruction, mapper_id)
 		VALUES ($1, $2, $3)
 	`, eventMapper.Name, instructionJSON, eventMapper.MapperID)
 
@@ -38,7 +38,7 @@ func (d Datasource) GetAllEventMappers() ([]model.EventMapper, error) {
 	// select all event mappers from database
 	rows, err := d.Conn.Query(`
 		SELECT mapper_id, name, created_at, mapping_instruction
-		FROM event_mappers
+		FROM blnk.event_mappers
 	`)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func (d Datasource) GetEventMapperByID(id string) (*model.EventMapper, error) {
 	// select event mapper from database by ID
 	row := d.Conn.QueryRow(`
 		SELECT mapper_id, name, created_at, mapping_instruction
-		FROM event_mappers
+		FROM blnk.event_mappers
 		WHERE mapper_id = $1
 	`, id)
 
@@ -108,7 +108,7 @@ func (d Datasource) UpdateEventMapper(eventMapper model.EventMapper) error {
 	}
 
 	_, err = d.Conn.Exec(`
-		UPDATE event_mappers
+		UPDATE blnk.event_mappers
 		SET name = $1, mapping_instruction = $2
 		WHERE mapper_id = $3
 	`, eventMapper.Name, instructionJSON, eventMapper.MapperID)
@@ -119,7 +119,7 @@ func (d Datasource) UpdateEventMapper(eventMapper model.EventMapper) error {
 // DeleteEventMapper deletes an event mapper from the database by ID
 func (d Datasource) DeleteEventMapper(id string) error {
 	_, err := d.Conn.Exec(`
-		DELETE FROM event_mappers
+		DELETE FROM blnk.event_mappers
 		WHERE mapper_id = $1
 	`, id)
 	return err

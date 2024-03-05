@@ -48,18 +48,18 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	queryBuilder.WriteString(strings.Join(selectFields, ", "))
 	queryBuilder.WriteString(`
         FROM (
-            SELECT * FROM balances WHERE balance_id = $1 FOR UPDATE
+            SELECT * FROM blnk.balances WHERE balance_id = $1
         ) AS b
     `)
 
 	if contains(include, "identity") {
 		queryBuilder.WriteString(`
-            LEFT JOIN identity i ON b.identity_id = i.identity_id
+            LEFT JOIN blnk.identity i ON b.identity_id = i.identity_id
         `)
 	}
 	if contains(include, "ledger") {
 		queryBuilder.WriteString(`
-            LEFT JOIN ledgers l ON b.ledger_id = l.ledger_id
+            LEFT JOIN blnk.ledgers l ON b.ledger_id = l.ledger_id
         `)
 	}
 
@@ -128,11 +128,17 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 		identityID = nil
 	}
 
+	// Replace empty string with null for indicator
+	var indicator interface{} = balance.Indicator
+	if balance.Indicator == "" {
+		indicator = nil
+	}
+
 	// insert into database
 	_, err = d.Conn.Exec(`
-		INSERT INTO balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, created_at, meta_data)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, balance.CreatedAt, &metaDataJSON)
+		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)
+	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON)
 
 	return balance, err
 }
@@ -167,12 +173,54 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 	return balance, nil
 }
 
+func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
+	var balance model.Balance
+	// select ledger from database by ID
+	row := d.Conn.QueryRow(`
+	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE
+	`, id)
+
+	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
+		&balance.DebitBalance, &balance.CreatedAt)
+	if err != nil {
+		logrus.Errorf("balance lite error %v", err)
+		if err == sql.ErrNoRows {
+			return &model.Balance{}, fmt.Errorf("balance with ID '%s' not found", id)
+		} else {
+			return nil, err
+		}
+	}
+
+	return &balance, nil
+}
+
+func (d Datasource) GetBalanceByIndicator(indicator string) (*model.Balance, error) {
+	var balance model.Balance
+	// select ledger from database by ID
+	row := d.Conn.QueryRow(`
+	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE indicator = $1 
+	`, indicator)
+
+	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
+		&balance.DebitBalance, &balance.CreatedAt)
+	if err != nil {
+		logrus.Errorf("balance lite error %v", err)
+		if err == sql.ErrNoRows {
+			return &model.Balance{}, fmt.Errorf("balance with indicator '%s' not found", indicator)
+		} else {
+			return nil, err
+		}
+	}
+
+	return &balance, nil
+}
+
 // GetAllBalances retrieves all balances from the database
 func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 	// select all balances from database
 	rows, err := d.Conn.Query(`
 		SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
-		FROM balances
+		FROM blnk.balances
 		LIMIT 20
 	`)
 	if err != nil {
@@ -219,6 +267,58 @@ func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 	return balances, nil
 }
 
+func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
+	// Start a transaction
+	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
+	if err != nil {
+		return err
+	}
+
+	// Defer a rollback in case anything fails. The rollback will be ignored if the transaction is successfully committed later.
+	defer tx.Rollback()
+
+	// Update source balance
+	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
+		return err
+	}
+
+	// Update destination balance
+	if err := updateBalance(ctx, tx, destinationBalance); err != nil {
+		return err
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// updateBalance is a helper function to update a single balance within a transaction
+func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) error {
+	// Convert metadata to JSONB
+	metaDataJSON, err := json.Marshal(balance.MetaData)
+	if err != nil {
+		return err
+	}
+
+	// Prepare the SQL statement
+	query := `
+		UPDATE blnk.balances
+		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
+		WHERE balance_id = $1
+	`
+
+	// Execute the update within the transaction
+	_, err = tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // UpdateBalance updates a balance in the database
 func (d Datasource) UpdateBalance(balance *model.Balance) error {
 	// convert metadata to JSONB
@@ -229,7 +329,7 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 
 	// update balance in database
 	_, err = d.Conn.Exec(`
-		UPDATE balances
+		UPDATE blnk.balances
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
 		WHERE balance_id = $1
 	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)

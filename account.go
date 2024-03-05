@@ -68,7 +68,7 @@ func (l Blnk) applyAccountName(account *model.Account) error {
 }
 
 func (l Blnk) overrideLedgerAndIdentity(account *model.Account) error {
-	balance, err := l.GetBalanceByID(account.BalanceID, nil)
+	balance, err := l.datasource.GetBalanceByIDLite(account.BalanceID)
 	if err != nil {
 		return err
 	}

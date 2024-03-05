@@ -23,7 +23,13 @@ services:
     volumes:
       - ./blnk.json:/blnk.json
 
-
+  migration:
+    build: .
+    entrypoint: [ "./blnk", "migrate","up" ]
+    depends_on:
+      - postgres
+    volumes:
+      - ./blnk.json:/blnk.json
 
   redis:
     image: redis:7.2.4
@@ -46,7 +52,25 @@ services:
       timeout: 5s
       retries: 5
 
+  loki:
+    image: grafana/loki:2.9.4
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - loki
 
+  promtail:
+    image: grafana/promtail:2.9.4
+    volumes:
+      - /var/log:/var/log
+      - ./promtail/config.yaml:/etc/promtail/config.y-ml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - loki
 
 volumes:
   pg_data:
+
+networks:
+  loki:

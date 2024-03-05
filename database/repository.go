@@ -1,6 +1,8 @@
 package database
 
 import (
+	"context"
+
 	"github.com/jerry-enebeli/blnk/model"
 )
 
@@ -15,15 +17,12 @@ type IDataSource interface {
 }
 
 type transaction interface {
-	RecordTransaction(txn model.Transaction) (model.Transaction, error)
+	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)
 	GetTransaction(id string) (model.Transaction, error)
-	GetTransactionByRef(reference string) (model.Transaction, error)
+	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)
+	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)
 	UpdateTransactionStatus(id string, status string) error
-	GroupTransactionsByCurrency() (map[string]struct {
-		TotalAmount int64 `json:"total_amount"`
-	}, error)
 	GetAllTransactions() ([]model.Transaction, error)
-	GetNextQueuedTransaction() (*model.Transaction, error)
 }
 
 type ledger interface {
@@ -35,8 +34,11 @@ type ledger interface {
 type balance interface {
 	CreateBalance(balance model.Balance) (model.Balance, error)
 	GetBalanceByID(id string, include []string) (*model.Balance, error)
+	GetBalanceByIDLite(id string) (*model.Balance, error)
 	GetAllBalances() ([]model.Balance, error)
 	UpdateBalance(balance *model.Balance) error
+	GetBalanceByIndicator(indicator string) (*model.Balance, error)
+	UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error
 }
 
 type account interface {

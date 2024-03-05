@@ -1,6 +1,7 @@
 package blnk
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jerry-enebeli/blnk/model"
 )
+
+const TANSACTION_QUEUE = "new:transaction:test"
 
 type Queue struct {
 	client    *asynq.Client
@@ -29,41 +32,26 @@ func NewQueue(conf *config.Configuration) *Queue {
 	}
 }
 
-func (q *Queue) Enqueue(transaction model.Transaction) error {
+func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) error {
 	payload, err := json.Marshal(transaction)
 	if err != nil {
 		log.Fatal(err)
 	}
-	task := q.geTask(transaction, payload)
-	if !transaction.ScheduledFor.IsZero() {
-		task = q.getScheduledTasked(transaction, payload)
-	}
-
-	info, err := q.client.Enqueue(task, asynq.MaxRetry(5))
+	info, err := q.client.Enqueue(q.geTask(transaction, payload), asynq.MaxRetry(5))
 	if err != nil {
-		log.Println("here", err, info)
+		log.Println(err, info)
+		return err
 	}
 	log.Printf(" [*] Successfully enqueued task: %+v", transaction.TransactionID)
 
 	return nil
 }
 
-func (q *Queue) geTask(transaction model.Transaction, payload []byte) *asynq.Task {
-	if transaction.DRCR == "Credit" {
-		//push to credit queue for higher priority and avoid grouping
-		return asynq.NewTask("new:transaction:credit", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"))
+func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Task {
+	taskOptions := []asynq.Option{asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions")}
+
+	if !transaction.ScheduledFor.IsZero() {
+		taskOptions = append(taskOptions, asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
 	}
-
-	return asynq.NewTask("new:transaction", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID))
-}
-
-func (q *Queue) getScheduledTasked(transaction model.Transaction, payload []byte) *asynq.Task {
-
-	if transaction.DRCR == "Credit" {
-		//push to credit queue for higher priority and avoid grouping
-		return asynq.NewTask("new:transaction:credit", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("credit-transactions"), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
-	}
-
-	return asynq.NewTask("new:transactions", payload, asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions"), asynq.Group(transaction.BalanceID), asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
-
+	return asynq.NewTask(TANSACTION_QUEUE, payload, taskOptions...)
 }

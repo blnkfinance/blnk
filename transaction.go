@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"go.opentelemetry.io/otel/trace"
@@ -20,15 +23,17 @@ import (
 )
 
 var (
-	tracer    = otel.Tracer("Queue transaction")
-	meter     = otel.Meter("Queue transaction")
-	commitCnt metric.Int64Counter
+	tracer = otel.Tracer("Queue transaction")
+	meter  = otel.Meter("rolldice")
+	txnCnt metric.Int64Counter
 )
+
+var ()
 
 func init() {
 	var err error
-	commitCnt, err = meter.Int64Counter("transaction.commits",
-		metric.WithDescription("The number of transactions committed"),
+	txnCnt, err = meter.Int64Counter("txn.commits",
+		metric.WithDescription("The number of commit by transition count value"),
 		metric.WithUnit("{txn}"))
 	if err != nil {
 		panic(err)
@@ -42,39 +47,58 @@ const (
 )
 
 func (l Blnk) getSourceAndDestination(transaction *model.Transaction) (source *model.Balance, destination *model.Balance, err error) {
-	sourceBalance, err := l.datasource.GetBalanceByIDLite(transaction.Source)
-	emptyBalance := &model.Balance{}
-	if err != nil {
-		logrus.Errorf("source error %v", err)
-		return emptyBalance, emptyBalance, err
+
+	var sourceBalance, destinationBalance *model.Balance
+
+	// Check if Source starts with "@"
+	if strings.HasPrefix(transaction.Source, "@") {
+		sourceBalance, err = l.getOrCreateBalanceByIndicator(transaction.Source)
+		if err != nil {
+			logrus.Errorf("source error %v", err)
+			return nil, nil, err
+		}
+		// Update transaction source with the balance ID
+		transaction.Source = sourceBalance.BalanceID
+	} else {
+		sourceBalance, err = l.datasource.GetBalanceByIDLite(transaction.Source)
+		if err != nil {
+			logrus.Errorf("source error %v", err)
+			return nil, nil, err
+		}
 	}
-	destinationBalance, err := l.datasource.GetBalanceByIDLite(transaction.Destination)
-	if err != nil {
-		logrus.Errorf("destination error %v", err)
-		return emptyBalance, emptyBalance, err
+
+	// Check if Destination starts with "@"
+	if strings.HasPrefix(transaction.Destination, "@") {
+		destinationBalance, err = l.getOrCreateBalanceByIndicator(transaction.Destination)
+		if err != nil {
+			logrus.Errorf("destination error %v", err)
+			return nil, nil, err
+		}
+		// Update transaction destination with the balance ID
+		transaction.Destination = destinationBalance.BalanceID
+	} else {
+		destinationBalance, err = l.datasource.GetBalanceByIDLite(transaction.Destination)
+		if err != nil {
+			logrus.Errorf("destination error %v", err)
+			return nil, nil, err
+		}
 	}
+
+	fmt.Println("here>>>", source, destination)
 
 	return sourceBalance, destinationBalance, nil
 }
 
-func (l Blnk) validateBlnMatch(transaction *model.Transaction) error {
-	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
-	if err != nil {
-		return err
-	}
-	if (sourceBalance.Currency != destinationBalance.Currency) && sourceBalance.Currency != transaction.Currency {
-		return fmt.Errorf("transaction %s currency %s does not match the source %s and destination balance %s currency %s. Please ensure they are consistent", transaction.TransactionID, transaction.Currency, transaction.Source, transaction.Destination, transaction.Currency)
-	}
-	return nil
-}
-
-// Helper function to get the opposite DRCR value
-func inverseDRCR(drcr string) string {
-	if drcr == "Debit" {
-		return "Credit"
-	}
-	return "Debit"
-}
+//func (l Blnk) validateCurrencyMatch(transaction *model.Transaction) error {
+//	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
+//	if err != nil {
+//		return err
+//	}
+//	if (sourceBalance.Currency != destinationBalance.Currency) && sourceBalance.Currency != transaction.Currency {
+//		return fmt.Errorf("transaction %s currency %s does not match the source %s and destination balance %s currency %s. Please ensure they are consistent", transaction.TransactionID, transaction.Currency, transaction.Source, transaction.Destination, transaction.Currency)
+//	}
+//	return nil
+//}
 
 func (l Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
 	err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance)
@@ -130,41 +154,44 @@ func (l Blnk) ApplyBalanceToQueuedTransaction(context context.Context, transacti
 		}
 	}
 
-	if len(transaction.GroupIds) > 0 {
-		for _, id := range transaction.GroupIds {
-			//updates the transaction status from QUEUED to SUCCESSFUL
-			err = l.datasource.UpdateTransactionStatus(id, StatusApplied)
+	go func() {
+		if len(transaction.GroupIds) > 0 {
+			for _, id := range transaction.GroupIds {
+				//updates the transaction status from QUEUED to SUCCESSFUL
+				err = l.datasource.UpdateTransactionStatus(id, StatusApplied)
+				if err != nil {
+					logrus.Error("UpdateTransactionStatus in groups error", err)
+				}
+			}
+		} else {
+			err = l.datasource.UpdateTransactionStatus(transaction.TransactionID, StatusApplied)
 			if err != nil {
-				logrus.Error("UpdateTransactionStatus in groups error", err)
-				return err
+				logrus.Error("UpdateTransactionStatus single error", err)
 			}
 		}
-	} else {
-		err = l.datasource.UpdateTransactionStatus(transaction.TransactionID, StatusApplied)
-		if err != nil {
-			logrus.Error("UpdateTransactionStatus single error", err)
-			return err
-		}
-	}
+	}()
 
+	rollValueAttr := attribute.Int("commit.value", 1)
+	span.SetAttributes(rollValueAttr)
+	txnCnt.Add(ctx, 1, metric.WithAttributes(rollValueAttr))
 	logrus.Infof("committed transaction to balance %s %s", sourceBalance.BalanceID, destinationBalance.BalanceID)
 
 	return nil
 }
 
-func (l Blnk) validateTxn(cxt context.Context, transaction *model.Transaction) (model.Transaction, error) {
+func (l Blnk) validateTxn(cxt context.Context, transaction *model.Transaction) error {
 	cxt, span := tracer.Start(cxt, "Validating transaction reference")
 	defer span.End()
-	txn, err := l.GetTransactionByRef(cxt, transaction.Reference)
+	txn, err := l.datasource.TransactionExistsByRef(cxt, transaction.Reference)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return model.Transaction{}, err
+		return err
 	}
 
-	if errors.Is(err, nil) && txn.TransactionID != "" {
-		return model.Transaction{}, fmt.Errorf("this reference has already been %s . discarding transaction", txn.Status)
+	if txn {
+		return fmt.Errorf("reference %s has already been used", transaction.Reference)
 	}
 
-	return txn, nil
+	return nil
 }
 
 func (l Blnk) recordTransaction(cxt context.Context, transaction *model.Transaction) (*model.Transaction, error) {
@@ -178,11 +205,10 @@ func (l Blnk) recordTransaction(cxt context.Context, transaction *model.Transact
 func (l Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Balance, transaction *model.Transaction) error {
 	span.AddEvent("calculating new balances")
 	defer span.End()
-	for i, _ := range balances {
-		err := balances[i].UpdateBalances(transaction, i)
-		if err != nil {
-			return err
-		}
+
+	err := model.UpdateBalances(transaction, balances[0], balances[1])
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -192,20 +218,31 @@ func (l Blnk) RecordTransaction(cxt context.Context, transaction *model.Transact
 	defer span.End()
 
 	emptyTransaction := &model.Transaction{}
-	_, err := l.datasource.TransactionExistsByRef(cxt, transaction.Reference)
+	err := l.validateTxn(cxt, transaction)
 	if err != nil {
 		return emptyTransaction, err
 	}
 
-	//riskScore := l.ApplyFraudScore(transaction)
-	//if riskScore >= transaction.RiskToleranceThreshold && transaction.RiskToleranceThreshold > 0 {
-	//	return emptyTransaction, fmt.Errorf("this transaction has been flagged as a high risk")
-	//}
-	//
-	//transaction.RiskScore = riskScore
-	//if transaction.Status == "" {
-	//	transaction.Status = StatusApplied
-	//}
+	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
+	if err != nil {
+		err := fmt.Errorf("source and balance error %v", err)
+		span.RecordError(err)
+		logrus.Error(err)
+		return nil, err
+	}
+
+	riskScore := l.ApplyFraudScore(transaction, sourceBalance, destinationBalance)
+	if riskScore >= transaction.RiskToleranceThreshold && transaction.RiskToleranceThreshold > 0 {
+		return emptyTransaction, fmt.Errorf("this transaction has been flagged as a high risk")
+	}
+
+	transaction.RiskScore = riskScore
+	if transaction.Status == "" {
+		transaction.Status = StatusApplied
+	}
+
+	transaction.Source = sourceBalance.BalanceID
+	transaction.Destination = destinationBalance.BalanceID
 
 	transaction, err = l.recordTransaction(cxt, transaction)
 	if err != nil {
@@ -233,7 +270,7 @@ func (l Blnk) QueueTransaction(cxt context.Context, transaction *model.Transacti
 	err = l.queue.Enqueue(ctx, transaction)
 	if err != nil {
 		notification.NotifyError(err)
-		logrus.Error("Error queuing transaction: %v", err)
+		logrus.Errorf("Error queuing transaction: %v", err)
 	}
 
 	return transaction, nil
@@ -255,7 +292,6 @@ func (l Blnk) UpdateTransactionStatus(id string, status string) error {
 	return l.datasource.UpdateTransactionStatus(id, status)
 }
 
-// todo rewrite
 func (l Blnk) RefundTransaction(transactionID string) (*model.Transaction, error) {
 	// Retrieve the original transaction by its ID
 	originalTxn, err := l.GetTransaction(transactionID)
@@ -263,16 +299,9 @@ func (l Blnk) RefundTransaction(transactionID string) (*model.Transaction, error
 		return &model.Transaction{}, err
 	}
 
-	// Create a new inverse transaction with the opposite "drcr" value
-	refundTxn := &model.Transaction{
-		Reference: database.GenerateUUIDWithSuffix("ref"),
-		Amount:    originalTxn.Amount, // Inverse amount
-		Currency:  originalTxn.Currency,
-		MetaData:  map[string]interface{}{"refunded_transaction_id": transactionID},
-	}
-
+	originalTxn.Reference = database.GenerateUUIDWithSuffix("ref")
 	// Record the new inverse transaction
-	refundTxn, err = l.RecordTransaction(context.Background(), refundTxn)
+	refundTxn, err := l.QueueTransaction(context.Background(), &originalTxn)
 	if err != nil {
 		return &model.Transaction{}, err
 	}

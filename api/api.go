@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/gin-gonic/gin"
@@ -75,6 +77,7 @@ func NewAPI(b *blnk.Blnk) *Api {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
+	r.Use(otelgin.Middleware("Blnk Sever"))
 	//r.LoadHTMLGlob("ui/**/*")
 	r.Static("/static", "ui")
 
@@ -167,7 +170,5 @@ func NewAPI(b *blnk.Blnk) *Api {
 			"customers": customers,
 		})
 	})
-
-	gin.SetMode(gin.DebugMode)
 	return &Api{blnk: b, router: r}
 }

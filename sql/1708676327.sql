@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS blnk.balances
 (
     id SERIAL PRIMARY KEY,
     balance_id TEXT NOT NULL UNIQUE,
+    indicator TEXT,
     balance BIGINT NOT NULL,
     credit_balance BIGINT NOT NULL,
     debit_balance BIGINT NOT NULL,
@@ -115,12 +116,29 @@ CREATE TABLE IF NOT EXISTS blnk.transactions
 
 -- +migrate Up
 CREATE INDEX idx_transactions_reference ON blnk.transactions (reference);
+CREATE INDEX idx_balances_indicator ON blnk.balances (indicator);
+CREATE UNIQUE INDEX idx_unique_indicator_on_non_nulls
+    ON blnk.balances (indicator)
+    WHERE indicator IS NOT NULL;
+
+-- +migrate Up
+INSERT INTO blnk.ledgers (name, ledger_id, created_at, meta_data)
+VALUES ('General Ledger', 'general_ledger_id', NOW(), '{}')
+ON CONFLICT (ledger_id) DO NOTHING;
+
+
 
 -- +migrate Down
-DROP TABLE IF EXISTS blnk.ledgers CASCADE;
-DROP TABLE IF EXISTS blnk.identity CASCADE;
-DROP TABLE IF EXISTS blnk.balances CASCADE;
-DROP TABLE IF EXISTS blnk.accounts CASCADE;
-DROP TABLE IF EXISTS blnk.balance_monitors CASCADE;
-DROP TABLE IF EXISTS blnk.event_mappers CASCADE;
+DELETE FROM blnk.ledgers WHERE ledger_id = 'general_ledger_id';
+
+-- +migrate Down
+DROP INDEX IF EXISTS blnk.idx_transactions_reference;
+DROP INDEX IF EXISTS blnk.idx_balances_indicator;
+
 DROP TABLE IF EXISTS blnk.transactions CASCADE;
+DROP TABLE IF EXISTS blnk.balance_monitors CASCADE;
+DROP TABLE IF EXISTS blnk.accounts CASCADE;
+DROP TABLE IF EXISTS blnk.balances CASCADE;
+DROP TABLE IF EXISTS blnk.identity CASCADE;
+DROP TABLE IF EXISTS blnk.event_mappers CASCADE;
+DROP TABLE IF EXISTS blnk.ledgers CASCADE;

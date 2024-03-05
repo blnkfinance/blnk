@@ -32,3 +32,15 @@ build_test_run:
 	make build
 	make test
 	make run
+
+migrate_up:
+	./${PROJECT} migrate up
+
+migrate_down:
+	./${PROJECT} migrate down
+
+backup:
+	./${PROJECT} backup drive
+
+backup_s3:
+	./${PROJECT} backup s3

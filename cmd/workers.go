@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
 
@@ -24,12 +25,11 @@ import (
 func processTransaction(cxt context.Context, t *asynq.Task) error {
 	var txn model.Transaction
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
-		fmt.Println("error", err)
+		logrus.Error(err)
 		return err
 	}
 	cfg, err := config.Fetch()
 	if err != nil {
-		fmt.Println("error", err)
 		return err
 	}
 	db, err := database.NewDataSource(cfg)
@@ -41,7 +41,7 @@ func processTransaction(cxt context.Context, t *asynq.Task) error {
 		log.Fatalf("Error creating blnk: %v\n", err)
 	}
 
-	log.Printf(" [*] Processing Transaction %s. source %s destination %s", txn.TransactionID, txn.Source, txn.Destination)
+	logrus.Printf(" [*] Processing Transaction %s. source %s destination %s", txn.TransactionID, txn.Source, txn.Destination)
 	err = newBlnk.ApplyBalanceToQueuedTransaction(cxt, &txn)
 	if err != nil {
 		return err

@@ -3,13 +3,11 @@ package main
 import (
 	"log"
 
-	"github.com/jerry-enebeli/blnk/internal/notification"
-
-	"github.com/caddyserver/certmagic"
+	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk"
 
-	"github.com/jerry-enebeli/blnk/database"
+	"github.com/caddyserver/certmagic"
 
 	"github.com/jerry-enebeli/blnk/api"
 	"github.com/jerry-enebeli/blnk/config"
@@ -31,32 +29,27 @@ func serveTLS(conf config.ServerConfig) error {
 
 }
 
-func serverCommands() *cobra.Command {
+func serverCommands(b *blnkInstance) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "start blnk server",
 		Run: func(cmd *cobra.Command, args []string) {
+			_, err := blnk.SetupOTelSDK(cmd.Context())
+			if err != nil {
+				return
+			}
+			router := api.NewAPI(b.blnk).Router()
 			cfg, err := config.Fetch()
 			if err != nil {
-				log.Fatalf("Error getting config: %v\n", err)
+				log.Fatal(err)
 			}
-			db, err := database.NewDataSource(cfg)
-			if err != nil {
-				notification.NotifyError(err)
-				log.Fatalf("Error getting datasource: %v\n", err)
-			}
-			newBlnk, err := blnk.NewBlnk(db)
-			if err != nil {
-				notification.NotifyError(err)
-				log.Fatalf("Error creating blnk: %v\n", err)
-			}
-			router := api.NewAPI(newBlnk).Router()
 			if cfg.Server.SSL {
 				err := serveTLS(cfg.Server)
 				if err != nil {
 					log.Fatalf("Error creating tls: %v\n", err)
 				}
 			}
+			logrus.Infof("Blnk sever running on localhost:%s ✅", cfg.Server.Port)
 			err = router.Run(":" + cfg.Server.Port)
 			if err != nil {
 				log.Fatal(err)

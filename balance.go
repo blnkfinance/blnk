@@ -64,6 +64,25 @@ func (l Blnk) applyFraudScore(balance *model.Balance, amount int64) float64 {
 	return ComputeFraudScore(changeFrequency, transactionAmount, currentBalance, creditBalance, debitBalance)
 }
 
+// Function to handle fetching or creating balance by indicator
+func (l Blnk) getOrCreateBalanceByIndicator(indicator string) (*model.Balance, error) {
+	balance, err := l.datasource.GetBalanceByIndicator(indicator)
+	if err != nil {
+		balance = &model.Balance{
+			Indicator: indicator,
+			LedgerID:  GeneralLedgerID,
+		}
+		// Save the new balance to the datasource
+		newBalance, err := l.datasource.CreateBalance(*balance)
+		if err != nil {
+			return nil, err
+		}
+
+		return &newBalance, nil
+	}
+	return balance, nil
+}
+
 func (l Blnk) CreateBalance(balance model.Balance) (model.Balance, error) {
 	return l.datasource.CreateBalance(balance)
 }
@@ -101,17 +120,7 @@ func (l Blnk) DeleteMonitor(id string) error {
 }
 
 // ApplyFraudScore updates the balance and computes the fraud score
-func (l Blnk) ApplyFraudScore(transaction *model.Transaction) float64 {
-	sourceBalance, err := l.datasource.GetBalanceByIDLite(transaction.Source)
-	if err != nil {
-		return 0
-	}
-
-	destinationBalance, err := l.datasource.GetBalanceByIDLite(transaction.Source)
-	if err != nil {
-		return 0
-	}
-
+func (l Blnk) ApplyFraudScore(transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) float64 {
 	fmt.Println(l.applyFraudScore(destinationBalance, transaction.Amount))
 	fmt.Println(l.applyFraudScore(sourceBalance, transaction.Amount))
 	return 0 //todo rewrite

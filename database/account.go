@@ -22,7 +22,7 @@ func (d Datasource) CreateAccount(account model.Account) (model.Account, error) 
 	account.CreatedAt = time.Now()
 
 	_, err = d.Conn.Exec(`
-		INSERT INTO accounts (account_id, name, number, bank_name, currency, ledger_id, identity_id, balance_id, created_at, meta_data)
+		INSERT INTO blnk.accounts (account_id, name, number, bank_name, currency, ledger_id, identity_id, balance_id, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6,$7,$8,$9,$10)
 	`, account.AccountID, account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, account.CreatedAt, metaDataJSON)
 
@@ -93,23 +93,23 @@ func prepareAccountQueries(queryBuilder strings.Builder, include []string) strin
 	queryBuilder.WriteString(strings.Join(selectFields, ", "))
 	queryBuilder.WriteString(`
         FROM (
-            SELECT * FROM accounts WHERE account_id = $1 FOR UPDATE
+            SELECT * FROM blnk.accounts WHERE account_id = $1 FOR UPDATE
         ) AS a
     `)
 
 	if contains(include, "identity") {
 		queryBuilder.WriteString(`
-            LEFT JOIN identity i ON a.identity_id = i.identity_id
+            LEFT JOIN blnk.identity i ON a.identity_id = i.identity_id
         `)
 	}
 	if contains(include, "ledger") {
 		queryBuilder.WriteString(`
-            LEFT JOIN ledgers l ON a.ledger_id = l.ledger_id
+            LEFT JOIN blnk.ledgers l ON a.ledger_id = l.ledger_id
         `)
 	}
 	if contains(include, "balance") {
 		queryBuilder.WriteString(`
-            LEFT JOIN balances b ON a.balance_id = b.balance_id
+            LEFT JOIN blnk.balances b ON a.balance_id = b.balance_id
         `)
 	}
 
@@ -209,7 +209,7 @@ func (d Datasource) GetAllAccounts() ([]model.Account, error) {
 func (d Datasource) GetAccountByNumber(number string) (*model.Account, error) {
 	row := d.Conn.QueryRow(`
 		SELECT account_id, name, number, bank_name, created_at, meta_data 
-		FROM accounts WHERE number = $1
+		FROM blnk.accounts WHERE number = $1
 	`, number)
 
 	account := &model.Account{}
@@ -239,7 +239,7 @@ func (d Datasource) UpdateAccount(account *model.Account) error {
 	}
 
 	_, err = d.Conn.Exec(`
-		UPDATE accounts
+		UPDATE blnk.accounts
 		SET name = $2, number = $3, bank_name = $4, meta_data = $5
 		WHERE account_id = $1
 	`, account.AccountID, account.Name, account.Number, account.BankName, metaDataJSON)
@@ -250,7 +250,7 @@ func (d Datasource) UpdateAccount(account *model.Account) error {
 // DeleteAccount deletes a specific account from the database
 func (d Datasource) DeleteAccount(id string) error {
 	_, err := d.Conn.Exec(`
-		DELETE FROM accounts WHERE account_id = $1
+		DELETE FROM blnk.accounts WHERE account_id = $1
 	`, id)
 	return err
 }

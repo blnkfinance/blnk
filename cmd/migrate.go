@@ -30,7 +30,7 @@ func migrateUpCommands() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			migrations := migrate.EmbedFileSystemMigrationSource{
 				FileSystem: blnk.SQLFiles,
-				Root:       "sqls",
+				Root:       "sql",
 			}
 			cnf, err := config.Fetch()
 			if err != nil {
@@ -57,7 +57,7 @@ func migrateDownCommands() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			migrations := migrate.EmbedFileSystemMigrationSource{
 				FileSystem: blnk.SQLFiles,
-				Root:       "sqls",
+				Root:       "sql",
 			}
 			cnf, err := config.Fetch()
 			if err != nil {
@@ -65,6 +65,7 @@ func migrateDownCommands() *cobra.Command {
 			}
 			db, err := database.ConnectDB(cnf.DataSource.Dns)
 			if err != nil {
+				log.Printf("Error migrating up: %v", err)
 				return
 			}
 			n, err := migrate.Exec(db, "postgres", migrations, migrate.Down)

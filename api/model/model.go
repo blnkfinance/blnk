@@ -69,6 +69,7 @@ type CreateAccount struct {
 
 type RecordTransaction struct {
 	Amount                 float64   `json:"amount"`
+	AllowOverDraft         bool      `json:"allow_over_draft"`
 	Source                 string    `json:"source"`
 	Reference              string    `json:"reference"`
 	Drcr                   string    `json:"drcr"`
@@ -180,7 +181,7 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 }
 
 func (t *RecordTransaction) ToTransaction() *model.Transaction {
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, RiskToleranceThreshold: t.RiskToleranceThreshold, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: int64(t.Amount)}
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, RiskToleranceThreshold: t.RiskToleranceThreshold, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: int64(t.Amount), AllowOverdraft: t.AllowOverDraft}
 }
 
 func (t *CreateEventMapper) ValidateCreateEventMapper() error {

@@ -13,26 +13,31 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRecordCreditTransaction(t *testing.T) {
+func TestRecordTransaction(t *testing.T) {
 	router, b, _ := setupRouter()
 	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
 	if err != nil {
 		return
 	}
 
-	newBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	newSourceBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	newDestinationBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
 	if err != nil {
 		t.Error(err)
 		return
 	}
 	validPayload := model2.RecordTransaction{
-		Amount:        10000,
-		Reference:     gofakeit.UUID(),
-		Drcr:          "Credit",
-		PaymentMethod: "Book",
-		Description:   "test",
-		Currency:      "NGN",
-		BalanceId:     newBalance.BalanceID,
+		Amount:      10000,
+		Reference:   gofakeit.UUID(),
+		Description: "test",
+		Currency:    "NGN",
+		Destination: newDestinationBalance.BalanceID,
+		Source:      newSourceBalance.BalanceID,
 	}
 	payloadBytes, _ := request.ToJsonReq(&validPayload)
 	var response model.Transaction
@@ -51,33 +56,35 @@ func TestRecordCreditTransaction(t *testing.T) {
 	}
 
 	assert.Equal(t, http.StatusCreated, resp.Code)
-	assert.Equal(t, response.LedgerID, newLedger.LedgerID)
 	assert.Equal(t, response.Currency, validPayload.Currency)
-	assert.NotEmpty(t, response.BalanceID)
-	assert.Equal(t, response.BalanceID, newBalance.BalanceID)
 	assert.Equal(t, response.Status, "QUEUED")
 }
 
-func TestRecordDebitTransaction(t *testing.T) {
+func TestRecordTransactionWithExitingRef(t *testing.T) {
 	router, b, _ := setupRouter()
 	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
 	if err != nil {
 		return
 	}
 
-	newBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	newSourceBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	newDestinationBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
 	if err != nil {
 		t.Error(err)
 		return
 	}
 	validPayload := model2.RecordTransaction{
-		Amount:        10000,
-		Reference:     gofakeit.UUID(),
-		Drcr:          "Debit",
-		PaymentMethod: "Book",
-		Description:   "test",
-		Currency:      "NGN",
-		BalanceId:     newBalance.BalanceID,
+		Amount:      10000,
+		Reference:   gofakeit.UUID(),
+		Description: "test",
+		Currency:    "NGN",
+		Destination: newDestinationBalance.BalanceID,
+		Source:      newSourceBalance.BalanceID,
 	}
 	payloadBytes, _ := request.ToJsonReq(&validPayload)
 	var response model.Transaction
@@ -96,9 +103,6 @@ func TestRecordDebitTransaction(t *testing.T) {
 	}
 
 	assert.Equal(t, http.StatusCreated, resp.Code)
-	assert.Equal(t, response.LedgerID, newLedger.LedgerID)
 	assert.Equal(t, response.Currency, validPayload.Currency)
-	assert.NotEmpty(t, response.BalanceID)
-	assert.Equal(t, response.BalanceID, newBalance.BalanceID)
 	assert.Equal(t, response.Status, "QUEUED")
 }
