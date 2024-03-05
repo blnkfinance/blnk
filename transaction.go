@@ -84,8 +84,6 @@ func (l Blnk) getSourceAndDestination(transaction *model.Transaction) (source *m
 		}
 	}
 
-	fmt.Println("here>>>", source, destination)
-
 	return sourceBalance, destinationBalance, nil
 }
 

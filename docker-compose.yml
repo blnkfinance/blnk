@@ -9,9 +9,14 @@ services:
     depends_on:
       - redis
       - postgres
+      - jaeger
     volumes:
       - ./blnk.json:/blnk.json
       - ./ui:/ui
+    environment:
+      - OUTBOUND_HOST_PORT=service-b:8082
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_INSECURE=true
 
   worker:
     build: .
@@ -20,16 +25,22 @@ services:
     depends_on:
       - redis
       - postgres
+      - jaeger
     volumes:
       - ./blnk.json:/blnk.json
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
 
   migration:
     build: .
     entrypoint: [ "./blnk", "migrate","up" ]
     depends_on:
       - postgres
+      - jaeger
     volumes:
       - ./blnk.json:/blnk.json
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
 
   redis:
     image: redis:7.2.4
@@ -52,25 +63,13 @@ services:
       timeout: 5s
       retries: 5
 
-  loki:
-    image: grafana/loki:2.9.4
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    networks:
-      - loki
-
-  promtail:
-    image: grafana/promtail:2.9.4
-    volumes:
-      - /var/log:/var/log
-      - ./promtail/config.yaml:/etc/promtail/config.y-ml
-    command: -config.file=/etc/promtail/config.yml
-    networks:
-      - loki
+      - "16686:16686"
+      - "4318:4318"
 
 volumes:
   pg_data:
-
-networks:
-  loki:

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
+
+	"github.com/jerry-enebeli/blnk"
 
 	"github.com/sirupsen/logrus"
 
@@ -32,6 +35,11 @@ func (a Api) RecordTransaction(c *gin.Context) {
 }
 
 func (a Api) QueueTransaction(c *gin.Context) {
+	tracer := blnk.Init(context.Background(), "Blnk")
+
+	ctx, span := tracer.Start(c.Request.Context(), "/QueueTransaction")
+	defer span.End()
+
 	var newTransaction model2.RecordTransaction
 	if err := c.ShouldBindJSON(&newTransaction); err != nil {
 		logrus.Error(err)
@@ -43,7 +51,7 @@ func (a Api) QueueTransaction(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.blnk.QueueTransaction(c.Request.Context(), newTransaction.ToTransaction())
+	resp, err := a.blnk.QueueTransaction(ctx, newTransaction.ToTransaction())
 	if err != nil {
 		logrus.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

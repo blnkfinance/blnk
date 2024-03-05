@@ -8,8 +8,6 @@ import (
 
 	"github.com/jerry-enebeli/blnk/api/middleware"
 
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/gin-gonic/gin"
@@ -84,8 +82,6 @@ func NewAPI(b *blnk.Blnk) *Api {
 		return nil
 	}
 	r := gin.Default()
-	r.Use(otelgin.Middleware("Blnk Sever"))
-
 	if conf.Server.Secure {
 		r.Use(middleware.SecretKeyAuthMiddleware())
 	}

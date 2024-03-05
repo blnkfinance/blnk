@@ -1,3 +1,6 @@
+![Build and Test Status](https://res.cloudinary.com/dp8bwjdvg/image/upload/v1709658741/logo_bze13p.svg
+)
+
 # Status at a Glance
  ![Build and Test Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/go.yml/badge.svg)
 ![Deploy to Docker Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/docker-publish.yml/badge.svg)

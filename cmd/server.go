@@ -5,8 +5,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/jerry-enebeli/blnk"
-
 	"github.com/caddyserver/certmagic"
 
 	"github.com/jerry-enebeli/blnk/api"
@@ -34,10 +32,10 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 		Use:   "start",
 		Short: "start blnk server",
 		Run: func(cmd *cobra.Command, args []string) {
-			_, err := blnk.SetupOTelSDK(cmd.Context())
-			if err != nil {
-				return
-			}
+			//_, err := blnk.SetupOTelSDK(cmd.Context())
+			//if err != nil {
+			//	return
+			//}
 			router := api.NewAPI(b.blnk).Router()
 			cfg, err := config.Fetch()
 			if err != nil {

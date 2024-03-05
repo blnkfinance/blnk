@@ -94,7 +94,7 @@ func workerCommands() *cobra.Command {
 			}
 			srv := asynq.NewServer(
 				asynq.RedisClientOpt{Addr: conf.Redis.Dns},
-				asynq.Config{Concurrency: 1, Queues: map[string]int{"transactions": 5, "credit-transactions": 5}, GroupMaxDelay: time.Second,
+				asynq.Config{Concurrency: 1, Queues: map[string]int{"transactions": 1}, GroupMaxDelay: time.Second,
 					GroupAggregator: asynq.GroupAggregatorFunc(aggregateDebit)},
 			)
 			mux := asynq.NewServeMux()
