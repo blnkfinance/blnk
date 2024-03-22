@@ -9,10 +9,11 @@ RUN go mod verify
 
 RUN go build -o blnk ./cmd/*.go
 
-FROM gcr.io/distroless/base
+FROM alpine:3.15
+# Install pg_dump
+RUN apk add --no-cache postgresql-client
+
 COPY --from=build-env /go/src/blnk/blnk .
 
-
 CMD ["./blnk", "start"]
-
 EXPOSE 8080
