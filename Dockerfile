@@ -11,7 +11,6 @@ RUN go build -o blnk ./cmd/*.go
 
 FROM gcr.io/distroless/base
 COPY --from=build-env /go/src/blnk/blnk .
-COPY ui /ui
 
 
 CMD ["./blnk", "start"]
