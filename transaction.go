@@ -87,17 +87,6 @@ func (l Blnk) getSourceAndDestination(transaction *model.Transaction) (source *m
 	return sourceBalance, destinationBalance, nil
 }
 
-//func (l Blnk) validateCurrencyMatch(transaction *model.Transaction) error {
-//	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
-//	if err != nil {
-//		return err
-//	}
-//	if (sourceBalance.Currency != destinationBalance.Currency) && sourceBalance.Currency != transaction.Currency {
-//		return fmt.Errorf("transaction %s currency %s does not match the source %s and destination balance %s currency %s. Please ensure they are consistent", transaction.TransactionID, transaction.Currency, transaction.Source, transaction.Destination, transaction.Currency)
-//	}
-//	return nil
-//}
-
 func (l Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
 	err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance)
 	if err != nil {

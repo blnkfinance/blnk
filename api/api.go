@@ -2,13 +2,10 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/jerry-enebeli/blnk/config"
 
 	"github.com/jerry-enebeli/blnk/api/middleware"
-
-	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jerry-enebeli/blnk"
@@ -72,6 +69,8 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/accounts-details/:account_id", a.AccountDetails)
 	router.GET("/mocked-account", a.generateMockAccount)
 
+	router.GET("/backup", a.BackupDB)
+	router.GET("/backup-s3", a.BackupDBS3)
 	return a.router
 }
 
@@ -89,22 +88,6 @@ func NewAPI(b *blnk.Blnk) *Api {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")
 	})
-	r.GET("/create-ledger", func(c *gin.Context) {
-		c.HTML(200, "create-ledger.html", gin.H{
-			"title": "Home Page",
-		})
-	})
-	r.GET("/create-customer", func(c *gin.Context) {
-		c.HTML(200, "create-customer.html", gin.H{
-			"title": "Home Page",
-		})
-	})
-	r.GET("/success", func(c *gin.Context) {
-		c.HTML(200, "successful.html", gin.H{
-			"message":   "Customer created",
-			"next_page": "/",
-		})
-	})
 
 	r.POST("/webhook", func(c *gin.Context) {
 		var payload map[string]interface{}
@@ -115,62 +98,5 @@ func NewAPI(b *blnk.Blnk) *Api {
 		fmt.Println(payload)
 	})
 
-	r.POST("/create-customer", func(c *gin.Context) {
-		var newCustomer model.Identity
-		if err := c.ShouldBind(&newCustomer); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": err})
-			return
-		}
-		_, err := b.CreateIdentity(newCustomer)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		c.HTML(200, "successful.html", gin.H{
-			"message":   "Customer created",
-			"next_page": "/",
-		})
-	})
-
-	r.POST("/create-account", func(c *gin.Context) {
-		var newAccount model.Account
-		if err := c.ShouldBind(&newAccount); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": err})
-			return
-		}
-		//get default ledger
-		balance := model.Balance{
-			Currency:   "NGN",
-			LedgerID:   "ldg_43e18b22-458f-47ce-9c60-a0704b3741fa",
-			IdentityID: newAccount.IdentityID,
-		}
-
-		newBalance, err := b.CreateBalance(balance)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		newAccount.BalanceID = newBalance.BalanceID
-		newAccount.LedgerID = newBalance.LedgerID
-		_, err = b.CreateAccount(newAccount)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		c.HTML(200, "successful.html", gin.H{
-			"message":   "Account created",
-			"next_page": "/",
-		})
-	})
-
-	r.GET("/customer-select", func(c *gin.Context) {
-		customers, err := b.GetAllIdentities()
-		if err != nil {
-			return
-		}
-		c.HTML(200, "customer-select.html", gin.H{
-			"customers": customers,
-		})
-	})
 	return &Api{blnk: b, router: r}
 }

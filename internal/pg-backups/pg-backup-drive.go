@@ -2,7 +2,9 @@ package backups
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -10,21 +12,66 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/credentials"
+
+	"github.com/jerry-enebeli/blnk/config"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 func BackupDB() error {
+	conf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
 	dbName := "blnk"
 	dbUser := "postgres"
-	dbHost := "localhost"
+	dbHost := "postgres"
 	dbPort := "5432"
+	dbPassword := "password"
 
+	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		dbHost, dbPort, dbUser, dbPassword, dbName)
+
+	db, err := sql.Open("postgres", psqlInfo)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// Ensure the connection is working
+	if err := db.Ping(); err != nil {
+		return err
+	}
+
+	// Get database size
+	var dbSize string
+	err = db.QueryRow("SELECT pg_size_pretty(pg_database_size(current_database()))").Scan(&dbSize)
+	if err != nil {
+		return err
+	}
+
+	// Find the largest table
+	var largestTable string
+	var largestTableSize string
+	err = db.QueryRow(`
+		SELECT relname, pg_size_pretty(pg_relation_size(relid))
+		FROM pg_catalog.pg_statio_user_tables 
+		ORDER BY pg_relation_size(relid) DESC 
+		LIMIT 1`).Scan(&largestTable, &largestTableSize)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Database size: %s\n", dbSize)
+	fmt.Printf("Largest table: %s, Size: %s\n", largestTable, largestTableSize)
+	// Proceed with backup logic as before...
 	// Format today's date as YYYY-MM-DD
 	today := time.Now().Format("2006-01-02")
 	currentTime := time.Now().Format("150405") // HHMMSS format
-	backupDir := fmt.Sprintf("./backups/%s", today)
+	backupDir := fmt.Sprintf("./%s/%s", conf.BackupDir, today)
 
 	// Create a directory for today's date if it doesn't exist
 	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
@@ -39,12 +86,15 @@ func BackupDB() error {
 
 	// Construct the pg_dump command
 	cmd := exec.Command("pg_dump", "-U", dbUser, "-d", dbName, "-f", backupFilePath)
-	cmd.Env = append(os.Environ(), "PGHOST="+dbHost, "PGPORT="+dbPort)
+	cmd.Env = append(os.Environ(), "PGHOST="+dbHost, "PGPORT="+dbPort, "PGUSER="+dbUser, "PGPASSWORD=password")
 
 	// Execute the pg_dump command
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "pg_dump failed: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "pg_dump stderr: %v\n", stderr.String())
+		return err
 	}
 
 	fmt.Printf("Backup successful: %s\n", backupFilePath)
@@ -52,6 +102,10 @@ func BackupDB() error {
 }
 
 func ZipUploadToS3() error {
+	cnf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
 	yesterday := time.Now().Format("2006-01-02")
 	dirToZip := "./backups/" + yesterday
 	zipFile := yesterday + ".zip"
@@ -62,7 +116,7 @@ func ZipUploadToS3() error {
 	}
 
 	// Upload to S3
-	if err := uploadToS3(zipFile, "your_s3_bucket_name", zipFile); err != nil {
+	if err := uploadToS3(zipFile, cnf.S3BucketName, zipFile, cnf.AwsAccessKeyId, cnf.AwsSecretAccessKey, cnf.S3Region); err != nil {
 		return err
 	}
 
@@ -112,8 +166,12 @@ func zipDir(srcDir, destZip string) error {
 	})
 }
 
-func uploadToS3(filePath, bucketName, itemKey string) error {
-	cfg, err := awsconfig.LoadDefaultConfig(context.TODO())
+func uploadToS3(filePath, bucketName, itemKey, accessKeyID, secretAccessKey, region string) error {
+	// Create a custom AWS configuration with static credentials and specified region
+	cfg, err := awsconfig.LoadDefaultConfig(context.TODO(),
+		awsconfig.WithRegion(region),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, "")),
+	)
 	if err != nil {
 		return err
 	}

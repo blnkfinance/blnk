@@ -2,7 +2,10 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -13,20 +16,31 @@ import (
 	_ "github.com/lib/pq"
 )
 
+func hashTransaction(transaction *model.Transaction) string {
+	data := fmt.Sprintf("%d%s%s%s%s", transaction.Amount, transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
+	// Compute SHA-256 hash
+	hash := sha256.Sum256([]byte(data))
+	// Return the hexadecimal encoding of the hash
+	return hex.EncodeToString(hash[:])
+}
+
 func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error) {
 	cxt, span := otel.Tracer("Queue transaction").Start(cxt, "Saving transaction to db")
 	defer span.End()
+	txn.TransactionID = GenerateUUIDWithSuffix("txn")
+	hash := hashTransaction(txn)
+	txn.Hash = hash
+
 	metaDataJSON, err := json.Marshal(txn.MetaData)
 	if err != nil {
 		return txn, err
 	}
 
-	txn.TransactionID = GenerateUUIDWithSuffix("txn")
 	txn.CreatedAt = time.Now()
 	// insert into database
 	_, err = d.Conn.ExecContext(cxt,
 		`
-		INSERT INTO blnk.transactions(transaction_id, source, reference, amount, currency,destination, description, status,created_at,meta_data,scheduled_for) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)
+		INSERT INTO blnk.transactions(transaction_id,source,reference,amount,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 	`,
 		txn.TransactionID,
 		txn.Source,
@@ -39,6 +53,7 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 		txn.CreatedAt,
 		metaDataJSON,
 		txn.ScheduledFor,
+		txn.Hash,
 	)
 
 	if err != nil {
@@ -51,7 +66,7 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 func (d Datasource) GetTransaction(id string) (model.Transaction, error) {
 	// retrieve from database
 	row := d.Conn.QueryRow(`
-		SELECT transaction_id, source, reference, amount, currency,destination, description, drcr, status,
+		SELECT transaction_id, source, reference, amount, currency,destination, description, drcr, status, hash,
 		created_at, meta_data
 		FROM blnk.transactions
 		WHERE transaction_id = $1
@@ -64,6 +79,7 @@ func (d Datasource) GetTransaction(id string) (model.Transaction, error) {
 	var metaDataJSON []byte
 	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.Currency, &txn.Destination, &txn.Description,
 		&txn.Status,
+		&txn.Hash,
 		&txn.CreatedAt, &metaDataJSON)
 
 	if err != nil {
@@ -132,7 +148,7 @@ func (d Datasource) UpdateTransactionStatus(id string, status string) error {
 func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 	// select all transactions from database
 	rows, err := d.Conn.Query(`
-		SELECT transaction_id, source, reference, amount, currency,destination, description, status, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, currency,destination, description, status, hash, created_at, meta_data
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 	`)
@@ -157,6 +173,7 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 			&transaction.Destination,
 			&transaction.Description,
 			&transaction.Status,
+			&transaction.Hash,
 			&transaction.CreatedAt,
 			&metaDataJSON,
 		)

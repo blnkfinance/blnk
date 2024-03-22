@@ -58,13 +58,18 @@ type Notification struct {
 }
 
 type OtelGrafanaCloud struct {
-	OTEL_EXPORTER_OTLP_PROTOCOL string `json:"OTEL_EXPORTER_OTLP_PROTOCOL	"`
-	OTEL_EXPORTER_OTLP_ENDPOINT string `json:"OTEL_EXPORTER_OTLP_ENDPOINT"`
-	OTEL_EXPORTER_OTLP_HEADERS  string `json:"OTEL_EXPORTER_OTLP_HEADERS"`
+	OtelExporterOtlpProtocol string `json:"OTEL_EXPORTER_OTLP_PROTOCOL"`
+	OtelExporterOtlpEndpoint string `json:"OTEL_EXPORTER_OTLP_ENDPOINT"`
+	OtelExporterOtlpHeaders  string `json:"OTEL_EXPORTER_OTLP_HEADERS"`
 }
 
 type Configuration struct {
 	ProjectName             string                        `json:"project_name" envconfig:"BLNK_PROJECT_NAME"`
+	BackupDir               string                        `json:"backup_dir" envconfig:"BLNK_BACKUP_DIR"`
+	AwsAccessKeyId          string                        `json:"aws_access_key_id"`
+	AwsSecretAccessKey      string                        `json:"aws_secret_access_key"`
+	S3BucketName            string                        `json:"s3_bucket_name"`
+	S3Region                string                        `json:"s3_region"`
 	Server                  ServerConfig                  `json:"server"`
 	DataSource              DataSourceConfig              `json:"data_source"`
 	Redis                   RedisConfig                   `json:"redis"`
@@ -124,15 +129,15 @@ func SetGrafanaExporterEnvs() error {
 	if err != nil {
 		return err
 	}
-	err = os.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", cnf.OtelGrafanaCloud.OTEL_EXPORTER_OTLP_PROTOCOL)
+	err = os.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", cnf.OtelGrafanaCloud.OtelExporterOtlpProtocol)
 	if err != nil {
 		return err
 	}
-	err = os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", cnf.OtelGrafanaCloud.OTEL_EXPORTER_OTLP_ENDPOINT)
+	err = os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", cnf.OtelGrafanaCloud.OtelExporterOtlpEndpoint)
 	if err != nil {
 		return err
 	}
-	err = os.Setenv("OTEL_EXPORTER_OTLP_HEADERS", cnf.OtelGrafanaCloud.OTEL_EXPORTER_OTLP_HEADERS)
+	err = os.Setenv("OTEL_EXPORTER_OTLP_HEADERS", cnf.OtelGrafanaCloud.OtelExporterOtlpHeaders)
 	if err != nil {
 		return err
 	}

@@ -14,9 +14,6 @@
   "paths": {
     "/ledgers": {
       "post": {
-        "tags": [
-          "Misc"
-        ],
         "summary": "Create ledger",
         "operationId": "Createledger",
         "parameters": [],

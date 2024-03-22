@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
 
-	"github.com/sirupsen/logrus"
+	"github.com/gin-gonic/gin"
 
 	"github.com/caddyserver/certmagic"
 
@@ -12,19 +14,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func serveTLS(conf config.ServerConfig) error {
-	// read and agree to your CA's legal documents
+func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
+	// Agree to CA's legal documents and set email for ACME account
 	certmagic.DefaultACME.Agreed = true
-	// provide an email address
 	certmagic.DefaultACME.Email = conf.Email
 
-	_, err := certmagic.Listen([]string{conf.Domain})
-	if err != nil {
+	// Configure certmagic for automatic HTTPS
+	cfg := certmagic.NewDefault()
+	cfg.Storage = &certmagic.FileStorage{Path: "path/to/certmagic/storage"}
+
+	// Handle domains
+	domains := []string{conf.Domain}
+	if conf.Domain == "" {
+		log.Println("No domain specified, defaulting to localhost")
+		domains = []string{"localhost"} // Default or handle as needed
+	}
+
+	// Prepare certmagic to manage the domains
+	if err := cfg.ManageSync(context.Background(), domains); err != nil {
 		return err
 	}
 
-	return nil
+	// Create a standard net/http server and configure it to use certmagic's TLSConfig
+	server := &http.Server{
+		Addr:      ":" + conf.Port,
+		Handler:   r,               // Your Gin router
+		TLSConfig: cfg.TLSConfig(), // Let certmagic handle the TLS configuration
+	}
 
+	// Start serving HTTPS
+	log.Printf("Starting HTTPS server on %s\n", conf.Port)
+	if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Failed to start HTTPS server: %v", err)
+	}
+
+	return nil
 }
 
 func serverCommands(b *blnkInstance) *cobra.Command {
@@ -32,25 +56,21 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 		Use:   "start",
 		Short: "start blnk server",
 		Run: func(cmd *cobra.Command, args []string) {
-			//_, err := blnk.SetupOTelSDK(cmd.Context())
-			//if err != nil {
-			//	return
-			//}
-			router := api.NewAPI(b.blnk).Router()
+			r := api.NewAPI(b.blnk).Router()
 			cfg, err := config.Fetch()
 			if err != nil {
 				log.Fatal(err)
 			}
+
 			if cfg.Server.SSL {
-				err := serveTLS(cfg.Server)
-				if err != nil {
-					log.Fatalf("Error creating tls: %v\n", err)
+				if err := serveTLS(r, cfg.Server); err != nil {
+					log.Fatalf("Error setting up TLS: %v", err)
 				}
-			}
-			logrus.Infof("Blnk sever running on localhost:%s ✅", cfg.Server.Port)
-			err = router.Run(":" + cfg.Server.Port)
-			if err != nil {
-				log.Fatal(err)
+			} else {
+				log.Printf("Starting server on http://localhost:%s", cfg.Server.Port)
+				if err := r.Run(":" + cfg.Server.Port); err != nil {
+					log.Fatal(err)
+				}
 			}
 		},
 	}

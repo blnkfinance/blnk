@@ -24,6 +24,7 @@ type Transaction struct {
 	RiskToleranceThreshold float64                `json:"risk_tolerance_threshold"`
 	RiskScore              float64                `json:"risk_score"`
 	SkipBalanceUpdate      bool                   `json:"-"`
+	Hash                   string                 `json:"hash"`
 	MetaData               map[string]interface{} `json:"meta_data,omitempty"`
 	GroupIds               []string               `json:"group_ids"`
 }
@@ -82,7 +83,7 @@ type Ledger struct {
 	LedgerID  string                 `json:"id"`
 	Name      string                 `json:"name"`
 	CreatedAt time.Time              `json:"created_at"`
-	MetaData  map[string]interface{} `json:"meta_data,omitempty"`
+	MetaData  map[string]interface{} `json:"meta_data"`
 }
 
 type LedgerFilter struct {

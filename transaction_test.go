@@ -57,8 +57,23 @@ func TestRecordTransaction(t *testing.T) {
 	mock.ExpectQuery(balanceQuery).WithArgs(source).WillReturnRows(sourceBalanceRows)
 	mock.ExpectQuery(balanceQuery2).WithArgs(destination).WillReturnRows(destinationBalanceRows)
 
-	// Mock the INSERT operation as before, ensuring it matches the expected usage
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO blnk.transactions(transaction_id, source, reference, amount, currency,destination, description, status,created_at,meta_data,scheduled_for) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)`)).WithArgs(sqlmock.AnyArg(), txn.Source, txn.Reference, txn.Amount, txn.Currency, txn.Destination, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	// Correct the expected SQL pattern to match the actual SQL command
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id,source,reference,amount,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`
+
+	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
+		sqlmock.AnyArg(),
+		source,
+		txn.Reference,
+		txn.Amount,
+		txn.Currency,
+		txn.Destination,
+		sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
+	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	_, err = d.RecordTransaction(context.Background(), txn)
 	assert.NoError(t, err)
