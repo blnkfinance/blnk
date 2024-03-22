@@ -6,6 +6,8 @@ services:
     restart: on-failure
     ports:
       - "5001:5001"
+      - "80:80"
+      - "443:443"
     depends_on:
       - redis
       - postgres
