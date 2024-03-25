@@ -86,7 +86,6 @@ func (d Datasource) GetEventMapperByID(id string) (*model.EventMapper, error) {
 			// Handle no rows error
 			return nil, fmt.Errorf("event mapper with ID '%s' not found", id)
 		} else {
-			// Handle other errors
 			return nil, err
 		}
 	}

@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/jerry-enebeli/blnk/internal/notification"
-
 	"github.com/jerry-enebeli/blnk/model"
 )
 
@@ -32,11 +30,7 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 	for _, monitor := range monitors {
 		if monitor.CheckCondition(updatedBalance) {
 			fmt.Printf("Condition met for balance: %s\n", monitor.MonitorID)
-			data := map[string]interface{}{
-				"event": "balance.monitor",
-				"data":  monitor,
-			}
-			notification.WebhookNotification(data)
+
 		}
 	}
 

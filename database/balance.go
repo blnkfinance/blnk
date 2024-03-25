@@ -275,12 +275,7 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 	}
 
 	// Defer a rollback in case anything fails. The rollback will be ignored if the transaction is successfully committed later.
-	defer func(tx *sql.Tx) {
-		err := tx.Rollback()
-		if err != nil {
-			logrus.Error(err)
-		}
-	}(tx)
+	defer tx.Rollback()
 
 	// Update source balance
 	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
@@ -347,7 +342,7 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 	monitor.CreatedAt = time.Now()
 
 	_, err := d.Conn.Exec(`
-		INSERT INTO balance_monitors (monitor_id, balance_id, field, operator, value, description, call_back_url, created_at)
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, description, call_back_url, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7,$8)
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
 
@@ -360,7 +355,7 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	row := d.Conn.QueryRow(`
 		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
-		FROM balance_monitors WHERE monitor_id = $1
+		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
 
 	monitor := &model.BalanceMonitor{}
@@ -376,7 +371,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	rows, err := d.Conn.Query(`
 		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
-		FROM balance_monitors
+		FROM blnk.balance_monitors
 	`)
 	if err != nil {
 		return nil, err
@@ -400,7 +395,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	rows, err := d.Conn.Query(`
 		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
-		FROM balance_monitors WHERE balance_id= $1
+		FROM blnk.balance_monitors WHERE balance_id= $1
 	`, balanceID)
 	if err != nil {
 		return nil, err
@@ -423,7 +418,7 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 
 func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
 	_, err := d.Conn.Exec(`
-		UPDATE balance_monitors
+		UPDATE blnk.balance_monitors
 		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url= $7
 		WHERE monitor_id = $1
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL)
@@ -432,7 +427,7 @@ func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
 
 func (d Datasource) DeleteMonitor(id string) error {
 	_, err := d.Conn.Exec(`
-		DELETE FROM balance_monitors WHERE monitor_id = $1
+		DELETE FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
 	return err
 }

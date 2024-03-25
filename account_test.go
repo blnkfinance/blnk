@@ -21,6 +21,9 @@ func TestCreateAccount(t *testing.T) {
 	assert.NoError(t, err)
 
 	d, err := NewBlnk(datasource)
+	if err != nil {
+		return
+	}
 	assert.NoError(t, err)
 
 	account := model.Account{

@@ -12,11 +12,12 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 )
 
-const TANSACTION_QUEUE = "new:transaction:test"
+const TANSACTION_QUEUE = "new:transaction"
+const WEBHOOK_QUEUE = "new:webhoook"
 
 type Queue struct {
-	client    *asynq.Client
-	inspector *asynq.Inspector
+	Client    *asynq.Client
+	Inspector *asynq.Inspector
 }
 
 type TransactionTypePayload struct {
@@ -27,8 +28,8 @@ func NewQueue(conf *config.Configuration) *Queue {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
 	return &Queue{
-		client:    client,
-		inspector: inspector,
+		Client:    client,
+		Inspector: inspector,
 	}
 }
 
@@ -37,7 +38,7 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	if err != nil {
 		log.Fatal(err)
 	}
-	info, err := q.client.Enqueue(q.geTask(transaction, payload), asynq.MaxRetry(5))
+	info, err := q.Client.Enqueue(q.geTask(transaction, payload), asynq.MaxRetry(5))
 	if err != nil {
 		log.Println(err, info)
 		return err

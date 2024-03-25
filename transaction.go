@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"go.opentelemetry.io/otel/attribute"
+	"sync"
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/otel"
@@ -27,8 +27,6 @@ var (
 	meter  = otel.Meter("rolldice")
 	txnCnt metric.Int64Counter
 )
-
-var ()
 
 func init() {
 	var err error
@@ -86,65 +84,66 @@ func (l Blnk) getSourceAndDestination(transaction *model.Transaction) (source *m
 
 	return sourceBalance, destinationBalance, nil
 }
-
 func (l Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
-	err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance)
-	if err != nil {
+	if err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance); err != nil {
 		return err
 	}
 
-	//todo refactor
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		l.checkBalanceMonitors(sourceBalance)
-
 	}()
 	go func() {
+		defer wg.Done()
 		l.checkBalanceMonitors(destinationBalance)
-
 	}()
+	wg.Wait()
 
 	return nil
 }
 
-func (l Blnk) ApplyBalanceToQueuedTransaction(context context.Context, transaction *model.Transaction) error {
-	ctx, span := tracer.Start(context, "commit")
+func (l Blnk) ApplyBalanceToQueuedTransaction(ctx context.Context, transaction *model.Transaction) error {
+	ctx, span := tracer.Start(ctx, "commit")
 	defer span.End()
+
 	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
 	if err != nil {
-		err := fmt.Errorf("source and balance error %v", err)
-		span.RecordError(err)
-		logrus.Error(err)
-		return err
+		return logAndRecordError(span, "source and balance error", err)
 	}
 
-	err = l.applyTransactionToBalances(span, []*model.Balance{sourceBalance, destinationBalance}, transaction)
-	if err != nil {
-		err := fmt.Errorf("applyTransactionToBalances error %s", err)
-		span.RecordError(err)
-		logrus.Error(err)
-		return err
+	if err := l.applyTransactionToBalances(span, []*model.Balance{sourceBalance, destinationBalance}, transaction); err != nil {
+		return logAndRecordError(span, "applyTransactionToBalances error", err)
 	}
 
 	txn, err := l.GetTransactionByRef(ctx, transaction.Reference)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		err := fmt.Errorf("GetTransactionByRef error %s", err)
-		span.RecordError(err)
-		logrus.Error(err)
-		return err
+		return logAndRecordError(span, "GetTransactionByRef error", err)
 	}
 
 	if txn.Status == StatusQueued {
-		err = l.updateBalances(ctx, sourceBalance, destinationBalance)
-		if err != nil {
+		if err := l.updateBalances(ctx, sourceBalance, destinationBalance); err != nil {
 			logrus.Error("commit balance error", err)
 			return err
 		}
 	}
 
+	l.updateTransactionStatusAsync(transaction)
+
+	rollValueAttr := attribute.Int("commit.value", 1)
+	span.SetAttributes(rollValueAttr)
+	txnCnt.Add(ctx, 1, metric.WithAttributes(rollValueAttr))
+	logrus.Infof("Committed transaction to balance %s %s", sourceBalance.BalanceID, destinationBalance.BalanceID)
+
+	return nil
+}
+
+func (l Blnk) updateTransactionStatusAsync(transaction *model.Transaction) {
 	go func() {
+		var err error
 		if len(transaction.GroupIds) > 0 {
 			for _, id := range transaction.GroupIds {
-				//updates the transaction status from QUEUED to SUCCESSFUL
 				err = l.datasource.UpdateTransactionStatus(id, StatusApplied)
 				if err != nil {
 					logrus.Error("UpdateTransactionStatus in groups error", err)
@@ -157,13 +156,13 @@ func (l Blnk) ApplyBalanceToQueuedTransaction(context context.Context, transacti
 			}
 		}
 	}()
+}
 
-	rollValueAttr := attribute.Int("commit.value", 1)
-	span.SetAttributes(rollValueAttr)
-	txnCnt.Add(ctx, 1, metric.WithAttributes(rollValueAttr))
-	logrus.Infof("committed transaction to balance %s %s", sourceBalance.BalanceID, destinationBalance.BalanceID)
-
-	return nil
+func logAndRecordError(span trace.Span, message string, err error) error {
+	wrappedErr := fmt.Errorf("%s: %w", message, err)
+	span.RecordError(wrappedErr)
+	logrus.Error(wrappedErr)
+	return wrappedErr
 }
 
 func (l Blnk) validateTxn(cxt context.Context, transaction *model.Transaction) error {

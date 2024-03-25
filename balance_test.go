@@ -21,7 +21,7 @@ func getBalanceMock(credit, debit, balance int64) *model.Balance {
 }
 
 func getTransactionMock(amount int64, overdraft bool) model.Transaction {
-	transaction := model.Transaction{Amount: amount, AllowOverdraft: overdraft}
+	transaction := model.Transaction{TransactionID: gofakeit.UUID(), Amount: amount, AllowOverdraft: overdraft}
 	return transaction
 }
 
@@ -294,7 +294,7 @@ func TestCreateMonitor(t *testing.T) {
 	}
 	monitor := model.BalanceMonitor{BalanceID: "test-balance", Description: "Test Monitor", CallBackURL: gofakeit.URL()}
 
-	mock.ExpectExec("INSERT INTO balance_monitors").WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO blnk.balance_monitors").WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := d.CreateMonitor(monitor)
 
@@ -321,7 +321,7 @@ func TestGetMonitorByID(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at"}).
 		AddRow(monitorID, gofakeit.UUID(), "field", "operator", 1000, "Test Monitor", gofakeit.URL(), time.Now())
 
-	mock.ExpectQuery("SELECT .* FROM balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnRows(rows)
+	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnRows(rows)
 
 	result, err := d.GetMonitorByID(monitorID)
 
@@ -346,7 +346,7 @@ func TestGetAllMonitors(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at"}).
 		AddRow("test-monitor", gofakeit.UUID(), "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now())
 
-	mock.ExpectQuery("SELECT .* FROM balance_monitors").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors").WillReturnRows(rows)
 
 	result, err := d.GetAllMonitors()
 
@@ -372,7 +372,7 @@ func TestGetBalanceMonitors(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at"}).
 		AddRow("test-monitor", balanceID, "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now())
 
-	mock.ExpectQuery("SELECT .* FROM balance_monitors WHERE balance_id=").WithArgs(balanceID).WillReturnRows(rows)
+	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE balance_id=").WithArgs(balanceID).WillReturnRows(rows)
 
 	result, err := d.GetBalanceMonitors(balanceID)
 
@@ -396,7 +396,7 @@ func TestUpdateMonitor(t *testing.T) {
 	}
 	monitor := &model.BalanceMonitor{MonitorID: "test-monitor", BalanceID: "test-balance", Description: "Updated Monitor"}
 
-	mock.ExpectExec("UPDATE balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.UpdateMonitor(monitor)
 
@@ -419,7 +419,7 @@ func TestDeleteMonitor(t *testing.T) {
 	}
 	monitorID := "test-monitor"
 
-	mock.ExpectExec("DELETE FROM balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("DELETE FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.DeleteMonitor(monitorID)
 
