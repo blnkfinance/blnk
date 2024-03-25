@@ -2,7 +2,6 @@ package blnk
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/jerry-enebeli/blnk/model"
 )
@@ -34,28 +33,6 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 		}
 	}
 
-}
-
-func (l Blnk) applyFraudScore(balance *model.Balance, amount int64) float64 {
-	bt := l.bt
-	bt.Mutex.Lock()
-	defer bt.Mutex.Unlock()
-
-	oldBalance, exists := bt.Balances[balance.BalanceID]
-
-	if exists && (oldBalance.CreditBalance != balance.CreditBalance || oldBalance.DebitBalance != balance.DebitBalance) {
-		bt.Frequencies[balance.BalanceID]++
-	}
-
-	bt.Balances[balance.BalanceID] = balance
-
-	changeFrequency := float64(bt.Frequencies[balance.BalanceID])
-	transactionAmount := float64(amount)
-	currentBalance := float64(balance.Balance)
-	creditBalance := float64(balance.CreditBalance)
-	debitBalance := float64(balance.DebitBalance)
-
-	return ComputeFraudScore(changeFrequency, transactionAmount, currentBalance, creditBalance, debitBalance)
 }
 
 // Function to handle fetching or creating balance by indicator
@@ -111,40 +88,4 @@ func (l Blnk) UpdateMonitor(monitor *model.BalanceMonitor) error {
 
 func (l Blnk) DeleteMonitor(id string) error {
 	return l.datasource.DeleteMonitor(id)
-}
-
-// ApplyFraudScore updates the balance and computes the fraud score
-func (l Blnk) ApplyFraudScore(transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) float64 {
-	fmt.Println(l.applyFraudScore(destinationBalance, transaction.Amount))
-	fmt.Println(l.applyFraudScore(sourceBalance, transaction.Amount))
-	return 0 //todo rewrite
-}
-
-// Normalize function to scale values between 0 and 1
-func normalize(value, min, max float64) float64 {
-	return (value - min) / (max - min)
-}
-
-// ComputeFraudScore computes a fraud score based on various parameters
-func ComputeFraudScore(changeFrequency, transactionAmount, currentBalance, creditBalance, debitBalance float64) float64 {
-	normalizedChangeFrequency := normalize(changeFrequency, 0, maxChangeFrequency)
-	normalizedTransactionAmount := normalize(transactionAmount, 0, maxTransactionAmount)
-	normalizedCurrentBalance := normalize(currentBalance, 0, maxBalance)
-	normalizedCreditBalance := normalize(creditBalance, 0, maxCreditBalance)
-	normalizedDebitBalance := normalize(debitBalance, 0, maxDebitBalance)
-
-	//ensure they sum up to 1
-	weightChangeFrequency := 0.3
-	weightTransactionAmount := 0.3
-	weightCurrentBalance := 0.1
-	weightCreditBalance := 0.1
-	weightDebitBalance := 0.2
-
-	fraudScore := normalizedChangeFrequency*weightChangeFrequency +
-		normalizedTransactionAmount*weightTransactionAmount +
-		normalizedCurrentBalance*weightCurrentBalance +
-		normalizedCreditBalance*weightCreditBalance +
-		normalizedDebitBalance*weightDebitBalance
-
-	return math.Max(0, math.Min(fraudScore, 1))
 }

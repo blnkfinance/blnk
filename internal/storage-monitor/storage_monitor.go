@@ -8,12 +8,10 @@ import (
 	"github.com/shirou/gopsutil/disk"
 )
 
-// StorageLimitEvent represents the data sent when the storage limit is hit.
 type StorageLimitEvent struct {
 	Message string
 }
 
-// EventBroker handles the subscription and broadcasting of storage limit events.
 type EventBroker struct {
 	subscribers []chan StorageLimitEvent
 	mu          sync.Mutex
@@ -25,12 +23,10 @@ func init() {
 	broker = NewEventBroker()
 }
 
-// NewEventBroker initializes a new EventBroker.
 func NewEventBroker() *EventBroker {
 	return &EventBroker{}
 }
 
-// Subscribe adds a new subscriber to the broker.
 func (b *EventBroker) Subscribe() chan StorageLimitEvent {
 	b.mu.Lock()
 	defer b.mu.Unlock()

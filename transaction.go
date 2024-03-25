@@ -217,12 +217,6 @@ func (l Blnk) RecordTransaction(cxt context.Context, transaction *model.Transact
 		return nil, err
 	}
 
-	riskScore := l.ApplyFraudScore(transaction, sourceBalance, destinationBalance)
-	if riskScore >= transaction.RiskToleranceThreshold && transaction.RiskToleranceThreshold > 0 {
-		return emptyTransaction, fmt.Errorf("this transaction has been flagged as a high risk")
-	}
-
-	transaction.RiskScore = riskScore
 	if transaction.Status == "" {
 		transaction.Status = StatusApplied
 	}

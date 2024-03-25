@@ -1,3 +1,0 @@
-localhost {
-    reverse_proxy server:5001
-}

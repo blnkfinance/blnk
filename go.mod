@@ -2,8 +2,6 @@ module github.com/jerry-enebeli/blnk
 
 go 1.21
 
-toolchain go1.22.1
-
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.1
 	github.com/aws/aws-sdk-go-v2 v1.25.2
