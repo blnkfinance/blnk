@@ -2,13 +2,10 @@ package database
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"sync"
 
 	"github.com/jerry-enebeli/blnk/cache"
-
-	"github.com/google/uuid"
 
 	"github.com/jerry-enebeli/blnk/config"
 )
@@ -64,18 +61,4 @@ func ConnectDB(dns string) (*sql.DB, error) {
 	}
 
 	return db, nil
-}
-
-func GenerateUUIDWithSuffix(module string) string {
-
-	// Generate a new UUID
-	id := uuid.New()
-
-	// Convert the UUID to a string
-	uuidStr := id.String()
-
-	// Add the module suffix
-	idWithSuffix := fmt.Sprintf("%s_%s", module, uuidStr)
-
-	return idWithSuffix
 }

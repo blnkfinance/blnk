@@ -2,10 +2,7 @@ package database
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -16,21 +13,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func hashTransaction(transaction *model.Transaction) string {
-	data := fmt.Sprintf("%d%s%s%s%s", transaction.Amount, transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
-	// Compute SHA-256 hash
-	hash := sha256.Sum256([]byte(data))
-	// Return the hexadecimal encoding of the hash
-	return hex.EncodeToString(hash[:])
-}
-
 func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error) {
 	cxt, span := otel.Tracer("Queue transaction").Start(cxt, "Saving transaction to db")
 	defer span.End()
-	txn.TransactionID = GenerateUUIDWithSuffix("txn")
-	hash := hashTransaction(txn)
-	txn.Hash = hash
-
 	metaDataJSON, err := json.Marshal(txn.MetaData)
 	if err != nil {
 		return txn, err
@@ -63,14 +48,13 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 	return txn, nil
 }
 
-func (d Datasource) GetTransaction(id string) (model.Transaction, error) {
+func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
 	// retrieve from database
 	row := d.Conn.QueryRow(`
-		SELECT transaction_id, source, reference, amount, currency,destination, description, drcr, status, hash,
-		created_at, meta_data
-		FROM blnk.transactions
-		WHERE transaction_id = $1
-	`, id)
+			SELECT transaction_id, source, reference, amount, currency,destination, description, status,created_at, meta_data
+						FROM blnk.transactions
+					WHERE transaction_id = $1
+				`, id)
 
 	// create a transaction instance
 	txn := &model.Transaction{}
@@ -79,20 +63,18 @@ func (d Datasource) GetTransaction(id string) (model.Transaction, error) {
 	var metaDataJSON []byte
 	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.Currency, &txn.Destination, &txn.Description,
 		&txn.Status,
-		&txn.Hash,
 		&txn.CreatedAt, &metaDataJSON)
-
 	if err != nil {
-		return model.Transaction{}, err
+		return &model.Transaction{}, err
 	}
 
 	// convert metadata from JSONB to map
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
-		return model.Transaction{}, err
+		return &model.Transaction{}, err
 	}
 
-	return *txn, nil
+	return txn, nil
 }
 
 func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string) (bool, error) {

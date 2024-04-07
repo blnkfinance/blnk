@@ -11,13 +11,9 @@ services:
     depends_on:
       - redis
       - postgres
+      - typesense
     volumes:
       - ./blnk.json:/blnk.json
-      - ./ui:/ui
-    environment:
-      - OUTBOUND_HOST_PORT=service-b:8082
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - OTEL_EXPORTER_OTLP_INSECURE=true
 
   worker:
     build: .
@@ -26,10 +22,9 @@ services:
     depends_on:
       - redis
       - postgres
+      - typesense
     volumes:
       - ./blnk.json:/blnk.json
-    environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
 
   migration:
     build: .
@@ -38,8 +33,6 @@ services:
       - postgres
     volumes:
       - ./blnk.json:/blnk.json
-    environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
 
   redis:
     image: redis:7.2.4
@@ -62,6 +55,15 @@ services:
       timeout: 5s
       retries: 5
 
+  typesense:
+    image: typesense/typesense:0.23.1 # Use the latest version suitable for your needs
+    command: ["--data-dir", "/data", "--api-key=your_typesense_api_key", "--listen-port", "8108"]
+    volumes:
+      - typesense_data:/data
+    ports:
+      - "8108:8108"
 
 volumes:
   pg_data:
+  typesense_data:
+

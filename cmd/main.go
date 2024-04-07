@@ -62,11 +62,11 @@ func preRun(app *blnkInstance) func(cmd *cobra.Command, args []string) error {
 func setupBlnk(cfg *config.Configuration) (*blnk.Blnk, error) {
 	db, err := database.NewDataSource(cfg)
 	if err != nil {
-		return &blnk.Blnk{}, fmt.Errorf("Error getting datasource: %v\n", err)
+		return &blnk.Blnk{}, fmt.Errorf("error getting datasource: %v", err)
 	}
 	newBlnk, err := blnk.NewBlnk(db)
 	if err != nil {
-		return &blnk.Blnk{}, fmt.Errorf("Error creating blnk: %v\n", err)
+		return &blnk.Blnk{}, fmt.Errorf("error creating blnk: %v", err)
 	}
 	return newBlnk, nil
 }

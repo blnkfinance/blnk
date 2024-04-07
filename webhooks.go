@@ -2,12 +2,12 @@ package blnk
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 
 	"github.com/jerry-enebeli/blnk/config"
+	"golang.org/x/net/context"
 
 	"github.com/hibiken/asynq"
 )
@@ -17,7 +17,7 @@ type NewWebhook struct {
 	Payload interface{} `json:"data"`
 }
 
-func processHTTP(data interface{}) error {
+func processHTTP(data NewWebhook) error {
 	conf, err := config.Fetch()
 	if err != nil {
 		log.Println("Error fetching config:", err)
@@ -67,22 +67,21 @@ func processHTTP(data interface{}) error {
 	return nil
 }
 
-func SendWebhook(data interface{}) error {
+func SendWebhook(newWebhook NewWebhook) error {
 	conf, err := config.Fetch()
 	if err != nil {
 		return err
 	}
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
 
-	payload, err := json.Marshal(data)
+	payload, err := json.Marshal(newWebhook)
 	if err != nil {
 		log.Fatal(err)
 
 		return err
 	}
-
-	task := asynq.NewTask(WEBHOOK_QUEUE, payload)
-
+	taskOptions := []asynq.Option{asynq.Queue(WEBHOOK_QUEUE)}
+	task := asynq.NewTask(WEBHOOK_QUEUE, payload, taskOptions...)
 	info, err := client.Enqueue(task)
 	if err != nil {
 		log.Println(err, info)
@@ -91,30 +90,16 @@ func SendWebhook(data interface{}) error {
 	return err
 }
 
-func ProcessWebhook(client *asynq.Client) {
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(WEBHOOK_QUEUE, func(ctx context.Context, task *asynq.Task) error {
-		var payload interface{} // Adjust the type according to your needs
-		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-			log.Printf("Error unmarshaling task payload: %v\n", err)
-			return err
-		}
-		log.Printf("Processing payload: %+v\n", payload)
-		processHTTP(payload)
-		return nil
-	})
-	conf, err := config.Fetch()
+func ProcessWebhook(ctx context.Context, task *asynq.Task) error {
+	var payload NewWebhook
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		log.Printf("Error unmarshaling task payload: %v", err)
+		return err
+	}
+	log.Printf("Processing webhook: %+v\n", payload.Event)
+	err := processHTTP(payload)
 	if err != nil {
-		return
+		return err
 	}
-	worker := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: conf.Redis.Dns},
-		asynq.Config{
-			Concurrency: 10,
-		},
-	)
-	// Start the worker with the mux as the task handler
-	if err := worker.Run(mux); err != nil {
-		log.Fatalf("Could not run worker: %v\n", err)
-	}
+	return nil
 }

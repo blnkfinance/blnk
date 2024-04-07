@@ -6,29 +6,34 @@ import (
 )
 
 type Balance struct {
-	ID                 int64                  `json:"-"`
-	BalanceID          string                 `json:"balance_id"`
-	Indicator          string                 `json:"indicator"`
-	Balance            int64                  `json:"balance"`
-	CreditBalance      int64                  `json:"credit_balance"`
-	DebitBalance       int64                  `json:"debit_balance"`
-	Currency           string                 `json:"currency"`
-	CurrencyMultiplier int64                  `json:"currency_multiplier"`
-	LedgerID           string                 `json:"ledger_id"`
-	IdentityID         string                 `json:"identity_id"`
-	Identity           *Identity              `json:"identity,omitempty"`
-	Ledger             *Ledger                `json:"ledger,omitempty"`
-	CreatedAt          time.Time              `json:"created_at"`
-	MetaData           map[string]interface{} `json:"meta_data"`
+	ID                    int64                  `json:"-"`
+	Balance               int64                  `json:"balance"`
+	InflightBalance       int64                  `json:"inflight_balance"`
+	CreditBalance         int64                  `json:"credit_balance"`
+	InflightCreditBalance int64                  `json:"inflight_credit_balance"`
+	DebitBalance          int64                  `json:"debit_balance"`
+	InflightDebitBalance  int64                  `json:"inflight_debit_balance"`
+	CurrencyMultiplier    int64                  `json:"preceision"`
+	Version               int64                  `json:"version"`
+	LedgerID              string                 `json:"ledger_id"`
+	IdentityID            string                 `json:"identity_id"`
+	BalanceID             string                 `json:"balance_id"`
+	Indicator             string                 `json:"indicator"`
+	Currency              string                 `json:"currency"`
+	Identity              *Identity              `json:"identity,omitempty"`
+	Ledger                *Ledger                `json:"ledger,omitempty"`
+	CreatedAt             time.Time              `json:"created_at"`
+	InflighExpiresAt      time.Time              `json:"inflight_expires_at"`
+	MetaData              map[string]interface{} `json:"meta_data"`
 }
 
 type BalanceMonitor struct {
 	MonitorID   string         `json:"monitor_id"`
 	BalanceID   string         `json:"balance_id"`
-	Condition   AlertCondition `json:"condition"`
 	Description string         `json:"description"`
 	CallBackURL string         `json:"call_back_url"`
 	CreatedAt   time.Time      `json:"created_at"`
+	Condition   AlertCondition `json:"condition"`
 }
 
 type BalanceFilter struct {
@@ -48,7 +53,7 @@ type BalanceTracker struct {
 	Mutex       sync.Mutex
 }
 type AlertCondition struct {
+	Value    int64  `json:"value"`
 	Field    string `json:"field"`
 	Operator string `json:"operator"`
-	Value    int64  `json:"value"`
 }

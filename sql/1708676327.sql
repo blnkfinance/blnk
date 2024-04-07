@@ -12,17 +12,6 @@ CREATE TABLE IF NOT EXISTS blnk.ledgers
 );
 
 -- +migrate Up
-CREATE TABLE blnk.matching_rules
-(
-    id         SERIAL PRIMARY KEY,
-    rule_id  TEXT      NOT NULL UNIQUE,
-    rule_type  VARCHAR(255),
-    parameters JSONB
-    all_match  BOOLEAN DEFAULT 
-);
-
-
--- +migrate Up
 CREATE TABLE IF NOT EXISTS blnk.identity
 (
     id                SERIAL PRIMARY KEY,
@@ -96,16 +85,6 @@ CREATE TABLE IF NOT EXISTS blnk.balance_monitors
 );
 
 -- +migrate Up
-CREATE TABLE IF NOT EXISTS blnk.event_mappers
-(
-    id                  SERIAL PRIMARY KEY,
-    name                TEXT      NOT NULL,
-    mapper_id           TEXT      NOT NULL UNIQUE,
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    mapping_instruction JSONB     NOT NULL
-);
-
--- +migrate Up
 CREATE TABLE IF NOT EXISTS blnk.transactions
 (
     id             SERIAL PRIMARY KEY,
@@ -146,6 +125,4 @@ DROP TABLE IF EXISTS blnk.balance_monitors CASCADE;
 DROP TABLE IF EXISTS blnk.accounts CASCADE;
 DROP TABLE IF EXISTS blnk.balances CASCADE;
 DROP TABLE IF EXISTS blnk.identity CASCADE;
-DROP TABLE IF EXISTS blnk.event_mappers CASCADE;
 DROP TABLE IF EXISTS blnk.ledgers CASCADE;
-DROP TABLE IF EXISTS blnk.matching_rules CASCADE;

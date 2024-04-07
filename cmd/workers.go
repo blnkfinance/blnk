@@ -3,24 +3,24 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/jerry-enebeli/blnk/internal/notification"
+	"github.com/spf13/cobra"
 
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/database"
 
 	"github.com/jerry-enebeli/blnk/config"
 
-	"github.com/spf13/cobra"
-
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/hibiken/asynq"
 )
+
+const NumberOfQueues = 5
 
 func processTransaction(cxt context.Context, t *asynq.Task) error {
 	var txn model.Transaction
@@ -42,7 +42,7 @@ func processTransaction(cxt context.Context, t *asynq.Task) error {
 	}
 
 	logrus.Printf(" [*] Processing Transaction %s. source %s destination %s", txn.TransactionID, txn.Source, txn.Destination)
-	err = newBlnk.ApplyBalanceToQueuedTransaction(cxt, &txn)
+	_, err = newBlnk.RecordTransaction(cxt, &txn)
 	if err != nil {
 		return err
 	}
@@ -90,18 +90,39 @@ func workerCommands() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			conf, err := config.Fetch()
 			if err != nil {
+				log.Println("Error fetching config:", err)
 				return
 			}
+
+			// Dynamically create the queues map based on the number of queues
+			queues := make(map[string]int)
+			queues[blnk.WEBHOOK_QUEUE] = 1
+			for i := 1; i <= NumberOfQueues; i++ {
+				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
+				queues[queueName] = 1
+			}
+
 			srv := asynq.NewServer(
 				asynq.RedisClientOpt{Addr: conf.Redis.Dns},
-				asynq.Config{Concurrency: 1, Queues: map[string]int{"transactions": 1}, GroupMaxDelay: time.Second,
-					GroupAggregator: asynq.GroupAggregatorFunc(aggregateDebit)},
+				asynq.Config{
+					Concurrency:     1,
+					Queues:          queues,
+					GroupMaxDelay:   time.Second,
+					GroupAggregator: asynq.GroupAggregatorFunc(aggregateDebit),
+				},
 			)
+
 			mux := asynq.NewServeMux()
-			mux.HandleFunc(blnk.TANSACTION_QUEUE, processTransaction)
+			// Register handler for each queue
+			for i := 1; i <= NumberOfQueues; i++ {
+				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
+				mux.HandleFunc(queueName, processTransaction)
+
+			}
+
+			mux.HandleFunc(blnk.WEBHOOK_QUEUE, blnk.ProcessWebhook)
 			if err := srv.Run(mux); err != nil {
-				notification.NotifyError(err)
-				log.Fatal(err)
+				log.Fatal("Error running server:", err)
 			}
 		},
 	}

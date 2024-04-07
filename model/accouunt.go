@@ -8,7 +8,6 @@ type Account struct {
 	Number     string                 `json:"number" form:"number"`
 	BankName   string                 `json:"bank_name"`
 	Currency   string                 `json:"currency"`
-	CreatedAt  time.Time              `json:"created_at"`
 	BalanceID  string                 `json:"balance_id" `
 	IdentityID string                 `json:"identity_id" form:"identity_id"`
 	LedgerID   string                 `json:"ledger_id"`
@@ -16,4 +15,5 @@ type Account struct {
 	Ledger     *Ledger                `json:"ledger"`
 	Balance    *Balance               `json:"balance"`
 	Identity   *Identity              `json:"identity"`
+	CreatedAt  time.Time              `json:"created_at"`
 }

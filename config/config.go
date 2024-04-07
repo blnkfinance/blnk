@@ -17,7 +17,7 @@ const (
 	DEFAULT_PORT = "5001"
 )
 
-var configStore atomic.Value
+var ConfigStore atomic.Value
 
 type ServerConfig struct {
 	SSL       bool   `json:"ssl" envconfig:"BLNK_SERVER_SSL"`
@@ -106,7 +106,7 @@ func loadConfigFromFile(file string) error {
 		return err
 	}
 
-	configStore.Store(&cnf)
+	ConfigStore.Store(&cnf)
 	return err
 }
 
@@ -116,7 +116,7 @@ func InitConfig(configFile string) error {
 }
 
 func Fetch() (*Configuration, error) {
-	config := configStore.Load()
+	config := ConfigStore.Load()
 	c, ok := config.(*Configuration)
 	if !ok {
 		return nil, errors.New("config not loaded from file. Create a json file called blnk.json with your config ❌")
@@ -202,7 +202,7 @@ func MockConfig(enableAutoGeneration bool, url string, authorizationToken string
 		},
 	}
 
-	configStore.Store(&mockConfig)
+	ConfigStore.Store(&mockConfig)
 }
 
 func logger() {

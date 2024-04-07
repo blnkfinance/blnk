@@ -8,14 +8,11 @@
  [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
 
 # Welcome to Blnk
-Blnk is your gateway to building powerful financial products with ease. This open-source financial ledger server is the backbone for creating scalable solutions in banking, digital wallets, card processing, and brokerage systems. Let's get you started on deploying Blnk and exploring its capabilities.
+Welcome to Blnk — an open-source ledger designed for the modern developer. It enables developers to build and manage complex financial transaction records and money movement.
 
-# Why Blnk?
-Whether you're launching a fintech startup or integrating financial functionalities into existing services, Blnk offers a robust platform that caters to:
-- **Banking Systems**: Streamline operations with our ledger's support.
-- **Digital Wallets**: Create wallets that are both flexible and secure.
-- **Card Processing Services**: Process payments smoothly and efficiently.
-- **Brokerage Systems**: Manage investments with a reliable back-end.
+Every financial product is made up of different transactions happening concurrently moving from one location to another. Some transactions will interact with external parties like cards, payouts, deposits, etc. Others will interact within your organization like moving money between user accounts or to/fro your organization accounts.
+
+Blnk gives you, the developer, a starting point to improve how you build, operate and perfectly manage money movement and storage in a reliable, scaleable and secure way.
 
 ## Get Started and Core Features
 - [Install Blnk](https://docs.blnkserver.xyz)

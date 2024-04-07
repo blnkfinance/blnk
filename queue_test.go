@@ -74,8 +74,8 @@ func TestEnqueueWithAsynqClientEnqueueError(t *testing.T) {
 			Dns: "localhost:6379",
 		},
 	})
-	q.Client = client       // Assuming you have a way to set this for testing
-	q.Inspector = inspector // Assuming you have a way to set this for testing
+	q.Client = client
+	q.Inspector = inspector
 
 	transaction := getTransactionMock(100, false)
 

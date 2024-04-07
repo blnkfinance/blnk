@@ -5,8 +5,8 @@ import "time"
 type EventMapper struct {
 	MapperID           string            `json:"mapper_id"`
 	Name               string            `json:"name"`
-	CreatedAt          time.Time         `json:"created_at"`
 	MappingInstruction map[string]string `json:"mapping_instruction"`
+	CreatedAt          time.Time         `json:"created_at"`
 }
 
 type Event struct {

@@ -3,16 +3,8 @@ package blnk
 import (
 	"fmt"
 
+	"github.com/jerry-enebeli/blnk/internal/notification"
 	"github.com/jerry-enebeli/blnk/model"
-)
-
-// Max constants for normalization
-const (
-	maxChangeFrequency   = 10.0
-	maxTransactionAmount = 100000
-	maxBalance           = 500000
-	maxCreditBalance     = 1000000
-	maxDebitBalance      = 700000
 )
 
 func NewBalanceTracker() *model.BalanceTracker {
@@ -29,27 +21,37 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 	for _, monitor := range monitors {
 		if monitor.CheckCondition(updatedBalance) {
 			fmt.Printf("Condition met for balance: %s\n", monitor.MonitorID)
+			go func(monitor model.BalanceMonitor) {
+				err := SendWebhook(NewWebhook{
+					Event:   "balance.monitor",
+					Payload: monitor,
+				})
+				notification.NotifyError(err)
+			}(monitor)
 
 		}
 	}
 
 }
 
-// Function to handle fetching or creating balance by indicator
 func (l Blnk) getOrCreateBalanceByIndicator(indicator string) (*model.Balance, error) {
 	balance, err := l.datasource.GetBalanceByIndicator(indicator)
 	if err != nil {
 		balance = &model.Balance{
 			Indicator: indicator,
 			LedgerID:  GeneralLedgerID,
-		}
+		} //TODO refactor
 		// Save the new balance to the datasource
-		newBalance, err := l.datasource.CreateBalance(*balance)
+		_, err := l.datasource.CreateBalance(*balance)
 		if err != nil {
 			return nil, err
 		}
 
-		return &newBalance, nil
+		balance, err = l.datasource.GetBalanceByIndicator(indicator)
+		if err != nil {
+			return nil, err
+		}
+		return balance, nil
 	}
 	return balance, nil
 }

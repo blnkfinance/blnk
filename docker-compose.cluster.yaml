@@ -1,13 +1,27 @@
 version: '3.8'
 
 services:
-  server:
-    image: jerryenebeli/blnk:v0.5.0
-    restart: on-failure
+  traefik:
+    image: traefik:v2.5
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
     ports:
-      - "5001:5001"
       - "80:80"
       - "443:443"
+      - "8080:8080" # Traefik Dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  server:
+    build: .
+    restart: on-failure
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.server.rule=Host(`localhost`)"
+      - "traefik.http.services.server.loadbalancer.server.port=5001"
     depends_on:
       - redis
       - postgres
@@ -15,9 +29,9 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: jerryenebeli/blnk:v0.5.0
+    build: .
     restart: on-failure
-    entrypoint: [ "./blnk", "workers"]
+    entrypoint: ["./blnk", "workers"]
     depends_on:
       - redis
       - postgres
@@ -26,7 +40,7 @@ services:
 
   migration:
     build: .
-    entrypoint: [ "./blnk", "migrate","up" ]
+    entrypoint: ["./blnk", "migrate", "up"]
     depends_on:
       - postgres
     volumes:
@@ -48,11 +62,11 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-
 volumes:
   pg_data:
+

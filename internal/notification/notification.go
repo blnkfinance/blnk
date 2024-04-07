@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jerry-enebeli/blnk/internal/request"
+	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk/config"
 )
@@ -71,6 +72,7 @@ func SlackNotification(err error) {
 
 func NotifyError(systemError error) {
 	go func(systemError error) {
+		logrus.Error(systemError)
 		conf, err := config.Fetch()
 		if err != nil {
 			log.Println(err)

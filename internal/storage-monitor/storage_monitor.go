@@ -36,13 +36,11 @@ func (b *EventBroker) Subscribe() chan StorageLimitEvent {
 	return ch
 }
 
-// Broadcast sends the event to all subscribers.
 func (b *EventBroker) Broadcast(event StorageLimitEvent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	for _, subscriber := range b.subscribers {
-		// Non-blocking send with select
 		select {
 		case subscriber <- event:
 		default:
@@ -51,7 +49,6 @@ func (b *EventBroker) Broadcast(event StorageLimitEvent) {
 	}
 }
 
-// checkDiskUsage checks the current disk usage and broadcasts an event if it exceeds the threshold.
 func checkDiskUsage() {
 	const diskUsageThreshold = 80.0
 	usage, err := disk.Usage("/")
@@ -80,7 +77,6 @@ func startAlertSystemSubscriber(broker *EventBroker) {
 	alertSub := broker.Subscribe()
 	go func() {
 		for event := range alertSub {
-			// Placeholder for alert sending logic
 			fmt.Printf("Alert sent: %s\n", event.Message)
 		}
 	}()

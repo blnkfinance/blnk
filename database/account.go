@@ -18,7 +18,7 @@ func (d Datasource) CreateAccount(account model.Account) (model.Account, error) 
 		return account, err
 	}
 
-	account.AccountID = GenerateUUIDWithSuffix("acc")
+	account.AccountID = model.GenerateUUIDWithSuffix("acc")
 	account.CreatedAt = time.Now()
 
 	_, err = d.Conn.Exec(`
@@ -93,7 +93,7 @@ func prepareAccountQueries(queryBuilder strings.Builder, include []string) strin
 	queryBuilder.WriteString(strings.Join(selectFields, ", "))
 	queryBuilder.WriteString(`
         FROM (
-            SELECT * FROM blnk.accounts WHERE account_id = $1 FOR UPDATE
+            SELECT * FROM blnk.accounts WHERE account_id = $1
         ) AS a
     `)
 

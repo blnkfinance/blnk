@@ -119,7 +119,7 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 		return balance, err
 	}
 
-	balance.BalanceID = GenerateUUIDWithSuffix("bln")
+	balance.BalanceID = model.GenerateUUIDWithSuffix("bln")
 	balance.CreatedAt = time.Now()
 
 	// Replace empty string with null for identity_id
@@ -175,13 +175,12 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 
 func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	var balance model.Balance
-	// select ledger from database by ID
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE
+	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = $1
 	`, id)
 
 	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
-		&balance.DebitBalance, &balance.CreatedAt)
+		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
 	if err != nil {
 		logrus.Errorf("balance lite error %v", err)
 		if err == sql.ErrNoRows {
@@ -196,13 +195,12 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 
 func (d Datasource) GetBalanceByIndicator(indicator string) (*model.Balance, error) {
 	var balance model.Balance
-	// select ledger from database by ID
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE indicator = $1 
+	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE indicator = $1 
 	`, indicator)
 
 	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
-		&balance.DebitBalance, &balance.CreatedAt)
+		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
 	if err != nil {
 		logrus.Errorf("balance lite error %v", err)
 		if err == sql.ErrNoRows {
@@ -294,8 +292,6 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 
 	return nil
 }
-
-// updateBalance is a helper function to update a single balance within a transaction
 func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) error {
 	// Convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(balance.MetaData)
@@ -303,18 +299,31 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 		return err
 	}
 
-	// Prepare the SQL statement
+	// Prepare the SQL statement with optimistic locking
 	query := `
-		UPDATE blnk.balances
-		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
-		WHERE balance_id = $1
-	`
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, meta_data = $12, version = version + 1
+        WHERE balance_id = $1 AND version = $13
+    `
 
 	// Execute the update within the transaction
-	_, err = tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
+	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.InflightBalance, balance.InflightCreditBalance, balance.InflightDebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON, balance.Version)
 	if err != nil {
 		return err
 	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		// No rows updated, indicating a possible version mismatch
+		return fmt.Errorf("optimistic locking failure: balance with ID '%s' may have been updated or deleted by another transaction", balance.BalanceID)
+	}
+
+	// Increment the version in the local balance object to reflect the successful update
+	balance.Version++
 
 	return nil
 }
@@ -338,7 +347,7 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 }
 
 func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMonitor, error) {
-	monitor.MonitorID = GenerateUUIDWithSuffix("mon")
+	monitor.MonitorID = model.GenerateUUIDWithSuffix("mon")
 	monitor.CreatedAt = time.Now()
 
 	_, err := d.Conn.Exec(`

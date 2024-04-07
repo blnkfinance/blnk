@@ -1,14 +1,14 @@
 package api
 
 import (
-	"context"
+	"errors"
+	"fmt"
 	"net/http"
-
-	"github.com/jerry-enebeli/blnk"
 
 	"github.com/sirupsen/logrus"
 
 	model2 "github.com/jerry-enebeli/blnk/api/model"
+	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,10 +35,6 @@ func (a Api) RecordTransaction(c *gin.Context) {
 }
 
 func (a Api) QueueTransaction(c *gin.Context) {
-	tracer := blnk.Init(context.Background(), "Blnk")
-
-	ctx, span := tracer.Start(c.Request.Context(), "/QueueTransaction")
-	defer span.End()
 
 	var newTransaction model2.RecordTransaction
 	if err := c.ShouldBindJSON(&newTransaction); err != nil {
@@ -51,7 +47,7 @@ func (a Api) QueueTransaction(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.blnk.QueueTransaction(ctx, newTransaction.ToTransaction())
+	resp, err := a.blnk.QueueTransaction(c.Request.Context(), newTransaction.ToTransaction())
 	if err != nil {
 		logrus.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -90,6 +86,46 @@ func (a Api) GetTransaction(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (a Api) UpdateInflightStatus(c *gin.Context) {
+	var resp *model.Transaction
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	status, passed := c.Params.Get("status")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status is required. pass id in the route /:status"})
+		return
+	}
+
+	if status == "commit" {
+		fmt.Println("got here")
+		transaction, err := a.blnk.CommitInflightTransaction(c.Request.Context(), id, 0)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		resp = transaction
+	} else if status == "void" {
+		transaction, err := a.blnk.VoidInflightTransaction(c.Request.Context(), id)
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		resp = transaction
+	} else {
+
+		c.JSON(http.StatusBadRequest, gin.H{"error": errors.New("status not supported. use either commit or void")})
+		return
+
 	}
 
 	c.JSON(http.StatusOK, resp)

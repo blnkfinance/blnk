@@ -11,25 +11,20 @@ import (
 	"github.com/jerry-enebeli/blnk/config"
 )
 
-// applyExternalAccount sets the account number and bank name for a given blnk.Account object.
-// It fetches configuration details and, if auto-generation of account numbers is enabled,
-// makes an HTTP request to a specified service to retrieve these details.
 func applyExternalAccount(account *model.Account) error {
-	// Define a struct to hold account details received from the HTTP service.
 	type accountDetails struct {
 		AccountNumber string `json:"account_number"`
 		BankName      string `json:"bank_name"`
 	}
 
-	// Fetch configuration settings.
 	cnf, err := config.Fetch()
 	if err != nil {
-		// If there's an error in fetching the configuration, return from the function.
 		return err
 	}
 
-	// Check if automatic account number generation is enabled in the configuration.
-	if cnf.AccountNumberGeneration.EnableAutoGeneration && account.Number == "" {
+	fmt.Print("hello i'm here", cnf.AccountNumberGeneration.EnableAutoGeneration, cnf.AccountNumberGeneration.HttpService.Url)
+
+	if cnf.AccountNumberGeneration.EnableAutoGeneration {
 		req, err := http.NewRequest("GET", cnf.AccountNumberGeneration.HttpService.Url, nil)
 		if err != nil {
 			return err
@@ -43,6 +38,7 @@ func applyExternalAccount(account *model.Account) error {
 			return err
 		}
 
+		fmt.Println("account generated", response)
 		if response.AccountNumber != "" && response.BankName != "" {
 			account.Number = response.AccountNumber
 			account.BankName = response.BankName
@@ -54,6 +50,7 @@ func applyExternalAccount(account *model.Account) error {
 
 func (l Blnk) applyAccountName(account *model.Account) error {
 	if account.Name == "" {
+
 		identity, err := l.GetIdentity(account.IdentityID)
 		if err != nil {
 			return err
@@ -73,17 +70,14 @@ func (l Blnk) overrideLedgerAndIdentity(account *model.Account) error {
 		return err
 	}
 
-	//if balance has an identity, it overrides account identity with the balance identity
 	if balance.IdentityID != "" {
 		account.IdentityID = balance.IdentityID
 	}
 
-	//if balance has a ledger, it overrides account ledger with the balance ledger
 	if balance.LedgerID != "" {
 		account.LedgerID = balance.LedgerID
 	}
 
-	//if balance has a currency, it overrides account currency with the balance currency
 	if balance.Currency != "" {
 		account.Currency = balance.Currency
 	}
@@ -138,14 +132,4 @@ func (l Blnk) GetAccountByNumber(id string) (*model.Account, error) {
 // GetAllAccounts retrieves all accounts from the database.
 func (l Blnk) GetAllAccounts() ([]model.Account, error) {
 	return l.datasource.GetAllAccounts()
-}
-
-// UpdateAccount updates an account in the database.
-func (l Blnk) UpdateAccount(account *model.Account) error {
-	return l.datasource.UpdateAccount(account)
-}
-
-// DeleteAccount deletes an account from the database by ID.
-func (l Blnk) DeleteAccount(id string) error {
-	return l.datasource.DeleteAccount(id)
 }

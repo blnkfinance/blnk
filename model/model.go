@@ -1,9 +1,36 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+
+	"github.com/google/uuid"
 )
+
+func GenerateUUIDWithSuffix(module string) string {
+
+	// Generate a new UUID
+	id := uuid.New()
+
+	// Convert the UUID to a string
+	uuidStr := id.String()
+
+	// Add the module suffix
+	idWithSuffix := fmt.Sprintf("%s_%s", module, uuidStr)
+
+	return idWithSuffix
+}
+
+func (transaction *Transaction) HashTxn() string {
+
+	data := fmt.Sprintf("%d%s%s%s%s", transaction.Amount, transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
+	// Compute SHA-256 hash
+	hash := sha256.Sum256([]byte(data))
+	// Return the hexadecimal encoding of the hash
+	return hex.EncodeToString(hash[:])
+}
 
 func compare(value int64, condition string, compareTo int64) bool {
 	switch condition {
@@ -21,12 +48,67 @@ func compare(value int64, condition string, compareTo int64) bool {
 	return false
 }
 
-func (balance *Balance) addCredit(amount int64) {
+func (balance *Balance) addCredit(amount int64, inflight bool) {
+	//if transaction is an inflight transaction compute the inflight balance
+	if inflight {
+		balance.InflightCreditBalance += amount
+		return
+	}
+
 	balance.CreditBalance += amount
 }
 
-func (balance *Balance) addDebit(amount int64) {
+func (balance *Balance) addDebit(amount int64, inflight bool) {
+	//if transaction is an inflight transaction compute the inflight balance
+	if inflight {
+		balance.InflightDebitBalance += amount
+		return
+	}
 	balance.DebitBalance += amount
+}
+
+func (balance *Balance) computeBalance(inflight bool) {
+	//if transaction is an inflight transaction compute the inflight balance
+	if inflight {
+		balance.InflightBalance = balance.InflightCreditBalance - balance.InflightDebitBalance
+		return
+	}
+	balance.Balance = balance.CreditBalance - balance.DebitBalance
+}
+
+func (balance *Balance) CommitInflightDebit(amount int64) {
+	if balance.InflightDebitBalance >= amount {
+		balance.InflightDebitBalance -= amount
+		balance.DebitBalance += amount
+		balance.computeBalance(true)  // Update inflight balance
+		balance.computeBalance(false) // Update normal balance
+	}
+}
+
+func (balance *Balance) CommitInflightCredit(amount int64) {
+	if balance.InflightCreditBalance >= amount {
+		balance.InflightCreditBalance -= amount
+		balance.CreditBalance += amount
+		balance.computeBalance(true)  // Update inflight balance
+		balance.computeBalance(false) // Update normal balance
+	}
+}
+
+// RollbackInflightCredit decreases the InflightCreditBalance by the specified amount
+func (balance *Balance) RollbackInflightCredit(amount int64) {
+	fmt.Println(amount, balance.InflightCreditBalance)
+	if balance.InflightCreditBalance >= amount {
+		balance.InflightCreditBalance -= amount
+		balance.computeBalance(true) // Update inflight balance
+	}
+}
+
+// RollbackInflightDebit decreases the InflightDebitBalance by the specified amount
+func (balance *Balance) RollbackInflightDebit(amount int64) {
+	if balance.InflightDebitBalance >= amount {
+		balance.InflightDebitBalance -= amount
+		balance.computeBalance(true) // Update inflight balance
+	}
 }
 
 func (balance *Balance) applyMultiplier(transaction *Transaction) {
@@ -70,17 +152,16 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 		return err
 	}
 
+	//compute source balance
 	source.applyMultiplier(transaction)
-	source.addDebit(transaction.Amount)
-	source.ComputeBalance()
-	destination.applyMultiplier(transaction)
-	destination.addCredit(transaction.Amount)
-	destination.ComputeBalance()
-	return nil
-}
+	source.addDebit(transaction.Amount, transaction.Inflight)
+	source.computeBalance(transaction.Inflight)
 
-func (balance *Balance) ComputeBalance() {
-	balance.Balance = balance.CreditBalance - balance.DebitBalance
+	//compute destination balance
+	destination.applyMultiplier(transaction)
+	destination.addCredit(transaction.Amount, transaction.Inflight)
+	destination.computeBalance(transaction.Inflight)
+	return nil
 }
 
 func (bm *BalanceMonitor) CheckCondition(b *Balance) bool {

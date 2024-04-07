@@ -2,94 +2,28 @@ package model
 
 import (
 	"errors"
-	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
 
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 )
 
-type CreateLedger struct {
-	Name     string                 `json:"name"`
-	MetaData map[string]interface{} `json:"meta_data"`
+func sourceOrSourcesValidation(t *RecordTransaction) validation.RuleFunc {
+	return func(value interface{}) error {
+		if (t.Source == "" && len(t.Sources) == 0) || (t.Source != "" && len(t.Sources) > 0) {
+			return errors.New("either source or sources is required, not both")
+		}
+		return nil
+	}
 }
 
-type CreateIdentity struct {
-	IdentityType     string                 `json:"identity_type"`
-	FirstName        string                 `json:"first_name"`
-	LastName         string                 `json:"last_name"`
-	OtherNames       string                 `json:"other_names"`
-	Gender           string                 `json:"gender"`
-	Dob              time.Time              `json:"dob"`
-	EmailAddress     string                 `json:"email_address"`
-	PhoneNumber      string                 `json:"phone_number"`
-	Nationality      string                 `json:"nationality"`
-	OrganizationName string                 `json:"organization_name"`
-	Category         string                 `json:"category"`
-	Street           string                 `json:"street"`
-	Country          string                 `json:"country"`
-	State            string                 `json:"state"`
-	PostCode         string                 `json:"post_code"`
-	City             string                 `json:"city"`
-	CreatedAt        time.Time              `json:"created_at"`
-	MetaData         map[string]interface{} `json:"meta_data"`
-}
-
-type CreateBalance struct {
-	LedgerId   string                 `json:"ledger_id"`
-	IdentityId string                 `json:"identity_id"`
-	Currency   string                 `json:"currency"`
-	MetaData   map[string]interface{} `json:"meta_data"`
-}
-
-type CreateBalanceMonitor struct {
-	BalanceId   string                 `json:"balance_id"`
-	Condition   MonitorCondition       `json:"condition"`
-	CallBackURL string                 `json:"call_back_url"`
-	MetaData    map[string]interface{} `json:"meta_data"`
-}
-
-type MonitorCondition struct {
-	Field    string `json:"field"`
-	Operator string `json:"operator"`
-	Value    int64  `json:"value"`
-}
-
-type CreateAccount struct {
-	BankName   string                 `json:"bank_name"`
-	Number     string                 `json:"number"`
-	Currency   string                 `json:"currency"`
-	IdentityId string                 `json:"identity_id"`
-	LedgerId   string                 `json:"ledger_id"`
-	BalanceId  string                 `json:"balance_id"`
-	MetaData   map[string]interface{} `json:"meta_data"`
-}
-
-type RecordTransaction struct {
-	Amount                 float64                `json:"amount"`
-	AllowOverDraft         bool                   `json:"allow_over_draft"`
-	Source                 string                 `json:"source"`
-	Reference              string                 `json:"reference"`
-	Drcr                   string                 `json:"drcr"`
-	Destination            string                 `json:"destination"`
-	Description            string                 `json:"description"`
-	Currency               string                 `json:"currency"`
-	BalanceId              string                 `json:"balance_id"`
-	RiskToleranceThreshold float64                `json:"risk_tolerance_threshold"`
-	ScheduledFor           time.Time              `json:"scheduled_for"`
-	MetaData               map[string]interface{} `json:"meta_data"`
-}
-
-type CreateEventMapper struct {
-	Name               string            `json:"name"`
-	MappingInstruction map[string]string `json:"mapping_instruction"`
-}
-
-type CreateEvent struct {
-	MapperId  string                 `json:"mapper_id"`
-	Drcr      string                 `json:"drcr"`
-	BalanceId string                 `json:"balance_id"`
-	Data      map[string]interface{} `json:"data"`
+func destinationOrDestinationsValidation(t *RecordTransaction) validation.RuleFunc {
+	return func(value interface{}) error {
+		if (t.Destination == "" && len(t.Destinations) == 0) || (t.Destination != "" && len(t.Destinations) > 0) {
+			return errors.New("either destination or destinations is required, not both")
+		}
+		return nil
+	}
 }
 
 func (l *CreateLedger) ValidateCreateLedger() error {
@@ -98,19 +32,11 @@ func (l *CreateLedger) ValidateCreateLedger() error {
 	)
 }
 
-func (l *CreateLedger) ToLedger() model.Ledger {
-	return model.Ledger{Name: l.Name, MetaData: l.MetaData}
-}
-
 func (b *CreateBalance) ValidateCreateBalance() error {
 	return validation.ValidateStruct(b,
 		validation.Field(&b.LedgerId, validation.Required),
 		validation.Field(&b.Currency, validation.Required),
 	)
-}
-
-func (b *CreateBalance) ToBalance() model.Balance {
-	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData}
 }
 
 func (b *CreateBalanceMonitor) ValidateCreateBalanceMonitor() error {
@@ -137,12 +63,14 @@ func (c *MonitorCondition) ValidateMonitorCondition() error {
 	)
 }
 
-func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
-	return model.BalanceMonitor{BalanceID: b.BalanceId, Condition: model.AlertCondition{
-		Field:    b.Condition.Field,
-		Operator: b.Condition.Operator,
-		Value:    b.Condition.Value,
-	}, CallBackURL: b.CallBackURL}
+func (t *RecordTransaction) ValidateRecordTransaction() error {
+	return validation.ValidateStruct(t,
+		validation.Field(&t.Amount, validation.Required),
+		validation.Field(&t.Currency, validation.Required),
+		validation.Field(&t.Reference, validation.Required),
+		validation.Field(&t.Source, validation.By(sourceOrSourcesValidation(t))),
+		validation.Field(&t.Destination, validation.By(destinationOrDestinationsValidation(t))),
+	)
 }
 
 func (a *CreateAccount) ValidateCreateAccount() error {
@@ -165,44 +93,26 @@ func (a *CreateAccount) ValidateCreateAccount() error {
 	)
 }
 
+func (l *CreateLedger) ToLedger() model.Ledger {
+	return model.Ledger{Name: l.Name, MetaData: l.MetaData}
+}
+
+func (b *CreateBalance) ToBalance() model.Balance {
+	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, CurrencyMultiplier: b.Preceision}
+}
+
+func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
+	return model.BalanceMonitor{BalanceID: b.BalanceId, Condition: model.AlertCondition{
+		Field:    b.Condition.Field,
+		Operator: b.Condition.Operator,
+		Value:    b.Condition.Value,
+	}, CallBackURL: b.CallBackURL}
+}
+
 func (a *CreateAccount) ToAccount() model.Account {
 	return model.Account{BalanceID: a.BalanceId, LedgerID: a.LedgerId, IdentityID: a.IdentityId, Currency: a.Currency, Number: a.Number, BankName: a.BankName, MetaData: a.MetaData}
 }
 
-func (t *RecordTransaction) ValidateRecordTransaction() error {
-	return validation.ValidateStruct(t,
-		validation.Field(&t.Amount, validation.Required),
-		validation.Field(&t.Currency, validation.Required),
-		validation.Field(&t.Reference, validation.Required),
-		validation.Field(&t.Source, validation.Required),
-		validation.Field(&t.Destination, validation.Required),
-	)
-}
-
 func (t *RecordTransaction) ToTransaction() *model.Transaction {
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, RiskToleranceThreshold: t.RiskToleranceThreshold, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: int64(t.Amount), AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData}
-}
-
-func (t *CreateEventMapper) ValidateCreateEventMapper() error {
-	return validation.ValidateStruct(t,
-		validation.Field(&t.Name, validation.Required),
-		validation.Field(&t.MappingInstruction, validation.Map(validation.Key("amount", validation.Required), validation.Key("currency", validation.Required), validation.Key("reference", validation.Required))),
-	)
-}
-
-func (t *CreateEventMapper) ToEventMapper() model.EventMapper {
-	return model.EventMapper{Name: t.Name, MappingInstruction: t.MappingInstruction}
-}
-
-func (e *CreateEvent) ValidateCreateEvent() error {
-	return validation.ValidateStruct(e,
-		validation.Field(&e.MapperId, validation.Required),
-		validation.Field(&e.BalanceId, validation.Required),
-		validation.Field(&e.Data, validation.Required),
-		validation.Field(&e.Drcr, validation.Required, validation.In("Credit", "Debit")),
-	)
-}
-
-func (e *CreateEvent) ToEvent() model.Event {
-	return model.Event{MapperID: e.MapperId, Drcr: e.Drcr, BalanceID: e.BalanceId, Data: e.Data}
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: int64(t.Amount), AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight}
 }

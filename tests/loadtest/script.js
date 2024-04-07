@@ -4,7 +4,7 @@ import { check, sleep } from "k6";
 
 
 export const options = {
-    vus: 10,
+    vus: 5,
     duration: '30s',
 };
 
@@ -15,8 +15,8 @@ export default function () {
             "allow_over_draft":true,
             "reference": uuidv4(),
             "currency": "NGN",
-            "source": "@cash",
-            "destination": "@interests"
+            "source": "@test1",
+            "destination": "@test2"
         }
 
     );

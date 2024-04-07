@@ -3,6 +3,8 @@ package blnk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"hash/fnv"
 	"log"
 	"time"
 
@@ -12,8 +14,9 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 )
 
-const TANSACTION_QUEUE = "new:transaction"
+const TRANSACTION_QUEUE = "new:transaction"
 const WEBHOOK_QUEUE = "new:webhoook"
+const NumberOfQueues = 5
 
 type Queue struct {
 	Client    *asynq.Client
@@ -43,16 +46,27 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 		log.Println(err, info)
 		return err
 	}
-	log.Printf(" [*] Successfully enqueued task: %+v", transaction.TransactionID)
+	log.Printf(" [*] Successfully enqueued task: %+v", transaction.Reference)
 
 	return nil
 }
 
 func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Task {
-	taskOptions := []asynq.Option{asynq.TaskID(transaction.TransactionID), asynq.Queue("transactions")}
+	// Hash the balance ID and use modulo to select a queue
+	queueIndex := hashBalanceID(transaction.Source) % NumberOfQueues
+	queueName := fmt.Sprintf("%s_%d", TRANSACTION_QUEUE, queueIndex+1) // Queue names are 1-based
+
+	taskOptions := []asynq.Option{asynq.TaskID(transaction.Reference), asynq.Queue(queueName)}
 
 	if !transaction.ScheduledFor.IsZero() {
 		taskOptions = append(taskOptions, asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
 	}
-	return asynq.NewTask(TANSACTION_QUEUE, payload, taskOptions...)
+	return asynq.NewTask(queueName, payload, taskOptions...)
+}
+
+// hashBalanceID returns a consistent hash value for an string balance ID
+func hashBalanceID(balanceID string) int {
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(balanceID))
+	return int(hasher.Sum32())
 }

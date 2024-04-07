@@ -16,7 +16,7 @@ func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 		return model.Ledger{}, err
 	}
 
-	ledger.LedgerID = GenerateUUIDWithSuffix("ldg")
+	ledger.LedgerID = model.GenerateUUIDWithSuffix("ldg")
 	ledger.CreatedAt = time.Now()
 
 	// insert into database

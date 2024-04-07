@@ -12,13 +12,12 @@ type IDataSource interface {
 	balance
 	identity
 	balanceMonitor
-	eventMapper
 	account
 }
 
 type transaction interface {
 	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)
-	GetTransaction(id string) (model.Transaction, error)
+	GetTransaction(id string) (*model.Transaction, error)
 	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)
 	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)
 	UpdateTransactionStatus(id string, status string) error
@@ -65,12 +64,4 @@ type identity interface {
 	GetAllIdentities() ([]model.Identity, error)
 	UpdateIdentity(identity *model.Identity) error
 	DeleteIdentity(id string) error
-}
-
-type eventMapper interface {
-	CreateEventMapper(mapper model.EventMapper) (model.EventMapper, error)
-	GetAllEventMappers() ([]model.EventMapper, error)
-	GetEventMapperByID(id string) (*model.EventMapper, error)
-	UpdateEventMapper(mapper model.EventMapper) error
-	DeleteEventMapper(id string) error
 }

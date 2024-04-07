@@ -46,8 +46,8 @@ func TestRecordTransaction(t *testing.T) {
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
 		AddRow(destination, "NGN", 1, "ledger-id-destination", 200, 100, 100, time.Now())
 
-	balanceQuery := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE`)
-	balanceQuery2 := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE`)
+	balanceQuery := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1`)
+	balanceQuery2 := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1`)
 
 	mock.ExpectQuery(balanceQuery).WithArgs(source).WillReturnRows(sourceBalanceRows)
 	mock.ExpectQuery(balanceQuery2).WithArgs(destination).WillReturnRows(destinationBalanceRows)
@@ -103,8 +103,8 @@ func TestApplyBalanceToQueuedTransaction(t *testing.T) {
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
 		AddRow(destination, "NGN", 1, "ledger-id-destination", 200, 100, 100, time.Now())
 
-	balanceQuery := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE`)
-	balanceQuery2 := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1 FOR UPDATE`)
+	balanceQuery := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1`)
+	balanceQuery2 := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, created_at FROM blnk.balances WHERE balance_id = $1`)
 
 	mock.ExpectQuery(balanceQuery).WithArgs(source).WillReturnRows(sourceBalanceRows)
 	mock.ExpectQuery(balanceQuery2).WithArgs(destination).WillReturnRows(destinationBalanceRows)
@@ -113,7 +113,7 @@ func TestApplyBalanceToQueuedTransaction(t *testing.T) {
 		WHERE reference = $1	
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{""}))
 
-	err = d.ApplyBalanceToQueuedTransaction(context.Background(), txn)
+	_, err = d.RecordTransaction(context.Background(), txn)
 	assert.NoError(t, err)
 
 	// Check if all expectations were met

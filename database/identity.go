@@ -15,7 +15,7 @@ func (d Datasource) CreateIdentity(identity model.Identity) (model.Identity, err
 		return identity, err
 	}
 
-	identity.IdentityID = GenerateUUIDWithSuffix("idt")
+	identity.IdentityID = model.GenerateUUIDWithSuffix("idt")
 	identity.CreatedAt = time.Now()
 
 	_, err = d.Conn.Exec(`
@@ -39,7 +39,7 @@ func (d Datasource) GetIdentityByID(id string) (*model.Identity, error) {
 	row := tx.QueryRow(`
 	SELECT identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data
 	FROM identity
-	WHERE identity_id = $1 FOR UPDATE SKIP LOCKED
+	WHERE identity_id = $1
 `, id)
 
 	identity := &model.Identity{}
