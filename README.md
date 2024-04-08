@@ -15,17 +15,5 @@ Every financial product is made up of different transactions happening concurren
 Blnk gives you, the developer, a starting point to improve how you build, operate and perfectly manage money movement and storage in a reliable, scaleable and secure way.
 
 ## Get Started and Core Features
-- [Install Blnk](https://docs.blnkserver.xyz)
-- [Managing ledgers](https://docs.blnkserver.xyz/ledger/get-started)
-- [Managing balances](https://docs.blnkserver.xyz/balance/get-started)
-- [Balance monitoring](https://docs.blnkserver.xyz/balance/monitoring)
-- [Accounts](https://docs.blnkserver.xyz/account/get-started)
-- [External account generation](https://docs.blnkserver.xyz/account/external-generation)
-- [Queuing transactions](https://docs.blnkserver.xyz/transaction/queuing-transactions)
-- [Scheduling transactions](https://docs.blnkserver.xyz/transaction/scheduling-transactions)
-- [Fraud detection](https://docs.blnkserver.xyz/fraud)
-- [Notifications and webhooks](https://docs.blnkserver.xyz/notifications)
-- [More Controls and configurations](https://docs.blnkserver.xyz/config)
-- [API Reference](https://docs.blnkserver.xyz/misc/create-ledger)
-
+- [Documentation](https://docs.blnkserver.xyz)
 

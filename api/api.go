@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/jerry-enebeli/blnk/config"
 
@@ -49,6 +50,8 @@ func (a Api) Router() *gin.Engine {
 
 	router.GET("/backup", a.BackupDB)
 	router.GET("/backup-s3", a.BackupDBS3)
+
+	router.POST("/search/:collection", a.Search)
 	return a.router
 }
 
@@ -66,7 +69,6 @@ func NewAPI(b *blnk.Blnk) *Api {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")
 	})
-
 	r.POST("/webhook", func(c *gin.Context) {
 		var payload map[string]interface{}
 		err := c.Bind(&payload)
@@ -77,4 +79,25 @@ func NewAPI(b *blnk.Blnk) *Api {
 	})
 
 	return &Api{blnk: b, router: r}
+}
+
+func (a Api) Search(c *gin.Context) {
+	collection, passed := c.Params.Get("collection")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "collection is required. pass id in the route /:collection"})
+		return
+	}
+
+	var query map[string]interface{}
+
+	c.BindJSON(&query)
+
+	resp, err := a.blnk.Search(collection, query)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
 }

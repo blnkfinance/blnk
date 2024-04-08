@@ -106,7 +106,6 @@
     },
     "/balances": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Create Balance",
         "operationId": "CreateBalance",
         "parameters": [],
@@ -204,7 +203,6 @@
     },
     "/transactions": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Record Transaction",
         "operationId": "RecordTransaction",
         "parameters": [],
@@ -388,7 +386,6 @@
     },
     "/transactions/inflight/{txID}/{status}": {
       "put": {
-        "tags": ["Misc"],
         "summary": "Update Inflight Transaction",
         "operationId": "UpdateInflightTransaction",
         "parameters": [
@@ -492,7 +489,6 @@
     },
     "/refund-transaction/{id}": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Refund Transaction",
         "operationId": "RefundTransaction",
         "parameters": [
@@ -607,7 +603,6 @@
     },
     "/balance-monitors": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Create Balance Monitor",
         "operationId": "CreateBalanceMonitor",
         "parameters": [],
@@ -715,7 +710,6 @@
     },
     "/identities": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Create Identity",
         "operationId": "CreateIdentity",
         "parameters": [],
@@ -859,7 +853,6 @@
     },
     "/accounts": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Create Account",
         "operationId": "CreateAccount",
         "parameters": [],
@@ -967,7 +960,6 @@
     },
     "/identities/{id}": {
       "put": {
-        "tags": ["Misc"],
         "summary": "Update Identity",
         "operationId": "UpdateIdentity",
         "parameters": [
@@ -1091,7 +1083,6 @@
         "deprecated": false
       },
       "get": {
-        "tags": ["Misc"],
         "summary": "Get Identity",
         "operationId": "GetIdentity",
         "parameters": [
@@ -1200,7 +1191,6 @@
     },
     "/accounts/{id}": {
       "put": {
-        "tags": ["Misc"],
         "summary": "Update Account",
         "operationId": "UpdateAccount",
         "parameters": [
@@ -1317,7 +1307,6 @@
         "deprecated": false
       },
       "get": {
-        "tags": ["Misc"],
         "summary": "Get Account",
         "operationId": "GetAccount",
         "parameters": [
@@ -1496,7 +1485,6 @@
     },
     "/balance-monitors/{id}": {
       "put": {
-        "tags": ["Misc"],
         "summary": "Update Balance Monitor",
         "operationId": "UpdateBalanceMonitor",
         "parameters": [
@@ -1554,7 +1542,6 @@
         "deprecated": false
       },
       "get": {
-        "tags": ["Misc"],
         "summary": "Get Balance Monitor",
         "operationId": "GetBalanceMonitor",
         "parameters": [
@@ -1639,7 +1626,6 @@
     },
     "/backup": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Back DB",
         "operationId": "BackDB",
         "parameters": [],
@@ -1736,7 +1722,6 @@
     },
     "/backup/s3": {
       "post": {
-        "tags": ["Misc"],
         "summary": "Back DB To S3",
         "operationId": "BackDBToS3",
         "parameters": [],
@@ -1833,7 +1818,6 @@
     },
     "/ledgers/{id}": {
       "get": {
-        "tags": ["Misc"],
         "summary": "Get Ledger",
         "operationId": "GetLedger",
         "parameters": [
@@ -1904,7 +1888,6 @@
     },
     "/balances/{id}": {
       "get": {
-        "tags": ["Misc"],
         "summary": "Get Balance",
         "operationId": "GetBalance",
         "parameters": [

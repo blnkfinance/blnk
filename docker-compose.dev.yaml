@@ -57,7 +57,7 @@ services:
 
   typesense:
     image: typesense/typesense:0.23.1 # Use the latest version suitable for your needs
-    command: ["--data-dir", "/data", "--api-key=your_typesense_api_key", "--listen-port", "8108"]
+    command: ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
     volumes:
       - typesense_data:/data
     ports:

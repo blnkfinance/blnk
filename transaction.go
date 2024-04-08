@@ -186,6 +186,7 @@ func (l Blnk) RecordTransaction(ctx context.Context, transaction *model.Transact
 		logrus.Errorf("ERROR saying transaction to db. %s", err)
 	}
 
+	l.search.IndexDocument(context.Background(), "transactions", transaction)
 	err = SendWebhook(NewWebhook{
 		Event:   "transaction.applied",
 		Payload: transaction,
@@ -230,9 +231,13 @@ func (l Blnk) CommitInflightTransaction(ctx context.Context, transactionID strin
 		return nil, err
 	}
 
+	if amount == 0 {
+		amount = transaction.Amount
+	}
+
 	// Commit inflight balances
-	sourceBalance.CommitInflightDebit(transaction.Amount)       // For the source
-	destinationBalance.CommitInflightCredit(transaction.Amount) // For the destination
+	sourceBalance.CommitInflightDebit(amount)       // For the source
+	destinationBalance.CommitInflightCredit(amount) // For the destination
 
 	// Update balances in the database
 	if err = l.updateBalances(ctx, sourceBalance, destinationBalance); err != nil {
@@ -242,6 +247,8 @@ func (l Blnk) CommitInflightTransaction(ctx context.Context, transactionID strin
 	// create a new transaction with status applied
 	transaction.Status = StatusApplied
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
+	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	transaction.Hash = transaction.HashTxn()
 	transaction, err = l.datasource.RecordTransaction(cxt, transaction)
 	if err != nil {
 		return nil, logAndRecordError(span, "saving transaction to db error", err)

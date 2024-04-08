@@ -24,7 +24,7 @@ type Transaction struct {
 	Destination       string                 `json:"destination,omitempty"`
 	Reference         string                 `json:"reference"`
 	Currency          string                 `json:"currency"`
-	Description       string                 `json:"description"`
+	Description       string                 `json:"description",omitempty`
 	Status            string                 `json:"status"`
 	Hash              string                 `json:"hash"`
 	GroupIds          []string               `json:"group_ids"`

@@ -1,6 +1,7 @@
 package blnk
 
 import (
+	"context"
 	"embed"
 	"fmt"
 
@@ -37,7 +38,11 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	}
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
-	newSearch := NewTypesenseClient("", []string{""})
+	newSearch := NewTypesenseClient("blnk-api-key", []string{"http://typesense:8108"})
 	newBlnk := &Blnk{datasource: db, bt: bt, queue: newQueue, redis: redis.Client(), search: newSearch}
 	return newBlnk, nil
+}
+
+func (b Blnk) Search(collection string, query map[string]interface{}) (interface{}, error) {
+	return b.search.Search(context.Background(), collection, query)
 }
