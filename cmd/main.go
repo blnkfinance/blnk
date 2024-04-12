@@ -84,7 +84,7 @@ func NewCLI() *Blnk {
 	rootCmd.PersistentPreRunE = preRun(b)
 
 	rootCmd.AddCommand(serverCommands(b))
-	rootCmd.AddCommand(workerCommands())
+	rootCmd.AddCommand(workerCommands(b))
 	rootCmd.AddCommand(migrateCommands(b))
 	rootCmd.AddCommand(backupCommands(b))
 	return &Blnk{cmd: rootCmd}

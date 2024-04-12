@@ -15,16 +15,19 @@ type Distribution struct {
 
 type Transaction struct {
 	ID                int64                  `json:"-"`
-	Amount            int64                  `json:"amount"`
-	TransactionID     string                 `json:"id"`
+	Amount            float64                `json:"amount"`
+	Rate              float64                `json:"rate"`
+	Precision         float64                `json:"precision"`
+	PreciseAmount     int64                  `json:"precise_amount,omitempty"`
+	TransactionID     string                 `json:"transaction_id"`
 	AllowOverdraft    bool                   `json:"allow_overdraft"`
-	Inflight          bool                   `json:"infligt"`
+	Inflight          bool                   `json:"inflight"`
 	SkipBalanceUpdate bool                   `json:"-"`
 	Source            string                 `json:"source,omitempty"`
 	Destination       string                 `json:"destination,omitempty"`
 	Reference         string                 `json:"reference"`
 	Currency          string                 `json:"currency"`
-	Description       string                 `json:"description",omitempty`
+	Description       string                 `json:"description,omitempty"`
 	Status            string                 `json:"status"`
 	Hash              string                 `json:"hash"`
 	GroupIds          []string               `json:"group_ids"`
@@ -79,11 +82,11 @@ func (transaction *Transaction) SplitTransaction() ([]Transaction, error) {
 }
 
 // CalculateDistributions calculates and returns the amount for each identifier (source or destination) based on its distribution.
-func CalculateDistributions(totalAmount int64, distributions []Distribution) (map[string]int64, error) {
-	resultDistributions := make(map[string]int64)
+func CalculateDistributions(totalAmount float64, distributions []Distribution) (map[string]float64, error) {
+	resultDistributions := make(map[string]float64)
 	var amountLeft = totalAmount
 	var totalPercentage float64 = 0
-	var fixedTotal int64 = 0
+	var fixedTotal float64 = 0
 
 	// First pass: calculate fixed and percentage amounts, track total percentage
 	for _, dist := range distributions {
@@ -97,12 +100,12 @@ func CalculateDistributions(totalAmount int64, distributions []Distribution) (ma
 				return nil, errors.New("invalid percentage format")
 			}
 			totalPercentage += percentage
-			amount := int64((percentage / 100) * float64(totalAmount))
+			amount := (percentage / 100) * totalAmount
 			resultDistributions[dist.Identifier] = amount
 			amountLeft -= amount
 		} else {
 			// Fixed amount distribution
-			fixedAmount, err := strconv.ParseInt(dist.Distribution, 10, 64)
+			fixedAmount, err := strconv.ParseFloat(dist.Distribution, 64)
 			if err != nil {
 				return nil, errors.New("invalid fixed amount format")
 			}

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   server:
-    image: jerryenebeli/blnk:v0.5.0
+    image: jerryenebeli/blnk:v0.6.1
     restart: on-failure
     ports:
       - "5001:5001"
@@ -15,7 +15,7 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: jerryenebeli/blnk:v0.5.0
+    image: jerryenebeli/blnk:v0.6.1
     restart: on-failure
     entrypoint: [ "./blnk", "workers"]
     depends_on:
@@ -53,6 +53,14 @@ services:
       timeout: 5s
       retries: 5
 
+  typesense:
+    image: typesense/typesense:0.23.1
+    command: ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
+    volumes:
+      - typesense_data:/data
+    ports:
+      - "8108:8108"
 
 volumes:
   pg_data:
+  typesense_data:

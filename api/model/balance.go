@@ -4,7 +4,7 @@ type CreateBalance struct {
 	LedgerId   string                 `json:"ledger_id"`
 	IdentityId string                 `json:"identity_id"`
 	Currency   string                 `json:"currency"`
-	Preceision int64                  `json:"preceision"`
+	Precision  float64                `json:"precision"`
 	MetaData   map[string]interface{} `json:"meta_data"`
 }
 

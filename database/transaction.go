@@ -25,12 +25,15 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 	// insert into database
 	_, err = d.Conn.ExecContext(cxt,
 		`
-		INSERT INTO blnk.transactions(transaction_id,source,reference,amount,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		INSERT INTO blnk.transactions(transaction_id,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 	`,
 		txn.TransactionID,
 		txn.Source,
 		txn.Reference,
 		txn.Amount,
+		txn.PreciseAmount,
+		txn.Precision,
+		txn.Rate,
 		txn.Currency,
 		txn.Destination,
 		txn.Description,
@@ -49,26 +52,22 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 }
 
 func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
-	// retrieve from database
 	row := d.Conn.QueryRow(`
-			SELECT transaction_id, source, reference, amount, currency,destination, description, status,created_at, meta_data
+			SELECT transaction_id, source, reference, amount, precise_amount, currency,destination, description, status,created_at, meta_data
 						FROM blnk.transactions
 					WHERE transaction_id = $1
 				`, id)
 
-	// create a transaction instance
 	txn := &model.Transaction{}
 
-	// scan database row into transaction instance
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.Currency, &txn.Destination, &txn.Description,
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description,
 		&txn.Status,
 		&txn.CreatedAt, &metaDataJSON)
 	if err != nil {
 		return &model.Transaction{}, err
 	}
 
-	// convert metadata from JSONB to map
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
 		return &model.Transaction{}, err
@@ -90,24 +89,21 @@ func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string
 func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (model.Transaction, error) {
 	// retrieve from database
 	row := d.Conn.QueryRowContext(ctx, `
-		SELECT transaction_id, source, reference, amount, currency,destination, description, status,created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, currency,destination, description, status,created_at, meta_data
 		FROM blnk.transactions
 		WHERE reference = $1
 	`, reference)
 
-	// create a transaction instance
 	txn := &model.Transaction{}
 
-	// scan database row into transaction instance
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.Currency, &txn.Destination, &txn.Description,
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description,
 		&txn.Status,
 		&txn.CreatedAt, &metaDataJSON)
 	if err != nil {
 		return model.Transaction{}, err
 	}
 
-	// convert metadata from JSONB to map
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
 		return model.Transaction{}, err
@@ -128,7 +124,6 @@ func (d Datasource) UpdateTransactionStatus(id string, status string) error {
 }
 
 func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
-	// select all transactions from database
 	rows, err := d.Conn.Query(`
 		SELECT transaction_id, source, reference, amount, currency,destination, description, status, hash, created_at, meta_data
 		FROM blnk.transactions
@@ -139,10 +134,8 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 	}
 	defer rows.Close()
 
-	// create slice to store transactions
 	var transactions []model.Transaction
 
-	// iterate through result set and parse metadata from JSON
 	for rows.Next() {
 		transaction := model.Transaction{}
 		var metaDataJSON []byte

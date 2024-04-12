@@ -50,7 +50,7 @@ func (a Api) UpdateIdentity(c *gin.Context) {
 		return
 	}
 
-	identity.IdentityID = id // Make sure the identity object has the right ID
+	identity.IdentityID = id
 	err := a.blnk.UpdateIdentity(&identity)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

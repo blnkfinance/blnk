@@ -4,9 +4,6 @@ WORKDIR /go/src/blnk
 
 COPY . .
 
-RUN go mod download
-RUN go mod verify
-
 RUN go build -o blnk ./cmd/*.go
 
 FROM gcr.io/distroless/base

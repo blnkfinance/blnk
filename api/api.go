@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/typesense/typesense-go/typesense/api"
+
 	"github.com/jerry-enebeli/blnk/config"
 
 	"github.com/jerry-enebeli/blnk/api/middleware"
@@ -69,6 +71,7 @@ func NewAPI(b *blnk.Blnk) *Api {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")
 	})
+
 	r.POST("/webhook", func(c *gin.Context) {
 		var payload map[string]interface{}
 		err := c.Bind(&payload)
@@ -88,11 +91,10 @@ func (a Api) Search(c *gin.Context) {
 		return
 	}
 
-	var query map[string]interface{}
-
+	var query api.SearchCollectionParams
 	c.BindJSON(&query)
 
-	resp, err := a.blnk.Search(collection, query)
+	resp, err := a.blnk.Search(collection, &query)
 
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

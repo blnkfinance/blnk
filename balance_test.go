@@ -20,7 +20,7 @@ func getBalanceMock(credit, debit, balance int64) *model.Balance {
 	return &model.Balance{CreditBalance: credit, DebitBalance: debit, Balance: balance}
 }
 
-func getTransactionMock(amount int64, overdraft bool) model.Transaction {
+func getTransactionMock(amount float64, overdraft bool) model.Transaction {
 	transaction := model.Transaction{TransactionID: gofakeit.UUID(), Amount: amount, AllowOverdraft: overdraft}
 	return transaction
 }

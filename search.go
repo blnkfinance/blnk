@@ -2,135 +2,78 @@ package blnk
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"reflect"
-	"strings"
+	"log"
 	"time"
 
-	"github.com/go-resty/resty/v2"
+	"github.com/sirupsen/logrus"
+
+	"github.com/typesense/typesense-go/typesense/api"
+
+	"github.com/typesense/typesense-go/typesense"
+
+	"github.com/jerry-enebeli/blnk/model"
 )
 
 type TypesenseClient struct {
-	ApiKey     string
-	Hosts      []string
-	HttpClient *resty.Client
+	Client *typesense.Client
 }
 
 type TypesenseError struct {
 	Message string `json:"message"`
 }
 
+type NotificationPayload struct {
+	Table string                 `json:"table"`
+	Data  map[string]interface{} `json:"data"` // This structure may need to be adjusted based on your actual data
+}
+
 func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
-	client := &TypesenseClient{
-		ApiKey: apiKey,
-		Hosts:  hosts,
-		HttpClient: resty.New().
-			SetRetryCount(3).
-			SetRetryWaitTime(5 * time.Second).
-			SetRetryMaxWaitTime(20 * time.Second).
-			AddRetryCondition(
-				func(r *resty.Response, err error) bool {
-					return r.StatusCode() == http.StatusTooManyRequests || r.StatusCode() == http.StatusServiceUnavailable || err != nil
-				},
-			),
-	}
-	return client
+	client := typesense.NewClient(
+		typesense.WithServer(hosts[0]),
+		typesense.WithAPIKey(apiKey),
+		typesense.WithConnectionTimeout(5*time.Second),
+		typesense.WithCircuitBreakerMaxRequests(50),
+		typesense.WithCircuitBreakerInterval(2*time.Minute),
+		typesense.WithCircuitBreakerTimeout(1*time.Minute),
+	)
+	return &TypesenseClient{Client: client}
 }
 
-func (client *TypesenseClient) doRequest(ctx context.Context, method, url string, body interface{}) (*resty.Response, error) {
-	req := client.HttpClient.R().
-		SetHeader("X-TYPESENSE-API-KEY", client.ApiKey).
-		SetBody(body).
-		SetContext(ctx)
-
-	var resp *resty.Response
-	var err error
-	switch method {
-	case http.MethodPost:
-		resp, err = req.Post(url)
-	case http.MethodGet:
-		resp, err = req.Get(url)
-		// Add other methods as needed
-	default:
-		return nil, fmt.Errorf("unsupported method: %s", method)
-	}
-
+func EnsureCollectionsExist(client *TypesenseClient, ctx context.Context) error {
+	ledger := model.Ledger{}
+	balance := model.Balance{}
+	transaction := model.Transaction{}
+	_, err := client.CreateCollection(ctx, ledger.ToSchema())
 	if err != nil {
-		return nil, err
+		logrus.Error(err)
 	}
-
-	if resp.IsError() {
-		var tsErr TypesenseError
-		if err := json.Unmarshal(resp.Body(), &tsErr); err == nil {
-			return nil, fmt.Errorf("typesense API error: %s", tsErr.Message)
-		}
-		return nil, fmt.Errorf("unknown error, status code: %d", resp.StatusCode())
+	_, err = client.CreateCollection(ctx, balance.ToSchema())
+	if err != nil {
+		logrus.Error(err)
 	}
-
-	return resp, nil
+	_, err = client.CreateCollection(ctx, transaction.ToSchema())
+	if err != nil {
+		logrus.Error(err)
+	}
+	return nil
 }
 
-func (client *TypesenseClient) CreateCollection(ctx context.Context, schema interface{}) (*resty.Response, error) {
-	url := fmt.Sprintf("%s/collections", client.Hosts[0])
-	return client.doRequest(ctx, http.MethodPost, url, schema)
+func (t *TypesenseClient) CreateCollection(ctx context.Context, schema *api.CollectionSchema) (*api.CollectionResponse, error) {
+	return t.Client.Collections().Create(ctx, schema)
 }
 
-func (client *TypesenseClient) IndexDocument(ctx context.Context, collection string, document interface{}) (*resty.Response, error) {
-	url := fmt.Sprintf("%s/collections/%s/documents", client.Hosts[0], collection)
-	return client.doRequest(ctx, http.MethodPost, url, document)
+func (t *TypesenseClient) Search(ctx context.Context, collection string, searchParams *api.SearchCollectionParams) (*api.SearchResult, error) {
+	return t.Client.Collection(collection).Documents().Search(ctx, searchParams)
 }
 
-func (client *TypesenseClient) Search(ctx context.Context, collection string, searchParams map[string]interface{}) (*resty.Response, error) {
-	url := fmt.Sprintf("%s/collections/%s/documents/search", client.Hosts[0], collection)
-	return client.doRequest(ctx, http.MethodGet, url, searchParams)
-}
-
-func structToSchema(name string, obj interface{}, defaultSortingField string) (map[string]interface{}, error) {
-	t := reflect.TypeOf(obj)
-	if t.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("provided object is not a struct")
+func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
+	_, err := t.Client.Collection(table).Documents().Upsert(context.Background(), data)
+	if err != nil {
+		log.Printf("Error indexing document in Typesense: %v", err)
+		return err
 	}
 
-	fields := make([]map[string]interface{}, 0, t.NumField())
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "" || jsonTag == "-" {
-			continue
-		}
-
-		// Split json tag on comma to ignore json options like omitempty
-		tagParts := strings.Split(jsonTag, ",")
-		fieldName := tagParts[0]
-
-		fieldType := field.Type.Kind()
-		typesenseType := ""
-		switch fieldType {
-		case reflect.String:
-			typesenseType = "string"
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			typesenseType = "int32" // Typesense uses int32, adjust based on your needs
-		case reflect.Float32, reflect.Float64:
-			typesenseType = "float" // Simplification, Typesense has float and optional
-		default:
-			return nil, fmt.Errorf("unsupported field type: %v", fieldType)
-		}
-
-		fieldSchema := map[string]interface{}{
-			"name": fieldName,
-			"type": typesenseType,
-		}
-		fields = append(fields, fieldSchema)
-	}
-
-	schema := map[string]interface{}{
-		"name":                  name,
-		"fields":                fields,
-		"default_sorting_field": defaultSortingField,
-	}
-
-	return schema, nil
+	fmt.Printf("Successfully indexed document in collection %s\n", table)
+	return nil
 }

@@ -73,6 +73,7 @@ type Configuration struct {
 	Server                  ServerConfig                  `json:"server"`
 	DataSource              DataSourceConfig              `json:"data_source"`
 	Redis                   RedisConfig                   `json:"redis"`
+	TypeSenseKey            string                        `json:"type_sense_key"`
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
 	OtelGrafanaCloud        OtelGrafanaCloud              `json:"otel_grafana_cloud"`
@@ -101,7 +102,7 @@ func loadConfigFromFile(file string) error {
 		return err
 	}
 
-	err = validateAndAddDefaults(&cnf)
+	err = cnf.validateAndAddDefaults()
 	if err != nil {
 		return err
 	}
@@ -145,8 +146,7 @@ func SetGrafanaExporterEnvs() error {
 	return nil
 }
 
-func validateAndAddDefaults(cnf *Configuration) error {
-	// Check for empty values in required fields
+func (cnf *Configuration) validateAndAddDefaults() error {
 	if cnf.ProjectName == "" {
 		log.Println("Warning: Project name is empty. Setting a default name.")
 		cnf.ProjectName = "Blnk Server"

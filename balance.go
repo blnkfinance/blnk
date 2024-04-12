@@ -34,12 +34,13 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 
 }
 
-func (l Blnk) getOrCreateBalanceByIndicator(indicator string) (*model.Balance, error) {
-	balance, err := l.datasource.GetBalanceByIndicator(indicator)
+func (l Blnk) getOrCreateBalanceByIndicator(indicator, currency string) (*model.Balance, error) {
+	balance, err := l.datasource.GetBalanceByIndicator(indicator, currency)
 	if err != nil {
 		balance = &model.Balance{
 			Indicator: indicator,
 			LedgerID:  GeneralLedgerID,
+			Currency:  currency,
 		} //TODO refactor
 		// Save the new balance to the datasource
 		_, err := l.datasource.CreateBalance(*balance)
@@ -47,7 +48,7 @@ func (l Blnk) getOrCreateBalanceByIndicator(indicator string) (*model.Balance, e
 			return nil, err
 		}
 
-		balance, err = l.datasource.GetBalanceByIndicator(indicator)
+		balance, err = l.datasource.GetBalanceByIndicator(indicator, currency)
 		if err != nil {
 			return nil, err
 		}

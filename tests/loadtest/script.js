@@ -12,11 +12,13 @@ export default function () {
     const url = 'http://localhost:5001/transactions';
     const payload = JSON.stringify({
             "amount": 100,
-            "allow_over_draft":true,
+            "description": "test transaction",
+            "precision": 100,
+            "allow_overdraft":true,
             "reference": uuidv4(),
             "currency": "NGN",
-            "source": "@test1",
-            "destination": "@test2"
+            "source": "@world",
+            "destination": "@cash"
         }
 
     );

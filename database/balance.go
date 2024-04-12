@@ -193,11 +193,11 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	return &balance, nil
 }
 
-func (d Datasource) GetBalanceByIndicator(indicator string) (*model.Balance, error) {
+func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Balance, error) {
 	var balance model.Balance
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE indicator = $1 
-	`, indicator)
+	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE indicator = $1 AND currency = $2 
+	`, indicator, currency)
 
 	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
 		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
@@ -265,6 +265,57 @@ func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 	return balances, nil
 }
 
+func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error) {
+	// select all balances from database
+	rows, err := d.Conn.Query(`
+		SELECT blnk.get_balances_by_id($1,$2)
+	`, sourceId, destinationId)
+	fmt.Println(rows, err)
+	if err != nil {
+
+		return nil, err
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			logrus.Error(err)
+		}
+	}(rows)
+
+	// create slice to store balances
+	var balances []*model.Balance
+
+	// iterate through result set and parse metadata from JSON
+	for rows.Next() {
+		balance := model.Balance{}
+		var metaDataJSON []byte
+		err = rows.Scan(
+			&balance.BalanceID,
+			&balance.Balance,
+			&balance.CreditBalance,
+			&balance.DebitBalance,
+			&balance.Currency,
+			&balance.CurrencyMultiplier,
+			&balance.LedgerID,
+			&balance.CreatedAt,
+			&metaDataJSON,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// convert metadata from JSON to map
+		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+		if err != nil {
+			return nil, err
+		}
+
+		balances = append(balances, &balance)
+	}
+
+	return balances, nil
+}
+
 func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
 	// Start a transaction
 	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
@@ -292,6 +343,7 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 
 	return nil
 }
+
 func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) error {
 	// Convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(balance.MetaData)

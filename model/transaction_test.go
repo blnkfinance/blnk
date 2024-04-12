@@ -8,9 +8,9 @@ import (
 func TestCalculateDistributions(t *testing.T) {
 	tests := []struct {
 		name          string
-		totalAmount   int64
+		totalAmount   float64
 		distributions []Distribution
-		want          map[string]int64
+		want          map[string]float64
 		wantErr       bool
 	}{
 		{
@@ -21,7 +21,7 @@ func TestCalculateDistributions(t *testing.T) {
 				{Identifier: "B", Distribution: "50%"},  // Percentage
 				{Identifier: "C", Distribution: "left"}, // Leftover
 			},
-			want: map[string]int64{
+			want: map[string]float64{
 				"A": 200, // Fixed
 				"B": 500, // 50% of 1000
 				"C": 300, // Leftover (1000 - 200 - 500)

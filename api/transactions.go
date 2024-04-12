@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/sirupsen/logrus"
@@ -94,6 +93,7 @@ func (a Api) GetTransaction(c *gin.Context) {
 func (a Api) UpdateInflightStatus(c *gin.Context) {
 	var resp *model.Transaction
 	id, passed := c.Params.Get("id")
+	var req map[string]float64
 	if !passed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
@@ -105,9 +105,12 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		return
 	}
 
+	c.BindJSON(&req)
+
+	amount := req["amount"]
+
 	if status == "commit" {
-		fmt.Println("got here")
-		transaction, err := a.blnk.CommitInflightTransaction(c.Request.Context(), id, 0)
+		transaction, err := a.blnk.CommitInflightTransaction(c.Request.Context(), id, amount)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

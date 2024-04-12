@@ -68,6 +68,7 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Amount, validation.Required),
 		validation.Field(&t.Currency, validation.Required),
 		validation.Field(&t.Reference, validation.Required),
+		validation.Field(&t.Description, validation.Required),
 		validation.Field(&t.Source, validation.By(sourceOrSourcesValidation(t))),
 		validation.Field(&t.Destination, validation.By(destinationOrDestinationsValidation(t))),
 	)
@@ -98,7 +99,7 @@ func (l *CreateLedger) ToLedger() model.Ledger {
 }
 
 func (b *CreateBalance) ToBalance() model.Balance {
-	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, CurrencyMultiplier: b.Preceision}
+	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, CurrencyMultiplier: b.Precision}
 }
 
 func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
@@ -114,5 +115,5 @@ func (a *CreateAccount) ToAccount() model.Account {
 }
 
 func (t *RecordTransaction) ToTransaction() *model.Transaction {
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: int64(t.Amount), AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight}
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision}
 }

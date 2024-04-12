@@ -36,8 +36,9 @@ type balance interface {
 	GetBalanceByIDLite(id string) (*model.Balance, error)
 	GetAllBalances() ([]model.Balance, error)
 	UpdateBalance(balance *model.Balance) error
-	GetBalanceByIndicator(indicator string) (*model.Balance, error)
+	GetBalanceByIndicator(indicator, currency string) (*model.Balance, error)
 	UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error
+	GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error)
 }
 
 type account interface {

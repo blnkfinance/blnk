@@ -7,28 +7,22 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/typesense/typesense-go/typesense/api"
 )
 
 func GenerateUUIDWithSuffix(module string) string {
-
 	// Generate a new UUID
 	id := uuid.New()
-
 	// Convert the UUID to a string
 	uuidStr := id.String()
-
 	// Add the module suffix
 	idWithSuffix := fmt.Sprintf("%s_%s", module, uuidStr)
-
 	return idWithSuffix
 }
 
 func (transaction *Transaction) HashTxn() string {
-
-	data := fmt.Sprintf("%d%s%s%s%s", transaction.Amount, transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
-	// Compute SHA-256 hash
+	data := fmt.Sprintf("%f%s%s%s%s", transaction.Amount, transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
 	hash := sha256.Sum256([]byte(data))
-	// Return the hexadecimal encoding of the hash
 	return hex.EncodeToString(hash[:])
 }
 
@@ -49,7 +43,6 @@ func compare(value int64, condition string, compareTo int64) bool {
 }
 
 func (balance *Balance) addCredit(amount int64, inflight bool) {
-	//if transaction is an inflight transaction compute the inflight balance
 	if inflight {
 		balance.InflightCreditBalance += amount
 		return
@@ -59,7 +52,6 @@ func (balance *Balance) addCredit(amount int64, inflight bool) {
 }
 
 func (balance *Balance) addDebit(amount int64, inflight bool) {
-	//if transaction is an inflight transaction compute the inflight balance
 	if inflight {
 		balance.InflightDebitBalance += amount
 		return
@@ -68,7 +60,6 @@ func (balance *Balance) addDebit(amount int64, inflight bool) {
 }
 
 func (balance *Balance) computeBalance(inflight bool) {
-	//if transaction is an inflight transaction compute the inflight balance
 	if inflight {
 		balance.InflightBalance = balance.InflightCreditBalance - balance.InflightDebitBalance
 		return
@@ -76,19 +67,23 @@ func (balance *Balance) computeBalance(inflight bool) {
 	balance.Balance = balance.CreditBalance - balance.DebitBalance
 }
 
-func (balance *Balance) CommitInflightDebit(amount int64) {
-	if balance.InflightDebitBalance >= amount {
-		balance.InflightDebitBalance -= amount
-		balance.DebitBalance += amount
+func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
+	preciseAmount := balance.applyPrecision(transaction)
+	transaction.PreciseAmount = preciseAmount
+	if balance.InflightDebitBalance >= preciseAmount {
+		balance.InflightDebitBalance -= preciseAmount
+		balance.DebitBalance += preciseAmount
 		balance.computeBalance(true)  // Update inflight balance
 		balance.computeBalance(false) // Update normal balance
 	}
 }
 
-func (balance *Balance) CommitInflightCredit(amount int64) {
-	if balance.InflightCreditBalance >= amount {
-		balance.InflightCreditBalance -= amount
-		balance.CreditBalance += amount
+func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
+	preciseAmount := balance.applyPrecision(transaction)
+	transaction.PreciseAmount = preciseAmount
+	if balance.InflightCreditBalance >= preciseAmount {
+		balance.InflightCreditBalance -= preciseAmount
+		balance.CreditBalance += preciseAmount
 		balance.computeBalance(true)  // Update inflight balance
 		balance.computeBalance(false) // Update normal balance
 	}
@@ -111,11 +106,16 @@ func (balance *Balance) RollbackInflightDebit(amount int64) {
 	}
 }
 
-func (balance *Balance) applyMultiplier(transaction *Transaction) {
+func (balance *Balance) applyPrecision(transaction *Transaction) int64 {
 	if balance.CurrencyMultiplier == 0 {
 		balance.CurrencyMultiplier = 1
 	}
-	transaction.Amount = transaction.Amount * balance.CurrencyMultiplier
+
+	if balance.CurrencyMultiplier > 0 && transaction.Precision == 0 {
+		transaction.Precision = balance.CurrencyMultiplier
+	}
+
+	return int64(transaction.Amount * transaction.Precision)
 }
 
 func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
@@ -125,7 +125,7 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 	}
 
 	// Use the provided sourceBalance for the check
-	if sourceBalance.Balance < transaction.Amount {
+	if sourceBalance.Balance < transaction.PreciseAmount {
 		return fmt.Errorf("insufficient funds in source balance")
 	}
 
@@ -153,13 +153,13 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	}
 
 	//compute source balance
-	source.applyMultiplier(transaction)
-	source.addDebit(transaction.Amount, transaction.Inflight)
+	transaction.PreciseAmount = source.applyPrecision(transaction)
+	source.addDebit(transaction.PreciseAmount, transaction.Inflight)
 	source.computeBalance(transaction.Inflight)
 
 	//compute destination balance
-	destination.applyMultiplier(transaction)
-	destination.addCredit(transaction.Amount, transaction.Inflight)
+	destination.applyPrecision(transaction)
+	destination.addCredit(transaction.PreciseAmount, transaction.Inflight)
 	destination.computeBalance(transaction.Inflight)
 	return nil
 }
@@ -174,4 +174,162 @@ func (bm *BalanceMonitor) CheckCondition(b *Balance) bool {
 		return compare(b.Balance, bm.Condition.Operator, bm.Condition.Value)
 	}
 	return false
+}
+
+func (_ *Transaction) ToSchema() *api.CollectionSchema {
+	schema := &api.CollectionSchema{
+		Name: "transactions",
+		Fields: []api.Field{
+			{
+				Name: "amount",
+				Type: "float",
+			},
+			{
+				Name: "precision",
+				Type: "int64",
+			},
+			{
+				Name: "source",
+				Type: "string",
+			},
+			{
+				Name: "reference",
+				Type: "string",
+			},
+			{
+				Name: "destination",
+				Type: "string",
+			},
+			{
+				Name: "description",
+				Type: "string",
+			},
+			{
+				Name: "currency",
+				Type: "string",
+			},
+			{
+				Name: "scheduled_for",
+				Type: "auto",
+			},
+			{
+				Name: "created_at",
+				Type: "string",
+			},
+			{
+				Name: "sources",
+				Type: "auto",
+			},
+			{
+				Name: "destinations",
+				Type: "auto",
+			},
+			{
+				Name: "meta_data",
+				Type: "auto",
+			},
+		},
+	}
+
+	return schema
+}
+
+func (_ *Ledger) ToSchema() *api.CollectionSchema {
+	schema := &api.CollectionSchema{
+		Name: "ledgers",
+		Fields: []api.Field{
+			{
+				Name: "ledger_id",
+				Type: "string",
+			},
+			{
+				Name: "name",
+				Type: "string",
+			},
+			{
+				Name: "meta_data",
+				Type: "auto",
+			},
+			{
+				Name: "created_at",
+				Type: "auto",
+			},
+		},
+	}
+
+	return schema
+}
+
+func (_ *Balance) ToSchema() *api.CollectionSchema {
+	schema := &api.CollectionSchema{
+		Name: "balances",
+		Fields: []api.Field{
+			{
+				Name: "balance",
+				Type: "int64",
+			},
+			{
+				Name: "inflight_balance",
+				Type: "int64",
+			},
+			{
+				Name: "credit_balance",
+				Type: "int64",
+			},
+			{
+				Name: "inflight_credit_balance",
+				Type: "int64",
+			},
+			{
+				Name: "debit_balance",
+				Type: "int64",
+			},
+			{
+				Name: "inflight_debit_balance",
+				Type: "int64",
+			},
+			{
+				Name: "currency_multiplier",
+				Type: "float",
+			},
+			{
+				Name: "version",
+				Type: "int64",
+			},
+			{
+				Name: "ledger_id",
+				Type: "string",
+			},
+			{
+				Name: "identity_id",
+				Type: "string",
+			},
+			{
+				Name: "balance_id",
+				Type: "string",
+			},
+			{
+				Name: "indicator",
+				Type: "string",
+			},
+			{
+				Name: "currency",
+				Type: "string",
+			},
+			{
+				Name: "created_at",
+				Type: "auto",
+			},
+			{
+				Name: "inflight_expires_at",
+				Type: "auto",
+			},
+			{
+				Name: "meta_data",
+				Type: "auto",
+			},
+		},
+	}
+
+	return schema
 }

@@ -4,7 +4,7 @@ import "time"
 
 type Ledger struct {
 	ID        int64                  `json:"-"`
-	LedgerID  string                 `json:"id"`
+	LedgerID  string                 `json:"ledger_id"`
 	Name      string                 `json:"name"`
 	MetaData  map[string]interface{} `json:"meta_data"`
 	CreatedAt time.Time              `json:"created_at"`

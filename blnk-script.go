@@ -1,7 +1,6 @@
 package blnk
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -80,7 +79,7 @@ func processLine(keyword string, values []string, transaction *model.Transaction
 }
 
 func parseAmount(value string, transaction *model.Transaction) error {
-	amount, err := strconv.ParseInt(value, 10, 64)
+	amount, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return fmt.Errorf("invalid amount: %v", err)
 	}
@@ -114,30 +113,4 @@ func parseAllowOverdraft(value string, transaction *model.Transaction) error {
 	}
 	transaction.AllowOverdraft = allowOverdraft
 	return nil
-}
-
-// Example usage
-func main() {
-	asl := `AMOUNT 1000
-REFERENCE reference-1-1-1
-CURRENCY NGN
-SOURCE @customer-1 50%
-SOURCE @customer-2 50%
-DESTINATION @mtn left
-DESTINATION @customer-123-comission 0.5%
-ALLOW_OVERDRAFT true`
-
-	transaction, err := parseASL(asl)
-	if err != nil {
-		fmt.Printf("Error parsing ASL: %v\n", err)
-		return
-	}
-
-	jsonOutput, err := json.MarshalIndent(transaction, "", "  ")
-	if err != nil {
-		fmt.Printf("Error marshalling transaction to JSON: %v\n", err)
-		return
-	}
-
-	fmt.Println(string(jsonOutput))
 }

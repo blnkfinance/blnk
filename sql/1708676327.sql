@@ -107,9 +107,7 @@ CREATE TABLE IF NOT EXISTS blnk.transactions
 -- +migrate Up
 CREATE INDEX idx_transactions_reference ON blnk.transactions (reference);
 CREATE INDEX idx_balances_indicator ON blnk.balances (indicator);
-CREATE UNIQUE INDEX idx_unique_indicator_on_non_nulls
-    ON blnk.balances (indicator)
-    WHERE indicator IS NOT NULL;
+CREATE UNIQUE INDEX idx_unique_indicator_on_non_nulls ON blnk.balances (indicator) WHERE indicator IS NOT NULL;
 
 -- +migrate Up
 INSERT INTO blnk.ledgers (name, ledger_id, created_at, meta_data)

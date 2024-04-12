@@ -18,7 +18,7 @@ func TestValidateAndAddDefaults(t *testing.T) {
 		},
 	}
 
-	err := validateAndAddDefaults(&cnf)
+	err := cnf.validateAndAddDefaults()
 	if err == nil || err.Error() != "data source DNS is required" {
 		t.Errorf("Expected data source DNS required error, got %v", err)
 	}
@@ -32,7 +32,7 @@ func TestValidateAndAddDefaults(t *testing.T) {
 		},
 	}
 
-	err = validateAndAddDefaults(&cnf)
+	err = cnf.validateAndAddDefaults()
 	if err == nil || err.Error() != "redis DNS is required" {
 		t.Errorf("Expected redis DNS required error, got %v", err)
 	}
@@ -47,14 +47,17 @@ func TestValidateAndAddDefaults(t *testing.T) {
 		},
 	}
 
-	err = validateAndAddDefaults(&cnf)
+	err = cnf.validateAndAddDefaults()
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
 
 	// Test default port setting
 	cnf.Server.Port = ""
-	validateAndAddDefaults(&cnf)
+	err = cnf.validateAndAddDefaults()
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
 	if cnf.Server.Port != DEFAULT_PORT {
 		t.Errorf("Expected default port %s, got %s", DEFAULT_PORT, cnf.Server.Port)
 	}

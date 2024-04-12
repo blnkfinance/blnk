@@ -33,7 +33,6 @@ func (a Api) CreateAccount(c *gin.Context) {
 func (a Api) GetAccount(c *gin.Context) {
 	id := c.Param("id")
 
-	// Extracting 'include' parameter from the query
 	includes := c.QueryArray("include")
 
 	account, err := a.blnk.GetAccount(id, includes)
