@@ -371,11 +371,9 @@ func (l Blnk) QueueTransaction(cxt context.Context, transaction *model.Transacti
 	if err != nil {
 		return nil, err
 	}
-
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	hash := transaction.HashTxn()
 	transaction.Hash = hash
-	fmt.Println(transactions)
 	if len(transactions) > 0 {
 		for _, txn := range transactions {
 			err = l.queue.Enqueue(ctx, &txn)

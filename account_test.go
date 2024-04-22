@@ -38,9 +38,9 @@ func TestCreateAccount(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	// Create a row with expected data
-	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
-		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 50, 50, 100, time.Now())
+	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
+		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
+
 	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).
 		WillReturnRows(rows)
@@ -56,50 +56,6 @@ func TestCreateAccount(t *testing.T) {
 	assert.Equal(t, account.Name, result.Name)
 	assert.Equal(t, account.Number, result.Number)
 	assert.WithinDuration(t, time.Now(), result.CreatedAt, time.Second)
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("there were unfulfilled expectations: %s", err)
-	}
-}
-
-func TestCreateAccountWithNoBalanceID(t *testing.T) {
-	datasource, mock, err := newTestDataSource()
-	assert.NoError(t, err)
-
-	d, err := NewBlnk(datasource)
-	if err != nil {
-		return
-	}
-	assert.NoError(t, err)
-
-	account := model.Account{
-		Name:       "Test Account",
-		Number:     "123456789",
-		BankName:   "Test Bank",
-		Currency:   "NGN",
-		LedgerID:   gofakeit.UUID(),
-		IdentityID: "identity_123",
-		MetaData:   map[string]interface{}{"key": "value"},
-	}
-	metaDataJSON, _ := json.Marshal(account.MetaData)
-
-	balance := model.Balance{Balance: 0, CreditBalance: 0, DebitBalance: 0, Currency: account.Currency, LedgerID: account.LedgerID, IdentityID: account.IdentityID}
-	// Convert metadata to JSON for mocking
-	metaDataJSON, _ = json.Marshal(balance.MetaData)
-	mock.ExpectExec("INSERT INTO blnk.balances").
-		WithArgs(sqlmock.AnyArg(), balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	mock.ExpectExec("INSERT INTO blnk.accounts").
-		WithArgs(sqlmock.AnyArg(), account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, sqlmock.AnyArg(), metaDataJSON).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	config.MockConfig(false, "http://example.com/generateAccount", "some-auth-token")
-
-	result, err := d.CreateAccount(account)
-	assert.NoError(t, err)
-	assert.Equal(t, account.Name, result.Name)
-	assert.Equal(t, account.Number, result.Number)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
@@ -136,9 +92,8 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	// Create a row with expected data
-	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "created_at"}).
-		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 50, 50, 100, time.Now())
+	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
+		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).

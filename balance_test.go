@@ -21,7 +21,7 @@ func getBalanceMock(credit, debit, balance int64) *model.Balance {
 }
 
 func getTransactionMock(amount float64, overdraft bool) model.Transaction {
-	transaction := model.Transaction{TransactionID: gofakeit.UUID(), Amount: amount, AllowOverdraft: overdraft}
+	transaction := model.Transaction{TransactionID: gofakeit.UUID(), Amount: amount, AllowOverdraft: overdraft, Reference: gofakeit.UUID()}
 	return transaction
 }
 
@@ -106,7 +106,7 @@ func TestUpdateBalancesWithTransaction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			transaction := tt.transaction
 			err := model.UpdateBalances(&transaction, tt.sourceBalance, tt.destinationBalance)
-			assert.Equal(t, err, tt.ExpectedError)
+			assert.Equal(t, tt.ExpectedError, err)
 			assert.Equal(t, tt.want.SourceBalance, tt.sourceBalance.Balance, "expected source balances to match")
 			assert.Equal(t, tt.want.SourceDebitBalance, tt.sourceBalance.DebitBalance, "expected source debit balances to match")
 			assert.Equal(t, tt.want.SourceCreditBalance, tt.sourceBalance.CreditBalance, "expected source credit balances to match")
@@ -157,19 +157,17 @@ func TestGetBalanceByID(t *testing.T) {
 	}
 	balanceID := gofakeit.UUID()
 
-	// Expect transaction to begin
 	mock.ExpectBegin()
 
 	// Adjust the expected SQL to match the actual query structure and fields
-	expectedSQL := "SELECT b\\.balance_id, b\\.balance, b\\.credit_balance, b\\.debit_balance, b\\.currency, b\\.currency_multiplier, b\\.ledger_id, COALESCE\\(b\\.identity_id, ''\\) as identity_id, b\\.created_at, b\\.meta_data FROM \\( SELECT \\* FROM blnk\\.balances WHERE balance_id = \\$1 \\) AS b"
-	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data"}).
-		AddRow(balanceID, 100, 50, 50, "USD", 100, "test-ledger", "test-identity", time.Now(), `{"key":"value"}`)
+	expectedSQL := "SELECT b\\.balance_id, b\\.balance, b\\.credit_balance, b\\.debit_balance, b\\.currency, b\\.currency_multiplier, b\\.ledger_id, COALESCE\\(b\\.identity_id, ''\\) as identity_id, b\\.created_at, b\\.meta_data, b\\.inflight_balance, b\\.inflight_credit_balance, b\\.inflight_debit_balance, b\\.version FROM \\( SELECT \\* FROM blnk\\.balances WHERE balance_id = \\$1 \\) AS b"
+	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version"}).
+		AddRow(balanceID, 100, 50, 50, "USD", 100, "test-ledger", "test-identity", time.Now(), `{"key":"value"}`, 0, 0, 0, 0)
 
 	mock.ExpectQuery(expectedSQL).
 		WithArgs(balanceID).
 		WillReturnRows(rows)
 
-	// Expect transaction to commit
 	mock.ExpectCommit()
 
 	result, err := d.GetBalanceByID(balanceID, nil)
@@ -263,12 +261,12 @@ func TestUpdateBalances(t *testing.T) {
 
 	// Expect the first update (for sourceBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		sourceBalance.BalanceID, sourceBalance.Balance, sourceBalance.CreditBalance, sourceBalance.DebitBalance, sourceBalance.Currency, sourceBalance.CurrencyMultiplier, sourceBalance.LedgerID, sourceBalance.CreatedAt, sqlmock.AnyArg(),
+		sourceBalance.BalanceID, sourceBalance.Balance, sourceBalance.CreditBalance, sourceBalance.DebitBalance, sourceBalance.InflightBalance, sourceBalance.InflightCreditBalance, sourceBalance.InflightDebitBalance, sourceBalance.Currency, sourceBalance.CurrencyMultiplier, sourceBalance.LedgerID, sourceBalance.CreatedAt, sqlmock.AnyArg(), sourceBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect the second update (for destinationBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		destinationBalance.BalanceID, destinationBalance.Balance, destinationBalance.CreditBalance, destinationBalance.DebitBalance, destinationBalance.Currency, destinationBalance.CurrencyMultiplier, destinationBalance.LedgerID, destinationBalance.CreatedAt, sqlmock.AnyArg(),
+		destinationBalance.BalanceID, destinationBalance.Balance, destinationBalance.CreditBalance, destinationBalance.DebitBalance, destinationBalance.InflightBalance, destinationBalance.InflightCreditBalance, destinationBalance.InflightDebitBalance, destinationBalance.Currency, destinationBalance.CurrencyMultiplier, destinationBalance.LedgerID, destinationBalance.CreatedAt, sqlmock.AnyArg(), destinationBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect transaction commit

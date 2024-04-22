@@ -92,7 +92,10 @@ func (a Api) Search(c *gin.Context) {
 	}
 
 	var query api.SearchCollectionParams
-	c.BindJSON(&query)
+	err := c.BindJSON(&query)
+	if err != nil {
+		return
+	}
 
 	resp, err := a.blnk.Search(collection, &query)
 

@@ -141,6 +141,7 @@ func (transaction *Transaction) validate() error {
 }
 
 func UpdateBalances(transaction *Transaction, source, destination *Balance) error {
+	transaction.PreciseAmount = source.applyPrecision(transaction)
 	// Validate transaction
 	err := transaction.validate()
 	if err != nil {
@@ -153,7 +154,6 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	}
 
 	//compute source balance
-	transaction.PreciseAmount = source.applyPrecision(transaction)
 	source.addDebit(transaction.PreciseAmount, transaction.Inflight)
 	source.computeBalance(transaction.Inflight)
 

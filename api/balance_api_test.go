@@ -15,34 +15,85 @@ import (
 )
 
 func TestCreateBalance(t *testing.T) {
-	router, b, _ := setupRouter()
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	// Create a ledger for positive test case
 	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
 	if err != nil {
-		return
+		t.Fatalf("Failed to create ledger: %v", err)
 	}
-	validPayload := model2.CreateBalance{
-		LedgerId: newLedger.LedgerID,
-		Currency: gofakeit.Currency().Short,
+
+	tests := []struct {
+		name         string
+		payload      model2.CreateBalance
+		expectedCode int
+		wantErr      bool
+	}{
+		{
+			name: "Valid Balance",
+			payload: model2.CreateBalance{
+				LedgerId: newLedger.LedgerID,
+				Currency: gofakeit.Currency().Short,
+			},
+			expectedCode: http.StatusCreated,
+			wantErr:      false,
+		},
+		{
+			name: "Missing Ledger ID",
+			payload: model2.CreateBalance{
+				Currency: gofakeit.Currency().Short,
+			},
+			expectedCode: http.StatusBadRequest,
+			wantErr:      false,
+		},
+		{
+			name: "Missing Currency",
+			payload: model2.CreateBalance{
+				LedgerId: newLedger.LedgerID,
+			},
+			expectedCode: http.StatusBadRequest,
+			wantErr:      false,
+		},
 	}
-	payloadBytes, _ := request.ToJsonReq(&validPayload)
-	var response model.Balance
-	testRequest := TestRequest{
-		Payload:  payloadBytes,
-		Response: &response,
-		Method:   "POST",
-		Route:    "/balances",
-		Auth:     "",
-		Router:   router,
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payloadBytes, _ := request.ToJsonReq(&tt.payload)
+			var response model.Balance
+			testRequest := TestRequest{
+				Payload:  payloadBytes,
+				Response: &response,
+				Method:   "POST",
+				Route:    "/balances",
+				Auth:     "",
+				Router:   router,
+			}
+
+			resp, err := SetUpTestRequest(testRequest)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SetUpTestRequest() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			assert.Equal(t, tt.expectedCode, resp.Code)
+
+			if tt.expectedCode == http.StatusCreated {
+				// Verify that the balance is actually created in the database
+				balanceFromDB, err := b.GetBalanceByID(response.BalanceID, nil)
+				if err != nil {
+					t.Errorf("Failed to retrieve balance by ID: %v", err)
+				} else {
+					assert.Equal(t, response.BalanceID, balanceFromDB.BalanceID)
+					assert.Equal(t, tt.payload.LedgerId, balanceFromDB.LedgerID)
+					assert.Equal(t, tt.payload.Currency, balanceFromDB.Currency)
+					assert.Equal(t, int64(0), balanceFromDB.Balance)
+					assert.Equal(t, int64(0), balanceFromDB.DebitBalance)
+					assert.Equal(t, int64(0), balanceFromDB.CreditBalance)
+				}
+			}
+		})
 	}
-	resp, err := SetUpTestRequest(testRequest)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	assert.Equal(t, http.StatusCreated, resp.Code)
-	assert.Equal(t, response.LedgerID, newLedger.LedgerID)
-	assert.Equal(t, response.Currency, validPayload.Currency)
-	assert.NotEmpty(t, response.BalanceID)
 }
 
 func TestGetBalance(t *testing.T) {
@@ -69,9 +120,15 @@ func TestGetBalance(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	fmt.Println(response)
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, response.BalanceID, newBalance.BalanceID)
 	assert.Equal(t, response.LedgerID, newLedger.LedgerID)
 	assert.Equal(t, response.Currency, newBalance.Currency)
+	assert.Equal(t, int64(0), newBalance.Balance)
+	assert.Equal(t, int64(0), newBalance.DebitBalance)
+	assert.Equal(t, int64(0), newBalance.CreditBalance)
+	assert.Equal(t, int64(0), newBalance.InflightBalance)
+	assert.Equal(t, int64(0), newBalance.InflightCreditBalance)
+	assert.Equal(t, int64(0), newBalance.InflightDebitBalance)
+	assert.Equal(t, int64(0), newBalance.Version)
 }

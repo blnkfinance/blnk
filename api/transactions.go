@@ -105,7 +105,10 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		return
 	}
 
-	c.BindJSON(&req)
+	err := c.BindJSON(&req)
+	if err != nil {
+		return
+	}
 
 	amount := req["amount"]
 

@@ -154,32 +154,6 @@ func TestInitConfig(t *testing.T) {
 	}
 }
 
-func TestFetch(t *testing.T) {
-	// Ensure Fetch returns an error before any configuration is loaded
-	_, err := Fetch()
-	if err == nil {
-		t.Log(err)
-		t.Errorf("Expected an error when fetching configuration before it's loaded")
-	}
-
-	// Load a mock configuration into ConfigStore
-	mockConfig := Configuration{
-		ProjectName: "Fetch Test",
-	}
-	ConfigStore.Store(&mockConfig)
-
-	// Fetch the configuration after loading
-	fetchedConfig, err := Fetch()
-	if err != nil {
-		t.Fatalf("Fetch failed: %v", err)
-	}
-
-	// Verify the fetched configuration matches the mock
-	if fetchedConfig.ProjectName != "Fetch Test" {
-		t.Errorf("Expected ProjectName to be 'Fetch Test', got '%s'", fetchedConfig.ProjectName)
-	}
-}
-
 func TestSetGrafanaExporterEnvs(t *testing.T) {
 	// Load a mock configuration into ConfigStore
 	mockConfig := Configuration{

@@ -22,8 +22,6 @@ func applyExternalAccount(account *model.Account) error {
 		return err
 	}
 
-	fmt.Print("hello i'm here", cnf.AccountNumberGeneration.EnableAutoGeneration, cnf.AccountNumberGeneration.HttpService.Url)
-
 	if cnf.AccountNumberGeneration.EnableAutoGeneration {
 		req, err := http.NewRequest("GET", cnf.AccountNumberGeneration.HttpService.Url, nil)
 		if err != nil {
@@ -38,7 +36,6 @@ func applyExternalAccount(account *model.Account) error {
 			return err
 		}
 
-		fmt.Println("account generated", response)
 		if response.AccountNumber != "" && response.BankName != "" {
 			account.Number = response.AccountNumber
 			account.BankName = response.BankName
@@ -84,25 +81,9 @@ func (l Blnk) overrideLedgerAndIdentity(account *model.Account) error {
 	return nil
 }
 
-func (l Blnk) setupBalance(account *model.Account) error {
-	if account.BalanceID == "" {
-		balance, err := l.CreateBalance(model.Balance{LedgerID: account.LedgerID, Currency: account.Currency, IdentityID: account.IdentityID})
-		if err != nil {
-			return err
-		}
-		account.BalanceID = balance.BalanceID
-	}
-	return nil
-}
-
 // CreateAccount creates a new account in the database.
 func (l Blnk) CreateAccount(account model.Account) (model.Account, error) {
-	err := l.setupBalance(&account)
-	if err != nil {
-		return model.Account{}, err
-	}
-
-	err = l.overrideLedgerAndIdentity(&account)
+	err := l.overrideLedgerAndIdentity(&account)
 	if err != nil {
 		return model.Account{}, err
 	}
@@ -119,7 +100,6 @@ func (l Blnk) CreateAccount(account model.Account) (model.Account, error) {
 	return l.datasource.CreateAccount(account)
 }
 
-// GetAccount retrieves an account from the database by ID.
 func (l Blnk) GetAccount(id string, include []string) (*model.Account, error) {
 	return l.datasource.GetAccountByID(id, include)
 }

@@ -28,8 +28,15 @@ func TestSendWebhook(t *testing.T) {
 
 	mockConfig := &config.Configuration{
 		Redis: config.RedisConfig{
-			Dns: mr.Addr(), // Use miniredis address
+			Dns: mr.Addr(),
 		},
+		Notification: config.Notification{Webhook: struct {
+			Url     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
+		}(struct {
+			Url     string
+			Headers map[string]string
+		}{Url: "https:localhost:5001/webhook", Headers: nil})},
 	}
 
 	config.ConfigStore.Store(mockConfig)

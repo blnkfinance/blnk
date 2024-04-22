@@ -28,7 +28,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	selectFields = append(selectFields,
 		"b.balance_id", "b.balance", "b.credit_balance", "b.debit_balance",
 		"b.currency", "b.currency_multiplier", "b.ledger_id",
-		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data")
+		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data", "b.inflight_balance", "b.inflight_credit_balance", "b.inflight_debit_balance", "b.version")
 
 	// Append fields and joins based on 'include'
 	if contains(include, "identity") {
@@ -75,7 +75,7 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 	// Add scan arguments for default fields
 	scanArgs = append(scanArgs, &balance.BalanceID, &balance.Balance, &balance.CreditBalance,
 		&balance.DebitBalance, &balance.Currency, &balance.CurrencyMultiplier,
-		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON)
+		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.Version)
 
 	if contains(include, "identity") {
 		scanArgs = append(scanArgs, &identity.IdentityID, &identity.FirstName, &identity.OrganizationName, &identity.Category, &identity.LastName,
@@ -345,13 +345,11 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 }
 
 func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) error {
-	// Convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	if err != nil {
 		return err
 	}
 
-	// Prepare the SQL statement with optimistic locking
 	query := `
         UPDATE blnk.balances
         SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, meta_data = $12, version = version + 1
@@ -370,11 +368,9 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 	}
 
 	if rowsAffected == 0 {
-		// No rows updated, indicating a possible version mismatch
 		return fmt.Errorf("optimistic locking failure: balance with ID '%s' may have been updated or deleted by another transaction", balance.BalanceID)
 	}
 
-	// Increment the version in the local balance object to reflect the successful update
 	balance.Version++
 
 	return nil
@@ -382,13 +378,11 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 
 // UpdateBalance updates a balance in the database
 func (d Datasource) UpdateBalance(balance *model.Balance) error {
-	// convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	if err != nil {
 		return err
 	}
 
-	// update balance in database
 	_, err = d.Conn.Exec(`
 		UPDATE blnk.balances
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
