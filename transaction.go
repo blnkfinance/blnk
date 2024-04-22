@@ -15,26 +15,13 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
 
 	"github.com/jerry-enebeli/blnk/model"
 )
 
 var (
 	tracer = otel.Tracer("Queue transaction")
-	meter  = otel.Meter("rolldice")
-	txnCnt metric.Int64Counter
 )
-
-func init() {
-	var err error
-	txnCnt, err = meter.Int64Counter("txn.commits",
-		metric.WithDescription("The number of commit by transition count value"),
-		metric.WithUnit("{txn}"))
-	if err != nil {
-		panic(err)
-	}
-}
 
 const (
 	StatusQueued    = "QUEUED"
@@ -140,7 +127,12 @@ func (l Blnk) RecordTransaction(ctx context.Context, transaction *model.Transact
 	if err != nil {
 		return nil, err
 	}
-	defer locker.Unlock(cxt)
+	defer func(locker *redlock.Locker, ctx context.Context) {
+		err := locker.Unlock(ctx)
+		if err != nil {
+			logrus.Error(err)
+		}
+	}(locker, cxt)
 
 	if err := l.validateTxn(cxt, transaction); err != nil {
 		return nil, err
@@ -261,7 +253,12 @@ func (l Blnk) CommitInflightTransaction(ctx context.Context, transactionID strin
 		fmt.Printf("Error acquiring lock: %s. Pushing to retry queue", err.Error())
 		return nil, err
 	}
-	defer locker.Unlock(ctx)
+	defer func(locker *redlock.Locker, ctx context.Context) {
+		err := locker.Unlock(ctx)
+		if err != nil {
+			logrus.Error(err)
+		}
+	}(locker, cxt)
 
 	// Get source and destination balances
 	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
@@ -321,7 +318,12 @@ func (l Blnk) VoidInflightTransaction(ctx context.Context, transactionID string)
 		fmt.Printf("Error acquiring lock: %s. Pushing to retry queue", err.Error())
 		return nil, err
 	}
-	defer locker.Unlock(ctx)
+	defer func(locker *redlock.Locker, ctx context.Context) {
+		err := locker.Unlock(ctx)
+		if err != nil {
+			logrus.Error(err)
+		}
+	}(locker, cxt)
 
 	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
 	if err != nil {
