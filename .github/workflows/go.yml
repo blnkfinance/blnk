@@ -53,7 +53,7 @@ jobs:
         run: go run ./cmd/*.go migrate up
         env:
           BLNK_DATA_SOURCE_DNS: postgres://postgres@localhost:5432/blnk?sslmode=disable
-          BLNK_REDIS_DNS: redis://localhost:6379
+          BLNK_REDIS_DNS: localhost:6379
 
       - name: Test
         run: go test -v ./
