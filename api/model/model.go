@@ -2,6 +2,9 @@ package model
 
 import (
 	"errors"
+	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk/model"
 
@@ -30,6 +33,14 @@ func (l *CreateLedger) ValidateCreateLedger() error {
 	return validation.ValidateStruct(l,
 		validation.Field(&l.Name, validation.Required),
 	)
+}
+
+func validateDateFormat(format, value string) error {
+	_, err := time.Parse(format, value)
+	if err != nil {
+		return errors.New("please format the scheduled date as 'YYYY-MM-DDTHH:MM:SS+00:00' (e.g., 2024-04-22T15:28:03+00:00)")
+	}
+	return nil
 }
 
 func (b *CreateBalance) ValidateCreateBalance() error {
@@ -71,7 +82,14 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Description, validation.Required),
 		validation.Field(&t.Source, validation.By(sourceOrSourcesValidation(t))),
 		validation.Field(&t.Destination, validation.By(destinationOrDestinationsValidation(t))),
-	)
+		validation.Field(&t.ScheduledFor, validation.When(t.ScheduledFor != "", validation.By(func(value interface{}) error {
+			dateStr, ok := value.(string)
+			if !ok {
+				return errors.New("invalid type for scheduled date")
+			}
+			return validateDateFormat("2006-01-02T15:04:05Z07:00", dateStr)
+		})),
+		))
 }
 
 func (a *CreateAccount) ValidateCreateAccount() error {
@@ -115,5 +133,9 @@ func (a *CreateAccount) ToAccount() model.Account {
 }
 
 func (t *RecordTransaction) ToTransaction() *model.Transaction {
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: t.ScheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision}
+	scheduledFor, err := time.Parse("2006-01-02T15:04:05Z07:00", t.ScheduledFor)
+	if err != nil {
+		logrus.Error(err)
+	}
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision}
 }

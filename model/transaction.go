@@ -9,8 +9,9 @@ import (
 )
 
 type Distribution struct {
-	Identifier   string `json:"identifier"`
-	Distribution string `json:"distribution"` // Can be a percentage (e.g., "10%"), a fixed amount (e.g., "100"), or "left"
+	Identifier    string `json:"identifier"`
+	Distribution  string `json:"distribution"` // Can be a percentage (e.g., "10%"), a fixed amount (e.g., "100"), or "left"
+	TransactionID string `json:"transaction_id"`
 }
 
 type Transaction struct {
@@ -30,7 +31,7 @@ type Transaction struct {
 	Description       string                 `json:"description,omitempty"`
 	Status            string                 `json:"status"`
 	Hash              string                 `json:"hash"`
-	GroupIds          []string               `json:"group_ids"`
+	GroupIds          []string               `json:"-"`
 	MetaData          map[string]interface{} `json:"meta_data,omitempty"`
 	Sources           []Distribution         `json:"sources,omitempty"`
 	Destinations      []Distribution         `json:"destinations,omitempty"`
@@ -68,9 +69,11 @@ func (transaction *Transaction) SplitTransaction() ([]Transaction, error) {
 		newTransaction.Destinations = nil                            // Clear the Sources slice since we're dealing with individual sources now
 		if len(transaction.Sources) > 0 {
 			newTransaction.Source = direction // Set the source
+			transaction.Sources[counter-1].TransactionID = newTransaction.TransactionID
 
 		} else if len(transaction.Destinations) > 0 {
 			newTransaction.Destination = direction // Set the destination
+			transaction.Destinations[counter-1].TransactionID = newTransaction.TransactionID
 		}
 
 		newTransaction.Reference = fmt.Sprintf("%s-%d", transaction.Reference, counter)

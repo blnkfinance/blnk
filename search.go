@@ -2,6 +2,7 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -68,6 +69,19 @@ func (t *TypesenseClient) Search(ctx context.Context, collection string, searchP
 }
 
 func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
+	if err := EnsureCollectionsExist(t, context.Background()); err != nil {
+		fmt.Println("Failed to ensure collections exist:", err)
+		logrus.Error(err)
+	}
+	metaData, ok := data["meta_data"]
+	if ok {
+		jsonString, err := json.Marshal(metaData)
+		if err != nil {
+			return err
+		}
+		data["meta_data"] = string(jsonString)
+	}
+
 	_, err := t.Client.Collection(table).Documents().Upsert(context.Background(), data)
 	if err != nil {
 		log.Printf("Error indexing document in Typesense: %v", err)

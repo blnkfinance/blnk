@@ -1,6 +1,33 @@
 version: '3.8'
 
 services:
+  typesense:
+    image: typesense/typesense:0.23.1
+    command: ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
+    volumes:
+      - typesense_data:/data
+    ports:
+      - "8108:8108"
+  redis:
+    image: redis:7.2.4
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:latest
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: blnk
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   server:
     build: .
     restart: on-failure
@@ -34,34 +61,7 @@ services:
     volumes:
       - ./blnk.json:/blnk.json
 
-  redis:
-    image: redis:7.2.4
-    ports:
-      - "6379:6379"
 
-  postgres:
-    image: postgres:latest
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: blnk
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "postgres" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  typesense:
-    image: typesense/typesense:0.23.1
-    command: ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
-    volumes:
-      - typesense_data:/data
-    ports:
-      - "8108:8108"
 
 volumes:
   pg_data:

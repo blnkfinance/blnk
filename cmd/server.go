@@ -2,14 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	pg_listener "github.com/jerry-enebeli/blnk/internal/pg-listener"
-
-	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk"
 
@@ -65,11 +62,6 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 
 			//todo fix exposed api key
 			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{"http://typesense:8108"})
-			if err := blnk.EnsureCollectionsExist(newSearch, context.Background()); err != nil {
-				fmt.Println("Failed to ensure collections exist:", err)
-				logrus.Error(err)
-			}
-
 			listener := pg_listener.NewDBListener(pg_listener.ListenerConfig{
 				PgConnStr: cfg.DataSource.Dns,
 				Interval:  10 * time.Second,

@@ -32,7 +32,13 @@ const (
 	StatusRejected  = "REJECTED"
 )
 
-func (l Blnk) getSourceAndDestination(transaction *model.Transaction) (source *model.Balance, destination *model.Balance, err error) {
+func logAndRecordError(span trace.Span, msg string, err error) error {
+	span.RecordError(err)
+	logrus.Error(msg, err)
+	return err
+}
+
+func (l *Blnk) getSourceAndDestination(transaction *model.Transaction) (source *model.Balance, destination *model.Balance, err error) {
 
 	var sourceBalance, destinationBalance *model.Balance
 
@@ -73,7 +79,16 @@ func (l Blnk) getSourceAndDestination(transaction *model.Transaction) (source *m
 	return sourceBalance, destinationBalance, nil
 }
 
-func (l Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
+func (l *Blnk) acquireLock(ctx context.Context, transaction *model.Transaction) (*redlock.Locker, error) {
+	locker := redlock.NewLocker(l.redis, transaction.Source, model.GenerateUUIDWithSuffix("loc"))
+	err := locker.Lock(ctx, time.Minute*30)
+	if err != nil {
+		return nil, err
+	}
+	return locker, nil
+}
+
+func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
 	if err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance); err != nil {
 		return err
 	}
@@ -93,7 +108,7 @@ func (l Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBala
 	return nil
 }
 
-func (l Blnk) validateTxn(cxt context.Context, transaction *model.Transaction) error {
+func (l *Blnk) validateTxn(cxt context.Context, transaction *model.Transaction) error {
 	cxt, span := tracer.Start(cxt, "Validating transaction reference")
 	defer span.End()
 	txn, err := l.datasource.TransactionExistsByRef(cxt, transaction.Reference)
@@ -108,7 +123,7 @@ func (l Blnk) validateTxn(cxt context.Context, transaction *model.Transaction) e
 	return nil
 }
 
-func (l Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Balance, transaction *model.Transaction) error {
+func (l *Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Balance, transaction *model.Transaction) error {
 	span.AddEvent("calculating new balances")
 	defer span.End()
 
@@ -119,7 +134,7 @@ func (l Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Bala
 	return nil
 }
 
-func (l Blnk) RecordTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
 	cxt, span := tracer.Start(ctx, "Recording transaction")
 	defer span.End()
 
@@ -162,26 +177,17 @@ func (l Blnk) RecordTransaction(ctx context.Context, transaction *model.Transact
 	return transaction, nil
 }
 
-func (l Blnk) acquireLock(ctx context.Context, transaction *model.Transaction) (*redlock.Locker, error) {
-	locker := redlock.NewLocker(l.redis, transaction.Source, model.GenerateUUIDWithSuffix("loc"))
-	err := locker.Lock(ctx, time.Minute*30)
-	if err != nil {
-		return nil, err
-	}
-	return locker, nil
-}
-
-func (l Blnk) updateTransactionDetails(transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.Transaction {
+func (l *Blnk) updateTransactionDetails(transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.Transaction {
 	fmt.Println(sourceBalance.BalanceID, destinationBalance.BalanceID)
 	transaction.Source = sourceBalance.BalanceID
 	transaction.Destination = destinationBalance.BalanceID
-	if transaction.Status == StatusQueued {
+	if transaction.Status == StatusQueued || transaction.Status == StatusScheduled {
 		transaction.Status = StatusApplied
 	}
 	return transaction
 }
 
-func (l Blnk) persistTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
 	transaction, err := l.datasource.RecordTransaction(ctx, transaction)
 	if err != nil {
 		logrus.Errorf("ERROR saving transaction to db. %s", err)
@@ -190,7 +196,7 @@ func (l Blnk) persistTransaction(ctx context.Context, transaction *model.Transac
 	return transaction, nil
 }
 
-func (l Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
+func (l *Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
 	err := SendWebhook(NewWebhook{
 		Event:   "transaction.applied",
 		Payload: transaction,
@@ -201,13 +207,7 @@ func (l Blnk) postTransactionActions(_ context.Context, transaction *model.Trans
 
 }
 
-func logAndRecordError(span trace.Span, msg string, err error) error {
-	span.RecordError(err)
-	logrus.Error(msg, err)
-	return err
-}
-
-func (l Blnk) RejectTransaction(ctx context.Context, transaction *model.Transaction, reason string) (*model.Transaction, error) {
+func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transaction, reason string) (*model.Transaction, error) {
 	transaction.Status = StatusRejected
 	if transaction.MetaData == nil {
 		transaction.MetaData = make(map[string]interface{})
@@ -230,7 +230,7 @@ func (l Blnk) RejectTransaction(ctx context.Context, transaction *model.Transact
 	return transaction, nil
 }
 
-func (l Blnk) CommitInflightTransaction(ctx context.Context, transactionID string, amount float64) (*model.Transaction, error) {
+func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID string, amount float64) (*model.Transaction, error) {
 	cxt, span := tracer.Start(ctx, "Committing inflight transaction")
 	defer span.End()
 
@@ -295,7 +295,7 @@ func (l Blnk) CommitInflightTransaction(ctx context.Context, transactionID strin
 	return transaction, nil
 }
 
-func (l Blnk) VoidInflightTransaction(ctx context.Context, transactionID string) (*model.Transaction, error) {
+func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string) (*model.Transaction, error) {
 	cxt, span := tracer.Start(ctx, "Rolling back inflight transaction")
 	defer span.End()
 
@@ -350,7 +350,7 @@ func (l Blnk) VoidInflightTransaction(ctx context.Context, transactionID string)
 	return transaction, nil
 }
 
-func (l Blnk) QueueTransaction(cxt context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+func (l *Blnk) QueueTransaction(cxt context.Context, transaction *model.Transaction) (*model.Transaction, error) {
 	ctx, span := tracer.Start(cxt, "Queuing transaction")
 	defer span.End()
 	emptyTransaction := &model.Transaction{}
@@ -401,32 +401,34 @@ func (l Blnk) QueueTransaction(cxt context.Context, transaction *model.Transacti
 	return transaction, nil
 }
 
-func (l Blnk) GetTransaction(TransactionID string) (*model.Transaction, error) {
+func (l *Blnk) GetTransaction(TransactionID string) (*model.Transaction, error) {
 	return l.datasource.GetTransaction(TransactionID)
 }
 
-func (l Blnk) GetAllTransactions() ([]model.Transaction, error) {
+func (l *Blnk) GetAllTransactions() ([]model.Transaction, error) {
 	return l.datasource.GetAllTransactions()
 }
 
-func (l Blnk) GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error) {
+func (l *Blnk) GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error) {
 	return l.datasource.GetTransactionByRef(cxt, reference)
 }
 
-func (l Blnk) UpdateTransactionStatus(id string, status string) error {
+func (l *Blnk) UpdateTransactionStatus(id string, status string) error {
 	return l.datasource.UpdateTransactionStatus(id, status)
 }
 
-func (l Blnk) RefundTransaction(transactionID string) (*model.Transaction, error) {
+func (l *Blnk) RefundTransaction(transactionID string) (*model.Transaction, error) {
 	originalTxn, err := l.GetTransaction(transactionID)
 	if err != nil {
 		return &model.Transaction{}, err
 	}
 
-	originalTxn.Reference = model.GenerateUUIDWithSuffix("ref")
-	originalTxn.Source = originalTxn.Destination
-	originalTxn.Destination = originalTxn.Source
-	refundTxn, err := l.QueueTransaction(context.Background(), originalTxn)
+	newTransaction := *originalTxn
+	newTransaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	newTransaction.Source = originalTxn.Destination
+	newTransaction.Destination = originalTxn.Source
+	newTransaction.AllowOverdraft = true
+	refundTxn, err := l.QueueTransaction(context.Background(), &newTransaction)
 	if err != nil {
 		return &model.Transaction{}, err
 	}

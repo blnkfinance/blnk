@@ -1,8 +1,6 @@
 package model
 
 import (
-	"time"
-
 	"github.com/jerry-enebeli/blnk/model"
 )
 
@@ -18,7 +16,7 @@ type RecordTransaction struct {
 	Description    string                 `json:"description"`
 	Currency       string                 `json:"currency"`
 	BalanceId      string                 `json:"balance_id"`
-	ScheduledFor   time.Time              `json:"scheduled_for"`
+	ScheduledFor   string                 `json:"scheduled_for"`
 	Sources        []model.Distribution   `json:"sources"`
 	Destinations   []model.Distribution   `json:"destinations"`
 	MetaData       map[string]interface{} `json:"meta_data"`

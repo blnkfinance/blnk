@@ -45,7 +45,7 @@ func applyExternalAccount(account *model.Account) error {
 	return nil
 }
 
-func (l Blnk) applyAccountName(account *model.Account) error {
+func (l *Blnk) applyAccountName(account *model.Account) error {
 	if account.Name == "" {
 
 		identity, err := l.GetIdentity(account.IdentityID)
@@ -61,7 +61,7 @@ func (l Blnk) applyAccountName(account *model.Account) error {
 	return nil
 }
 
-func (l Blnk) overrideLedgerAndIdentity(account *model.Account) error {
+func (l *Blnk) overrideLedgerAndIdentity(account *model.Account) error {
 	balance, err := l.datasource.GetBalanceByIDLite(account.BalanceID)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (l Blnk) overrideLedgerAndIdentity(account *model.Account) error {
 }
 
 // CreateAccount creates a new account in the database.
-func (l Blnk) CreateAccount(account model.Account) (model.Account, error) {
+func (l *Blnk) CreateAccount(account model.Account) (model.Account, error) {
 	err := l.overrideLedgerAndIdentity(&account)
 	if err != nil {
 		return model.Account{}, err
@@ -100,16 +100,16 @@ func (l Blnk) CreateAccount(account model.Account) (model.Account, error) {
 	return l.datasource.CreateAccount(account)
 }
 
-func (l Blnk) GetAccount(id string, include []string) (*model.Account, error) {
+func (l *Blnk) GetAccount(id string, include []string) (*model.Account, error) {
 	return l.datasource.GetAccountByID(id, include)
 }
 
 // GetAccountByNumber retrieves an account from the database by ID.
-func (l Blnk) GetAccountByNumber(id string) (*model.Account, error) {
+func (l *Blnk) GetAccountByNumber(id string) (*model.Account, error) {
 	return l.datasource.GetAccountByNumber(id)
 }
 
 // GetAllAccounts retrieves all accounts from the database.
-func (l Blnk) GetAllAccounts() ([]model.Account, error) {
+func (l *Blnk) GetAllAccounts() ([]model.Account, error) {
 	return l.datasource.GetAllAccounts()
 }

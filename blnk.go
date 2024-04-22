@@ -46,6 +46,6 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	return newBlnk, nil
 }
 
-func (b Blnk) Search(collection string, query *api.SearchCollectionParams) (interface{}, error) {
-	return b.search.Search(context.Background(), collection, query)
+func (l *Blnk) Search(collection string, query *api.SearchCollectionParams) (interface{}, error) {
+	return l.search.Search(context.Background(), collection, query)
 }

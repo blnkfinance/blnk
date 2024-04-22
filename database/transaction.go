@@ -53,7 +53,7 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 
 func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
 	row := d.Conn.QueryRow(`
-			SELECT transaction_id, source, reference, amount, precise_amount, currency,destination, description, status,created_at, meta_data
+			SELECT transaction_id, source, reference, amount, precise_amount, precision, currency,destination, description, status,created_at, meta_data
 						FROM blnk.transactions
 					WHERE transaction_id = $1
 				`, id)
@@ -61,7 +61,7 @@ func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
 	txn := &model.Transaction{}
 
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description,
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description,
 		&txn.Status,
 		&txn.CreatedAt, &metaDataJSON)
 	if err != nil {
