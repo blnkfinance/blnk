@@ -190,7 +190,7 @@ func (l Blnk) persistTransaction(ctx context.Context, transaction *model.Transac
 	return transaction, nil
 }
 
-func (l Blnk) postTransactionActions(ctx context.Context, transaction *model.Transaction) {
+func (l Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
 	err := SendWebhook(NewWebhook{
 		Event:   "transaction.applied",
 		Payload: transaction,
@@ -378,6 +378,7 @@ func (l Blnk) QueueTransaction(cxt context.Context, transaction *model.Transacti
 	transaction.Hash = hash
 	if len(transactions) > 0 {
 		for _, txn := range transactions {
+			transaction.PreciseAmount = int64(transaction.Amount * transaction.Precision)
 			err = l.queue.Enqueue(ctx, &txn)
 			if err != nil {
 				notification.NotifyError(err)
@@ -388,6 +389,7 @@ func (l Blnk) QueueTransaction(cxt context.Context, transaction *model.Transacti
 		}
 
 	} else {
+		transaction.PreciseAmount = int64(transaction.Amount * transaction.Precision)
 		err = l.queue.Enqueue(ctx, transaction)
 		if err != nil {
 			notification.NotifyError(err)

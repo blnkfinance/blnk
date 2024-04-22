@@ -57,7 +57,7 @@ func (b *CreateBalanceMonitor) ValidateCreateBalanceMonitor() error {
 
 func (c *MonitorCondition) ValidateMonitorCondition() error {
 	return validation.ValidateStruct(c,
-		validation.Field(&c.Field, validation.Required),
+		validation.Field(&c.Field, validation.Required, validation.In("debit_balance", "credit_balance", "balance", "inflight_debit_balance", "inflight_credit_balance", "inflight_balance")),
 		validation.Field(&c.Operator, validation.Required),
 		validation.Field(&c.Value, validation.Required),
 	)

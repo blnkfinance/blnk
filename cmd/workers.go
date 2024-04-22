@@ -57,7 +57,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			// Dynamically create the queues map based on the number of queues
 			queues := make(map[string]int)
-			queues[blnk.WEBHOOK_QUEUE] = 1
+			queues[blnk.WEBHOOK_QUEUE] = 10
 			for i := 1; i <= NumberOfQueues; i++ {
 				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
 				queues[queueName] = 1

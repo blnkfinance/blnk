@@ -3,8 +3,11 @@ package blnk
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk/config"
 	"golang.org/x/net/context"
@@ -47,7 +50,12 @@ func processHTTP(data NewWebhook) error {
 		log.Println("Error sending request:", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			logrus.Error(err)
+		}
+	}(resp.Body)
 
 	// Check if the status code is not in the 2XX success range
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -78,7 +86,6 @@ func SendWebhook(newWebhook NewWebhook) error {
 	}
 
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
-
 	payload, err := json.Marshal(newWebhook)
 	if err != nil {
 		log.Fatal(err)
@@ -95,7 +102,7 @@ func SendWebhook(newWebhook NewWebhook) error {
 	return err
 }
 
-func ProcessWebhook(ctx context.Context, task *asynq.Task) error {
+func ProcessWebhook(_ context.Context, task *asynq.Task) error {
 	var payload NewWebhook
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		log.Printf("Error unmarshaling task payload: %v", err)

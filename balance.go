@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
+
 	"github.com/jerry-enebeli/blnk/model"
 )
 
@@ -26,7 +27,11 @@ func (l Blnk) checkBalanceMonitors(updatedBalance *model.Balance) {
 					Event:   "balance.monitor",
 					Payload: monitor,
 				})
-				notification.NotifyError(err)
+				if err != nil {
+					notification.NotifyError(err)
+					return
+				}
+
 			}(monitor)
 
 		}

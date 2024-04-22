@@ -15,5 +15,5 @@ Every financial product is made up of different transactions happening concurren
 Blnk gives you, the developer, a starting point to improve how you build, operate and perfectly manage money movement and storage in a reliable, scaleable and secure way.
 
 ## Get Started and Core Features
-- [Documentation](https://docs.blnkserver.xyz)
+- [Documentation](https://docs.blnkledger.com)
 

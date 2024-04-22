@@ -40,10 +40,10 @@ func TestRecordTransaction(t *testing.T) {
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
 	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
-		AddRow(source, "NGN", 1, "ledger-id-source", 100, 50, 50, 0, 0, 0, time.Now(), 0)
+		AddRow(source, "NGN", 1, "ledger-id-source", 10000, 10000, 0, 0, 0, 0, time.Now(), 0)
 
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
-		AddRow(destination, "NGN", 1, "ledger-id-destination", 200, 100, 100, 0, 0, 0, time.Now(), 0)
+		AddRow(destination, "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0)
 
 	balanceQuery := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = $1`)
 	balanceQuery2 := regexp.QuoteMeta(`SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = $1`)
@@ -58,9 +58,9 @@ func TestRecordTransaction(t *testing.T) {
 	  WHERE balance_id = $1 AND version = $13
 	`)).WithArgs(
 		source,
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
+		9000,
+		10000,
+		1000,
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
@@ -78,9 +78,9 @@ func TestRecordTransaction(t *testing.T) {
 	  WHERE balance_id = $1 AND version = $13
 	`)).WithArgs(
 		destination,
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
+		1000,
+		1000,
+		0,
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
@@ -91,6 +91,7 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(),
 		0,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
+
 	mock.ExpectCommit()
 	expectedSQL := `INSERT INTO blnk.transactions(transaction_id,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(

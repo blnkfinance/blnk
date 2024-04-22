@@ -45,6 +45,7 @@ func TestRecordTransaction(t *testing.T) {
 			name: "Valid Transaction",
 			payload: model2.RecordTransaction{
 				Amount:      750,
+				Precision:   100,
 				Reference:   "ref_001adcfgf",
 				Description: "For fees",
 				Currency:    "NGN",
@@ -137,6 +138,7 @@ func TestRecordTransaction(t *testing.T) {
 
 			if !tt.wantErr && tt.expectedCode == http.StatusCreated {
 				assert.Equal(t, tt.payload.Amount, response.Amount)
+				assert.Equal(t, int64(tt.payload.Precision*tt.payload.Amount), response.PreciseAmount)
 				assert.Equal(t, tt.payload.Reference, response.Reference)
 				assert.Equal(t, tt.payload.Description, response.Description)
 				assert.Equal(t, tt.payload.Currency, response.Currency)

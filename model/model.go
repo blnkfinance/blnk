@@ -36,6 +36,8 @@ func compare(value int64, condition string, compareTo int64) bool {
 		return value >= compareTo
 	case "<=":
 		return value <= compareTo
+	case "!=":
+		return value != compareTo
 	case "==":
 		return value == compareTo
 	}
@@ -142,7 +144,6 @@ func (transaction *Transaction) validate() error {
 
 func UpdateBalances(transaction *Transaction, source, destination *Balance) error {
 	transaction.PreciseAmount = source.applyPrecision(transaction)
-	// Validate transaction
 	err := transaction.validate()
 	if err != nil {
 		return err
@@ -172,6 +173,12 @@ func (bm *BalanceMonitor) CheckCondition(b *Balance) bool {
 		return compare(b.CreditBalance, bm.Condition.Operator, bm.Condition.Value)
 	case "balance":
 		return compare(b.Balance, bm.Condition.Operator, bm.Condition.Value)
+	case "inflight_debit_balance":
+		return compare(b.InflightDebitBalance, bm.Condition.Operator, bm.Condition.Value)
+	case "inflight_credit_balance":
+		return compare(b.InflightCreditBalance, bm.Condition.Operator, bm.Condition.Value)
+	case "inflight_balance":
+		return compare(b.InflightBalance, bm.Condition.Operator, bm.Condition.Value)
 	}
 	return false
 }

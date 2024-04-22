@@ -76,9 +76,11 @@ func NewAPI(b *blnk.Blnk) *Api {
 		var payload map[string]interface{}
 		err := c.Bind(&payload)
 		if err != nil {
+			fmt.Println(err)
 			return
 		}
 		fmt.Println(payload)
+		c.JSON(200, "webhook received")
 	})
 
 	return &Api{blnk: b, router: r}
