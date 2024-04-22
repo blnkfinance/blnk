@@ -324,7 +324,12 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 	}
 
 	// Defer a rollback in case anything fails. The rollback will be ignored if the transaction is successfully committed later.
-	defer tx.Rollback()
+	defer func(tx *sql.Tx) {
+		err := tx.Rollback()
+		if err != nil {
+			logrus.Error(err)
+		}
+	}(tx)
 
 	// Update source balance
 	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
