@@ -102,7 +102,7 @@ func TestRecordTransaction(t *testing.T) {
 		txn.Amount,
 		1000,
 		txn.Precision,
-		float64(0),
+		float64(1),
 		txn.Currency,
 		txn.Destination,
 		sqlmock.AnyArg(),
