@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -25,9 +27,10 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 	// insert into database
 	_, err = d.Conn.ExecContext(cxt,
 		`
-		INSERT INTO blnk.transactions(transaction_id,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		INSERT INTO blnk.transactions(transaction_id,parent_transaction,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 	`,
 		txn.TransactionID,
+		txn.ParentTransaction,
 		txn.Source,
 		txn.Reference,
 		txn.Amount,
@@ -166,4 +169,26 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 	}
 
 	return transactions, nil
+}
+
+func (d Datasource) GetTotalCommittedTransactions(parentID string) (int64, error) {
+	query := `
+		SELECT SUM(precise_amount) AS total_amount
+		FROM blnk.transactions
+		WHERE parent_transaction = $1
+		GROUP BY parent_transaction;
+	`
+
+	row := d.Conn.QueryRow(query, parentID)
+	var totalAmount int64
+
+	err := row.Scan(&totalAmount)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, errors.New("no committed transactions found for the given parent ID")
+		}
+		return 0, err
+	}
+
+	return totalAmount, nil
 }

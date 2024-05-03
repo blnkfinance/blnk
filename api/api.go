@@ -37,7 +37,7 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/transactions", a.QueueTransaction)
 	router.POST("/refund-transaction/:id", a.RefundTransaction)
 	router.GET("/transactions/:id", a.GetTransaction)
-	router.PUT("/transactions/inflight/:id/:status", a.UpdateInflightStatus)
+	router.PUT("/transactions/inflight/:txID", a.UpdateInflightStatus)
 
 	router.POST("/identities", a.CreateIdentity)
 	router.GET("/identities/:id", a.GetIdentity)

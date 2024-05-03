@@ -202,7 +202,6 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
 		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
 	if err != nil {
-		logrus.Errorf("balance lite error %v", err)
 		if err == sql.ErrNoRows {
 			return &model.Balance{}, fmt.Errorf("balance with indicator '%s' not found", indicator)
 		} else {
@@ -317,31 +316,26 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 }
 
 func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
-	// Start a transaction
 	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
 	if err != nil {
 		return err
 	}
 
-	// Defer a rollback in case anything fails. The rollback will be ignored if the transaction is successfully committed later.
 	defer func(tx *sql.Tx) {
 		err := tx.Rollback()
 		if err != nil {
-			logrus.Error(err)
+			logrus.Warningln(err)
 		}
 	}(tx)
 
-	// Update source balance
 	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
 		return err
 	}
 
-	// Update destination balance
 	if err := updateBalance(ctx, tx, destinationBalance); err != nil {
 		return err
 	}
 
-	// Commit the transaction
 	if err := tx.Commit(); err != nil {
 		return err
 	}

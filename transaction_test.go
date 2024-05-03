@@ -93,8 +93,9 @@ func TestRecordTransaction(t *testing.T) {
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectCommit()
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id,parent_transaction,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
+		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
 		source,
 		txn.Reference,

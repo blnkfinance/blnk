@@ -88,12 +88,40 @@ func (l *Blnk) acquireLock(ctx context.Context, transaction *model.Transaction) 
 	return locker, nil
 }
 
+func (l *Blnk) updateTransactionDetails(transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.Transaction {
+	transaction.Source = sourceBalance.BalanceID
+	transaction.Destination = destinationBalance.BalanceID
+	if transaction.Status == StatusQueued || transaction.Status == StatusScheduled {
+		transaction.Status = StatusApplied
+	}
+	return transaction
+}
+
+func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+	transaction, err := l.datasource.RecordTransaction(ctx, transaction)
+	if err != nil {
+		logrus.Errorf("ERROR saving transaction to db. %s", err)
+		return nil, err
+	}
+	return transaction, nil
+}
+
+func (l *Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
+	err := SendWebhook(NewWebhook{
+		Event:   "transaction.applied",
+		Payload: transaction,
+	})
+	if err != nil {
+		notification.NotifyError(err)
+	}
+
+}
+
 func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
+	var wg sync.WaitGroup
 	if err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance); err != nil {
 		return err
 	}
-
-	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -142,10 +170,11 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	if err != nil {
 		return nil, err
 	}
+
 	defer func(locker *redlock.Locker, ctx context.Context) {
 		err := locker.Unlock(ctx)
 		if err != nil {
-			logrus.Error(err)
+			logrus.Error("lock error", err)
 		}
 	}(locker, cxt)
 
@@ -177,36 +206,6 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	return transaction, nil
 }
 
-func (l *Blnk) updateTransactionDetails(transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.Transaction {
-	fmt.Println(sourceBalance.BalanceID, destinationBalance.BalanceID)
-	transaction.Source = sourceBalance.BalanceID
-	transaction.Destination = destinationBalance.BalanceID
-	if transaction.Status == StatusQueued || transaction.Status == StatusScheduled {
-		transaction.Status = StatusApplied
-	}
-	return transaction
-}
-
-func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
-	transaction, err := l.datasource.RecordTransaction(ctx, transaction)
-	if err != nil {
-		logrus.Errorf("ERROR saving transaction to db. %s", err)
-		return nil, err
-	}
-	return transaction, nil
-}
-
-func (l *Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
-	err := SendWebhook(NewWebhook{
-		Event:   "transaction.applied",
-		Payload: transaction,
-	})
-	if err != nil {
-		notification.NotifyError(err)
-	}
-
-}
-
 func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transaction, reason string) (*model.Transaction, error) {
 	transaction.Status = StatusRejected
 	if transaction.MetaData == nil {
@@ -234,20 +233,17 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 	cxt, span := tracer.Start(ctx, "Committing inflight transaction")
 	defer span.End()
 
-	// Fetch the transaction
 	transaction, err := l.datasource.GetTransaction(transactionID)
 	if err != nil {
 		return nil, logAndRecordError(span, "fetch transaction error", err)
 	}
 
-	// Verify it's an inflight transaction
 	if transaction.Status != StatusInflight {
 		err = fmt.Errorf("transaction is not in inflight status")
 		span.RecordError(err)
 		return nil, err
 	}
 
-	// Locking around the transaction source to prevent concurrent modifications
 	locker := redlock.NewLocker(l.redis, transaction.Source, "lock")
 	if err := locker.Lock(ctx, 30*time.Minute); err != nil {
 		fmt.Printf("Error acquiring lock: %s. Pushing to retry queue", err.Error())
@@ -260,7 +256,6 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 		}
 	}(locker, cxt)
 
-	// Get source and destination balances
 	sourceBalance, destinationBalance, err := l.getSourceAndDestination(transaction)
 	if err != nil {
 		err = fmt.Errorf("source and destination balance error: %v", err)
@@ -268,14 +263,27 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 		return nil, err
 	}
 
+	committedAmount, err := l.datasource.GetTotalCommittedTransactions(transactionID)
+	if err != nil {
+		return nil, err
+	}
+	originalAmount := transaction.PreciseAmount
+	amountLeft := originalAmount - committedAmount
+
 	if amount != 0 {
 		transaction.Amount = amount
 		transaction.PreciseAmount = 0
 	}
 
+	preciseAmount := model.ApplyPrecision(transaction)
+
+	if (amountLeft) < preciseAmount {
+		return transaction, fmt.Errorf("can not commit %s%.2f. You can only commit an amount between 1.00 - %s%.2f", transaction.Currency, amount, transaction.Currency, float64(amountLeft)/transaction.Precision)
+	}
+
 	// Commit inflight balances
-	sourceBalance.CommitInflightDebit(transaction)       // For the source
-	destinationBalance.CommitInflightCredit(transaction) // For the destination
+	sourceBalance.CommitInflightDebit(transaction)
+	destinationBalance.CommitInflightCredit(transaction)
 
 	// Update balances in the database
 	if err = l.updateBalances(ctx, sourceBalance, destinationBalance); err != nil {
@@ -284,6 +292,7 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 
 	// create a new transaction with status applied
 	transaction.Status = StatusApplied
+	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
@@ -299,13 +308,11 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 	cxt, span := tracer.Start(ctx, "Rolling back inflight transaction")
 	defer span.End()
 
-	// Fetch the transaction
 	transaction, err := l.datasource.GetTransaction(transactionID)
 	if err != nil {
 		return nil, logAndRecordError(span, "fetch transaction error", err)
 	}
 
-	// Verify it's an inflight transaction
 	if transaction.Status != StatusInflight {
 		err = fmt.Errorf("transaction is not in inflight status")
 		span.RecordError(err)
@@ -332,13 +339,24 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 		return nil, err
 	}
 
-	sourceBalance.RollbackInflightDebit(transaction.PreciseAmount)
-	destinationBalance.RollbackInflightCredit(transaction.PreciseAmount)
+	committedAmount, err := l.datasource.GetTotalCommittedTransactions(transactionID)
+	if err != nil {
+		return nil, err
+	}
 
+	originalAmount := transaction.PreciseAmount
+	amountLeft := originalAmount - committedAmount
+
+	sourceBalance.RollbackInflightDebit(amountLeft)
+	destinationBalance.RollbackInflightCredit(amountLeft)
 	if err = l.updateBalances(ctx, sourceBalance, destinationBalance); err != nil {
 		return nil, logAndRecordError(span, "update balances error", err)
 	}
+
 	transaction.Status = StatusVoid
+	transaction.Amount = float64(amountLeft) / transaction.Precision
+	transaction.PreciseAmount = amountLeft
+	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()

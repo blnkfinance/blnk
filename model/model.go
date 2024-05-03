@@ -70,7 +70,7 @@ func (balance *Balance) computeBalance(inflight bool) {
 }
 
 func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
-	preciseAmount := balance.applyPrecision(transaction)
+	preciseAmount := ApplyPrecision(transaction)
 	transaction.PreciseAmount = preciseAmount
 	if balance.InflightDebitBalance >= preciseAmount {
 		balance.InflightDebitBalance -= preciseAmount
@@ -81,7 +81,7 @@ func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
 }
 
 func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
-	preciseAmount := balance.applyPrecision(transaction)
+	preciseAmount := ApplyPrecision(transaction)
 	transaction.PreciseAmount = preciseAmount
 	if balance.InflightCreditBalance >= preciseAmount {
 		balance.InflightCreditBalance -= preciseAmount
@@ -93,7 +93,6 @@ func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
 
 // RollbackInflightCredit decreases the InflightCreditBalance by the specified amount
 func (balance *Balance) RollbackInflightCredit(amount int64) {
-	fmt.Println(amount, balance.InflightCreditBalance)
 	if balance.InflightCreditBalance >= amount {
 		balance.InflightCreditBalance -= amount
 		balance.computeBalance(true) // Update inflight balance
@@ -108,15 +107,10 @@ func (balance *Balance) RollbackInflightDebit(amount int64) {
 	}
 }
 
-func (balance *Balance) applyPrecision(transaction *Transaction) int64 {
-	if balance.CurrencyMultiplier == 0 {
-		balance.CurrencyMultiplier = 1
+func ApplyPrecision(transaction *Transaction) int64 {
+	if transaction.Precision == 0 {
+		transaction.Precision = 1
 	}
-
-	if balance.CurrencyMultiplier > 0 && transaction.Precision == 0 {
-		transaction.Precision = balance.CurrencyMultiplier
-	}
-
 	return int64(transaction.Amount * transaction.Precision)
 }
 
@@ -143,7 +137,7 @@ func (transaction *Transaction) validate() error {
 }
 
 func UpdateBalances(transaction *Transaction, source, destination *Balance) error {
-	transaction.PreciseAmount = source.applyPrecision(transaction)
+	transaction.PreciseAmount = ApplyPrecision(transaction)
 	err := transaction.validate()
 	if err != nil {
 		return err
@@ -159,7 +153,7 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	source.computeBalance(transaction.Inflight)
 
 	//compute destination balance
-	destination.applyPrecision(transaction)
+	transaction.PreciseAmount = ApplyPrecision(transaction)
 	destination.addCredit(transaction.PreciseAmount, transaction.Inflight)
 	destination.computeBalance(transaction.Inflight)
 	return nil

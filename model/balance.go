@@ -8,13 +8,13 @@ import (
 type Balance struct {
 	ID                    int64                  `json:"-"`
 	Balance               int64                  `json:"balance"`
+	Version               int64                  `json:"version"`
 	InflightBalance       int64                  `json:"inflight_balance"`
 	CreditBalance         int64                  `json:"credit_balance"`
 	InflightCreditBalance int64                  `json:"inflight_credit_balance"`
 	DebitBalance          int64                  `json:"debit_balance"`
 	InflightDebitBalance  int64                  `json:"inflight_debit_balance"`
 	CurrencyMultiplier    float64                `json:"precision"`
-	Version               int64                  `json:"version"`
 	LedgerID              string                 `json:"ledger_id"`
 	IdentityID            string                 `json:"identity_id"`
 	BalanceID             string                 `json:"balance_id"`

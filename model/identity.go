@@ -19,7 +19,7 @@ type Identity struct {
 	State            string                 `json:"state" form:"state"`
 	PostCode         string                 `json:"post_code" form:"postCode"`
 	City             string                 `json:"city" form:"city"`
-	MetaData         map[string]interface{} `json:"meta_data" form:"metaData"`
 	DOB              time.Time              `json:"dob" form:"dob"`
 	CreatedAt        time.Time              `json:"created_at" form:"createdAt"`
+	MetaData         map[string]interface{} `json:"meta_data" form:"metaData"`
 }

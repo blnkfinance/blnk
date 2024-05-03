@@ -22,6 +22,7 @@ type transaction interface {
 	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)
 	UpdateTransactionStatus(id string, status string) error
 	GetAllTransactions() ([]model.Transaction, error)
+	GetTotalCommittedTransactions(parentID string) (int64, error)
 }
 
 type ledger interface {

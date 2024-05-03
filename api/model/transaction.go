@@ -11,7 +11,6 @@ type RecordTransaction struct {
 	Inflight       bool                   `json:"inflight"`
 	Source         string                 `json:"source"`
 	Reference      string                 `json:"reference"`
-	Drcr           string                 `json:"drcr"`
 	Destination    string                 `json:"destination"`
 	Description    string                 `json:"description"`
 	Currency       string                 `json:"currency"`
@@ -20,4 +19,9 @@ type RecordTransaction struct {
 	Sources        []model.Distribution   `json:"sources"`
 	Destinations   []model.Distribution   `json:"destinations"`
 	MetaData       map[string]interface{} `json:"meta_data"`
+}
+
+type InflightUpdate struct {
+	Status string  `json:"status"`
+	Amount float64 `json:"amount"`
 }

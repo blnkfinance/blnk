@@ -52,7 +52,6 @@ func (l *Blnk) getOrCreateBalanceByIndicator(indicator, currency string) (*model
 		if err != nil {
 			return nil, err
 		}
-
 		balance, err = l.datasource.GetBalanceByIndicator(indicator, currency)
 		if err != nil {
 			return nil, err

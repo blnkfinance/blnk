@@ -92,28 +92,20 @@ func (a Api) GetTransaction(c *gin.Context) {
 
 func (a Api) UpdateInflightStatus(c *gin.Context) {
 	var resp *model.Transaction
-	id, passed := c.Params.Get("id")
-	var req map[string]float64
+	id, passed := c.Params.Get("txID")
+	var req model2.InflightUpdate
 	if !passed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
 	}
-
-	status, passed := c.Params.Get("status")
-	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "status is required. pass id in the route /:status"})
-		return
-	}
-
 	err := c.BindJSON(&req)
 	if err != nil {
 		return
 	}
 
-	amount := req["amount"]
-
+	status := req.Status
 	if status == "commit" {
-		transaction, err := a.blnk.CommitInflightTransaction(c.Request.Context(), id, amount)
+		transaction, err := a.blnk.CommitInflightTransaction(c.Request.Context(), id, req.Amount)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

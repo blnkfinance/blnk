@@ -11,9 +11,9 @@ type Account struct {
 	BalanceID  string                 `json:"balance_id" `
 	IdentityID string                 `json:"identity_id" form:"identity_id"`
 	LedgerID   string                 `json:"ledger_id"`
-	MetaData   map[string]interface{} `json:"meta_data"`
 	Ledger     *Ledger                `json:"ledger"`
 	Balance    *Balance               `json:"balance"`
 	Identity   *Identity              `json:"identity"`
 	CreatedAt  time.Time              `json:"created_at"`
+	MetaData   map[string]interface{} `json:"meta_data"`
 }
