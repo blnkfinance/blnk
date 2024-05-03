@@ -269,7 +269,6 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 	rows, err := d.Conn.Query(`
 		SELECT blnk.get_balances_by_id($1,$2)
 	`, sourceId, destinationId)
-	fmt.Println(rows, err)
 	if err != nil {
 
 		return nil, err

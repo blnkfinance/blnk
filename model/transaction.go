@@ -15,29 +15,30 @@ type Distribution struct {
 }
 
 type Transaction struct {
-	ID                int64                  `json:"-"`
-	PreciseAmount     int64                  `json:"precise_amount,omitempty"`
-	Amount            float64                `json:"amount"`
-	Rate              float64                `json:"rate"`
-	Precision         float64                `json:"precision"`
-	TransactionID     string                 `json:"transaction_id"`
-	ParentTransaction string                 `json:"parent_transaction"`
-	Source            string                 `json:"source,omitempty"`
-	Destination       string                 `json:"destination,omitempty"`
-	Reference         string                 `json:"reference"`
-	Currency          string                 `json:"currency"`
-	Description       string                 `json:"description,omitempty"`
-	Status            string                 `json:"status"`
-	Hash              string                 `json:"hash"`
-	AllowOverdraft    bool                   `json:"allow_overdraft"`
-	Inflight          bool                   `json:"inflight"`
-	SkipBalanceUpdate bool                   `json:"-"`
-	GroupIds          []string               `json:"-"`
-	Sources           []Distribution         `json:"sources,omitempty"`
-	Destinations      []Distribution         `json:"destinations,omitempty"`
-	CreatedAt         time.Time              `json:"created_at"`
-	ScheduledFor      time.Time              `json:"scheduled_for,omitempty"`
-	MetaData          map[string]interface{} `json:"meta_data,omitempty"`
+	ID                 int64                  `json:"-"`
+	PreciseAmount      int64                  `json:"precise_amount,omitempty"`
+	Amount             float64                `json:"amount"`
+	Rate               float64                `json:"rate"`
+	Precision          float64                `json:"precision"`
+	TransactionID      string                 `json:"transaction_id"`
+	ParentTransaction  string                 `json:"parent_transaction"`
+	Source             string                 `json:"source,omitempty"`
+	Destination        string                 `json:"destination,omitempty"`
+	Reference          string                 `json:"reference"`
+	Currency           string                 `json:"currency"`
+	Description        string                 `json:"description,omitempty"`
+	Status             string                 `json:"status"`
+	Hash               string                 `json:"hash"`
+	AllowOverdraft     bool                   `json:"allow_overdraft"`
+	Inflight           bool                   `json:"inflight"`
+	SkipBalanceUpdate  bool                   `json:"-"`
+	GroupIds           []string               `json:"-"`
+	Sources            []Distribution         `json:"sources,omitempty"`
+	Destinations       []Distribution         `json:"destinations,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	ScheduledFor       time.Time              `json:"scheduled_for,omitempty"`
+	InflightExpiryDate time.Time              `json:"inflight_expiry_date,omitempty"`
+	MetaData           map[string]interface{} `json:"meta_data,omitempty"`
 }
 
 func (transaction *Transaction) ToJSON() ([]byte, error) {

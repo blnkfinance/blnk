@@ -275,9 +275,7 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 		transaction.PreciseAmount = 0
 	}
 
-	preciseAmount := model.ApplyPrecision(transaction)
-
-	if (amountLeft) < preciseAmount {
+	if (amountLeft) < model.ApplyPrecision(transaction) {
 		return transaction, fmt.Errorf("can not commit %s%.2f. You can only commit an amount between 1.00 - %s%.2f", transaction.Currency, amount, transaction.Currency, float64(amountLeft)/transaction.Precision)
 	}
 
@@ -379,6 +377,7 @@ func (l *Blnk) QueueTransaction(cxt context.Context, transaction *model.Transact
 
 	transaction.Status = StatusQueued
 	transaction.SkipBalanceUpdate = true
+
 	if !transaction.ScheduledFor.IsZero() {
 		transaction.Status = StatusScheduled
 	}
@@ -394,6 +393,7 @@ func (l *Blnk) QueueTransaction(cxt context.Context, transaction *model.Transact
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	hash := transaction.HashTxn()
 	transaction.Hash = hash
+
 	if len(transactions) > 0 {
 		for _, txn := range transactions {
 			transaction.PreciseAmount = int64(transaction.Amount * transaction.Precision)

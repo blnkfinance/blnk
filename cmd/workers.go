@@ -44,6 +44,22 @@ func (b *blnkInstance) processTransaction(cxt context.Context, t *asynq.Task) er
 	return nil
 }
 
+func (b *blnkInstance) procesInflightExpiry(cxt context.Context, t *asynq.Task) error {
+	var txnID string
+	if err := json.Unmarshal(t.Payload(), &txnID); err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	_, err := b.blnk.VoidInflightTransaction(cxt, txnID)
+	if err != nil {
+		return err
+	}
+
+	logrus.Printf(" [*] Inflight Transaction Expired %s", txnID)
+	return nil
+}
+
 func workerCommands(b *blnkInstance) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workers",
@@ -55,9 +71,10 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				return
 			}
 
-			// Dynamically create the queues map based on the number of queues
 			queues := make(map[string]int)
 			queues[blnk.WEBHOOK_QUEUE] = 10
+			queues[blnk.EXPIREDINFLIGHT_QUEUE] = 1
+
 			for i := 1; i <= NumberOfQueues; i++ {
 				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
 				queues[queueName] = 1
@@ -80,6 +97,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			mux.HandleFunc(blnk.WEBHOOK_QUEUE, blnk.ProcessWebhook)
+			mux.HandleFunc(blnk.EXPIREDINFLIGHT_QUEUE, b.procesInflightExpiry)
 			if err := srv.Run(mux); err != nil {
 				log.Fatal("Error running server:", err)
 			}

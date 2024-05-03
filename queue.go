@@ -16,6 +16,7 @@ import (
 
 const TRANSACTION_QUEUE = "new:transaction"
 const WEBHOOK_QUEUE = "new:webhoook"
+const EXPIREDINFLIGHT_QUEUE = "new:inflight-expiry"
 const NumberOfQueues = 5
 
 type Queue struct {
@@ -35,8 +36,23 @@ func NewQueue(conf *config.Configuration) *Queue {
 		Inspector: inspector,
 	}
 }
+func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) error {
+	IPayload, err := json.Marshal(transactionID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	taskOptions := []asynq.Option{asynq.TaskID(transactionID), asynq.Queue(EXPIREDINFLIGHT_QUEUE), asynq.ProcessIn(time.Until(expiresAt))}
+	task := asynq.NewTask(EXPIREDINFLIGHT_QUEUE, IPayload, taskOptions...)
+	info, err := q.Client.Enqueue(task)
+	if err != nil {
+		log.Println(err, info)
+		return err
+	}
+	log.Printf(" [*] Successfully enqueued inflight expiry: %+v", transactionID)
+	return nil
+}
 
-func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) error {
+func (q *Queue) Enqueue(_ context.Context, transaction *model.Transaction) error {
 	payload, err := json.Marshal(transaction)
 	if err != nil {
 		log.Fatal(err)
@@ -46,7 +62,12 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 		log.Println(err, info)
 		return err
 	}
-	log.Printf(" [*] Successfully enqueued task: %+v", transaction.Reference)
+	log.Printf(" [*] Successfully enqueued transaction: %+v", transaction.Reference)
+
+	if !transaction.InflightExpiryDate.IsZero() {
+		fmt.Println(transaction.InflightExpiryDate)
+		return q.queueInflightExpiry(transaction.TransactionID, transaction.InflightExpiryDate)
+	}
 
 	return nil
 }

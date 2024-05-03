@@ -30,7 +30,7 @@ func TestRecordTransaction(t *testing.T) {
 		Source:         source,
 		Destination:    destination,
 		Amount:         10,
-		AllowOverdraft: true,
+		AllowOverdraft: false,
 		Precision:      100,
 		Currency:       "NGN",
 	}

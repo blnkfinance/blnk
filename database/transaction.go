@@ -185,7 +185,7 @@ func (d Datasource) GetTotalCommittedTransactions(parentID string) (int64, error
 	err := row.Scan(&totalAmount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, errors.New("no committed transactions found for the given parent ID")
+			return 0, nil
 		}
 		return 0, err
 	}
