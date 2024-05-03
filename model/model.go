@@ -114,6 +114,13 @@ func ApplyPrecision(transaction *Transaction) int64 {
 	return int64(transaction.Amount * transaction.Precision)
 }
 
+func ApplyRate(transaction *Transaction) float64 {
+	if transaction.Rate == 0 {
+		transaction.Rate = 1
+	}
+	return transaction.Amount * transaction.Rate
+}
+
 func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
 	if transaction.AllowOverdraft {
 		// Skip balance check if overdraft is allowed
@@ -138,6 +145,7 @@ func (transaction *Transaction) validate() error {
 
 func UpdateBalances(transaction *Transaction, source, destination *Balance) error {
 	transaction.PreciseAmount = ApplyPrecision(transaction)
+	origanialAmount := transaction.Amount
 	err := transaction.validate()
 	if err != nil {
 		return err
@@ -153,9 +161,14 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	source.computeBalance(transaction.Inflight)
 
 	//compute destination balance
+	transaction.Amount = ApplyRate(transaction) //apply exchange rate to destination if rate is passed.
 	transaction.PreciseAmount = ApplyPrecision(transaction)
 	destination.addCredit(transaction.PreciseAmount, transaction.Inflight)
 	destination.computeBalance(transaction.Inflight)
+
+	fmt.Println(origanialAmount)
+	transaction.Amount = origanialAmount //revert *Transaction.Amount back original amount after modification for destination rates
+	transaction.PreciseAmount = ApplyPrecision(transaction)
 	return nil
 }
 

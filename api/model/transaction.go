@@ -6,6 +6,7 @@ import (
 
 type RecordTransaction struct {
 	Amount             float64                `json:"amount"`
+	Rate               float64                `json:"rate"`
 	Precision          float64                `json:"precision"`
 	AllowOverDraft     bool                   `json:"allow_overdraft"`
 	Inflight           bool                   `json:"inflight"`
