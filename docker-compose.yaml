@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   server:
-    image: jerryenebeli/blnk:v0.6.1
+    image: jerryenebeli/blnk:v0.6.2
     restart: on-failure
     ports:
       - "5001:5001"
@@ -15,7 +15,7 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: jerryenebeli/blnk:v0.6.1
+    image: jerryenebeli/blnk:v0.6.2
     restart: on-failure
     entrypoint: [ "./blnk", "workers"]
     depends_on:
