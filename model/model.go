@@ -166,7 +166,6 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	destination.addCredit(transaction.PreciseAmount, transaction.Inflight)
 	destination.computeBalance(transaction.Inflight)
 
-	fmt.Println(origanialAmount)
 	transaction.Amount = origanialAmount //revert *Transaction.Amount back original amount after modification for destination rates
 	transaction.PreciseAmount = ApplyPrecision(transaction)
 	return nil
