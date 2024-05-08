@@ -17,8 +17,8 @@ export default function () {
             "allow_overdraft":true,
             "reference": uuidv4(),
             "currency": "NGN",
-            "source": "@world",
-            "destination": "@cash"
+            "source": `@${uuidv4()}`,
+            "destination": `@${uuidv4()}`
         }
 
     );

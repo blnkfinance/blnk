@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -19,17 +18,19 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-const NumberOfQueues = 5
-
 func (b *blnkInstance) processTransaction(cxt context.Context, t *asynq.Task) error {
 	var txn model.Transaction
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
 		logrus.Error(err)
 		return err
 	}
-
-	logrus.Printf(" [*] Processing Transaction %s. source %s destination %s", txn.TransactionID, txn.Source, txn.Destination)
 	_, err := b.blnk.RecordTransaction(cxt, &txn)
+
+	if err != nil {
+		return err
+	}
+	//todo only reject insufficient balance transaction and push the rest back for retry
+
 	if err != nil {
 		_, err := b.blnk.RejectTransaction(cxt, &txn, err.Error())
 		if err != nil {
@@ -72,10 +73,10 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			queues := make(map[string]int)
-			queues[blnk.WEBHOOK_QUEUE] = 10
-			queues[blnk.EXPIREDINFLIGHT_QUEUE] = 1
+			queues[blnk.WEBHOOK_QUEUE] = 3
+			queues[blnk.EXPIREDINFLIGHT_QUEUE] = 3
 
-			for i := 1; i <= NumberOfQueues; i++ {
+			for i := 1; i <= blnk.NumberOfQueues; i++ {
 				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
 				queues[queueName] = 1
 			}
@@ -83,15 +84,14 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			srv := asynq.NewServer(
 				asynq.RedisClientOpt{Addr: conf.Redis.Dns},
 				asynq.Config{
-					Concurrency:   1,
-					Queues:        queues,
-					GroupMaxDelay: time.Second,
+					Concurrency: 1,
+					Queues:      queues,
 				},
 			)
 
 			mux := asynq.NewServeMux()
 			// Register handler for each queue
-			for i := 1; i <= NumberOfQueues; i++ {
+			for i := 1; i <= blnk.NumberOfQueues; i++ {
 				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
 				mux.HandleFunc(queueName, b.processTransaction)
 			}

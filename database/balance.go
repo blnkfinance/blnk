@@ -321,10 +321,7 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 	}
 
 	defer func(tx *sql.Tx) {
-		err := tx.Rollback()
-		if err != nil {
-			logrus.Warningln(err)
-		}
+		_ = tx.Rollback()
 	}(tx)
 
 	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
@@ -395,9 +392,9 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 	monitor.CreatedAt = time.Now()
 
 	_, err := d.Conn.Exec(`
-		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, description, call_back_url, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7,$8)
-	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value,precision,precise_value, description, call_back_url, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9,$10)
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue, monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
 
 	if err != nil {
 		return monitor, err
@@ -407,13 +404,13 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	row := d.Conn.QueryRow(`
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
+		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at 
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
 
 	monitor := &model.BalanceMonitor{}
 	condition := &model.AlertCondition{}
-	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &condition.Precision, &condition.PreciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

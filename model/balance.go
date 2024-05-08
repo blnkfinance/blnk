@@ -30,8 +30,8 @@ type Balance struct {
 type BalanceMonitor struct {
 	MonitorID   string         `json:"monitor_id"`
 	BalanceID   string         `json:"balance_id"`
-	Description string         `json:"description"`
-	CallBackURL string         `json:"call_back_url"`
+	Description string         `json:"description,omitempty"`
+	CallBackURL string         `json:"-"`
 	CreatedAt   time.Time      `json:"created_at"`
 	Condition   AlertCondition `json:"condition"`
 }
@@ -53,7 +53,9 @@ type BalanceTracker struct {
 	Mutex       sync.Mutex
 }
 type AlertCondition struct {
-	Value    int64  `json:"value"`
-	Field    string `json:"field"`
-	Operator string `json:"operator"`
+	Value        float64 `json:"value"`
+	Precision    float64 `json:"precision"`
+	PreciseValue int64   `json:"precise_value"`
+	Field        string  `json:"field"`
+	Operator     string  `json:"operator"`
 }

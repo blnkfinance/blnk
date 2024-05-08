@@ -69,9 +69,24 @@ func (balance *Balance) computeBalance(inflight bool) {
 	balance.Balance = balance.CreditBalance - balance.DebitBalance
 }
 
+func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
+	if transaction.AllowOverdraft {
+		// Skip balance check if overdraft is allowed
+		return nil
+	}
+
+	// Use the provided sourceBalance for the check
+	if sourceBalance.Balance < transaction.PreciseAmount {
+		return fmt.Errorf("insufficient funds in source balance")
+	}
+
+	return nil
+}
+
 func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
 	preciseAmount := ApplyPrecision(transaction)
-	transaction.PreciseAmount = preciseAmount
+
+	transaction.PreciseAmount = preciseAmount //set transaction precision amount
 	if balance.InflightDebitBalance >= preciseAmount {
 		balance.InflightDebitBalance -= preciseAmount
 		balance.DebitBalance += preciseAmount
@@ -121,20 +136,6 @@ func ApplyRate(transaction *Transaction) float64 {
 	return transaction.Amount * transaction.Rate
 }
 
-func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
-	if transaction.AllowOverdraft {
-		// Skip balance check if overdraft is allowed
-		return nil
-	}
-
-	// Use the provided sourceBalance for the check
-	if sourceBalance.Balance < transaction.PreciseAmount {
-		return fmt.Errorf("insufficient funds in source balance")
-	}
-
-	return nil
-}
-
 func (transaction *Transaction) validate() error {
 	if transaction.Amount <= 0 {
 		return errors.New("transaction amount must be positive")
@@ -174,17 +175,17 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 func (bm *BalanceMonitor) CheckCondition(b *Balance) bool {
 	switch bm.Condition.Field {
 	case "debit_balance":
-		return compare(b.DebitBalance, bm.Condition.Operator, bm.Condition.Value)
+		return compare(b.DebitBalance, bm.Condition.Operator, bm.Condition.PreciseValue)
 	case "credit_balance":
-		return compare(b.CreditBalance, bm.Condition.Operator, bm.Condition.Value)
+		return compare(b.CreditBalance, bm.Condition.Operator, bm.Condition.PreciseValue)
 	case "balance":
-		return compare(b.Balance, bm.Condition.Operator, bm.Condition.Value)
+		return compare(b.Balance, bm.Condition.Operator, bm.Condition.PreciseValue)
 	case "inflight_debit_balance":
-		return compare(b.InflightDebitBalance, bm.Condition.Operator, bm.Condition.Value)
+		return compare(b.InflightDebitBalance, bm.Condition.Operator, bm.Condition.PreciseValue)
 	case "inflight_credit_balance":
-		return compare(b.InflightCreditBalance, bm.Condition.Operator, bm.Condition.Value)
+		return compare(b.InflightCreditBalance, bm.Condition.Operator, bm.Condition.PreciseValue)
 	case "inflight_balance":
-		return compare(b.InflightBalance, bm.Condition.Operator, bm.Condition.Value)
+		return compare(b.InflightBalance, bm.Condition.Operator, bm.Condition.PreciseValue)
 	}
 	return false
 }

@@ -61,7 +61,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			//todo fix exposed api key
-			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{"http://typesense:8108"})
+			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
 			listener := pg_listener.NewDBListener(pg_listener.ListenerConfig{
 				PgConnStr: cfg.DataSource.Dns,
 				Interval:  10 * time.Second,

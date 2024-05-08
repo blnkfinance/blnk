@@ -103,13 +103,21 @@ func SendWebhook(newWebhook NewWebhook) error {
 }
 
 func ProcessWebhook(_ context.Context, task *asynq.Task) error {
+	conf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+
+	if conf.Notification.Webhook.Url == "" {
+		return nil
+	}
 	var payload NewWebhook
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		log.Printf("Error unmarshaling task payload: %v", err)
 		return err
 	}
 	log.Printf("Processing webhook: %+v\n", payload.Event)
-	err := processHTTP(payload)
+	err = processHTTP(payload)
 	if err != nil {
 		return err
 	}

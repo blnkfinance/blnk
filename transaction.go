@@ -39,7 +39,6 @@ func logAndRecordError(span trace.Span, msg string, err error) error {
 }
 
 func (l *Blnk) getSourceAndDestination(transaction *model.Transaction) (source *model.Balance, destination *model.Balance, err error) {
-
 	var sourceBalance, destinationBalance *model.Balance
 
 	// Check if Source starts with "@"
@@ -75,7 +74,6 @@ func (l *Blnk) getSourceAndDestination(transaction *model.Transaction) (source *
 			return nil, nil, err
 		}
 	}
-
 	return sourceBalance, destinationBalance, nil
 }
 
@@ -107,14 +105,15 @@ func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transa
 }
 
 func (l *Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
-	err := SendWebhook(NewWebhook{
-		Event:   "transaction.applied",
-		Payload: transaction,
-	})
-	if err != nil {
-		notification.NotifyError(err)
-	}
-
+	go func() {
+		err := SendWebhook(NewWebhook{
+			Event:   "transaction.applied",
+			Payload: transaction,
+		})
+		if err != nil {
+			notification.NotifyError(err)
+		}
+	}()
 }
 
 func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
@@ -196,6 +195,7 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	}
 
 	transaction = l.updateTransactionDetails(transaction, sourceBalance, destinationBalance)
+
 	transaction, err = l.persistTransaction(cxt, transaction)
 	if err != nil {
 		return nil, err
@@ -273,10 +273,14 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 	if amount != 0 {
 		transaction.Amount = amount
 		transaction.PreciseAmount = 0
+	} else {
+		transaction.Amount = float64(amountLeft) / transaction.Precision
 	}
 
 	if (amountLeft) < model.ApplyPrecision(transaction) {
 		return transaction, fmt.Errorf("can not commit %s%.2f. You can only commit an amount between 1.00 - %s%.2f", transaction.Currency, amount, transaction.Currency, float64(amountLeft)/transaction.Precision)
+	} else if amountLeft == 0 {
+		return transaction, fmt.Errorf("can not commit %s%.2f. Transaction already commited with amount of - %s%.2f", transaction.Currency, amount, transaction.Currency, float64(committedAmount)/transaction.Precision)
 	}
 
 	// Commit inflight balances

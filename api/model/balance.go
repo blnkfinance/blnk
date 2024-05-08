@@ -16,7 +16,8 @@ type CreateBalanceMonitor struct {
 }
 
 type MonitorCondition struct {
-	Field    string `json:"field"`
-	Operator string `json:"operator"`
-	Value    int64  `json:"value"`
+	Precision float64 `json:"precision"`
+	Field     string  `json:"field"`
+	Operator  string  `json:"operator"`
+	Value     float64 `json:"value"`
 }

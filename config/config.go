@@ -36,6 +36,10 @@ type RedisConfig struct {
 	Dns string `json:"dns" envconfig:"BLNK_REDIS_DNS"`
 }
 
+type TypeSenseConfig struct {
+	Dns string `json:"dns" envconfig:"BLNK_TYPESENSE_DNS"`
+}
+
 type AccountNumberGenerationConfig struct {
 	EnableAutoGeneration bool `json:"enable_auto_generation"`
 	HttpService          struct {
@@ -73,6 +77,7 @@ type Configuration struct {
 	Server                  ServerConfig                  `json:"server"`
 	DataSource              DataSourceConfig              `json:"data_source"`
 	Redis                   RedisConfig                   `json:"redis"`
+	TypeSense               TypeSenseConfig               `json:"typesense"`
 	TypeSenseKey            string                        `json:"type_sense_key"`
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
@@ -150,6 +155,10 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	if cnf.ProjectName == "" {
 		log.Println("Warning: Project name is empty. Setting a default name.")
 		cnf.ProjectName = "Blnk Server"
+	}
+
+	if cnf.TypeSense.Dns == "" {
+		cnf.TypeSense.Dns = "http://typesense:8108"
 	}
 
 	if cnf.DataSource.Dns == "" {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -70,9 +71,12 @@ func (t *TypesenseClient) Search(ctx context.Context, collection string, searchP
 
 func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
 	if err := EnsureCollectionsExist(t, context.Background()); err != nil {
-		fmt.Println("Failed to ensure collections exist:", err)
-		logrus.Error(err)
+		if strings.Contains(err.Error(), "already exists.") {
+			return nil
+		}
+		logrus.Warningln(err)
 	}
+
 	metaData, ok := data["meta_data"]
 	if ok {
 		jsonString, err := json.Marshal(metaData)

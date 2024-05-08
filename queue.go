@@ -17,7 +17,7 @@ import (
 const TRANSACTION_QUEUE = "new:transaction"
 const WEBHOOK_QUEUE = "new:webhoook"
 const EXPIREDINFLIGHT_QUEUE = "new:inflight-expiry"
-const NumberOfQueues = 5
+const NumberOfQueues = 20
 
 type Queue struct {
 	Client    *asynq.Client

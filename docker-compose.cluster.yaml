@@ -42,7 +42,7 @@ services:
     build: .
     entrypoint: ["./blnk", "migrate", "up"]
     depends_on:
-      - postgres
+      - server
     volumes:
       - ./blnk.json:/blnk.json
 

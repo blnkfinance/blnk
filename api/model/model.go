@@ -70,6 +70,7 @@ func (c *MonitorCondition) ValidateMonitorCondition() error {
 	return validation.ValidateStruct(c,
 		validation.Field(&c.Field, validation.Required, validation.In("debit_balance", "credit_balance", "balance", "inflight_debit_balance", "inflight_credit_balance", "inflight_balance")),
 		validation.Field(&c.Operator, validation.Required),
+		validation.Field(&c.Precision, validation.Required),
 		validation.Field(&c.Value, validation.Required),
 	)
 }
@@ -131,9 +132,10 @@ func (b *CreateBalance) ToBalance() model.Balance {
 
 func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
 	return model.BalanceMonitor{BalanceID: b.BalanceId, Condition: model.AlertCondition{
-		Field:    b.Condition.Field,
-		Operator: b.Condition.Operator,
-		Value:    b.Condition.Value,
+		Field:     b.Condition.Field,
+		Operator:  b.Condition.Operator,
+		Value:     b.Condition.Value,
+		Precision: b.Condition.Precision,
 	}, CallBackURL: b.CallBackURL}
 }
 
@@ -142,15 +144,28 @@ func (a *CreateAccount) ToAccount() model.Account {
 }
 
 func (t *RecordTransaction) ToTransaction() *model.Transaction {
-	scheduledFor, err := time.Parse("2006-01-02T15:04:05Z07:00", t.ScheduledFor)
-	if err != nil {
-		logrus.Error(err)
+	var scheduledFor time.Time
+	var inflightExpiryDate time.Time
+
+	if t.ScheduledFor != "" {
+		scheduledTime, err := time.Parse("2006-01-02T15:04:05Z07:00", t.ScheduledFor)
+		if err != nil {
+			logrus.Error(err)
+		}
+
+		scheduledFor = scheduledTime
+
 	}
 
-	InflightExpiryDate, err := time.Parse("2006-01-02T15:04:05Z07:00", t.InflightExpiryDate)
-	if err != nil {
-		logrus.Error(err)
+	if t.InflightExpiryDate != "" {
+		inflightExpiry, err := time.Parse("2006-01-02T15:04:05Z07:00", t.InflightExpiryDate)
+		if err != nil {
+			logrus.Error(err)
+		}
+
+		inflightExpiryDate = inflightExpiry
+
 	}
 
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: InflightExpiryDate, Rate: t.Rate}
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: inflightExpiryDate, Rate: t.Rate}
 }
