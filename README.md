@@ -1,4 +1,4 @@
-![Build and Test Status](https://res.cloudinary.com/dp8bwjdvg/image/upload/v1709658741/logo_bze13p.svg
+![Build and Test Status](https://res.cloudinary.com/dp8bwjdvg/image/upload/v1715242318/Blnk_AVI_tuxwg1.png)
 )
 
 # Status at a Glance
