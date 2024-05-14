@@ -25,8 +25,9 @@ services:
       - ./blnk.json:/blnk.json
 
   migration:
-    build: .
+    image:  jerryenebeli/blnk:v0.6.2
     entrypoint: [ "./blnk", "migrate","up" ]
+    restart: on-failure
     depends_on:
       - postgres
     volumes:

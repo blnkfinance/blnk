@@ -38,14 +38,6 @@ services:
     volumes:
       - ./blnk.json:/blnk.json
 
-  migration:
-    build: .
-    entrypoint: ["./blnk", "migrate", "up"]
-    depends_on:
-      - server
-    volumes:
-      - ./blnk.json:/blnk.json
-
   redis:
     image: redis:7.2.4
     ports:
