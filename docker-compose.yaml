@@ -2,8 +2,11 @@ version: '3.8'
 
 services:
   server:
-    image: jerryenebeli/blnk:v0.6.2
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.2}
+    container_name: server
     restart: on-failure
+    environment:
+      TZ: ${TZ:-Etc/UTC}
     ports:
       - "5001:5001"
       - "80:80"
@@ -15,7 +18,8 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: jerryenebeli/blnk:v0.6.2
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.2}
+    container_name: worker
     restart: on-failure
     entrypoint: [ "./blnk", "workers"]
     depends_on:
@@ -25,7 +29,7 @@ services:
       - ./blnk.json:/blnk.json
 
   migration:
-    image:  jerryenebeli/blnk:v0.6.2
+    image:  ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.2}
     entrypoint: [ "./blnk", "migrate","up" ]
     restart: on-failure
     depends_on:
@@ -35,27 +39,32 @@ services:
 
   redis:
     image: redis:7.2.4
+    container_name: redis
     ports:
       - "6379:6379"
 
   postgres:
-    image: postgres:latest
+    image: ${POSTGRES_IMAGE:-postgres:latest}
+    container_name: ${POSTGRES_CONTAINER:-postgres}
+    restart: on-failure
     ports:
-      - "5432:5432"
+      - "${POSTGRES_OUTER_PORT:-5432}:5432"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: blnk
+      TZ: ${TZ:-Etc/UTC}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-blnk}
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER:-postgres}" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
   typesense:
     image: typesense/typesense:0.23.1
+    container_name: typesense
     command: ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
     volumes:
       - typesense_data:/data
@@ -65,3 +74,4 @@ services:
 volumes:
   pg_data:
   typesense_data:
+
