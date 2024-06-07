@@ -79,13 +79,7 @@ main() {
                 printf "Creating file: ${YEL}${env}${NC} with secrets... Check it before you spin up the stack.\n"
                 cp ${example} ${env}
                 POSTGRES_PASSWORD=$(openssl rand -base64 15)
-                DIR_KEY=$(openssl rand -base64 15)
-                DIR_SECRET=$(openssl rand -base64 15)
-                DIR_ADMIN_PASSWORD=$(openssl rand -base64 15)
                 sed -i "s|{POSTGRES_PASSWORD}|$POSTGRES_PASSWORD|g" ${env}
-                sed -i "s|{DIR_KEY}|$DIR_KEY|g" ${env}
-                sed -i "s|{DIR_SECRET}|$DIR_SECRET|g" ${env}
-                sed -i "s|{DIR_ADMIN_PASSWORD}|$DIR_ADMIN_PASSWORD|g" ${env}
                 #checking if .env created successfully:
                 if [ ! -r ${env} ]
                 then
