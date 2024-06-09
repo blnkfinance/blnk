@@ -72,9 +72,8 @@ func (t *TypesenseClient) Search(ctx context.Context, collection string, searchP
 func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
 	if err := EnsureCollectionsExist(t, context.Background()); err != nil {
 		if strings.Contains(err.Error(), "already exists.") {
-			return nil
+			logrus.Warningln(err)
 		}
-		logrus.Warningln(err)
 	}
 
 	metaData, ok := data["meta_data"]
