@@ -381,6 +381,7 @@ func (l *Blnk) QueueTransaction(cxt context.Context, transaction *model.Transact
 
 	transaction.Status = StatusQueued
 	transaction.SkipBalanceUpdate = true
+	transaction.CreatedAt = time.Now()
 
 	if !transaction.ScheduledFor.IsZero() {
 		transaction.Status = StatusScheduled

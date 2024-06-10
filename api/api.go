@@ -2,15 +2,11 @@ package api
 
 import (
 	"fmt"
-	"log"
 	"net/http"
-	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/typesense/typesense-go/typesense/api"
 
 	"github.com/jerry-enebeli/blnk/config"
-	pg_listener "github.com/jerry-enebeli/blnk/internal/pg-listener"
 
 	"github.com/jerry-enebeli/blnk/api/middleware"
 
@@ -61,48 +57,6 @@ func (a Api) Router() *gin.Engine {
 	return a.router
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
-func (a Api) handleNotification(table string, data map[string]interface{}) error {
-	log.Printf("Table: %s, Data: %v", table, data)
-	return nil
-}
-
-func wsHandler(c *gin.Context) {
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Printf("Failed to set websocket upgrade: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	for {
-		// Read message from browser
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("Error reading message: %v", err)
-			break
-		}
-		log.Printf("Received message: %s", msg)
-
-		listener := pg_listener.NewDBListener(pg_listener.ListenerConfig{
-			PgConnStr: cfg.DataSource.Dns,
-			Interval:  10 * time.Second,
-			Timeout:   time.Minute,
-		}, Api)
-
-		// Write message back to browser
-		if err := conn.WriteJSON(); err != nil {
-			log.Printf("Error writing message: %v", err)
-			break
-		}
-	}
-}
-
 func NewAPI(b *blnk.Blnk) *Api {
 	gin.SetMode(gin.ReleaseMode)
 	conf, err := config.Fetch()
@@ -113,8 +67,6 @@ func NewAPI(b *blnk.Blnk) *Api {
 	if conf.Server.Secure {
 		r.Use(middleware.SecretKeyAuthMiddleware())
 	}
-
-	r.GET("/ws", wsHandler) // WebSocket endpoint
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")
