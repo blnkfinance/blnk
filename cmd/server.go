@@ -67,6 +67,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 				Interval:  10 * time.Second,
 				Timeout:   time.Minute,
 			}, newSearch)
+
 			go listener.Start()
 
 			if cfg.Server.SSL {

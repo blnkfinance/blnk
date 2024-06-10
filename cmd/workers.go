@@ -25,7 +25,6 @@ func (b *blnkInstance) processTransaction(cxt context.Context, t *asynq.Task) er
 		return err
 	}
 	_, err := b.blnk.RecordTransaction(cxt, &txn)
-
 	if err != nil {
 		return err
 	}
@@ -42,6 +41,8 @@ func (b *blnkInstance) processTransaction(cxt context.Context, t *asynq.Task) er
 		})
 		return err
 	}
+
+	log.Println(" [*] Transaction Processed", txn.ID)
 	return nil
 }
 

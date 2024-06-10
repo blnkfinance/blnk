@@ -48,32 +48,38 @@ func EnsureCollectionsExist(client *TypesenseClient, ctx context.Context) error 
 	transaction := model.Transaction{}
 	_, err := client.CreateCollection(ctx, ledger.ToSchema())
 	if err != nil {
-		logrus.Error(err)
+		return err
 	}
 	_, err = client.CreateCollection(ctx, balance.ToSchema())
 	if err != nil {
-		logrus.Error(err)
+		return err
 	}
 	_, err = client.CreateCollection(ctx, transaction.ToSchema())
 	if err != nil {
-		logrus.Error(err)
+		return err
 	}
 	return nil
 }
 
 func (t *TypesenseClient) CreateCollection(ctx context.Context, schema *api.CollectionSchema) (*api.CollectionResponse, error) {
-	return t.Client.Collections().Create(ctx, schema)
+	api, err := t.Client.Collections().Create(ctx, schema)
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists.") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return api, nil
 }
 
 func (t *TypesenseClient) Search(ctx context.Context, collection string, searchParams *api.SearchCollectionParams) (*api.SearchResult, error) {
 	return t.Client.Collection(collection).Documents().Search(ctx, searchParams)
+
 }
 
 func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
 	if err := EnsureCollectionsExist(t, context.Background()); err != nil {
-		if strings.Contains(err.Error(), "already exists.") {
-			logrus.Warningln(err)
-		}
+		logrus.Warningln(err)
 	}
 
 	metaData, ok := data["meta_data"]
