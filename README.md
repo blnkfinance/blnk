@@ -1,19 +1,84 @@
-![Logo](https://res.cloudinary.com/dp8bwjdvg/image/upload/v1715242318/Blnk_AVI_tuxwg1.png
-)
+![Blnk logo](https://res.cloudinary.com/dmxizylxw/image/upload/v1719884842/blnk-github-logo_twgk1x.png)
 
-# Status at a Glance
- ![Build and Test Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/go.yml/badge.svg)
+## Status at a Glance
+![Build and Test Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/go.yml/badge.svg)
 ![Deploy to Docker Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/docker-publish.yml/badge.svg)
 ![Linter Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/lint.yml/badge.svg)
- [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
+![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
 
-# Welcome to Blnk
-Welcome to Blnk — an open-source ledger designed for the modern developer. It enables developers to build and manage complex financial transaction records and money movement.
+## Open-source fintech ledger for the internet
 
-Every financial product is made up of different transactions happening concurrently moving from one location to another. Some transactions will interact with external parties like cards, payouts, deposits, etc. Others will interact within your organization like moving money between user accounts or to/fro your organization accounts.
+Blnk Ledger is an open-source fintech database for building fintech products to standard and at scale. We designed Blnk to help developers do three things well:
 
-Blnk gives you, the developer, a starting point to improve how you build, operate and perfectly manage money movement and storage in a reliable, scaleable and secure way.
+1. Accurately record transactions in their system.
+2. Correctly manage complex flow of funds and transaction data.
+3. Reliably manage the size of your transactions as your product scales.
 
-## Get Started and Core Features
-- [Documentation](https://docs.blnkledger.com)
+## About Blnk
 
+Building fintech starts off simple, and gets quickly difficult & complex the more time you spend with it. Blnk offers specialized tools to help developers today manage and navigate this complexity correctly for their respective organizations.
+
+Every fintech product is made up of transactions — happening concurrently, moving all the time from one place to another. Sometimes, they will interact with parties outside of your application like cards, deposits, bank accounts, etc; sometimes, they happen within your application between user balances or to/fro your organization accounts.
+
+With Blnk, you get a full-service starting point for building, managing and operating money movement and store of value in a reliable, secure and scaleable way.
+
+## Quick Links
+- [Visit the Blnk Website](https://blnkfinance.com)
+- [Our developer documentation](https://docs.blnkledger.com)
+
+## Quickstart
+
+The fastest way to get acquainted with Blnk is by [installing Blnk](#installation). If you'd like to read more information about how Blnk works, you can get started here:
+
+- [Welcome to Blnk](https://docs.blnkledger.com/intro/welcome)
+- [Understanding Double Entry](https://docs.blnkledger.com/ledger/guide/double-entry-101)
+- [Create ledgers and ledger balances](https://docs.blnkledger.com/ledger/tutorial/create-a-ledger)
+- [Record a transaction](https://docs.blnkledger.com/ledger/tutorial/record-a-transaction)
+
+## Installation
+
+To install Blnk, make sure you have [Docker](https://www.docker.com/) and [Compose](https://docs.docker.com/compose/) installed and running on your machine.
+
+To get started with Blnk, first clone the repository into your machine:
+```
+git clone https://github.com/blnkledger/Blnk && cd Blnk
+```
+and create a configuration file, `blnk.json`:
+```
+touch blnk.json
+```
+then copy and save the following configuration:
+```json
+{
+  "project_name": "Blnk",
+  "data_source": {
+    "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
+  },
+  "redis": {
+    "dns": "redis:6379"
+  },
+  "server": {
+    "domain": "blnk.io",
+    "ssl": false,
+    "ssl_email": "jerryenebeli@gmail.com",
+    "port": "5001"
+  },
+  "notification": {
+    "slack": {
+      "webhook_url": "https://hooks.slack.com"
+    }
+  }
+}
+```
+then start your Blnk server with Docker Compose:
+```
+docker compose up
+```
+
+## Contributions
+
+Contributions and feedback are welcome and encouraged. Join our [Discord community](https://discord.gg/7WNv94zPpx) to do so, and connect with other developers from around the world.
+
+## License
+
+This project uses the [Apache License 2.0](LICENSE.md).
