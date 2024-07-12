@@ -26,6 +26,8 @@ With Blnk, you get a full-service starting point for building, managing and oper
 - [Virtual card issuance](https://docs.blnkfinance.com/ledger/examples/virtual-cards-issuance)
 - [Loyalty points system](https://docs.blnkfinance.com/ledger/examples/customer-loyalty-points-system)
 - [Expense management system](https://docs.blnkfinance.com/ledger/examples/expense-management)
+- [Escrow application](https://docs.blnkfinance.com/ledger/examples/escrow-application)
+- [Savings application](https://docs.blnkfinance.com/ledger/examples/savings-application)
 
 ## Quick Links
 - [Visit the Blnk Website](https://blnkfinance.com)
