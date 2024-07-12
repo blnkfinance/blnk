@@ -20,20 +20,25 @@ Building fintech starts off simple, and gets quickly difficult & complex the mor
 
 Every fintech product is made up of transactions — happening concurrently, moving all the time from one place to another. Sometimes, they will interact with parties outside of your application like cards, deposits, bank accounts, etc; sometimes, they happen within your application between user balances or to/fro your organization accounts.
 
-With Blnk, you get a full-service starting point for building, managing and operating money movement and store of value in a reliable, secure and scaleable way.
+With Blnk, you get a full-service starting point for building, managing and operating money movement and store of value in a reliable, secure and scaleable way. Here are some use-cases of the Blnk Ledger:
+
+- [Multi-currency wallets](https://docs.blnkfinance.com/ledger/examples/multicurrency-wallets)
+- [Virtual card issuance](https://docs.blnkfinance.com/ledger/examples/virtual-cards-issuance)
+- [Loyalty points system](https://docs.blnkfinance.com/ledger/examples/customer-loyalty-points-system)
+- [Expense management system](https://docs.blnkfinance.com/ledger/examples/expense-management)
 
 ## Quick Links
 - [Visit the Blnk Website](https://blnkfinance.com)
-- [Our developer documentation](https://docs.blnkledger.com)
+- [Our developer documentation](https://docs.blnkfinance.com)
 
 ## Quickstart
 
 The fastest way to get acquainted with Blnk is by [installing Blnk](#installation). If you'd like to read more information about how Blnk works, you can get started here:
 
-- [Welcome to Blnk](https://docs.blnkledger.com/intro/welcome)
-- [Understanding Double Entry](https://docs.blnkledger.com/ledger/guide/double-entry-101)
-- [Create ledgers and ledger balances](https://docs.blnkledger.com/ledger/tutorial/create-a-ledger)
-- [Record a transaction](https://docs.blnkledger.com/ledger/tutorial/record-a-transaction)
+- [Welcome to Blnk](https://docs.blnkfinance.com/intro/welcome)
+- [Understanding Double Entry](https://docs.blnkfinance.com/ledger/guide/double-entry-101)
+- [Create ledgers and ledger balances](https://docs.blnkfinance.com/ledger/tutorial/create-a-ledger)
+- [Record a transaction](https://docs.blnkfinance.com/ledger/tutorial/record-a-transaction)
 
 ## Installation
 
