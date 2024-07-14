@@ -1,9 +1,9 @@
 ![Blnk logo](https://res.cloudinary.com/dmxizylxw/image/upload/v1719884842/blnk-github-logo_twgk1x.png)
 
 ## Status at a Glance
-![Build and Test Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/go.yml/badge.svg)
-![Deploy to Docker Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/docker-publish.yml/badge.svg)
-![Linter Status](https://github.com/jerry-enebeli/Blnk/actions/workflows/lint.yml/badge.svg)
+![Build and Test Status](https://github.com/blnkfinance/blnk/actions/workflows/go.yml/badge.svg)
+![Deploy to Docker Status](https://github.com/blnkfinance/blnk/actions/workflows/docker-publish.yml/badge.svg)
+![Linter Status](https://github.com/blnkfinance/blnk/actions/workflows/lint.yml/badge.svg)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](code_of_conduct.md)
 
 ## Open-source fintech ledger for the internet
