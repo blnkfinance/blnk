@@ -76,6 +76,25 @@ func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
 	return txn, nil
 }
 
+func (d Datasource) IsParentTransactionVoid(parentID string) (bool, error) {
+	row := d.Conn.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM blnk.transactions
+			WHERE parent_transaction = $1
+			AND status = 'VOID'
+		)
+	`, parentID)
+
+	var exists bool
+	err := row.Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
 func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string) (bool, error) {
 	cxt, span := otel.Tracer("Queue transaction").Start(ctx, "Getting transaction from db by reference")
 	defer span.End()
