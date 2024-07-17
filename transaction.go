@@ -32,10 +32,23 @@ const (
 	StatusRejected  = "REJECTED"
 )
 
-func logAndRecordError(span trace.Span, msg string, err error) error {
-	span.RecordError(err)
-	logrus.Error(msg, err)
-	return err
+func getEventFromStatus(status string) string {
+	switch strings.ToLower(status) {
+	case strings.ToLower(StatusQueued):
+		return "transaction.queued"
+	case strings.ToLower(StatusApplied):
+		return "transaction.applied"
+	case strings.ToLower(StatusScheduled):
+		return "transaction.scheduled"
+	case strings.ToLower(StatusInflight):
+		return "transaction.inflight"
+	case strings.ToLower(StatusVoid):
+		return "transaction.void"
+	case strings.ToLower(StatusRejected):
+		return "transaction.rejected"
+	default:
+		return "transaction.unknown"
+	}
 }
 
 func (l *Blnk) getSourceAndDestination(transaction *model.Transaction) (source *model.Balance, destination *model.Balance, err error) {
@@ -107,7 +120,7 @@ func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transa
 func (l *Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
 	go func() {
 		err := SendWebhook(NewWebhook{
-			Event:   "transaction.applied",
+			Event:   getEventFromStatus(transaction.Status),
 			Payload: transaction,
 		})
 		if err != nil {
