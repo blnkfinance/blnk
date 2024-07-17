@@ -457,8 +457,18 @@ func (l *Blnk) RefundTransaction(transactionID string) (*model.Transaction, erro
 		return &model.Transaction{}, err
 	}
 
+	parentVoided, err := l.datasource.IsParentTransactionVoid(transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if parentVoided && originalTxn.Status == StatusInflight {
+		originalTxn.Inflight = true
+	}
+
 	newTransaction := *originalTxn
 	newTransaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	newTransaction.ParentTransaction = originalTxn.TransactionID
 	newTransaction.Source = originalTxn.Destination
 	newTransaction.Destination = originalTxn.Source
 	newTransaction.AllowOverdraft = true
