@@ -18,6 +18,7 @@ type IDataSource interface {
 type transaction interface {
 	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)
 	GetTransaction(id string) (*model.Transaction, error)
+	IsParentTransactionVoid(parentID string) (bool, error)
 	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)
 	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)
 	UpdateTransactionStatus(id string, status string) error
