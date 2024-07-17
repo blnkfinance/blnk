@@ -321,6 +321,17 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 		return nil, err
 	}
 
+	parentVoided, err := l.datasource.IsParentTransactionVoid(transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if parentVoided {
+		err = fmt.Errorf("transaction has already been voided")
+		span.RecordError(err)
+		return nil, err
+	}
+
 	// Locking around the transaction source to prevent concurrent modifications
 	locker := redlock.NewLocker(l.redis, transaction.Source, "lock")
 	if err := locker.Lock(ctx, 30*time.Minute); err != nil {
