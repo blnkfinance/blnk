@@ -45,7 +45,7 @@ func (transaction *Transaction) ToJSON() ([]byte, error) {
 	return json.Marshal(transaction)
 }
 
-func (transaction *Transaction) SplitTransaction() ([]Transaction, error) {
+func (transaction *Transaction) SplitTransaction() ([]*Transaction, error) {
 	var ds []Distribution
 
 	if len(transaction.Sources) > 0 {
@@ -60,7 +60,7 @@ func (transaction *Transaction) SplitTransaction() ([]Transaction, error) {
 		return nil, err
 	}
 
-	var transactions []Transaction
+	var transactions []*Transaction
 	counter := 1
 	for direction, amount := range distributions {
 		newTransaction := *transaction                               // Create a copy of the original transaction
@@ -80,7 +80,7 @@ func (transaction *Transaction) SplitTransaction() ([]Transaction, error) {
 
 		newTransaction.Reference = fmt.Sprintf("%s-%d", transaction.Reference, counter)
 		counter++
-		transactions = append(transactions, newTransaction)
+		transactions = append(transactions, &newTransaction)
 	}
 
 	return transactions, nil
