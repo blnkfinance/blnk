@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/jerry-enebeli/blnk/internal/request"
-
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/jerry-enebeli/blnk/config"
