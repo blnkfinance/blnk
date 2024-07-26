@@ -1,6 +1,7 @@
 package pg_listener
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"golang.org/x/time/rate"
 )
 
 type NotificationHandler interface {
@@ -16,14 +18,17 @@ type NotificationHandler interface {
 }
 
 type ListenerConfig struct {
-	PgConnStr string
-	Interval  time.Duration
-	Timeout   time.Duration
+	PgConnStr     string
+	Interval      time.Duration
+	Timeout       time.Duration
+	ThrottleRate  float64
+	ThrottleBurst int
 }
 
 type DBListener struct {
-	config  ListenerConfig
-	handler NotificationHandler
+	config    ListenerConfig
+	handler   NotificationHandler
+	throttler *rate.Limiter
 }
 
 type NotificationPayload struct {
@@ -33,8 +38,9 @@ type NotificationPayload struct {
 
 func NewDBListener(config ListenerConfig, handler NotificationHandler) *DBListener {
 	return &DBListener{
-		config:  config,
-		handler: handler,
+		config:    config,
+		handler:   handler,
+		throttler: rate.NewLimiter(rate.Limit(config.ThrottleRate), config.ThrottleBurst),
 	}
 }
 
@@ -60,10 +66,18 @@ func (d *DBListener) Start() {
 func (d *DBListener) waitForNotification(listener *pq.Listener) {
 	select {
 	case notification := <-listener.Notify:
-		d.handleNotification(notification)
+		d.throttledHandleNotification(notification)
 	case <-time.After(90 * time.Second):
 		fmt.Println("Checking for notifications...")
 	}
+}
+
+func (d *DBListener) throttledHandleNotification(notification *pq.Notification) {
+	if err := d.throttler.Wait(context.Background()); err != nil {
+		log.Printf("Error waiting for throttler: %v", err)
+		return
+	}
+	d.handleNotification(notification)
 }
 
 func (d *DBListener) handleNotification(notification *pq.Notification) {
@@ -77,7 +91,7 @@ func (d *DBListener) handleNotification(notification *pq.Notification) {
 	// Handle null values and special cases in payload.Data
 	for key, value := range payload.Data {
 		if value == nil {
-			payload.Data[key] = "no value"
+			payload.Data[key] = ""
 		} else if key == "id" {
 			if floatValue, ok := value.(float64); ok {
 				payload.Data[key] = strconv.FormatFloat(floatValue, 'f', -1, 64)
