@@ -69,6 +69,7 @@ func (transaction *Transaction) SplitTransaction() ([]*Transaction, error) {
 		newTransaction.Amount = amount                               // Set the amount based on the distribution
 		newTransaction.Sources = nil                                 // Clear the Sources slice since we're dealing with individual sources now
 		newTransaction.Destinations = nil                            // Clear the Sources slice since we're dealing with individual sources now
+		newTransaction.ParentTransaction = transaction.TransactionID // Set the parent transaction ID
 		if len(transaction.Sources) > 0 {
 			newTransaction.Source = direction // Set the source
 			transaction.Sources[counter-1].TransactionID = newTransaction.TransactionID
