@@ -208,3 +208,166 @@ func (d Datasource) GetTotalCommittedTransactions(parentID string) (int64, error
 
 	return totalAmount, nil
 }
+
+func (d Datasource) GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, batchSize, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var transactions []*model.Transaction
+
+	for rows.Next() {
+		transaction := model.Transaction{}
+		var metaDataJSON []byte
+		err = rows.Scan(
+			&transaction.TransactionID,
+			&transaction.ParentTransaction,
+			&transaction.Source,
+			&transaction.Reference,
+			&transaction.Amount,
+			&transaction.PreciseAmount,
+			&transaction.Precision,
+			&transaction.Rate,
+			&transaction.Currency,
+			&transaction.Destination,
+			&transaction.Description,
+			&transaction.Status,
+			&transaction.CreatedAt,
+			&metaDataJSON,
+			&transaction.ScheduledFor,
+			&transaction.Hash,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert metadata from JSON to map
+		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
+		if err != nil {
+			return nil, err
+		}
+
+		transactions = append(transactions, &transaction)
+	}
+
+	return transactions, nil
+}
+
+func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		WHERE transaction_id = $1 OR parent_transaction = $1 AND status = 'INFLIGHT'
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`, parentTransactionID, batchSize, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var transactions []*model.Transaction
+
+	for rows.Next() {
+		transaction := model.Transaction{}
+		var metaDataJSON []byte
+		err = rows.Scan(
+			&transaction.TransactionID,
+			&transaction.ParentTransaction,
+			&transaction.Source,
+			&transaction.Reference,
+			&transaction.Amount,
+			&transaction.PreciseAmount,
+			&transaction.Precision,
+			&transaction.Rate,
+			&transaction.Currency,
+			&transaction.Destination,
+			&transaction.Description,
+			&transaction.Status,
+			&transaction.CreatedAt,
+			&metaDataJSON,
+			&transaction.ScheduledFor,
+			&transaction.Hash,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert metadata from JSON to map
+		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
+		if err != nil {
+			return nil, err
+		}
+
+		transactions = append(transactions, &transaction)
+	}
+
+	return transactions, nil
+}
+
+func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		WHERE transaction_id = $1 AND status = 'APPLIED' OR parent_transaction = $1 AND (status = 'VOID' OR status = 'APPLIED')
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`, parentTransactionID, batchSize, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var transactions []*model.Transaction
+
+	for rows.Next() {
+		transaction := model.Transaction{}
+		var metaDataJSON []byte
+		err = rows.Scan(
+			&transaction.TransactionID,
+			&transaction.ParentTransaction,
+			&transaction.Source,
+			&transaction.Reference,
+			&transaction.Amount,
+			&transaction.PreciseAmount,
+			&transaction.Precision,
+			&transaction.Rate,
+			&transaction.Currency,
+			&transaction.Destination,
+			&transaction.Description,
+			&transaction.Status,
+			&transaction.CreatedAt,
+			&metaDataJSON,
+			&transaction.ScheduledFor,
+			&transaction.Hash,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert metadata from JSON to map
+		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
+		if err != nil {
+			return nil, err
+		}
+
+		transactions = append(transactions, &transaction)
+	}
+	return transactions, nil
+}
