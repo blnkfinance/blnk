@@ -1,6 +1,7 @@
 package blnk
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
@@ -46,9 +47,8 @@ func (l *Blnk) getOrCreateBalanceByIndicator(indicator, currency string) (*model
 			Indicator: indicator,
 			LedgerID:  GeneralLedgerID,
 			Currency:  currency,
-		} //TODO refactor
-		// Save the new balance to the datasource
-		_, err := l.datasource.CreateBalance(*balance)
+		}
+		_, err := l.CreateBalance(*balance)
 		if err != nil {
 			return nil, err
 		}
@@ -61,8 +61,26 @@ func (l *Blnk) getOrCreateBalanceByIndicator(indicator, currency string) (*model
 	return balance, nil
 }
 
+func (l *Blnk) postBalanceActions(_ context.Context, balance *model.Balance) {
+	go func() {
+		l.queue.queueIndexData(balance.BalanceID, "balances", balance)
+		err := SendWebhook(NewWebhook{
+			Event:   "balance.created",
+			Payload: balance,
+		})
+		if err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
+
 func (l *Blnk) CreateBalance(balance model.Balance) (model.Balance, error) {
-	return l.datasource.CreateBalance(balance)
+	balance, err := l.datasource.CreateBalance(balance)
+	if err != nil {
+		return model.Balance{}, err
+	}
+	l.postBalanceActions(context.Background(), &balance)
+	return balance, nil
 }
 
 func (l *Blnk) GetBalanceByID(id string, include []string) (*model.Balance, error) {
