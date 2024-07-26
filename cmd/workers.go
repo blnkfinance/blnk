@@ -18,6 +18,11 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+type indexData struct {
+	Collection string                 `json:"collection"`
+	Payload    map[string]interface{} `json:"payload"`
+}
+
 func (b *blnkInstance) processTransaction(cxt context.Context, t *asynq.Task) error {
 	var txn model.Transaction
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
@@ -42,7 +47,39 @@ func (b *blnkInstance) processTransaction(cxt context.Context, t *asynq.Task) er
 		return err
 	}
 
-	log.Println(" [*] Transaction Processed", txn.ID)
+	log.Println(" [*] Transaction Processed", txn.TransactionID)
+	return nil
+}
+
+func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
+	var data indexData
+
+	if err := json.Unmarshal(t.Payload(), &data); err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	collection := data.Collection
+	payload := data.Payload
+
+	newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{b.cnf.TypeSense.Dns})
+	err := newSearch.EnsureCollectionsExist(context.Background())
+	if err != nil {
+		log.Fatalf("Failed to ensure collections exist: %v", err)
+	}
+	err = migrateTypeSenseSchema(context.Background(), newSearch)
+	if err != nil {
+		log.Fatalf("Failed to migrate typesense schema: %v", err)
+	}
+
+	err = newSearch.HandleNotification(collection, payload)
+
+	if err != nil {
+		log.Println("Error indexing data", err)
+		return err
+	}
+
+	log.Println(" [*] Data indexed", collection)
 	return nil
 }
 
@@ -75,6 +112,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			queues := make(map[string]int)
 			queues[blnk.WEBHOOK_QUEUE] = 3
+			queues[blnk.INDEX_QUEUE] = 1
 			queues[blnk.EXPIREDINFLIGHT_QUEUE] = 3
 
 			for i := 1; i <= blnk.NumberOfQueues; i++ {
@@ -97,6 +135,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				mux.HandleFunc(queueName, b.processTransaction)
 			}
 
+			mux.HandleFunc(blnk.INDEX_QUEUE, b.indexData)
 			mux.HandleFunc(blnk.WEBHOOK_QUEUE, blnk.ProcessWebhook)
 			mux.HandleFunc(blnk.EXPIREDINFLIGHT_QUEUE, b.procesInflightExpiry)
 			if err := srv.Run(mux); err != nil {
