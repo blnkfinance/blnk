@@ -176,10 +176,10 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	var balance model.Balance
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = $1
+	   SELECT balance_id, indicator, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = $1
 	`, id)
 
-	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
+	err := row.Scan(&balance.BalanceID, &balance.Indicator, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
 		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
 	if err != nil {
 		logrus.Errorf("balance lite error %v", err)
@@ -196,10 +196,10 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Balance, error) {
 	var balance model.Balance
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE indicator = $1 AND currency = $2 
+	   SELECT balance_id, indicator, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE indicator = $1 AND currency = $2 
 	`, indicator, currency)
 
-	err := row.Scan(&balance.BalanceID, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
+	err := row.Scan(&balance.BalanceID, &balance.Indicator, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
 		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
 	if err != nil {
 		if err == sql.ErrNoRows {
