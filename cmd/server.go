@@ -4,9 +4,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"time"
-
-	pg_listener "github.com/jerry-enebeli/blnk/internal/pg-listener"
 
 	"github.com/jerry-enebeli/blnk"
 
@@ -49,6 +46,17 @@ func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
 	return nil
 }
 
+func migrateTypeSenseSchema(ctx context.Context, t *blnk.TypesenseClient) error {
+	collections := []string{"ledgers", "balances", "transactions", "identities", "reconciliations"}
+	for _, c := range collections {
+		err := t.MigrateTypeSenseSchema(ctx, c)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func serverCommands(b *blnkInstance) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -62,13 +70,14 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 
 			//todo fix exposed api key
 			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
-			listener := pg_listener.NewDBListener(pg_listener.ListenerConfig{
-				PgConnStr: cfg.DataSource.Dns,
-				Interval:  10 * time.Second,
-				Timeout:   time.Minute,
-			}, newSearch)
-
-			go listener.Start()
+			err = newSearch.EnsureCollectionsExist(context.Background())
+			if err != nil {
+				log.Fatalf("Failed to ensure collections exist: %v", err)
+			}
+			err = migrateTypeSenseSchema(context.Background(), newSearch)
+			if err != nil {
+				log.Fatalf("Failed to migrate typesense schema: %v", err)
+			}
 
 			if cfg.Server.SSL {
 				if err := serveTLS(router, cfg.Server); err != nil {
