@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 
@@ -209,24 +212,104 @@ func (d Datasource) GetTotalCommittedTransactions(parentID string) (int64, error
 	return totalAmount, nil
 }
 
-func (d Datasource) GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error) {
+func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batchSize int, offset int64) ([]*model.Transaction, error) {
 	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-		FROM blnk.transactions
-		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`, batchSize, offset)
+        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        ORDER BY created_at DESC
+        LIMIT $1 OFFSET $2
+    `, batchSize, offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	var transactions []*model.Transaction
+	rowCount := 0
 
 	for rows.Next() {
+		rowCount++
+		transaction := model.Transaction{}
+		var metaDataJSON []byte
+		err = rows.Scan(
+			&transaction.TransactionID,
+			&transaction.ParentTransaction,
+			&transaction.Source,
+			&transaction.Reference,
+			&transaction.Amount,
+			&transaction.PreciseAmount,
+			&transaction.Precision,
+			&transaction.Rate,
+			&transaction.Currency,
+			&transaction.Destination,
+			&transaction.Description,
+			&transaction.Status,
+			&transaction.CreatedAt,
+			&metaDataJSON,
+			&transaction.ScheduledFor,
+			&transaction.Hash,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
+		if err != nil {
+			return nil, err
+		}
+
+		transactions = append(transactions, &transaction)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return transactions, nil
+}
+
+func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]model.Transaction, error) {
+	ctx, span := otel.Tracer("Group transactions").Start(ctx, "Grouping transactions based on criteria")
+	defer span.End()
+
+	// Build the SQL query based on the grouping criteria
+	query := `
+        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE 1=1
+    `
+	var args []interface{}
+	var groupByColumns []string
+
+	argIndex := 1
+	for key, value := range groupingCriteria {
+		query += fmt.Sprintf(" AND %s = $%d", key, argIndex)
+		args = append(args, value)
+		groupByColumns = append(groupByColumns, key)
+		argIndex++
+	}
+
+	if len(groupByColumns) > 0 {
+		query += " GROUP BY " + strings.Join(groupByColumns, ", ")
+	}
+
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	args = append(args, batchSize, offset)
+
+	rows, err := d.Conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	groupedTransactions := make(map[string][]model.Transaction)
+	rowCount := 0
+
+	for rows.Next() {
+		rowCount++
 		transaction := model.Transaction{}
 		var metaDataJSON []byte
 		err = rows.Scan(
@@ -257,10 +340,21 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, id string, bat
 			return nil, err
 		}
 
-		transactions = append(transactions, &transaction)
+		// Create a group key based on the grouping criteria
+		var groupKeyParts []string
+		for _, col := range groupByColumns {
+			groupKeyParts = append(groupKeyParts, fmt.Sprintf("%v", reflect.ValueOf(transaction).FieldByName(col)))
+		}
+		groupKey := strings.Join(groupKeyParts, "-")
+
+		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], transaction)
 	}
 
-	return transactions, nil
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return groupedTransactions, nil
 }
 
 func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
