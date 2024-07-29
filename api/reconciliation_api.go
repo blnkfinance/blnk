@@ -51,42 +51,6 @@ func (a Api) StartReconciliation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"reconciliation_id": reconciliationID})
 }
 
-// GetReconciliationStatus retrieves the status of a reconciliation process
-func (a Api) GetReconciliationStatus(c *gin.Context) {
-	reconciliationID := c.Param("id")
-	if reconciliationID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Reconciliation ID is required"})
-		return
-	}
-
-	status, err := a.blnk.GetReconciliationStatus(c.Request.Context(), reconciliationID)
-	if err != nil {
-		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve reconciliation status"})
-		return
-	}
-
-	c.JSON(http.StatusOK, status)
-}
-
-// GetReconciliationResults retrieves the results of a completed reconciliation
-func (a Api) GetReconciliationResults(c *gin.Context) {
-	reconciliationID := c.Param("id")
-	if reconciliationID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Reconciliation ID is required"})
-		return
-	}
-
-	results, err := a.blnk.GetReconciliationResults(c.Request.Context(), reconciliationID)
-	if err != nil {
-		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve reconciliation results"})
-		return
-	}
-
-	c.JSON(http.StatusOK, results)
-}
-
 // CreateMatchingRule creates a new matching rule
 func (a Api) CreateMatchingRule(c *gin.Context) {
 	var rule model.MatchingRule
