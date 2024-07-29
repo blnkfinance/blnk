@@ -54,5 +54,6 @@ type MatchingCriteria struct {
 	Field          string  `json:"field"`
 	Operator       string  `json:"operator"`
 	Value          string  `json:"value"`
+	Pattern        string  `json:"pattern"`
 	AllowableDrift float64 `json:"allowable_drift"`
 }
