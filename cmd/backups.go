@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func backupCommands(b *blnkInstance) *cobra.Command {
+func backupCommands(_ *blnkInstance) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "backup",
 		Short: "start blnk database backup",
