@@ -328,7 +328,7 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 		SELECT id, amount, reference, currency, description, date, source
 		FROM blnk.external_transactions
 		WHERE upload_id = $1
-		ORDER BY created_at DESC
+		ORDER BY date DESC
 		LIMIT $2 OFFSET $3
 	`, uploadID, batchSize, offset)
 	if err != nil {
@@ -350,6 +350,8 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 
 		transactions = append(transactions, tx)
 	}
+
+	fmt.Println("external transactions", transactions)
 
 	return transactions, nil
 }
