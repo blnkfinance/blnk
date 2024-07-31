@@ -177,7 +177,10 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 	go func() {
 		err := s.processReconciliation(context.Background(), reconciliation, strategy, groupingCriteria, matchingRuleIDs)
 		if err != nil {
-			s.datasource.UpdateReconciliationStatus(context.Background(), reconciliationID, StatusFailed, 0, 0)
+			err := s.datasource.UpdateReconciliationStatus(context.Background(), reconciliationID, StatusFailed, 0, 0)
+			if err != nil {
+				log.Printf("error updating reconciliation status: %v", err)
+			}
 		}
 	}()
 
@@ -210,7 +213,10 @@ func (s *Blnk) matchesRules(externalTxn *model.Transaction, internalTxn model.Tr
 }
 
 func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupingCriteria map[string]interface{}, matchingRuleIDs []string) error {
-	s.datasource.UpdateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusInProgress, 0, 0)
+	err := s.datasource.UpdateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusInProgress, 0, 0)
+	if err != nil {
+		log.Printf("error updating reconciliation status: %v", err)
+	}
 
 	matchingRules, err := s.getMatchingRules(ctx, matchingRuleIDs)
 	if err != nil {
