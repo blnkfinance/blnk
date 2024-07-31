@@ -272,8 +272,6 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 }
 
 func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]model.Transaction, error) {
-	ctx, span := otel.Tracer("Group transactions").Start(ctx, "Grouping transactions based on criteria")
-	defer span.End()
 
 	// Build the SQL query based on the grouping criteria
 	query := `

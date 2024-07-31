@@ -63,8 +63,11 @@ func (l *Blnk) getOrCreateBalanceByIndicator(indicator, currency string) (*model
 
 func (l *Blnk) postBalanceActions(_ context.Context, balance *model.Balance) {
 	go func() {
-		l.queue.queueIndexData(balance.BalanceID, "balances", balance)
-		err := SendWebhook(NewWebhook{
+		err := l.queue.queueIndexData(balance.BalanceID, "balances", balance)
+		if err != nil {
+			notification.NotifyError(err)
+		}
+		err = SendWebhook(NewWebhook{
 			Event:   "balance.created",
 			Payload: balance,
 		})

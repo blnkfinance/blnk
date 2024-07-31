@@ -39,8 +39,8 @@ type getTxns func(ctx context.Context, parentTransactionID string, batchSize int
 type transactionWorker func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64)
 
 type BatchJobResult struct {
-	RefundTxn *model.Transaction
-	Error     error
+	Txn   *model.Transaction
+	Error error
 }
 
 func getEventFromStatus(status string) string {
@@ -132,8 +132,11 @@ func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transa
 
 func (l *Blnk) postTransactionActions(_ context.Context, transaction *model.Transaction) {
 	go func() {
-		l.queue.queueIndexData(transaction.TransactionID, "transactions", transaction)
-		err := SendWebhook(NewWebhook{
+		err := l.queue.queueIndexData(transaction.TransactionID, "transactions", transaction)
+		if err != nil {
+			notification.NotifyError(err)
+		}
+		err = SendWebhook(NewWebhook{
 			Event:   getEventFromStatus(transaction.Status),
 			Payload: transaction,
 		})
@@ -152,12 +155,18 @@ func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBal
 	go func() {
 		defer wg.Done()
 		l.checkBalanceMonitors(sourceBalance)
-		l.queue.queueIndexData(sourceBalance.BalanceID, "balances", sourceBalance)
+		err := l.queue.queueIndexData(sourceBalance.BalanceID, "balances", sourceBalance)
+		if err != nil {
+			notification.NotifyError(err)
+		}
 	}()
 	go func() {
 		defer wg.Done()
 		l.checkBalanceMonitors(destinationBalance)
-		l.queue.queueIndexData(destinationBalance.BalanceID, "balances", destinationBalance)
+		err := l.queue.queueIndexData(destinationBalance.BalanceID, "balances", destinationBalance)
+		if err != nil {
+			notification.NotifyError(err)
+		}
 	}()
 	wg.Wait()
 
@@ -217,7 +226,7 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 		maxWorkers   = 5
 		maxQueueSize = 1000
 	)
-	var allRefundTxns []*model.Transaction
+	var allTxns []*model.Transaction
 	var allErrors []error
 
 	// Create a buffered channel to queue work
@@ -249,8 +258,8 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 		for result := range results {
 			if result.Error != nil {
 				allErrors = append(allErrors, result.Error)
-			} else if result.RefundTxn != nil {
-				allRefundTxns = append(allRefundTxns, result.RefundTxn)
+			} else if result.Txn != nil {
+				allTxns = append(allTxns, result.Txn)
 			}
 		}
 	}()
@@ -260,7 +269,7 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 	for {
 		txns, err := gt(ctx, parentTransactionID, batchSize, offset)
 		if err != nil {
-			return allRefundTxns, err
+			return allTxns, err
 		}
 		if len(txns) == 0 {
 			break // No more transactions to process
@@ -288,10 +297,10 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 		for _, err := range allErrors {
 			log.Printf("Error during processing: %v", err)
 		}
-		return allRefundTxns, allErrors[0]
+		return allTxns, allErrors[0]
 	}
 
-	return allRefundTxns, nil
+	return allTxns, nil
 }
 
 func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
@@ -303,7 +312,7 @@ func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction,
 			results <- BatchJobResult{Error: err}
 		}
 		fmt.Println("refund txn", queuedRefundTxn)
-		results <- BatchJobResult{RefundTxn: queuedRefundTxn}
+		results <- BatchJobResult{Txn: queuedRefundTxn}
 	}
 }
 
@@ -317,7 +326,7 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 		}
-		results <- BatchJobResult{RefundTxn: queuedRefundTxn}
+		results <- BatchJobResult{Txn: queuedRefundTxn}
 	}
 }
 
@@ -331,7 +340,7 @@ func (l *Blnk) VoidWorker(ctx context.Context, jobs <-chan *model.Transaction, r
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 		}
-		results <- BatchJobResult{RefundTxn: queuedRefundTxn}
+		results <- BatchJobResult{Txn: queuedRefundTxn}
 	}
 }
 

@@ -185,3 +185,14 @@ func (bm *BalanceMonitor) CheckCondition(b *Balance) bool {
 	}
 	return false
 }
+
+func (et *ExternalTransaction) ToInternalTransaction() *Transaction {
+	return &Transaction{
+		TransactionID: et.ID,
+		Amount:        et.Amount,
+		Reference:     et.Reference,
+		Currency:      et.Currency,
+		CreatedAt:     et.Date,
+		Description:   et.Description,
+	}
+}

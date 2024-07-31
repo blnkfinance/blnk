@@ -304,7 +304,6 @@ func getTransactionSchema() *api.CollectionSchema {
 	}
 }
 
-// Add this new function
 func getReconciliationSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "started_at"
@@ -323,7 +322,6 @@ func getReconciliationSchema() *api.CollectionSchema {
 	}
 }
 
-// Add this new function
 func getIdentitySchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"

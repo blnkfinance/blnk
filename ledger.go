@@ -9,8 +9,11 @@ import (
 
 func (l *Blnk) postLedgerActions(_ context.Context, ledger *model.Ledger) {
 	go func() {
-		l.queue.queueIndexData(ledger.LedgerID, "ledgers", ledger)
-		err := SendWebhook(NewWebhook{
+		err := l.queue.queueIndexData(ledger.LedgerID, "ledgers", ledger)
+		if err != nil {
+			notification.NotifyError(err)
+		}
+		err = SendWebhook(NewWebhook{
 			Event:   "ledger.created",
 			Payload: ledger,
 		})
