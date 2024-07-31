@@ -18,6 +18,7 @@ import (
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"github.com/jerry-enebeli/blnk/model"
+	"github.com/texttheater/golang-levenshtein/levenshtein"
 )
 
 const (
@@ -750,25 +751,51 @@ func (s *Blnk) matchesCriteria(externalTxn *model.Transaction, internalTxn model
 	case "reference":
 		return s.matchesString(externalTxn.Reference, internalTxn.Reference, criteria)
 	case "currency":
-		return s.matchesString(externalTxn.Reference, internalTxn.Reference, criteria)
+		return s.matchesString(externalTxn.Currency, internalTxn.Currency, criteria)
 	}
 	return false
 }
-
 func (s *Blnk) matchesString(externalValue, internalValue string, criteria model.MatchingCriteria) bool {
 	switch criteria.Operator {
 	case "equals":
-		return externalValue == internalValue
+		return strings.EqualFold(externalValue, internalValue)
 	case "contains":
-		return strings.Contains(externalValue, internalValue) || strings.Contains(internalValue, externalValue)
+		return s.partialMatch(externalValue, internalValue, criteria.AllowableDrift)
 	}
 	return false
 }
 
+func (s *Blnk) partialMatch(str1, str2 string, allowableDrift float64) bool {
+	// Convert strings to lowercase for case-insensitive comparison
+	str1 = strings.ToLower(str1)
+	str2 = strings.ToLower(str2)
+
+	// Check if either string contains the other
+	if strings.Contains(str1, str2) || strings.Contains(str2, str1) {
+		return true
+	}
+
+	// Calculate Levenshtein distance
+	distance := levenshtein.DistanceForStrings([]rune(str1), []rune(str2), levenshtein.DefaultOptions)
+
+	// Calculate the maximum allowed distance based on the length of the longer string and the allowable drift
+	maxLength := float64(max(len(str1), len(str2)))
+	maxAllowedDistance := int(maxLength * (allowableDrift / 100))
+
+	// Return true if the distance is within the allowed range
+	return distance <= maxAllowedDistance
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
 func (s *Blnk) matchesAmount(externalAmount, internalAmount float64, criteria model.MatchingCriteria) bool {
 	switch criteria.Operator {
 	case "equals":
-		allowableDrift := internalAmount * (criteria.AllowableDrift / 100)
+		allowableDrift := internalAmount * (criteria.AllowableDrift)
 		return math.Abs(externalAmount-internalAmount) <= allowableDrift
 	case "greater_than":
 		return externalAmount > internalAmount
@@ -782,7 +809,8 @@ func (s *Blnk) matchesDate(externalDate, internalDate time.Time, criteria model.
 	switch criteria.Operator {
 	case "equals":
 		difference := externalDate.Sub(internalDate)
-		return math.Abs(difference.Seconds()) <= criteria.AllowableDrift
+		seconds := int64(difference.Seconds()) // Convert to whole seconds
+		return math.Abs(float64(seconds)) <= criteria.AllowableDrift
 	case "before":
 		return externalDate.Before(internalDate)
 	case "after":
