@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -250,6 +251,8 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ float64) {
 			defer wg.Done()
 			for externalTxn := range jobs {
+
+				//TODO: external transaction id is not sequential, so we need to find a way to skip already processed transactions
 				// Skip already processed transactions
 				if externalTxn.TransactionID <= progress.LastProcessedExternalTxnID {
 					continue
@@ -527,41 +530,102 @@ func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*mode
 	return matches, unmatched
 }
 
-func (s *Blnk) manyToOneReconciliation(_ context.Context, externalTxns []*model.Transaction, groupingCriteria map[string]interface{}, matchingRules []model.MatchingRule) ([]model.Match, []string) {
+func (s *Blnk) manyToOneReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupingCriteria map[string]interface{}, matchingRules []model.MatchingRule) ([]model.Match, []string) {
 	var matches []model.Match
 	var unmatched []string
 
-	internalTxnID := groupingCriteria["internal_transaction_id"].(string)
-	startDate := groupingCriteria["start_date"].(time.Time)
-	endDate := groupingCriteria["end_date"].(time.Time)
+	internalTxnID, ok := groupingCriteria["internal_transaction_id"].(string)
+	if !ok {
+		return nil, []string{"Error: invalid internal_transaction_id in grouping criteria"}
+	}
+
+	startDate, ok := groupingCriteria["start_date"].(time.Time)
+	if !ok {
+		return nil, []string{"Error: invalid start_date in grouping criteria"}
+	}
+
+	endDate, ok := groupingCriteria["end_date"].(time.Time)
+	if !ok {
+		return nil, []string{"Error: invalid end_date in grouping criteria"}
+	}
 
 	internalTxn, err := s.GetTransaction(internalTxnID)
 	if err != nil {
-		// Handle error
-		return nil, []string{}
+		log.Printf("Error fetching internal transaction: %v", err)
+		return nil, []string{fmt.Sprintf("Error fetching internal transaction: %v", err)}
 	}
 
 	var totalExternalAmount float64
-	for _, externalTxn := range externalTxns {
-		if externalTxn.CreatedAt.Before(startDate) || externalTxn.CreatedAt.After(endDate) {
-			unmatched = append(unmatched, externalTxn.TransactionID)
-			continue
-		}
+	var matchedExternalTxns []*model.Transaction
 
-		if s.matchesRules(externalTxn, *internalTxn, matchingRules) {
-			totalExternalAmount += externalTxn.Amount
-			matches = append(matches, model.Match{
-				ExternalTransactionID: externalTxn.TransactionID,
-				InternalTransactionID: internalTxn.TransactionID,
-				Amount:                externalTxn.Amount,
-				Date:                  externalTxn.CreatedAt,
-			})
+	// Use a worker pool for parallel processing
+	numWorkers := runtime.NumCPU()
+	jobs := make(chan *model.Transaction, len(externalTxns))
+	results := make(chan struct {
+		txn       *model.Transaction
+		isMatched bool
+	}, len(externalTxns))
+
+	// Start worker pool
+	for w := 0; w < numWorkers; w++ {
+		go manyToOneWorker(ctx, jobs, results, startDate, endDate, internalTxn, matchingRules, s.matchesRules)
+	}
+
+	// Send jobs to workers
+	for _, txn := range externalTxns {
+		jobs <- txn
+	}
+	close(jobs)
+
+	// Collect results
+	for range externalTxns {
+		result := <-results
+		if result.isMatched {
+			totalExternalAmount += result.txn.Amount
+			matchedExternalTxns = append(matchedExternalTxns, result.txn)
 		} else {
-			unmatched = append(unmatched, externalTxn.TransactionID)
+			unmatched = append(unmatched, result.txn.TransactionID)
 		}
 	}
 
+	// Check if the total amount of matched external transactions equals the internal transaction amount
+	allowableDrift := internalTxn.Amount * 0.01 // 1% allowable drift
+	if math.Abs(totalExternalAmount-internalTxn.Amount) <= allowableDrift {
+		for _, matchedExternalTxn := range matchedExternalTxns {
+			matches = append(matches, model.Match{
+				ExternalTransactionID: matchedExternalTxn.TransactionID,
+				InternalTransactionID: internalTxn.TransactionID,
+				Amount:                matchedExternalTxn.Amount,
+				Date:                  matchedExternalTxn.CreatedAt,
+			})
+		}
+	} else {
+		// If the total doesn't match, consider all external transactions as unmatched
+		for _, matchedExternalTxn := range matchedExternalTxns {
+			unmatched = append(unmatched, matchedExternalTxn.TransactionID)
+		}
+		log.Printf("Total amount mismatch: Internal %.2f, External %.2f", internalTxn.Amount, totalExternalAmount)
+	}
+
 	return matches, unmatched
+}
+
+func manyToOneWorker(_ context.Context, jobs <-chan *model.Transaction, results chan<- struct {
+	txn       *model.Transaction
+	isMatched bool
+}, startDate, endDate time.Time, internalTxn *model.Transaction, matchingRules []model.MatchingRule,
+	matchFunc func(*model.Transaction, model.Transaction, []model.MatchingRule) bool) {
+	for txn := range jobs {
+		isMatched := false
+		if (txn.CreatedAt.After(startDate) || txn.CreatedAt.Equal(startDate)) &&
+			(txn.CreatedAt.Before(endDate) || txn.CreatedAt.Equal(endDate)) {
+			isMatched = matchFunc(txn, *internalTxn, matchingRules)
+		}
+		results <- struct {
+			txn       *model.Transaction
+			isMatched bool
+		}{txn, isMatched}
+	}
 }
 
 func (s *Blnk) CreateMatchingRule(ctx context.Context, rule model.MatchingRule) (*model.MatchingRule, error) {
