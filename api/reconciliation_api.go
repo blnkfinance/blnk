@@ -34,6 +34,7 @@ func (a Api) StartReconciliation(c *gin.Context) {
 		UploadID         string                 `json:"upload_id" binding:"required"`
 		Strategy         string                 `json:"strategy" binding:"required"`
 		GroupingCriteria map[string]interface{} `json:"grouping_criteria"`
+		DryRun           bool                   `json:"dry_run"`
 		MatchingRuleIDs  []string               `json:"matching_rule_ids" binding:"required"`
 	}
 
@@ -41,7 +42,7 @@ func (a Api) StartReconciliation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	reconciliationID, err := a.blnk.StartReconciliation(c.Request.Context(), req.UploadID, req.Strategy, req.GroupingCriteria, req.MatchingRuleIDs)
+	reconciliationID, err := a.blnk.StartReconciliation(c.Request.Context(), req.UploadID, req.Strategy, req.GroupingCriteria, req.MatchingRuleIDs, req.DryRun)
 	if err != nil {
 		logrus.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start reconciliation"})

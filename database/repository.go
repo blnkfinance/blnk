@@ -88,4 +88,6 @@ type reconciliation interface {
 	GetMatchingRule(ctx context.Context, id string) (*model.MatchingRule, error)
 	UpdateMatchingRule(ctx context.Context, rule *model.MatchingRule) error
 	DeleteMatchingRule(ctx context.Context, id string) error
+	SaveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error
+	LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error)
 }

@@ -355,3 +355,53 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 
 	return transactions, nil
 }
+
+func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error {
+	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving reconciliation progress to db")
+	defer span.End()
+
+	progressJSON, err := json.Marshal(progress)
+	if err != nil {
+		return fmt.Errorf("error marshaling progress: %w", err)
+	}
+
+	_, err = d.Conn.ExecContext(ctx, `
+		INSERT INTO blnk.reconciliation_progress (reconciliation_id, progress)
+		VALUES ($1, $2)
+		ON CONFLICT (reconciliation_id) DO UPDATE
+		SET progress = $2
+	`, reconciliationID, progressJSON)
+
+	if err != nil {
+		return fmt.Errorf("error saving reconciliation progress: %w", err)
+	}
+
+	return nil
+}
+
+func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error) {
+	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Loading reconciliation progress from db")
+	defer span.End()
+
+	var progressJSON []byte
+	err := d.Conn.QueryRowContext(ctx, `
+		SELECT progress
+		FROM blnk.reconciliation_progress
+		WHERE reconciliation_id = $1
+	`, reconciliationID).Scan(&progressJSON)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return model.ReconciliationProgress{}, nil // Return empty progress if not found
+		}
+		return model.ReconciliationProgress{}, fmt.Errorf("error loading reconciliation progress: %w", err)
+	}
+
+	var progress model.ReconciliationProgress
+	err = json.Unmarshal(progressJSON, &progress)
+	if err != nil {
+		return model.ReconciliationProgress{}, fmt.Errorf("error unmarshaling progress: %w", err)
+	}
+
+	return progress, nil
+}

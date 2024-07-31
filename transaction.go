@@ -35,31 +35,10 @@ const (
 )
 
 type getTxns func(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)
-
 type transactionWorker func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64)
-
 type BatchJobResult struct {
 	Txn   *model.Transaction
 	Error error
-}
-
-func getEventFromStatus(status string) string {
-	switch strings.ToLower(status) {
-	case strings.ToLower(StatusQueued):
-		return "transaction.queued"
-	case strings.ToLower(StatusApplied):
-		return "transaction.applied"
-	case strings.ToLower(StatusScheduled):
-		return "transaction.scheduled"
-	case strings.ToLower(StatusInflight):
-		return "transaction.inflight"
-	case strings.ToLower(StatusVoid):
-		return "transaction.void"
-	case strings.ToLower(StatusRejected):
-		return "transaction.rejected"
-	default:
-		return "transaction.unknown"
-	}
 }
 
 func (l *Blnk) getSourceAndDestination(transaction *model.Transaction) (source *model.Balance, destination *model.Balance, err error) {
@@ -199,7 +178,6 @@ func (l *Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Bal
 	}
 
 	if transaction.Status == StatusVoid {
-		//TODO: Implement RollbackInflightDebit and RollbackInflightCredit
 		balances[0].RollbackInflightDebit(int64(transaction.PreciseAmount))
 		balances[1].RollbackInflightCredit(int64(transaction.PreciseAmount))
 		return nil

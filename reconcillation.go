@@ -160,13 +160,14 @@ func (l *Blnk) postReconciliationActions(_ context.Context, reconciliation model
 	}()
 }
 
-func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strategy string, groupingCriteria map[string]interface{}, matchingRuleIDs []string) (string, error) {
+func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strategy string, groupingCriteria map[string]interface{}, matchingRuleIDs []string, isDryRun bool) (string, error) {
 	reconciliationID := model.GenerateUUIDWithSuffix("recon")
 	reconciliation := model.Reconciliation{
 		ReconciliationID: reconciliationID,
 		UploadID:         uploadID,
 		Status:           StatusStarted,
 		StartedAt:        time.Now(),
+		IsDryRun:         isDryRun,
 	}
 
 	if err := s.datasource.RecordReconciliation(ctx, &reconciliation); err != nil {
@@ -177,9 +178,10 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 	go func() {
 		err := s.processReconciliation(context.Background(), reconciliation, strategy, groupingCriteria, matchingRuleIDs)
 		if err != nil {
+			log.Printf("Error in reconciliation process: %v", err)
 			err := s.datasource.UpdateReconciliationStatus(context.Background(), reconciliationID, StatusFailed, 0, 0)
 			if err != nil {
-				log.Printf("error updating reconciliation status: %v", err)
+				log.Printf("Error updating reconciliation status: %v", err)
 			}
 		}
 	}()
@@ -212,10 +214,18 @@ func (s *Blnk) matchesRules(externalTxn *model.Transaction, internalTxn model.Tr
 	return false
 }
 
+func (s *Blnk) saveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error {
+	return s.datasource.SaveReconciliationProgress(ctx, reconciliationID, progress)
+}
+
+func (s *Blnk) loadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error) {
+	return s.datasource.LoadReconciliationProgress(ctx, reconciliationID)
+}
+
 func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupingCriteria map[string]interface{}, matchingRuleIDs []string) error {
 	err := s.datasource.UpdateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusInProgress, 0, 0)
 	if err != nil {
-		log.Printf("error updating reconciliation status: %v", err)
+		log.Printf("Error updating reconciliation status: %v", err)
 	}
 
 	matchingRules, err := s.getMatchingRules(ctx, matchingRuleIDs)
@@ -226,6 +236,12 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 	var matches []model.Match
 	var unmatched []string
 
+	progress, err := s.loadReconciliationProgress(ctx, reconciliation.ReconciliationID)
+	if err != nil {
+		log.Printf("Error loading reconciliation progress: %v", err)
+		progress = model.ReconciliationProgress{} // Start from beginning if unable to load progress
+	}
+
 	_, err = s.ProcessTransactionInBatches(
 		ctx,
 		reconciliation.UploadID,
@@ -234,6 +250,11 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ float64) {
 			defer wg.Done()
 			for externalTxn := range jobs {
+				// Skip already processed transactions
+				if externalTxn.TransactionID <= progress.LastProcessedExternalTxnID {
+					continue
+				}
+
 				var batchMatches []model.Match
 				var batchUnmatched []string
 
@@ -252,9 +273,20 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 				matches = append(matches, batchMatches...)
 				unmatched = append(unmatched, batchUnmatched...)
 
-				if err := s.storeMatches(ctx, reconciliation.ReconciliationID, batchMatches); err != nil {
-					results <- BatchJobResult{Error: err}
-					return
+				if !reconciliation.IsDryRun {
+					if err := s.storeMatches(ctx, reconciliation.ReconciliationID, batchMatches); err != nil {
+						results <- BatchJobResult{Error: err}
+						return
+					}
+				}
+
+				progress.LastProcessedExternalTxnID = externalTxn.TransactionID
+				progress.ProcessedCount++
+
+				if progress.ProcessedCount%100 == 0 { // Save progress every 100 transactions
+					if err := s.saveReconciliationProgress(ctx, reconciliation.ReconciliationID, progress); err != nil {
+						log.Printf("Error saving reconciliation progress: %v", err)
+					}
 				}
 
 				results <- BatchJobResult{} // Signal successful processing
@@ -269,7 +301,14 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 	reconciliation.Status = StatusCompleted
 	completedAt := time.Now()
 	reconciliation.CompletedAt = &completedAt
-	s.postReconciliationActions(ctx, reconciliation)
+
+	if !reconciliation.IsDryRun {
+		s.postReconciliationActions(ctx, reconciliation)
+	} else {
+		// For dry run, just log the results
+		log.Printf("Dry run completed. Matches: %d, Unmatched: %d", len(matches), len(unmatched))
+		// You might want to store these results somewhere or return them to the caller
+	}
 
 	return s.datasource.UpdateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusCompleted, len(matches), len(unmatched))
 }

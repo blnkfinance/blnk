@@ -27,8 +27,14 @@ type Reconciliation struct {
 	Status                string     `json:"status"`
 	MatchedTransactions   int        `json:"matched_transactions"`
 	UnmatchedTransactions int        `json:"unmatched_transactions"`
+	IsDryRun              bool       `json:"is_dry_run"`
 	StartedAt             time.Time  `json:"started_at"`
 	CompletedAt           *time.Time `json:"completed_at"`
+}
+
+type ReconciliationProgress struct {
+	LastProcessedExternalTxnID string `json:"last_processed_external_txn_id"`
+	ProcessedCount             int    `json:"processed_count"`
 }
 
 type ReconciliationResults struct {

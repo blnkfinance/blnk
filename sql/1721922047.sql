@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS blnk.external_transactions (
     upload_id TEXT NOT NULL
 );
 
+-- Create reconciliation_progress table
+CREATE TABLE IF NOT EXISTS blnk.reconciliation_progress (
+    processed_count BIGINT,
+    reconciliation_id TEXT,
+    last_processed_external_txn_id TEXT,
+);
+
 -- Create matching_rules table
 CREATE TABLE IF NOT EXISTS blnk.matching_rules (
     id SERIAL PRIMARY KEY,
@@ -49,11 +56,14 @@ CREATE TABLE IF NOT EXISTS blnk.matching_rules (
 -- Create indexes
 CREATE INDEX idx_reconciliations_upload_id ON blnk.reconciliations (upload_id);
 CREATE INDEX idx_external_transactions_upload_id ON blnk.external_transactions (upload_id);
+CREATE INDEX idx_reconciliations_progress_id ON blnk.reconciliation_progress (reconciliation_id);
 
 -- +migrate Down
 DROP INDEX IF EXISTS blnk.idx_reconciliations_upload_id;
 DROP INDEX IF EXISTS blnk.idx_external_transactions_reconciliation_id;
+DROP INDEX IF EXISTS blnk.idx_reconciliations_progress_id;
 DROP TABLE IF EXISTS blnk.matching_rules CASCADE;
 DROP TABLE IF EXISTS blnk.external_transactions CASCADE;
 DROP TABLE IF EXISTS blnk.matches CASCADE;
 DROP TABLE IF EXISTS blnk.reconciliations CASCADE;
+DROP TABLE IF EXISTS blnk.reconciliation_progress
