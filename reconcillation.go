@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"math"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -162,6 +161,14 @@ func (l *Blnk) postReconciliationActions(_ context.Context, reconciliation model
 	}()
 }
 
+func (s *Blnk) storeMatches(ctx context.Context, reconciliationID string, matches []model.Match) error {
+	for _, match := range matches {
+		match.ReconciliationID = reconciliationID
+		return s.datasource.RecordMatch(ctx, &match)
+	}
+	return nil
+}
+
 func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strategy string, groupingCriteria map[string]interface{}, matchingRuleIDs []string, isDryRun bool) (string, error) {
 	reconciliationID := model.GenerateUUIDWithSuffix("recon")
 	reconciliation := model.Reconciliation{
@@ -191,20 +198,24 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 	return reconciliationID, nil
 }
 
-func (s *Blnk) storeMatches(ctx context.Context, reconciliationID string, matches []model.Match) error {
-	for _, match := range matches {
-		match.ReconciliationID = reconciliationID
-		return s.datasource.RecordMatch(ctx, &match)
-	}
-	return nil
-}
-
-// Update the existing matchesRules method to use model.MatchingRule
-func (s *Blnk) matchesRules(externalTxn *model.Transaction, internalTxn model.Transaction, rules []model.MatchingRule) bool {
+func (s *Blnk) matchesRules(externalTxn *model.Transaction, groupTxn model.Transaction, rules []model.MatchingRule) bool {
 	for _, rule := range rules {
 		allCriteriaMet := true
 		for _, criteria := range rule.Criteria {
-			if !s.matchesCriteria(externalTxn, internalTxn, criteria) {
+			var criterionMet bool
+			switch criteria.Field {
+			case "amount":
+				criterionMet = s.matchesGroupAmount(externalTxn.Amount, groupTxn.Amount, criteria)
+			case "date":
+				criterionMet = s.matchesGroupDate(externalTxn.CreatedAt, groupTxn.CreatedAt, criteria)
+			case "description":
+				criterionMet = s.matchesString(externalTxn.Description, groupTxn.Description, criteria)
+			case "reference":
+				criterionMet = s.matchesString(externalTxn.Reference, groupTxn.Reference, criteria)
+			case "currency":
+				criterionMet = s.matchesCurrency(externalTxn.Currency, groupTxn.Currency, criteria)
+			}
+			if !criterionMet {
 				allCriteriaMet = false
 				break
 			}
@@ -266,9 +277,9 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 				case "one_to_one":
 					batchMatches, batchUnmatched = s.oneToOneReconciliation(ctx, []*model.Transaction{externalTxn}, matchingRules)
 				case "one_to_many":
-					batchMatches, batchUnmatched = s.oneToManyReconciliation(ctx, []*model.Transaction{externalTxn}, groupingCriteria, matchingRules)
-				case "many_external_to_one_internal":
-					batchMatches, batchUnmatched = s.manyToOneReconciliation(ctx, []*model.Transaction{externalTxn}, groupingCriteria, matchingRules)
+					batchMatches, batchUnmatched = s.groupToNReconciliation(ctx, []*model.Transaction{externalTxn}, groupingCriteria, matchingRules, false)
+				case "many_to_one":
+					batchMatches, batchUnmatched = s.groupToNReconciliation(ctx, []*model.Transaction{externalTxn}, groupingCriteria, matchingRules, true)
 				default:
 					results <- BatchJobResult{Error: fmt.Errorf("unsupported reconciliation strategy: %s", strategy)}
 					return
@@ -367,6 +378,99 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 	return matches, unmatched
 }
 
+func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupingCriteria map[string]interface{}, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+	var matches []model.Match
+	var unmatched []string
+
+	batchSize := 100
+	offset := int64(0)
+
+	var groupedTxns map[string][]*model.Transaction
+	var singleTxns []*model.Transaction
+
+	if isExternalGrouped {
+		groupedTxns = s.groupExternalTransactions(externalTxns)
+		// Fetch internal transactions in batches
+		for {
+			internalTxns, err := s.getInternalTransactionsPaginated(ctx, "", batchSize, offset)
+			if err != nil {
+				log.Printf("Error fetching internal transactions: %v", err)
+				break
+			}
+
+			if len(internalTxns) == 0 {
+				break
+			}
+			singleTxns = append(singleTxns, internalTxns...)
+
+			offset += int64(len(internalTxns))
+		}
+	} else {
+		singleTxns = externalTxns
+		// Group internal transactions
+		var err error
+		groupedTxns, err = s.groupInternalTransactions(ctx, groupingCriteria, batchSize, 0)
+		if err != nil {
+			log.Printf("Error grouping internal transactions: %v", err)
+			return nil, []string{}
+		}
+	}
+
+	for _, singleTxn := range singleTxns {
+		matched := false
+		for groupKey, groupedTxnList := range groupedTxns {
+			if s.matchesGroup(singleTxn, groupedTxnList, matchingRules) {
+				for _, groupedTxn := range groupedTxnList {
+					var externalID, internalID string
+					if isExternalGrouped {
+						externalID = groupedTxn.TransactionID
+						internalID = singleTxn.TransactionID
+					} else {
+						externalID = singleTxn.TransactionID
+						internalID = groupedTxn.TransactionID
+					}
+					matches = append(matches, model.Match{
+						ExternalTransactionID: externalID,
+						InternalTransactionID: internalID,
+						Amount:                groupedTxn.Amount,
+						Date:                  groupedTxn.CreatedAt,
+					})
+				}
+				matched = true
+				delete(groupedTxns, groupKey)
+				break
+			}
+		}
+		if !matched {
+			unmatched = append(unmatched, singleTxn.TransactionID)
+		}
+	}
+
+	// Add remaining unmatched grouped transactions
+	for _, group := range groupedTxns {
+		for _, txn := range group {
+			unmatched = append(unmatched, txn.TransactionID)
+		}
+	}
+
+	return matches, unmatched
+}
+
+func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+	return s.datasource.GroupTransactions(ctx, groupingCriteria, batchSize, offset)
+}
+
+func (s *Blnk) groupExternalTransactions(externalTxns []*model.Transaction) map[string][]*model.Transaction {
+	grouped := make(map[string][]*model.Transaction)
+
+	for _, txn := range externalTxns {
+		key := fmt.Sprintf("%s_%s", txn.Currency, txn.CreatedAt.Format("2006-01-02"))
+		grouped[key] = append(grouped[key], txn)
+	}
+
+	return grouped
+}
+
 func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn *model.Transaction, matchingRules []model.MatchingRule) (*model.Match, error) {
 	var match *model.Match
 	var matchFound bool
@@ -422,211 +526,49 @@ func (s *Blnk) getInternalTransactionsPaginated(ctx context.Context, id string, 
 	return s.datasource.GetTransactionsPaginated(ctx, "", limit, offset)
 }
 
-func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]model.Transaction, error) {
-	return s.datasource.GroupTransactions(ctx, groupingCriteria, batchSize, offset)
+func (s *Blnk) matchesGroup(externalTxn *model.Transaction, group []*model.Transaction, matchingRules []model.MatchingRule) bool {
+	var totalAmount float64
+	var minDate, maxDate time.Time
+	descriptions := make([]string, 0, len(group))
+	references := make([]string, 0, len(group))
+	currencies := make(map[string]bool)
+
+	for i, internalTxn := range group {
+		totalAmount += internalTxn.Amount
+
+		if i == 0 || internalTxn.CreatedAt.Before(minDate) {
+			minDate = internalTxn.CreatedAt
+		}
+		if i == 0 || internalTxn.CreatedAt.After(maxDate) {
+			maxDate = internalTxn.CreatedAt
+		}
+
+		descriptions = append(descriptions, internalTxn.Description)
+		references = append(references, internalTxn.Reference)
+		currencies[internalTxn.Currency] = true
+	}
+
+	// Create a virtual transaction representing the group
+	groupTxn := model.Transaction{
+		Amount:      totalAmount,
+		CreatedAt:   minDate, // We'll use the earliest date in the group
+		Description: strings.Join(descriptions, " | "),
+		Reference:   strings.Join(references, " | "),
+		Currency:    s.dominantCurrency(currencies),
+	}
+
+	// Check if the external transaction matches the group using the matching rules
+	return s.matchesRules(externalTxn, groupTxn, matchingRules)
 }
 
-func (s *Blnk) findMatchingGroup(externalTxn *model.Transaction, groupedInternalTxns map[string][]model.Transaction, matchingRules []model.MatchingRule) ([]model.Transaction, error) {
-	for _, group := range groupedInternalTxns {
-		allRulesMet := true
-		for _, rule := range matchingRules {
-			ruleMet := false
-			for _, internalTxn := range group {
-				if s.matchesRules(externalTxn, internalTxn, []model.MatchingRule{rule}) {
-					ruleMet = true
-					break
-				}
-			}
-			if !ruleMet {
-				allRulesMet = false
-				break
-			}
-		}
-		if allRulesMet {
-			return group, nil
+// Helper function to determine the dominant currency
+func (s *Blnk) dominantCurrency(currencies map[string]bool) string {
+	if len(currencies) == 1 {
+		for currency := range currencies {
+			return currency
 		}
 	}
-	return nil, fmt.Errorf("no matching group found")
-}
-
-func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupingCriteria map[string]interface{}, matchingRules []model.MatchingRule) ([]model.Match, []string) {
-	var matches []model.Match
-	var unmatched []string
-
-	batchSize := 1000
-	offset := int64(0)
-
-	// Create a map to store processed external transactions
-	processedExternalTxns := make(map[string]bool)
-
-	for {
-		// Group internal transactions based on the grouping criteria
-		groupedInternalTxns, err := s.groupInternalTransactions(ctx, groupingCriteria, batchSize, offset)
-		if err != nil {
-			log.Printf("Error grouping internal transactions: %v", err)
-			return nil, []string{err.Error()}
-		}
-
-		if len(groupedInternalTxns) == 0 {
-			break // No more transactions to process
-		}
-
-		// Process external transactions in parallel
-		var wg sync.WaitGroup
-		matchChan := make(chan model.Match, len(externalTxns))
-		unmatchedChan := make(chan string, len(externalTxns))
-
-		for _, externalTxn := range externalTxns {
-			if processedExternalTxns[externalTxn.TransactionID] {
-				continue // Skip already processed transactions
-			}
-
-			wg.Add(1)
-			go func(extTxn *model.Transaction) {
-				defer wg.Done()
-				matchedGroup, err := s.findMatchingGroup(extTxn, groupedInternalTxns, matchingRules)
-				if err != nil {
-					unmatchedChan <- extTxn.TransactionID
-					return
-				}
-
-				totalInternalAmount := 0.0
-				for _, internalTxn := range matchedGroup {
-					totalInternalAmount += internalTxn.Amount
-					matchChan <- model.Match{
-						ExternalTransactionID: extTxn.TransactionID,
-						InternalTransactionID: internalTxn.TransactionID,
-						Amount:                internalTxn.Amount,
-						Date:                  internalTxn.CreatedAt,
-					}
-				}
-
-				// Check if the total amount of internal transactions matches the external transaction
-				if math.Abs(extTxn.Amount-totalInternalAmount) > 0.01 {
-					unmatchedChan <- extTxn.TransactionID
-				}
-
-				processedExternalTxns[extTxn.TransactionID] = true
-			}(externalTxn)
-		}
-
-		// Wait for all goroutines to finish
-		go func() {
-			wg.Wait()
-			close(matchChan)
-			close(unmatchedChan)
-		}()
-
-		// Collect results
-		for match := range matchChan {
-			matches = append(matches, match)
-		}
-		for unmatchedID := range unmatchedChan {
-			unmatched = append(unmatched, unmatchedID)
-		}
-
-		offset += int64(batchSize)
-	}
-
-	return matches, unmatched
-}
-
-func (s *Blnk) manyToOneReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupingCriteria map[string]interface{}, matchingRules []model.MatchingRule) ([]model.Match, []string) {
-	var matches []model.Match
-	var unmatched []string
-
-	internalTxnID, ok := groupingCriteria["internal_transaction_id"].(string)
-	if !ok {
-		return nil, []string{"Error: invalid internal_transaction_id in grouping criteria"}
-	}
-
-	startDate, ok := groupingCriteria["start_date"].(time.Time)
-	if !ok {
-		return nil, []string{"Error: invalid start_date in grouping criteria"}
-	}
-
-	endDate, ok := groupingCriteria["end_date"].(time.Time)
-	if !ok {
-		return nil, []string{"Error: invalid end_date in grouping criteria"}
-	}
-
-	internalTxn, err := s.GetTransaction(internalTxnID)
-	if err != nil {
-		log.Printf("Error fetching internal transaction: %v", err)
-		return nil, []string{fmt.Sprintf("Error fetching internal transaction: %v", err)}
-	}
-
-	var totalExternalAmount float64
-	var matchedExternalTxns []*model.Transaction
-
-	// Use a worker pool for parallel processing
-	numWorkers := runtime.NumCPU()
-	jobs := make(chan *model.Transaction, len(externalTxns))
-	results := make(chan struct {
-		txn       *model.Transaction
-		isMatched bool
-	}, len(externalTxns))
-
-	// Start worker pool
-	for w := 0; w < numWorkers; w++ {
-		go manyToOneWorker(ctx, jobs, results, startDate, endDate, internalTxn, matchingRules, s.matchesRules)
-	}
-
-	// Send jobs to workers
-	for _, txn := range externalTxns {
-		jobs <- txn
-	}
-	close(jobs)
-
-	// Collect results
-	for range externalTxns {
-		result := <-results
-		if result.isMatched {
-			totalExternalAmount += result.txn.Amount
-			matchedExternalTxns = append(matchedExternalTxns, result.txn)
-		} else {
-			unmatched = append(unmatched, result.txn.TransactionID)
-		}
-	}
-
-	// Check if the total amount of matched external transactions equals the internal transaction amount
-	allowableDrift := internalTxn.Amount * 0.01 // 1% allowable drift
-	if math.Abs(totalExternalAmount-internalTxn.Amount) <= allowableDrift {
-		for _, matchedExternalTxn := range matchedExternalTxns {
-			matches = append(matches, model.Match{
-				ExternalTransactionID: matchedExternalTxn.TransactionID,
-				InternalTransactionID: internalTxn.TransactionID,
-				Amount:                matchedExternalTxn.Amount,
-				Date:                  matchedExternalTxn.CreatedAt,
-			})
-		}
-	} else {
-		// If the total doesn't match, consider all external transactions as unmatched
-		for _, matchedExternalTxn := range matchedExternalTxns {
-			unmatched = append(unmatched, matchedExternalTxn.TransactionID)
-		}
-		log.Printf("Total amount mismatch: Internal %.2f, External %.2f", internalTxn.Amount, totalExternalAmount)
-	}
-
-	return matches, unmatched
-}
-
-func manyToOneWorker(_ context.Context, jobs <-chan *model.Transaction, results chan<- struct {
-	txn       *model.Transaction
-	isMatched bool
-}, startDate, endDate time.Time, internalTxn *model.Transaction, matchingRules []model.MatchingRule,
-	matchFunc func(*model.Transaction, model.Transaction, []model.MatchingRule) bool) {
-	for txn := range jobs {
-		isMatched := false
-		if (txn.CreatedAt.After(startDate) || txn.CreatedAt.Equal(startDate)) &&
-			(txn.CreatedAt.Before(endDate) || txn.CreatedAt.Equal(endDate)) {
-			isMatched = matchFunc(txn, *internalTxn, matchingRules)
-		}
-		results <- struct {
-			txn       *model.Transaction
-			isMatched bool
-		}{txn, isMatched}
-	}
+	return "MIXED" // Or handle multiple currencies as appropriate for your use case
 }
 
 func (s *Blnk) CreateMatchingRule(ctx context.Context, rule model.MatchingRule) (*model.MatchingRule, error) {
@@ -740,27 +682,24 @@ func (s *Blnk) getMatchingRules(ctx context.Context, matchingRuleIDs []string) (
 	return rules, nil
 }
 
-func (s *Blnk) matchesCriteria(externalTxn *model.Transaction, internalTxn model.Transaction, criteria model.MatchingCriteria) bool {
-	switch criteria.Field {
-	case "amount":
-		return s.matchesAmount(externalTxn.Amount, internalTxn.Amount, criteria)
-	case "date":
-		return s.matchesDate(externalTxn.CreatedAt, internalTxn.CreatedAt, criteria)
-	case "description":
-		return s.matchesString(externalTxn.Description, internalTxn.Description, criteria)
-	case "reference":
-		return s.matchesString(externalTxn.Reference, internalTxn.Reference, criteria)
-	case "currency":
-		return s.matchesString(externalTxn.Currency, internalTxn.Currency, criteria)
-	}
-	return false
-}
 func (s *Blnk) matchesString(externalValue, internalValue string, criteria model.MatchingCriteria) bool {
 	switch criteria.Operator {
 	case "equals":
-		return strings.EqualFold(externalValue, internalValue)
+		// Split the internal value and check if any part matches exactly
+		for _, part := range strings.Split(internalValue, " | ") {
+			if strings.EqualFold(externalValue, part) {
+				return true
+			}
+		}
+		return false
 	case "contains":
-		return s.partialMatch(externalValue, internalValue, criteria.AllowableDrift)
+		// Check if the external value is contained in any part of the internal value
+		for _, part := range strings.Split(internalValue, " | ") {
+			if s.partialMatch(externalValue, part, criteria.AllowableDrift) {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }
@@ -792,29 +731,37 @@ func max(a, b int) int {
 	}
 	return b
 }
-func (s *Blnk) matchesAmount(externalAmount, internalAmount float64, criteria model.MatchingCriteria) bool {
+
+func (s *Blnk) matchesCurrency(externalValue, internalValue string, criteria model.MatchingCriteria) bool {
+	if internalValue == "MIXED" {
+		// Decide how to handle mixed currencies. Maybe always return true, or implement a more complex logic
+		return true
+	}
+	return s.matchesString(externalValue, internalValue, criteria)
+}
+
+func (s *Blnk) matchesGroupAmount(externalAmount, groupAmount float64, criteria model.MatchingCriteria) bool {
 	switch criteria.Operator {
 	case "equals":
-		allowableDrift := internalAmount * (criteria.AllowableDrift)
-		return math.Abs(externalAmount-internalAmount) <= allowableDrift
+		allowableDrift := groupAmount * criteria.AllowableDrift
+		return math.Abs(externalAmount-groupAmount) <= allowableDrift
 	case "greater_than":
-		return externalAmount > internalAmount
+		return externalAmount > groupAmount
 	case "less_than":
-		return externalAmount < internalAmount
+		return externalAmount < groupAmount
 	}
 	return false
 }
 
-func (s *Blnk) matchesDate(externalDate, internalDate time.Time, criteria model.MatchingCriteria) bool {
+func (s *Blnk) matchesGroupDate(externalDate, groupEarliestDate time.Time, criteria model.MatchingCriteria) bool {
 	switch criteria.Operator {
 	case "equals":
-		difference := externalDate.Sub(internalDate)
-		seconds := int64(difference.Seconds()) // Convert to whole seconds
-		return math.Abs(float64(seconds)) <= criteria.AllowableDrift
-	case "before":
-		return externalDate.Before(internalDate)
+		difference := externalDate.Sub(groupEarliestDate)
+		return math.Abs(difference.Seconds()) <= criteria.AllowableDrift
 	case "after":
-		return externalDate.After(internalDate)
+		return externalDate.After(groupEarliestDate)
+	case "before":
+		return externalDate.Before(groupEarliestDate)
 	}
 	return false
 }
