@@ -271,7 +271,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	return transactions, nil
 }
 
-func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]model.Transaction, error) {
+func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 
 	// Build the SQL query based on the grouping criteria
 	query := `
@@ -303,7 +303,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[
 	}
 	defer rows.Close()
 
-	groupedTransactions := make(map[string][]model.Transaction)
+	groupedTransactions := make(map[string][]*model.Transaction)
 	rowCount := 0
 
 	for rows.Next() {
@@ -345,7 +345,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[
 		}
 		groupKey := strings.Join(groupKeyParts, "-")
 
-		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], transaction)
+		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], &transaction)
 	}
 
 	if err = rows.Err(); err != nil {
