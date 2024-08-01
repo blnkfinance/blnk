@@ -763,7 +763,6 @@ func (s *Blnk) matchesCurrency(externalValue, internalValue string, criteria mod
 }
 
 func (s *Blnk) matchesGroupAmount(externalAmount, groupAmount float64, criteria model.MatchingCriteria) bool {
-	fmt.Println(externalAmount, groupAmount, criteria)
 	switch criteria.Operator {
 	case "equals":
 		allowableDrift := groupAmount * criteria.AllowableDrift
