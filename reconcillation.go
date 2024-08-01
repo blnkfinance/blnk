@@ -462,9 +462,32 @@ func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria m
 
 func (s *Blnk) groupExternalTransactions(externalTxns []*model.Transaction) map[string][]*model.Transaction {
 	grouped := make(map[string][]*model.Transaction)
+	const timeWindow = 2 * time.Hour // Adjust this value as needed
 
 	for _, txn := range externalTxns {
-		key := fmt.Sprintf("%s_%s", txn.Currency, txn.CreatedAt.Format("2006-01-02"))
+		var key string
+		var assigned bool
+
+		// Check existing groups for a close match
+		for existingKey, group := range grouped {
+			for _, groupTxn := range group {
+				if txn.Currency == groupTxn.Currency &&
+					math.Abs(txn.CreatedAt.Sub(groupTxn.CreatedAt).Hours()) <= timeWindow.Hours() {
+					key = existingKey
+					assigned = true
+					break
+				}
+			}
+			if assigned {
+				break
+			}
+		}
+
+		// If no close match found, create a new group
+		if !assigned {
+			key = fmt.Sprintf("%s_%s", txn.Currency, txn.CreatedAt.Format("2006-01-02T15:04:05"))
+		}
+
 		grouped[key] = append(grouped[key], txn)
 	}
 
@@ -532,7 +555,6 @@ func (s *Blnk) matchesGroup(externalTxn *model.Transaction, group []*model.Trans
 	descriptions := make([]string, 0, len(group))
 	references := make([]string, 0, len(group))
 	currencies := make(map[string]bool)
-
 	for i, internalTxn := range group {
 		totalAmount += internalTxn.Amount
 
@@ -741,6 +763,7 @@ func (s *Blnk) matchesCurrency(externalValue, internalValue string, criteria mod
 }
 
 func (s *Blnk) matchesGroupAmount(externalAmount, groupAmount float64, criteria model.MatchingCriteria) bool {
+	fmt.Println(externalAmount, groupAmount, criteria)
 	switch criteria.Operator {
 	case "equals":
 		allowableDrift := groupAmount * criteria.AllowableDrift
@@ -757,7 +780,7 @@ func (s *Blnk) matchesGroupDate(externalDate, groupEarliestDate time.Time, crite
 	switch criteria.Operator {
 	case "equals":
 		difference := externalDate.Sub(groupEarliestDate)
-		return math.Abs(difference.Seconds()) <= criteria.AllowableDrift
+		return math.Abs(float64(difference/time.Second)) <= criteria.AllowableDrift
 	case "after":
 		return externalDate.After(groupEarliestDate)
 	case "before":
