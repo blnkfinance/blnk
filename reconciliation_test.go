@@ -310,7 +310,7 @@ func TestReconciliationEdgeCases(t *testing.T) {
 		}
 		internalTxns := []*model.Transaction{}
 
-		mockDS.On("GetTransactionsPaginated", mock.Anything, "", 1000, int64(0)).Return(internalTxns, nil)
+		mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100, int64(0)).Return(internalTxns, nil)
 
 		matchingRules := []model.MatchingRule{
 			{
@@ -334,9 +334,9 @@ func TestReconciliationEdgeCases(t *testing.T) {
 		externalTxns := []*model.Transaction{
 			{TransactionID: "ext1", Amount: 300, CreatedAt: time.Now()},
 		}
-		groupedInternalTxns := map[string][]model.Transaction{}
+		groupedInternalTxns := map[string][]*model.Transaction{}
 
-		mockDS.On("GroupTransactions", mock.Anything, mock.Anything, 1000, int64(0)).Return(groupedInternalTxns, nil)
+		mockDS.On("GroupTransactions", mock.Anything, mock.Anything, 100, int64(0)).Return(groupedInternalTxns, nil)
 
 		matchingRules := []model.MatchingRule{
 			{
