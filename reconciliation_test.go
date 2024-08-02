@@ -44,10 +44,16 @@ func TestOneToOneReconciliation(t *testing.T) {
 
 	assert.Equal(t, 2, len(matches), "Expected 2 matches")
 	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
-	assert.Equal(t, "ext1", matches[0].ExternalTransactionID)
-	assert.Equal(t, "int1", matches[0].InternalTransactionID)
-	assert.Equal(t, "ext2", matches[1].ExternalTransactionID)
-	assert.Equal(t, "int2", matches[1].InternalTransactionID)
+
+	// Create a map to easily check for expected matches
+	matchMap := make(map[string]string)
+	for _, match := range matches {
+		matchMap[match.ExternalTransactionID] = match.InternalTransactionID
+	}
+
+	// Check if all expected matches are present
+	assert.Equal(t, "int1", matchMap["ext1"], "Expected ext1 to match with int1")
+	assert.Equal(t, "int2", matchMap["ext2"], "Expected ext2 to match with int2")
 
 	mockDS.AssertExpectations(t)
 }

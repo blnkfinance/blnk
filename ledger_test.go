@@ -48,7 +48,7 @@ func TestCreateLedger(t *testing.T) {
 	metaDataJSON, _ := json.Marshal(ledger.MetaData)
 
 	// Set expectations on mock
-	mock.ExpectExec("INSERT INTO ledgers").
+	mock.ExpectExec("INSERT INTO blnk.ledgers").
 		WithArgs(metaDataJSON, ledger.Name, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -80,7 +80,7 @@ func TestGetAllLedgers(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"ledger_id", "name", "created_at", "meta_data"}).
 		AddRow("ldg_1234567", "general ledger", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT ledger_id,name, created_at, meta_data FROM ledgers LIMIT 20").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT ledger_id,name, created_at, meta_data FROM blnk.ledgers LIMIT 20").WillReturnRows(rows)
 
 	result, err := d.GetAllLedgers()
 
@@ -107,7 +107,7 @@ func TestGetLedgerByID(t *testing.T) {
 	row := sqlmock.NewRows([]string{gofakeit.UUID(), "name", "created_at", "meta_data"}).
 		AddRow(testID, "test-name", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM ledgers WHERE ledger_id =").
+	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers WHERE ledger_id =").
 		WithArgs(testID).
 		WillReturnRows(row)
 

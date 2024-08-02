@@ -38,8 +38,8 @@ func TestCreateAccount(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
-		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
+	rows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
+		AddRow(account.BalanceID, "", "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).
@@ -92,8 +92,8 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	rows := sqlmock.NewRows([]string{"balance_id", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
-		AddRow(account.BalanceID, "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
+	rows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
+		AddRow(account.BalanceID, "", "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).
@@ -180,7 +180,7 @@ func TestGetAllAccounts(t *testing.T) {
 		AddRow(account1.AccountID, account1.Name, account1.Number, account1.BankName, account1.Currency, time.Now(), metaDataJSON1).
 		AddRow(account2.AccountID, account2.Name, account2.Number, account2.BankName, account1.Currency, time.Now(), metaDataJSON2)
 
-	mock.ExpectQuery("SELECT .* FROM accounts").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT .* FROM blnk.accounts").WillReturnRows(rows)
 
 	result, err := d.GetAllAccounts()
 	assert.NoError(t, err)

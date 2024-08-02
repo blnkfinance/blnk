@@ -45,7 +45,7 @@ func TestCreateIdentity(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(identity.MetaData)
 
-	mock.ExpectExec("INSERT INTO identity").
+	mock.ExpectExec("INSERT INTO blnk.identity").
 		WithArgs(sqlmock.AnyArg(), identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, sqlmock.AnyArg(), metaDataJSON).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -87,7 +87,7 @@ func TestGetIdentity(t *testing.T) {
 	)
 
 	// Updated query to match the actual method's query
-	mock.ExpectQuery("SELECT .* FROM identity WHERE identity_id =").
+	mock.ExpectQuery("SELECT .* FROM blnk.identity WHERE identity_id =").
 		WithArgs(testID).
 		WillReturnRows(row)
 
@@ -134,7 +134,7 @@ func TestGetAllIdentities(t *testing.T) {
 		"Street", "Country", "State", "PostCode", "City", time.Now(), `{"key":"value"}`,
 	)
 
-	mock.ExpectQuery("SELECT .* FROM identity").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT .* FROM blnk.identity").WillReturnRows(rows)
 
 	result, err := d.GetAllIdentities()
 
@@ -178,7 +178,7 @@ func TestUpdateIdentity(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(identity.MetaData)
 
-	mock.ExpectExec("UPDATE identity SET").
+	mock.ExpectExec("UPDATE blnk.identity SET").
 		WithArgs(sqlmock.AnyArg(), identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, sqlmock.AnyArg(), metaDataJSON).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
