@@ -9,18 +9,21 @@ export const options = {
 
 export default function () {
   const url = "http://localhost:5001/transactions";
-  const payload = JSON.stringify({
+
+  // Schedule a transaction
+  let payload = JSON.stringify({
     amount: 500,
-    description: "test transaction",
+    description: "scheduled transaction",
     precision: 100,
     allow_overdraft: true,
     reference: uuidv4(),
     currency: "USD",
     source: `@world`,
     destination: `@${uuidv4()}`,
+    scheduled_for: new Date(new Date().getTime() + 60 * 1000).toISOString(),
   });
 
-  const params = {
+  let params = {
     headers: {
       "Content-Type": "application/json",
     },

@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func migrateCommands(b *blnkInstance) *cobra.Command {
+func migrateCommands(_ *blnkInstance) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "start blnk migration",

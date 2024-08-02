@@ -1,9 +1,35 @@
 package blnk
 
-import "github.com/jerry-enebeli/blnk/model"
+import (
+	"context"
+
+	"github.com/jerry-enebeli/blnk/internal/notification"
+	"github.com/jerry-enebeli/blnk/model"
+)
+
+func (l *Blnk) postLedgerActions(_ context.Context, ledger *model.Ledger) {
+	go func() {
+		err := l.queue.queueIndexData(ledger.LedgerID, "ledgers", ledger)
+		if err != nil {
+			notification.NotifyError(err)
+		}
+		err = SendWebhook(NewWebhook{
+			Event:   "ledger.created",
+			Payload: ledger,
+		})
+		if err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
 
 func (l *Blnk) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
-	return l.datasource.CreateLedger(ledger)
+	ledger, err := l.datasource.CreateLedger(ledger)
+	if err != nil {
+		return model.Ledger{}, err
+	}
+	l.postLedgerActions(context.Background(), &ledger)
+	return ledger, nil
 }
 
 func (l *Blnk) GetAllLedgers() ([]model.Ledger, error) {

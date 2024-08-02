@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -18,6 +19,25 @@ import (
 type NewWebhook struct {
 	Event   string      `json:"event"`
 	Payload interface{} `json:"data"`
+}
+
+func getEventFromStatus(status string) string {
+	switch strings.ToLower(status) {
+	case strings.ToLower(StatusQueued):
+		return "transaction.queued"
+	case strings.ToLower(StatusApplied):
+		return "transaction.applied"
+	case strings.ToLower(StatusScheduled):
+		return "transaction.scheduled"
+	case strings.ToLower(StatusInflight):
+		return "transaction.inflight"
+	case strings.ToLower(StatusVoid):
+		return "transaction.void"
+	case strings.ToLower(StatusRejected):
+		return "transaction.rejected"
+	default:
+		return "transaction.unknown"
+	}
 }
 
 func processHTTP(data NewWebhook) error {

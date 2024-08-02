@@ -21,7 +21,7 @@ func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 
 	// insert into database
 	_, err = d.Conn.Exec(`
-		INSERT INTO ledgers (meta_data, name, ledger_id)
+		INSERT INTO blnk.ledgers (meta_data, name, ledger_id)
 		VALUES ($1, $2,$3)
 
 	`, metaDataJSON, ledger.Name, ledger.LedgerID)
@@ -38,7 +38,7 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 	// select all ledgers from database
 	rows, err := d.Conn.Query(`
 		SELECT ledger_id,name, created_at, meta_data
-		FROM ledgers
+		FROM blnk.ledgers
 		LIMIT 20
 	`)
 	if err != nil {
@@ -77,7 +77,7 @@ func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	// select ledger from database by ID
 	row := d.Conn.QueryRow(`
 		SELECT ledger_id, name, created_at, meta_data
-		FROM ledgers
+		FROM blnk.ledgers
 		WHERE ledger_id = $1
 	`, id)
 

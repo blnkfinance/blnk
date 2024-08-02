@@ -132,21 +132,3 @@ func TestGetBalance(t *testing.T) {
 	assert.Equal(t, int64(0), newBalance.InflightDebitBalance)
 	assert.Equal(t, int64(0), newBalance.Version)
 }
-
-func TestBalanceMonitor(t *testing.T) {
-	//create balance
-	//create monitor for when balance if greater than 1000
-	//create monitor for when balance if less than 1000
-	//create monitor for when balance
-
-	//{
-	//	"balance_id": "bln_0be360ca-86fe-457d-be43-daa3f966d8f0",
-	//	"condition": {
-	//	"field": "debit_balance",
-	//		"operator": ">",
-	//		"value": 100000
-	//},
-	//	"description": "Tier 1 Account"
-	//}
-
-}

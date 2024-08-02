@@ -13,6 +13,7 @@ type IDataSource interface {
 	identity
 	balanceMonitor
 	account
+	reconciliation
 }
 
 type transaction interface {
@@ -24,6 +25,10 @@ type transaction interface {
 	UpdateTransactionStatus(id string, status string) error
 	GetAllTransactions() ([]model.Transaction, error)
 	GetTotalCommittedTransactions(parentID string) (int64, error)
+	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)
+	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)
+	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)
+	GroupTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error)
 }
 
 type ledger interface {
@@ -67,4 +72,22 @@ type identity interface {
 	GetAllIdentities() ([]model.Identity, error)
 	UpdateIdentity(identity *model.Identity) error
 	DeleteIdentity(id string) error
+}
+
+type reconciliation interface {
+	RecordReconciliation(ctx context.Context, rec *model.Reconciliation) error
+	GetReconciliation(ctx context.Context, id string) (*model.Reconciliation, error)
+	UpdateReconciliationStatus(ctx context.Context, id string, status string, matchedCount, unmatchedCount int) error
+	GetReconciliationsByUploadID(ctx context.Context, uploadID string) ([]*model.Reconciliation, error)
+	RecordMatch(ctx context.Context, match *model.Match) error
+	GetMatchesByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.Match, error)
+	GetExternalTransactionsPaginated(ctx context.Context, uploadID string, batchSize int, offset int64) ([]*model.ExternalTransaction, error)
+	RecordExternalTransaction(ctx context.Context, tx *model.ExternalTransaction, reconciliationID string) error
+	RecordMatchingRule(ctx context.Context, rule *model.MatchingRule) error
+	GetMatchingRules(ctx context.Context) ([]*model.MatchingRule, error)
+	GetMatchingRule(ctx context.Context, id string) (*model.MatchingRule, error)
+	UpdateMatchingRule(ctx context.Context, rule *model.MatchingRule) error
+	DeleteMatchingRule(ctx context.Context, id string) error
+	SaveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error
+	LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error)
 }

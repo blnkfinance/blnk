@@ -9,7 +9,10 @@ export const options = {
 
 export default function () {
   const url = "http://localhost:5001/transactions";
-  const payload = JSON.stringify({
+  const refundUrl = "http://localhost:5001/refund-transaction/";
+
+  // Step 1: Create and commit a transaction
+  let payload = JSON.stringify({
     amount: 500,
     description: "test transaction",
     precision: 100,
@@ -20,13 +23,21 @@ export default function () {
     destination: `@${uuidv4()}`,
   });
 
-  const params = {
+  let params = {
     headers: {
       "Content-Type": "application/json",
     },
   };
 
   let response = http.post(url, payload, params);
+  check(response, {
+    "is status 201": (r) => r.status === 201,
+  });
+
+  let transactionId = JSON.parse(response.body).transaction_id;
+
+  // Step 2: Refund the transaction
+  response = http.post(`${refundUrl}${transactionId}`, null, params);
   check(response, {
     "is status 201": (r) => r.status === 201,
   });

@@ -54,6 +54,10 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/backup-s3", a.BackupDBS3)
 
 	router.POST("/search/:collection", a.Search)
+
+	router.POST("/reconciliation/upload", a.UploadExternalData)
+	router.POST("/reconciliation/matching-rules", a.CreateMatchingRule)
+	router.POST("/reconciliation/start", a.StartReconciliation)
 	return a.router
 }
 

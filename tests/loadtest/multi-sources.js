@@ -9,18 +9,35 @@ export const options = {
 
 export default function () {
   const url = "http://localhost:5001/transactions";
-  const payload = JSON.stringify({
-    amount: 500,
-    description: "test transaction",
+
+  let payload = JSON.stringify({
+    amount: 30000,
     precision: 100,
-    allow_overdraft: true,
+    description: "multi sources",
     reference: uuidv4(),
+    allow_overdraft: true,
     currency: "USD",
-    source: `@world`,
+    sources: [
+      {
+        identifier: `@${uuidv4()}`,
+        distribution: "10%",
+        narration: "Source 1",
+      },
+      {
+        identifier: `@${uuidv4()}`,
+        distribution: "20000",
+        narration: "Source 2",
+      },
+      {
+        identifier: `@${uuidv4()}`,
+        distribution: "left",
+        narration: "Source 3",
+      },
+    ],
     destination: `@${uuidv4()}`,
   });
 
-  const params = {
+  let params = {
     headers: {
       "Content-Type": "application/json",
     },

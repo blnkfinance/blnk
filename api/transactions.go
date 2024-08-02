@@ -63,13 +63,16 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
 	}
-	resp, err := a.blnk.RefundTransaction(id)
-
+	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, 0, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorker)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	if len(transaction) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no transaction to refund"})
+		return
+	}
+	resp := transaction[0]
 	c.JSON(http.StatusCreated, resp)
 }
 
@@ -105,22 +108,28 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 
 	status := req.Status
 	if status == "commit" {
-		transaction, err := a.blnk.CommitInflightTransaction(c.Request.Context(), id, req.Amount)
+		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		resp = transaction
+		if len(transaction) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no transaction to commit"})
+			return
+		}
+		resp = transaction[0]
 	} else if status == "void" {
-		transaction, err := a.blnk.VoidInflightTransaction(c.Request.Context(), id)
-
+		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		resp = transaction
+		if len(transaction) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no transaction to void"})
+			return
+		}
+		resp = transaction[0]
 	} else {
-
 		c.JSON(http.StatusBadRequest, gin.H{"error": errors.New("status not supported. use either commit or void")})
 		return
 

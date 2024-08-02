@@ -7,15 +7,11 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/typesense/typesense-go/typesense/api"
 )
 
 func GenerateUUIDWithSuffix(module string) string {
-	// Generate a new UUID
 	id := uuid.New()
-	// Convert the UUID to a string
 	uuidStr := id.String()
-	// Add the module suffix
 	idWithSuffix := fmt.Sprintf("%s_%s", module, uuidStr)
 	return idWithSuffix
 }
@@ -190,160 +186,13 @@ func (bm *BalanceMonitor) CheckCondition(b *Balance) bool {
 	return false
 }
 
-func (_ *Transaction) ToSchema() *api.CollectionSchema {
-	schema := &api.CollectionSchema{
-		Name: "transactions",
-		Fields: []api.Field{
-			{
-				Name: "amount",
-				Type: "float",
-			},
-			{
-				Name: "precision",
-				Type: "int64",
-			},
-			{
-				Name: "source",
-				Type: "string",
-			},
-			{
-				Name: "reference",
-				Type: "string",
-			},
-			{
-				Name: "destination",
-				Type: "string",
-			},
-			{
-				Name: "description",
-				Type: "string",
-			},
-			{
-				Name: "currency",
-				Type: "string",
-			},
-			{
-				Name: "scheduled_for",
-				Type: "auto",
-			},
-			{
-				Name: "created_at",
-				Type: "string",
-			},
-			{
-				Name: "sources",
-				Type: "auto",
-			},
-			{
-				Name: "destinations",
-				Type: "auto",
-			},
-			{
-				Name: "meta_data",
-				Type: "auto",
-			},
-		},
+func (et *ExternalTransaction) ToInternalTransaction() *Transaction {
+	return &Transaction{
+		TransactionID: et.ID,
+		Amount:        et.Amount,
+		Reference:     et.Reference,
+		Currency:      et.Currency,
+		CreatedAt:     et.Date,
+		Description:   et.Description,
 	}
-
-	return schema
-}
-
-func (_ *Ledger) ToSchema() *api.CollectionSchema {
-	schema := &api.CollectionSchema{
-		Name: "ledgers",
-		Fields: []api.Field{
-			{
-				Name: "ledger_id",
-				Type: "string",
-			},
-			{
-				Name: "name",
-				Type: "string",
-			},
-			{
-				Name: "meta_data",
-				Type: "auto",
-			},
-			{
-				Name: "created_at",
-				Type: "auto",
-			},
-		},
-	}
-
-	return schema
-}
-
-func (_ *Balance) ToSchema() *api.CollectionSchema {
-	schema := &api.CollectionSchema{
-		Name: "balances",
-		Fields: []api.Field{
-			{
-				Name: "balance",
-				Type: "int64",
-			},
-			{
-				Name: "inflight_balance",
-				Type: "int64",
-			},
-			{
-				Name: "credit_balance",
-				Type: "int64",
-			},
-			{
-				Name: "inflight_credit_balance",
-				Type: "int64",
-			},
-			{
-				Name: "debit_balance",
-				Type: "int64",
-			},
-			{
-				Name: "inflight_debit_balance",
-				Type: "int64",
-			},
-			{
-				Name: "currency_multiplier",
-				Type: "float",
-			},
-			{
-				Name: "version",
-				Type: "int64",
-			},
-			{
-				Name: "ledger_id",
-				Type: "string",
-			},
-			{
-				Name: "identity_id",
-				Type: "string",
-			},
-			{
-				Name: "balance_id",
-				Type: "string",
-			},
-			{
-				Name: "indicator",
-				Type: "string",
-			},
-			{
-				Name: "currency",
-				Type: "string",
-			},
-			{
-				Name: "created_at",
-				Type: "auto",
-			},
-			{
-				Name: "inflight_expires_at",
-				Type: "auto",
-			},
-			{
-				Name: "meta_data",
-				Type: "auto",
-			},
-		},
-	}
-
-	return schema
 }

@@ -176,7 +176,7 @@ func scanAccountRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Account,
 func (d Datasource) GetAllAccounts() ([]model.Account, error) {
 	rows, err := d.Conn.Query(`
     SELECT account_id, name, number, bank_name, currency, created_at, meta_data 
-    FROM accounts
+    FROM blnk.accounts
 	ORDER BY created_at DESC
 
 `)
