@@ -113,8 +113,11 @@ func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, 
 	if err != nil {
 		return fmt.Errorf("error starting transaction: %w", err)
 	}
-	defer txn.Rollback()
-
+	defer func() {
+		if err := txn.Rollback(); err != nil && err != sql.ErrTxDone {
+			span.RecordError(fmt.Errorf("error rolling back transaction: %w", err))
+		}
+	}()
 	stmt, err := txn.PrepareContext(ctx, pq.CopyIn("blnk.matches", "external_transaction_id", "internal_transaction_id", "reconciliation_id", "amount", "date"))
 	if err != nil {
 		return fmt.Errorf("error preparing statement: %w", err)
