@@ -19,6 +19,10 @@ type Cache interface {
 	Delete(ctx context.Context, key string) error
 }
 
+type RedisCache struct {
+	cache *cache.Cache
+}
+
 func NewCache() (Cache, error) {
 	cfg, err := config.Fetch()
 	if err != nil {
@@ -32,10 +36,6 @@ func NewCache() (Cache, error) {
 }
 
 const cacheSize = 128000
-
-type RedisCache struct {
-	cache *cache.Cache
-}
 
 func newRedisCache(addresses []string) (*RedisCache, error) {
 	client, err := redis_db.NewRedisClient(addresses)

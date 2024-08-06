@@ -11,14 +11,16 @@ import (
 // UploadExternalData handles the upload of external transaction data
 func (a Api) UploadExternalData(c *gin.Context) {
 	source := c.PostForm("source")
-	file, _, err := c.Request.FormFile("file")
+	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File upload failed"})
 		return
 	}
 	defer file.Close()
 
-	uploadID, err := a.blnk.UploadExternalData(c.Request.Context(), source, file)
+	fileName := header.Filename
+
+	uploadID, err := a.blnk.UploadExternalData(c.Request.Context(), source, file, fileName)
 	if err != nil {
 		logrus.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process upload"})

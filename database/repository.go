@@ -90,4 +90,5 @@ type reconciliation interface {
 	DeleteMatchingRule(ctx context.Context, id string) error
 	SaveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error
 	LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error)
+	RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error
 }

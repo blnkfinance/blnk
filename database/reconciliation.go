@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
+	"github.com/lib/pq"
 	"go.opentelemetry.io/otel"
 )
 
@@ -102,6 +103,47 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 	}
 
 	return reconciliations, nil
+}
+
+func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error {
+	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Batch saving matches to db")
+	defer span.End()
+
+	txn, err := d.Conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("error starting transaction: %w", err)
+	}
+	defer txn.Rollback()
+
+	stmt, err := txn.PrepareContext(ctx, pq.CopyIn("blnk.matches", "external_transaction_id", "internal_transaction_id", "reconciliation_id", "amount", "date"))
+	if err != nil {
+		return fmt.Errorf("error preparing statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, match := range matches {
+		_, err := stmt.ExecContext(ctx,
+			match.ExternalTransactionID,
+			match.InternalTransactionID,
+			reconciliationID,
+			match.Amount,
+			match.Date,
+		)
+		if err != nil {
+			return fmt.Errorf("error executing statement: %w", err)
+		}
+	}
+
+	_, err = stmt.ExecContext(ctx)
+	if err != nil {
+		return fmt.Errorf("error flushing batch insert: %w", err)
+	}
+
+	if err := txn.Commit(); err != nil {
+		return fmt.Errorf("error committing transaction: %w", err)
+	}
+
+	return nil
 }
 
 // RecordMatch inserts a new match record into the database

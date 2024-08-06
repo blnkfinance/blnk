@@ -271,9 +271,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	return transactions, nil
 }
 
-func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
-
-	// Build the SQL query based on the grouping criteria
+func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 	query := `
         SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
@@ -281,13 +279,22 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[
     `
 	var args []interface{}
 	var groupByColumns []string
+	var whereClauses []string
 
 	argIndex := 1
-	for key, value := range groupingCriteria {
-		query += fmt.Sprintf(" AND %s = $%d", key, argIndex)
-		args = append(args, value)
-		groupByColumns = append(groupByColumns, key)
-		argIndex++
+
+	for field, value := range groupCriteria {
+		groupByColumns = append(groupByColumns, field)
+
+		if value != nil {
+			whereClauses = append(whereClauses, fmt.Sprintf("%s = $%d", field, argIndex))
+			args = append(args, value)
+			argIndex++
+		}
+	}
+
+	if len(whereClauses) > 0 {
+		query += " AND " + strings.Join(whereClauses, " AND ")
 	}
 
 	if len(groupByColumns) > 0 {
@@ -304,10 +311,8 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[
 	defer rows.Close()
 
 	groupedTransactions := make(map[string][]*model.Transaction)
-	rowCount := 0
 
 	for rows.Next() {
-		rowCount++
 		transaction := model.Transaction{}
 		var metaDataJSON []byte
 		err = rows.Scan(
@@ -340,8 +345,8 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupingCriteria map[
 
 		// Create a group key based on the grouping criteria
 		var groupKeyParts []string
-		for _, col := range groupByColumns {
-			groupKeyParts = append(groupKeyParts, fmt.Sprintf("%v", reflect.ValueOf(transaction).FieldByName(col)))
+		for field := range groupCriteria {
+			groupKeyParts = append(groupKeyParts, fmt.Sprintf("%v", reflect.ValueOf(transaction).FieldByName(field)))
 		}
 		groupKey := strings.Join(groupKeyParts, "-")
 

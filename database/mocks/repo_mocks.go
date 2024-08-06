@@ -251,6 +251,11 @@ func (m *MockDataSource) RecordMatch(ctx context.Context, match *model.Match) er
 	return args.Error(0)
 }
 
+func (m *MockDataSource) RecordMatches(ctx context.Context, reconciliationID string, match []model.Match) error {
+	args := m.Called(ctx, reconciliationID, match)
+	return args.Error(0)
+}
+
 func (m *MockDataSource) GetMatchesByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.Match, error) {
 	args := m.Called(ctx, reconciliationID)
 	return args.Get(0).([]*model.Match), args.Error(1)

@@ -77,7 +77,10 @@ func TestOneToManyReconciliation(t *testing.T) {
 		"parent_transaction": internalTxns,
 	}
 
+	emptyGroup := map[string][]*model.Transaction{}
+
 	mockDS.On("GroupTransactions", mock.Anything, mock.Anything, 100, int64(0)).Return(groupedInternalTxns, nil)
+	mockDS.On("GroupTransactions", mock.Anything, mock.Anything, 100, int64(100)).Return(emptyGroup, nil)
 
 	matchingRules := []model.MatchingRule{
 		{
