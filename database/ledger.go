@@ -3,78 +3,82 @@ package database
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
+	"github.com/lib/pq"
 )
 
 func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
-	// convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(ledger.MetaData)
 	if err != nil {
-		return model.Ledger{}, err
+		return model.Ledger{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
 	ledger.LedgerID = model.GenerateUUIDWithSuffix("ldg")
 	ledger.CreatedAt = time.Now()
 
-	// insert into database
 	_, err = d.Conn.Exec(`
 		INSERT INTO blnk.ledgers (meta_data, name, ledger_id)
-		VALUES ($1, $2,$3)
-
+		VALUES ($1, $2, $3)
 	`, metaDataJSON, ledger.Name, ledger.LedgerID)
 
 	if err != nil {
-		return model.Ledger{}, err
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "unique_violation":
+				return model.Ledger{}, apierror.NewAPIError(apierror.ErrConflict, "Ledger with this name or ID already exists", err)
+			default:
+				return model.Ledger{}, apierror.NewAPIError(apierror.ErrInternalServer, "Database error occurred", err)
+			}
+		}
+		return model.Ledger{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to create ledger", err)
 	}
 
 	return ledger, nil
 }
 
-// GetAllLedgers retrieves all ledgers from the database
 func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
-	// select all ledgers from database
 	rows, err := d.Conn.Query(`
-		SELECT ledger_id,name, created_at, meta_data
+		SELECT ledger_id, name, created_at, meta_data
 		FROM blnk.ledgers
 		LIMIT 20
 	`)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve ledgers", err)
 	}
 	defer rows.Close()
 
-	// create slice to store ledgers
 	ledgers := []model.Ledger{}
 
-	// iterate through result set and parse metadata from JSONB
 	for rows.Next() {
 		ledger := model.Ledger{}
 		var metaDataJSON []byte
 		err = rows.Scan(&ledger.LedgerID, &ledger.Name, &ledger.CreatedAt, &metaDataJSON)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan ledger data", err)
 		}
 
-		// convert metadata from JSONB to map
 		err = json.Unmarshal(metaDataJSON, &ledger.MetaData)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
 		ledgers = append(ledgers, ledger)
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over ledgers", err)
+	}
+
 	return ledgers, nil
 }
 
-// GetLedgerByID retrieves a single ledger from the database by ID
 func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	ledger := model.Ledger{}
 
-	// select ledger from database by ID
 	row := d.Conn.QueryRow(`
 		SELECT ledger_id, name, created_at, meta_data
 		FROM blnk.ledgers
@@ -85,18 +89,14 @@ func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	err := row.Scan(&ledger.LedgerID, &ledger.Name, &ledger.CreatedAt, &metaDataJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Handle no rows error
-			return nil, fmt.Errorf("ledger with ID '%s' not found", id)
-		} else {
-			// Handle other errors
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, "Ledger not found", err)
 		}
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve ledger", err)
 	}
 
-	// convert metadata from JSONB to map
 	err = json.Unmarshal(metaDataJSON, &ledger.MetaData)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
 	return &ledger, nil

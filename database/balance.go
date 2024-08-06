@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/sirupsen/logrus"
 
+	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
 )
 
@@ -113,34 +115,45 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 
 // CreateBalance inserts a new Balance into the database
 func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) {
-	// convert metadata to JSONB
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	if err != nil {
-		return balance, err
+		return model.Balance{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
 	balance.BalanceID = model.GenerateUUIDWithSuffix("bln")
 	balance.CreatedAt = time.Now()
 
-	// Replace empty string with null for identity_id
 	var identityID interface{} = balance.IdentityID
 	if balance.IdentityID == "" {
 		identityID = nil
 	}
 
-	// Replace empty string with null for indicator
 	var indicator interface{} = balance.Indicator
 	if balance.Indicator == "" {
 		indicator = nil
 	}
 
-	// insert into database
 	_, err = d.Conn.Exec(`
 		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)
 	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON)
 
-	return balance, err
+	if err != nil {
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "unique_violation":
+				return model.Balance{}, apierror.NewAPIError(apierror.ErrConflict, "Balance with this ID already exists", err)
+			case "foreign_key_violation":
+				return model.Balance{}, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid ledger ID", err)
+			default:
+				return model.Balance{}, apierror.NewAPIError(apierror.ErrInternalServer, "Database error occurred", err)
+			}
+		}
+		return model.Balance{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to create balance", err)
+	}
+
+	return balance, nil
 }
 
 func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance, error) {
@@ -149,7 +162,7 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 
 	tx, err := d.Conn.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
 	}
 
 	var queryBuilder strings.Builder
@@ -158,16 +171,14 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 	balance, err := scanRow(row, tx, include)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Handle no rows error
-			return nil, fmt.Errorf("balance with ID '%s' not found", id)
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
 		} else {
-			// Handle other errors
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan balance data", err)
 		}
 	}
 	err = tx.Commit()
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
 	}
 
 	return balance, nil
@@ -184,9 +195,9 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	if err != nil {
 		logrus.Errorf("balance lite error %v", err)
 		if err == sql.ErrNoRows {
-			return &model.Balance{}, fmt.Errorf("balance with ID '%s' not found", id)
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
 		} else {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan balance data", err)
 		}
 	}
 
@@ -317,7 +328,7 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
 	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
 	}
 
 	defer func(tx *sql.Tx) {
@@ -333,7 +344,7 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 	}
 
 	if err := tx.Commit(); err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
 	}
 
 	return nil
@@ -342,7 +353,7 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) error {
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
 	query := `
@@ -351,19 +362,18 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
         WHERE balance_id = $1 AND version = $13
     `
 
-	// Execute the update within the transaction
 	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.InflightBalance, balance.InflightCreditBalance, balance.InflightDebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON, balance.Version)
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("optimistic locking failure: balance with ID '%s' may have been updated or deleted by another transaction", balance.BalanceID)
+		return apierror.NewAPIError(apierror.ErrConflict, fmt.Sprintf("Optimistic locking failure: balance with ID '%s' may have been updated or deleted by another transaction", balance.BalanceID), nil)
 	}
 
 	balance.Version++
@@ -375,16 +385,29 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 func (d Datasource) UpdateBalance(balance *model.Balance) error {
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
-	_, err = d.Conn.Exec(`
+	result, err := d.Conn.Exec(`
 		UPDATE blnk.balances
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
 		WHERE balance_id = $1
 	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", balance.BalanceID), nil)
+	}
+
+	return nil
 }
 
 func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMonitor, error) {
@@ -392,14 +415,25 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 	monitor.CreatedAt = time.Now()
 
 	_, err := d.Conn.Exec(`
-		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value,precision,precise_value, description, call_back_url, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9,$10)
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue, monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
 
 	if err != nil {
-		return monitor, err
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "unique_violation":
+				return model.BalanceMonitor{}, apierror.NewAPIError(apierror.ErrConflict, "Monitor with this ID already exists", err)
+			case "foreign_key_violation":
+				return model.BalanceMonitor{}, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid balance ID", err)
+			default:
+				return model.BalanceMonitor{}, apierror.NewAPIError(apierror.ErrInternalServer, "Database error occurred", err)
+			}
+		}
+		return model.BalanceMonitor{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to create monitor", err)
 	}
-	return monitor, err
+	return monitor, nil
 }
 
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
@@ -412,7 +446,10 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	condition := &model.AlertCondition{}
 	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &condition.Precision, &condition.PreciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows {
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Monitor with ID '%s' not found", id), err)
+		}
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitor", err)
 	}
 	monitor.Condition = *condition
 	return monitor, nil
@@ -424,7 +461,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 		FROM blnk.balance_monitors
 	`)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitors", err)
 	}
 	defer rows.Close()
 
@@ -434,10 +471,13 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 		condition := model.AlertCondition{}
 		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
 		}
 		monitor.Condition = condition
 		monitors = append(monitors, monitor)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over monitors", err)
 	}
 	return monitors, nil
 }
@@ -445,10 +485,10 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	rows, err := d.Conn.Query(`
 		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
-		FROM blnk.balance_monitors WHERE balance_id= $1
+		FROM blnk.balance_monitors WHERE balance_id = $1
 	`, balanceID)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve balance monitors", err)
 	}
 	defer rows.Close()
 
@@ -458,26 +498,57 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 		condition := model.AlertCondition{}
 		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
 		}
 		monitor.Condition = condition
 		monitors = append(monitors, monitor)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over balance monitors", err)
 	}
 	return monitors, nil
 }
 
 func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
-	_, err := d.Conn.Exec(`
+	result, err := d.Conn.Exec(`
 		UPDATE blnk.balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url= $7
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7
 		WHERE monitor_id = $1
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL)
-	return err
+
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update monitor", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Monitor with ID '%s' not found", monitor.MonitorID), nil)
+	}
+
+	return nil
 }
 
 func (d Datasource) DeleteMonitor(id string) error {
-	_, err := d.Conn.Exec(`
+	result, err := d.Conn.Exec(`
 		DELETE FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
-	return err
+
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to delete monitor", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Monitor with ID '%s' not found", id), nil)
+	}
+
+	return nil
 }

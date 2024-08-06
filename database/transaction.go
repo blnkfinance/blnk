@@ -11,44 +11,29 @@ import (
 
 	"go.opentelemetry.io/otel"
 
+	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 )
 
-func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error) {
-	cxt, span := otel.Tracer("Queue transaction").Start(cxt, "Saving transaction to db")
+func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Saving transaction to db")
 	defer span.End()
+
 	metaDataJSON, err := json.Marshal(txn.MetaData)
 	if err != nil {
-		return txn, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
-	_, err = d.Conn.ExecContext(cxt,
-		`
-		INSERT INTO blnk.transactions(transaction_id,parent_transaction,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-	`,
-		txn.TransactionID,
-		txn.ParentTransaction,
-		txn.Source,
-		txn.Reference,
-		txn.Amount,
-		txn.PreciseAmount,
-		txn.Precision,
-		txn.Rate,
-		txn.Currency,
-		txn.Destination,
-		txn.Description,
-		txn.Status,
-		txn.CreatedAt,
-		metaDataJSON,
-		txn.ScheduledFor,
-		txn.Hash,
+	_, err = d.Conn.ExecContext(ctx,
+		`INSERT INTO blnk.transactions(transaction_id,parent_transaction,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.Amount, txn.PreciseAmount, txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash,
 	)
 
 	if err != nil {
-		return txn, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record transaction", err)
 	}
 
 	return txn, nil
@@ -56,103 +41,119 @@ func (d Datasource) RecordTransaction(cxt context.Context, txn *model.Transactio
 
 func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
 	row := d.Conn.QueryRow(`
-			SELECT transaction_id, source, reference, amount, precise_amount, precision, currency,destination, description, status,created_at, meta_data
-						FROM blnk.transactions
-					WHERE transaction_id = $1
-				`, id)
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data
+		FROM blnk.transactions
+		WHERE transaction_id = $1
+	`, id)
 
 	txn := &model.Transaction{}
-
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description,
-		&txn.Status,
-		&txn.CreatedAt, &metaDataJSON)
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
 	if err != nil {
-		return &model.Transaction{}, err
+		if err == sql.ErrNoRows {
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Transaction with ID '%s' not found", id), err)
+		}
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transaction", err)
 	}
 
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
-		return &model.Transaction{}, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
 	return txn, nil
 }
 
 func (d Datasource) IsParentTransactionVoid(parentID string) (bool, error) {
-	row := d.Conn.QueryRow(`
+	var exists bool
+	err := d.Conn.QueryRow(`
 		SELECT EXISTS (
 			SELECT 1
 			FROM blnk.transactions
 			WHERE parent_transaction = $1
 			AND status = 'VOID'
 		)
-	`, parentID)
+	`, parentID).Scan(&exists)
 
-	var exists bool
-	err := row.Scan(&exists)
 	if err != nil {
-		return false, err
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check if parent transaction is void", err)
 	}
 
 	return exists, nil
 }
 
 func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string) (bool, error) {
-	cxt, span := otel.Tracer("Queue transaction").Start(ctx, "Getting transaction from db by reference")
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Getting transaction from db by reference")
 	defer span.End()
+
 	var exists bool
-	err := d.Conn.QueryRowContext(cxt, `
-        SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
-    `, reference).Scan(&exists)
-	return exists, err
+	err := d.Conn.QueryRowContext(ctx, `
+		SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
+	`, reference).Scan(&exists)
+
+	if err != nil {
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check if transaction exists", err)
+	}
+
+	return exists, nil
 }
 
 func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (model.Transaction, error) {
-	// retrieve from database
 	row := d.Conn.QueryRowContext(ctx, `
-		SELECT transaction_id, source, reference, amount, precise_amount, currency,destination, description, status,created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data
 		FROM blnk.transactions
 		WHERE reference = $1
 	`, reference)
 
-	txn := &model.Transaction{}
-
+	txn := model.Transaction{}
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description,
-		&txn.Status,
-		&txn.CreatedAt, &metaDataJSON)
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
 	if err != nil {
-		return model.Transaction{}, err
+		if err == sql.ErrNoRows {
+			return model.Transaction{}, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Transaction with reference '%s' not found", reference), err)
+		}
+		return model.Transaction{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transaction", err)
 	}
 
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
-		return model.Transaction{}, err
+		return model.Transaction{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
-	return *txn, nil
+	return txn, nil
 }
 
 func (d Datasource) UpdateTransactionStatus(id string, status string) error {
-	// retrieve from database
-	_, err := d.Conn.Exec(`
+	result, err := d.Conn.Exec(`
 		UPDATE blnk.transactions
 		SET status = $2
 		WHERE transaction_id = $1
 	`, id, status)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update transaction status", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Transaction with ID '%s' not found", id), nil)
+	}
+
+	return nil
 }
 
 func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 	rows, err := d.Conn.Query(`
-		SELECT transaction_id, source, reference, amount, currency,destination, description, status, hash, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 	`)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions", err)
 	}
 	defer rows.Close()
 
@@ -175,16 +176,19 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 			&metaDataJSON,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
-		// convert metadata from JSON to map
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
 		transactions = append(transactions, transaction)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
 	return transactions, nil
@@ -198,15 +202,13 @@ func (d Datasource) GetTotalCommittedTransactions(parentID string) (int64, error
 		GROUP BY parent_transaction;
 	`
 
-	row := d.Conn.QueryRow(query, parentID)
 	var totalAmount int64
-
-	err := row.Scan(&totalAmount)
+	err := d.Conn.QueryRow(query, parentID).Scan(&totalAmount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
-		return 0, err
+		return 0, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get total committed transactions", err)
 	}
 
 	return totalAmount, nil
@@ -217,21 +219,19 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-        FROM blnk.transactions
-        ORDER BY created_at DESC
-        LIMIT $1 OFFSET $2
-    `, batchSize, offset)
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, batchSize, offset)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve paginated transactions", err)
 	}
 	defer rows.Close()
 
 	var transactions []*model.Transaction
-	rowCount := 0
 
 	for rows.Next() {
-		rowCount++
 		transaction := model.Transaction{}
 		var metaDataJSON []byte
 		err = rows.Scan(
@@ -253,19 +253,19 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 			&transaction.Hash,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
 		transactions = append(transactions, &transaction)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
 	return transactions, nil
@@ -273,10 +273,10 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 
 func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 	query := `
-        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-        FROM blnk.transactions
-        WHERE 1=1
-    `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		WHERE 1=1
+	`
 	var args []interface{}
 	var groupByColumns []string
 	var whereClauses []string
@@ -306,7 +306,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[str
 
 	rows, err := d.Conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped transactions", err)
 	}
 	defer rows.Close()
 
@@ -334,16 +334,14 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[str
 			&transaction.Hash,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
-		// Convert metadata from JSON to map
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		// Create a group key based on the grouping criteria
 		var groupKeyParts []string
 		for field := range groupCriteria {
 			groupKeyParts = append(groupKeyParts, fmt.Sprintf("%v", reflect.ValueOf(transaction).FieldByName(field)))
@@ -354,14 +352,14 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[str
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
 	return groupedTransactions, nil
 }
 
 func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching inflight transactions by parent ID with pagination")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -372,7 +370,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve inflight transactions", err)
 	}
 	defer rows.Close()
 
@@ -400,23 +398,26 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			&transaction.Hash,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
-		// Convert metadata from JSON to map
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
 		transactions = append(transactions, &transaction)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
 	return transactions, nil
 }
 
 func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching refundable transactions by parent ID with pagination")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -427,7 +428,7 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve refundable transactions", err)
 	}
 	defer rows.Close()
 
@@ -455,16 +456,20 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 			&transaction.Hash,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
-		// Convert metadata from JSON to map
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
 		transactions = append(transactions, &transaction)
 	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
+	}
+
 	return transactions, nil
 }

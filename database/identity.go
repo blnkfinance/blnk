@@ -2,17 +2,19 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
 )
 
-// CreateIdentity inserts a new Identity into the database
 func (d Datasource) CreateIdentity(identity model.Identity) (model.Identity, error) {
 	metaDataJSON, err := json.Marshal(identity.MetaData)
 	if err != nil {
-		return identity, err
+		return identity, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
 	identity.IdentityID = model.GenerateUUIDWithSuffix("idt")
@@ -23,17 +25,20 @@ func (d Datasource) CreateIdentity(identity model.Identity) (model.Identity, err
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
 
-	return identity, err
+	if err != nil {
+		return identity, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to create identity", err)
+	}
+
+	return identity, nil
 }
 
-// GetIdentityByID retrieves an identity from the database by ID
 func (d Datasource) GetIdentityByID(id string) (*model.Identity, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
 	tx, err := d.Conn.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
 	}
 
 	row := tx.QueryRow(`
@@ -52,24 +57,26 @@ func (d Datasource) GetIdentityByID(id string) (*model.Identity, error) {
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, err
+		if err == sql.ErrNoRows {
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Identity with ID '%s' not found", id), err)
+		}
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve identity", err)
 	}
 
 	err = json.Unmarshal(metaDataJSON, &identity.MetaData)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
 	}
 
 	return identity, nil
 }
 
-// GetAllIdentities retrieves all identities from the database
 func (d Datasource) GetAllIdentities() ([]model.Identity, error) {
 	rows, err := d.Conn.Query(`
 	SELECT identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data
@@ -77,7 +84,7 @@ func (d Datasource) GetAllIdentities() ([]model.Identity, error) {
 	ORDER BY created_at DESC
 `)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve identities", err)
 	}
 	defer rows.Close()
 
@@ -92,41 +99,70 @@ func (d Datasource) GetAllIdentities() ([]model.Identity, error) {
 			&identity.Street, &identity.Country, &identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt, &metaDataJSON,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan identity data", err)
 		}
 
 		err = json.Unmarshal(metaDataJSON, &identity.MetaData)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
 		identities = append(identities, identity)
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over identities", err)
+	}
+
 	return identities, nil
 }
 
-// UpdateIdentity updates an identity in the database
 func (d Datasource) UpdateIdentity(identity *model.Identity) error {
 	metaDataJSON, err := json.Marshal(identity.MetaData)
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
-	_, err = d.Conn.Exec(`
+	result, err := d.Conn.Exec(`
 		UPDATE blnk.identity
 		SET identity_type = $2, first_name = $3, last_name = $4, other_names = $5, gender = $6, dob = $7, email_address = $8, phone_number = $9, nationality = $10, organization_name = $11, category = $12, street = $13, country = $14, state = $15, post_code = $16, city = $17, created_at = $18, meta_data = $19
 		WHERE identity_id = $1
 	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update identity", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Identity with ID '%s' not found", identity.IdentityID), nil)
+	}
+
+	return nil
 }
 
-// DeleteIdentity deletes an identity from the database by ID
 func (d Datasource) DeleteIdentity(id string) error {
-	_, err := d.Conn.Exec(`
-		DELETE FROM identity
+	result, err := d.Conn.Exec(`
+		DELETE FROM blnk.identity
 		WHERE identity_id = $1
 	`, id)
-	return err
+
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to delete identity", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Identity with ID '%s' not found", id), nil)
+	}
+
+	return nil
 }

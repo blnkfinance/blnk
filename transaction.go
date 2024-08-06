@@ -289,7 +289,6 @@ func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction,
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 		}
-		fmt.Println("refund txn", queuedRefundTxn)
 		results <- BatchJobResult{Txn: queuedRefundTxn}
 	}
 }
