@@ -86,7 +86,6 @@ func NewCLI() *Blnk {
 	rootCmd.AddCommand(serverCommands(b))
 	rootCmd.AddCommand(workerCommands(b))
 	rootCmd.AddCommand(migrateCommands(b))
-	rootCmd.AddCommand(backupCommands(b))
 	return &Blnk{cmd: rootCmd}
 }
 
