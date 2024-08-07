@@ -74,6 +74,9 @@ func detectFileType(data []byte, filename string) (string, error) {
 		if json.Valid(data) {
 			return "application/json", nil
 		}
+	case "text/csv; charset=utf-8":
+		// Fix for CSV files with charset
+		return "text/csv", nil
 	}
 
 	return mimeType, nil
@@ -323,6 +326,8 @@ func (s *Blnk) UploadExternalData(ctx context.Context, source string, reader io.
 		err = s.parseAndStoreCSV(ctx, uploadID, source, tempFile)
 	case "application/json":
 		total, err = s.parseAndStoreJSON(ctx, uploadID, source, tempFile)
+	case "text/csv; charset=utf-8":
+		err = s.parseAndStoreCSV(ctx, uploadID, source, tempFile)
 	default:
 		return "", 0, fmt.Errorf("unsupported file type: %s", fileType)
 	}
