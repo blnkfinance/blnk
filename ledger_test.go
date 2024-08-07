@@ -80,7 +80,7 @@ func TestGetAllLedgers(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"ledger_id", "name", "created_at", "meta_data"}).
 		AddRow("ldg_1234567", "general ledger", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT ledger_id,name, created_at, meta_data FROM blnk.ledgers LIMIT 20").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers LIMIT 20").WillReturnRows(rows)
 
 	result, err := d.GetAllLedgers()
 

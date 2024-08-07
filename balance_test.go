@@ -370,7 +370,7 @@ func TestGetBalanceMonitors(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at"}).
 		AddRow("test-monitor", balanceID, "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now())
 
-	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE balance_id=").WithArgs(balanceID).WillReturnRows(rows)
+	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE balance_id =").WithArgs(balanceID).WillReturnRows(rows)
 
 	result, err := d.GetBalanceMonitors(balanceID)
 
