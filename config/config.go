@@ -71,6 +71,7 @@ type Configuration struct {
 	ProjectName             string                        `json:"project_name" envconfig:"BLNK_PROJECT_NAME"`
 	BackupDir               string                        `json:"backup_dir" envconfig:"BLNK_BACKUP_DIR"`
 	AwsAccessKeyId          string                        `json:"aws_access_key_id"`
+	S3Endpoint              string                        `json:"s3_endpoint"`
 	AwsSecretAccessKey      string                        `json:"aws_secret_access_key"`
 	S3BucketName            string                        `json:"s3_bucket_name"`
 	S3Region                string                        `json:"s3_region"`

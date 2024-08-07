@@ -1,7 +1,6 @@
 package backups
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
@@ -14,177 +13,147 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/credentials"
-
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/jerry-enebeli/blnk/config"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
-func BackupDB() error {
-	conf, err := config.Fetch()
+var (
+	log = logrus.New()
+)
+
+type BackupManager struct {
+	Config   *config.Configuration
+	S3Client *s3.S3
+}
+
+func NewBackupManager() (*BackupManager, error) {
+	cfg, err := config.Fetch()
 	if err != nil {
-		return err
+		return nil, errors.Wrap(err, "failed to fetch config")
 	}
 
-	db, err := sql.Open("postgres", conf.DataSource.Dns)
+	endpoint := cfg.S3Endpoint
+	accessKeyID := cfg.AwsAccessKeyId
+	secretAccessKey := cfg.AwsSecretAccessKey
+
+	s3Config := &aws.Config{
+		Credentials:      credentials.NewStaticCredentials(accessKeyID, secretAccessKey, ""),
+		Endpoint:         aws.String(endpoint),
+		Region:           aws.String(cfg.S3Region),
+		DisableSSL:       aws.Bool(true),
+		S3ForcePathStyle: aws.Bool(true),
+	}
+
+	newSession, err := session.NewSession(s3Config)
 	if err != nil {
-		return err
+		log.Fatalf("Error creating session: %v", err)
+	}
+
+	return &BackupManager{
+		Config:   cfg,
+		S3Client: s3.New(newSession),
+	}, nil
+}
+
+// BackupToDisk performs a database backup to the local disk
+func (bm *BackupManager) BackupToDisk(ctx context.Context) (string, error) {
+	log.Info("Starting database backup to disk")
+
+	db, err := sql.Open("postgres", bm.Config.DataSource.Dns)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to open database connection")
 	}
 	defer db.Close()
 
-	if err := db.Ping(); err != nil {
-		return err
+	if err := db.PingContext(ctx); err != nil {
+		return "", errors.Wrap(err, "failed to ping database")
 	}
 
-	var dbSize string
-	err = db.QueryRow("SELECT pg_size_pretty(pg_database_size(current_database()))").Scan(&dbSize)
+	parsedURL, err := url.Parse(bm.Config.DataSource.Dns)
 	if err != nil {
-		return err
-	}
-
-	var largestTable string
-	var largestTableSize string
-	err = db.QueryRow(`
-		SELECT relname, pg_size_pretty(pg_relation_size(relid))
-		FROM pg_catalog.pg_statio_user_tables 
-		ORDER BY pg_relation_size(relid) DESC 
-		LIMIT 1`).Scan(&largestTable, &largestTableSize)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Database size: %s\n", dbSize)
-	fmt.Printf("Largest table: %s, Size: %s\n", largestTable, largestTableSize)
-
-	// Format today's date as YYYY-MM-DD
-	today := time.Now().Format("2006-01-02")
-	currentTime := time.Now().Format("150405") // HHMMSS format
-	backupDir := fmt.Sprintf("./%s/%s", conf.BackupDir, today)
-
-	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
-		err := os.Mkdir(backupDir, os.ModePerm)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Parse the DNS URL to extract details
-	parsedURL, err := url.Parse(conf.DataSource.Dns)
-	if err != nil {
-		return err
+		return "", errors.Wrap(err, "failed to parse database URL")
 	}
 
 	dbUser := parsedURL.User.Username()
 	dbPassword, _ := parsedURL.User.Password()
 	dbHost, dbPort, err := net.SplitHostPort(parsedURL.Host)
 	if err != nil {
-		return err
+		return "", errors.Wrap(err, "failed to split host and port")
 	}
-	dbName := "blnk"
-	backupFilePath := fmt.Sprintf("%s/blnk-%s-backup.sql", backupDir, currentTime)
-	cmd := exec.Command("pg_dump", "-U", dbUser, "-d", dbName, "-f", backupFilePath)
-	cmd.Env = append(os.Environ(), "PGHOST="+dbHost, "PGPORT="+dbPort, "PGUSER="+dbUser, "PGPASSWORD="+dbPassword)
+	dbName := parsedURL.Path[1:] // Remove leading '/'
 
-	// Execute the pg_dump command
+	backupDir := filepath.Join(bm.Config.BackupDir, time.Now().Format("2006-01-02"))
+	log.Infof("Backup directory: %s", backupDir)
+
+	if err := os.MkdirAll(backupDir, os.ModePerm); err != nil {
+		return "", errors.Wrap(err, "failed to create backup directory")
+	}
+
+	log.Infof("Backup directory created: %s", backupDir)
+
+	backupFile := filepath.Join(backupDir, fmt.Sprintf("%s-%s.sql", dbName, time.Now().Format("150405")))
+	log.Infof("Backup file path: %s", backupFile)
+
+	cmd := exec.CommandContext(ctx, "pg_dump", "-U", dbUser, "-d", dbName, "-f", backupFile)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("PGHOST=%s", dbHost),
+		fmt.Sprintf("PGPORT=%s", dbPort),
+		fmt.Sprintf("PGUSER=%s", dbUser),
+		fmt.Sprintf("PGPASSWORD=%s", dbPassword),
+	)
+
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "pg_dump failed: %v\n", err)
-		fmt.Fprintf(os.Stderr, "pg_dump stderr: %v\n", stderr.String())
-		return err
+		return "", errors.Wrapf(err, "pg_dump failed: %s", stderr.String())
 	}
 
-	fmt.Printf("Backup successful: %s\n", backupFilePath)
-	return nil
+	log.Infof("Database backup completed: %s", backupFile)
+
+	// Verify file existence
+	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+		return "", errors.New("backup file does not exist after pg_dump")
+	}
+	return backupFile, nil
 }
 
-func ZipUploadToS3() error {
-	cnf, err := config.Fetch()
+// BackupToS3 uploads a backup file to S3
+func (bm *BackupManager) BackupToS3(ctx context.Context) error {
+	log.Info("Starting backup to S3")
+
+	filePath, err := bm.BackupToDisk(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to backup to disk")
 	}
-	yesterday := time.Now().Format("2006-01-02")
-	dirToZip := "./backups/" + yesterday
-	zipFile := yesterday + ".zip"
-
-	if err := zipDir(dirToZip, zipFile); err != nil {
-		return err
-	}
-
-	if err := uploadToS3(zipFile, cnf.S3BucketName, zipFile, cnf.AwsAccessKeyId, cnf.AwsSecretAccessKey, cnf.S3Region); err != nil {
-		return err
-	}
-
-	if err := os.Remove(zipFile); err != nil {
-		return err
-	}
-
-	fmt.Println("Backup for", yesterday, "zipped and uploaded to S3.")
-
-	return nil
-}
-
-func zipDir(srcDir, destZip string) error {
-	zipFile, err := os.Create(destZip)
-	if err != nil {
-		return err
-	}
-	defer zipFile.Close()
-
-	writer := zip.NewWriter(zipFile)
-	defer writer.Close()
-
-	return filepath.Walk(srcDir, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		relPath := filePath[len(srcDir)+1:]
-		zipFileWriter, err := writer.Create(relPath)
-		if err != nil {
-			return err
-		}
-
-		srcFile, err := os.Open(filePath)
-		if err != nil {
-			return err
-		}
-		defer srcFile.Close()
-
-		_, err = io.Copy(zipFileWriter, srcFile)
-		return err
-	})
-}
-
-func uploadToS3(filePath, bucketName, itemKey, accessKeyID, secretAccessKey, region string) error {
-	cfg, err := awsconfig.LoadDefaultConfig(context.TODO(),
-		awsconfig.WithRegion(region),
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, "")),
-	)
-	if err != nil {
-		return err
-	}
-
-	client := s3.NewFromConfig(cfg)
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to open file for S3 upload")
 	}
 	defer file.Close()
 
-	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(itemKey),
-		Body:   file,
+	_, filename := filepath.Split(filePath)
+
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return errors.Wrap(err, "failed to open file for S3 upload")
+	}
+
+	_, err = bm.S3Client.PutObjectWithContext(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bm.Config.S3BucketName),
+		Key:    aws.String(filename),
+		Body:   bytes.NewReader(fileBytes),
 	})
 
-	return err
+	if err != nil {
+		return errors.Wrap(err, "failed to upload to S3")
+	}
+
+	log.Infof("Backup uploaded to S3: %s", filename)
+	return nil
 }

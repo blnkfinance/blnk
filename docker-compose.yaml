@@ -21,7 +21,7 @@ services:
     image: ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.4}
     container_name: worker
     restart: on-failure
-    entrypoint: [ "./blnk", "workers"]
+    entrypoint: [ "blnk", "workers"]
     depends_on:
       - redis
       - postgres
@@ -30,7 +30,7 @@ services:
 
   migration:
     image:  ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.4}
-    entrypoint: [ "./blnk", "migrate","up" ]
+    entrypoint: [ "blnk", "migrate","up" ]
     restart: on-failure
     depends_on:
       - postgres
@@ -40,15 +40,11 @@ services:
   redis:
     image: redis:7.2.4
     container_name: redis
-    ports:
-      - "6379:6379"
 
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:latest}
+    image: ${POSTGRES_IMAGE:-postgres:16}
     container_name: ${POSTGRES_CONTAINER:-postgres}
     restart: on-failure
-    ports:
-      - "${POSTGRES_OUTER_PORT:-5432}:5432"
     environment:
       TZ: ${TZ:-Etc/UTC}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -68,8 +64,6 @@ services:
     command: ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
     volumes:
       - typesense_data:/data
-    ports:
-      - "8108:8108"
     logging:
       driver: "none"
     healthcheck:
@@ -81,4 +75,3 @@ services:
 volumes:
   pg_data:
   typesense_data:
-
