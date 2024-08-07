@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/lib/pq"
 	"go.opentelemetry.io/otel"
 )
 
-// RecordReconciliation inserts a new reconciliation record into the database
 func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconciliation) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving reconciliation to db")
 	defer span.End()
@@ -26,10 +26,13 @@ func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconci
 		rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt,
 	)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record reconciliation", err)
+	}
+
+	return nil
 }
 
-// GetReconciliation retrieves a reconciliation record by its ID
 func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Reconciliation, error) {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching reconciliation from db")
 	defer span.End()
@@ -47,29 +50,43 @@ func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Re
 	)
 
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows {
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Reconciliation with ID '%s' not found", id), err)
+		}
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve reconciliation", err)
 	}
 
 	return rec, nil
 }
 
-// UpdateReconciliationStatus updates the status of a reconciliation record
 func (d Datasource) UpdateReconciliationStatus(ctx context.Context, id string, status string, matchedCount, unmatchedCount int) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Updating reconciliation status")
 	defer span.End()
 
 	completedAt := sql.NullTime{Time: time.Now(), Valid: status == "completed"}
 
-	_, err := d.Conn.ExecContext(ctx, `
+	result, err := d.Conn.ExecContext(ctx, `
 		UPDATE blnk.reconciliations
 		SET status = $2, matched_transactions = $3, unmatched_transactions = $4, completed_at = $5
 		WHERE reconciliation_id = $1
 	`, id, status, matchedCount, unmatchedCount, completedAt)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update reconciliation status", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Reconciliation with ID '%s' not found", id), nil)
+	}
+
+	return nil
 }
 
-// GetReconciliationsByUploadID retrieves all reconciliations for a given upload
 func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID string) ([]*model.Reconciliation, error) {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching reconciliations by upload ID")
 	defer span.End()
@@ -82,7 +99,7 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 		ORDER BY started_at DESC
 	`, uploadID)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve reconciliations", err)
 	}
 	defer rows.Close()
 
@@ -96,10 +113,14 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 			&rec.StartedAt, &rec.CompletedAt,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan reconciliation data", err)
 		}
 
 		reconciliations = append(reconciliations, rec)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over reconciliations", err)
 	}
 
 	return reconciliations, nil
@@ -111,16 +132,17 @@ func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, 
 
 	txn, err := d.Conn.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error starting transaction: %w", err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to start transaction", err)
 	}
 	defer func() {
 		if err := txn.Rollback(); err != nil && err != sql.ErrTxDone {
 			span.RecordError(fmt.Errorf("error rolling back transaction: %w", err))
 		}
 	}()
+
 	stmt, err := txn.PrepareContext(ctx, pq.CopyIn("blnk.matches", "external_transaction_id", "internal_transaction_id", "reconciliation_id", "amount", "date"))
 	if err != nil {
-		return fmt.Errorf("error preparing statement: %w", err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to prepare statement", err)
 	}
 	defer stmt.Close()
 
@@ -133,23 +155,22 @@ func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, 
 			match.Date,
 		)
 		if err != nil {
-			return fmt.Errorf("error executing statement: %w", err)
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to execute statement", err)
 		}
 	}
 
 	_, err = stmt.ExecContext(ctx)
 	if err != nil {
-		return fmt.Errorf("error flushing batch insert: %w", err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to flush batch insert", err)
 	}
 
 	if err := txn.Commit(); err != nil {
-		return fmt.Errorf("error committing transaction: %w", err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
 	}
 
 	return nil
 }
 
-// RecordMatch inserts a new match record into the database
 func (d Datasource) RecordMatch(ctx context.Context, match *model.Match) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving match to db")
 	defer span.End()
@@ -161,10 +182,13 @@ func (d Datasource) RecordMatch(ctx context.Context, match *model.Match) error {
 		match.ExternalTransactionID, match.InternalTransactionID, match.ReconciliationID, match.Amount, match.Date,
 	)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record match", err)
+	}
+
+	return nil
 }
 
-// GetMatchesByReconciliationID retrieves all matches for a given reconciliation
 func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.Match, error) {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching matches by reconciliation ID")
 	defer span.End()
@@ -176,7 +200,7 @@ func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconcilia
 		WHERE et.reconciliation_id = $1
 	`, reconciliationID)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matches", err)
 	}
 	defer rows.Close()
 
@@ -189,16 +213,19 @@ func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconcilia
 			&match.Amount, &match.Date,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan match data", err)
 		}
 
 		matches = append(matches, match)
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over matches", err)
+	}
+
 	return matches, nil
 }
 
-// RecordExternalTransaction inserts a new external transaction record into the database
 func (d Datasource) RecordExternalTransaction(ctx context.Context, tx *model.ExternalTransaction, uploadID string) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving external transaction to db")
 	defer span.End()
@@ -210,10 +237,13 @@ func (d Datasource) RecordExternalTransaction(ctx context.Context, tx *model.Ext
 		tx.ID, tx.Amount, tx.Reference, tx.Currency, tx.Description, tx.Date, tx.Source, uploadID,
 	)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record external transaction", err)
+	}
+
+	return nil
 }
 
-// GetExternalTransactionsByReconciliationID retrieves all external transactions for a given reconciliation
 func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.ExternalTransaction, error) {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching external transactions by reconciliation ID")
 	defer span.End()
@@ -224,7 +254,7 @@ func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Contex
 		WHERE reconciliation_id = $1
 	`, reconciliationID)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve external transactions", err)
 	}
 	defer rows.Close()
 
@@ -237,23 +267,26 @@ func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Contex
 			&tx.Description, &tx.Date, &tx.Source,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan external transaction data", err)
 		}
 
 		transactions = append(transactions, tx)
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over external transactions", err)
+	}
+
 	return transactions, nil
 }
 
-// RecordMatchingRule inserts a new matching rule into the database
 func (d Datasource) RecordMatchingRule(ctx context.Context, rule *model.MatchingRule) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving matching rule to db")
 	defer span.End()
 
 	criteriaJSON, err := json.Marshal(rule.Criteria)
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal matching rule criteria", err)
 	}
 
 	_, err = d.Conn.ExecContext(ctx,
@@ -263,10 +296,13 @@ func (d Datasource) RecordMatchingRule(ctx context.Context, rule *model.Matching
 		rule.RuleID, rule.CreatedAt, rule.UpdatedAt, rule.Name, rule.Description, criteriaJSON,
 	)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record matching rule", err)
+	}
+
+	return nil
 }
 
-// GetMatchingRules retrieves all matching rules
 func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule, error) {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching matching rules")
 	defer span.End()
@@ -276,7 +312,7 @@ func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule
 		FROM blnk.matching_rules
 	`)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matching rules", err)
 	}
 	defer rows.Close()
 
@@ -290,50 +326,80 @@ func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule
 			&rule.Name, &rule.Description, &criteriaJSON,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan matching rule data", err)
 		}
 
 		err = json.Unmarshal(criteriaJSON, &rule.Criteria)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal matching rule criteria", err)
 		}
 
 		rules = append(rules, rule)
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over matching rules", err)
+	}
+
 	return rules, nil
 }
+
 func (d Datasource) UpdateMatchingRule(ctx context.Context, rule *model.MatchingRule) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Updating matching rule")
 	defer span.End()
 
 	criteriaJSON, err := json.Marshal(rule.Criteria)
 	if err != nil {
-		return err
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal matching rule criteria", err)
 	}
 
-	_, err = d.Conn.ExecContext(ctx, `
+	result, err := d.Conn.ExecContext(ctx, `
 		UPDATE blnk.matching_rules
 		SET name = $2, description = $3, criteria = $4
 		WHERE rule_id = $1
 	`, rule.RuleID, rule.Name, rule.Description, criteriaJSON)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update matching rule", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Matching rule with ID '%s' not found", rule.RuleID), nil)
+	}
+
+	return nil
 }
 
 func (d Datasource) DeleteMatchingRule(ctx context.Context, id string) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Deleting matching rule")
 	defer span.End()
 
-	_, err := d.Conn.ExecContext(ctx, `
+	result, err := d.Conn.ExecContext(ctx, `
 		DELETE FROM blnk.matching_rules
 		WHERE rule_id = $1
 	`, id)
 
-	return err
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to delete matching rule", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Matching rule with ID '%s' not found", id), nil)
+	}
+
+	return nil
 }
 
-// GetMatchingRules retrieves all matching rules
 func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.MatchingRule, error) {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching matching rule")
 	defer span.End()
@@ -352,21 +418,21 @@ func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.Matc
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("no matching rule found with id: %s", id)
+			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Matching rule with ID '%s' not found", id), err)
 		}
-		return nil, fmt.Errorf("error fetching matching rule: %w", err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matching rule", err)
 	}
 
 	err = json.Unmarshal(criteriaJSON, &rule.Criteria)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling criteria JSON: %w", err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal matching rule criteria", err)
 	}
 
 	return &rule, nil
 }
 
 func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, uploadID string, batchSize int, offset int64) ([]*model.ExternalTransaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
+	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching external transactions with pagination")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -377,7 +443,7 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 		LIMIT $2 OFFSET $3
 	`, uploadID, batchSize, offset)
 	if err != nil {
-		return nil, err
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve external transactions", err)
 	}
 	defer rows.Close()
 
@@ -390,13 +456,15 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 			&tx.Description, &tx.Date, &tx.Source,
 		)
 		if err != nil {
-			return nil, err
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan external transaction data", err)
 		}
 
 		transactions = append(transactions, tx)
 	}
 
-	fmt.Println("external transactions", transactions)
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over external transactions", err)
+	}
 
 	return transactions, nil
 }
@@ -407,7 +475,7 @@ func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliati
 
 	progressJSON, err := json.Marshal(progress)
 	if err != nil {
-		return fmt.Errorf("error marshaling progress: %w", err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal reconciliation progress", err)
 	}
 
 	_, err = d.Conn.ExecContext(ctx, `
@@ -418,7 +486,7 @@ func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliati
 	`, reconciliationID, progressJSON)
 
 	if err != nil {
-		return fmt.Errorf("error saving reconciliation progress: %w", err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to save reconciliation progress", err)
 	}
 
 	return nil
@@ -439,13 +507,13 @@ func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliati
 		if err == sql.ErrNoRows {
 			return model.ReconciliationProgress{}, nil // Return empty progress if not found
 		}
-		return model.ReconciliationProgress{}, fmt.Errorf("error loading reconciliation progress: %w", err)
+		return model.ReconciliationProgress{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to load reconciliation progress", err)
 	}
 
 	var progress model.ReconciliationProgress
 	err = json.Unmarshal(progressJSON, &progress)
 	if err != nil {
-		return model.ReconciliationProgress{}, fmt.Errorf("error unmarshaling progress: %w", err)
+		return model.ReconciliationProgress{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal reconciliation progress", err)
 	}
 
 	return progress, nil

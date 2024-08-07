@@ -204,7 +204,7 @@ func TestDeleteIdentity(t *testing.T) {
 
 	testID := "idt_123"
 
-	mock.ExpectExec("DELETE FROM identity WHERE identity_id =").
+	mock.ExpectExec("DELETE FROM blnk.identity WHERE identity_id =").
 		WithArgs(testID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
