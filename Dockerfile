@@ -1,15 +1,24 @@
-# syntax=docker/dockerfile:1
 FROM golang:1.20.3 as build-env
 WORKDIR /go/src/blnk
 
 COPY . .
 
-RUN go build -o blnk ./cmd/*.go
+RUN go build -o /blnk ./cmd/*.go
 
-FROM gcr.io/distroless/base
-COPY --from=build-env /go/src/blnk/blnk .
+FROM debian:bullseye-slim
 
+# Install pg_dump version 16
+RUN apt-get update && apt-get install -y wget gnupg2 lsb-release && \
+    echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
+    wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - && \
+    apt-get update && \
+    apt-get install -y postgresql-client-16 && \
+    rm -rf /var/lib/apt/lists/*
 
-CMD ["./blnk", "start"]
+COPY --from=build-env /blnk /usr/local/bin/blnk
+
+RUN chmod +x /usr/local/bin/blnk
+
+CMD ["blnk", "start"]
 
 EXPOSE 8080
