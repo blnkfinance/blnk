@@ -91,4 +91,5 @@ type reconciliation interface {
 	SaveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error
 	LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error)
 	RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error
+	RecordUnmatched(ctx context.Context, reconciliationID string, results []string) error
 }

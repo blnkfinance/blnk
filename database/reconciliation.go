@@ -9,7 +9,6 @@ import (
 
 	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
-	"github.com/lib/pq"
 	"go.opentelemetry.io/otel"
 )
 
@@ -125,7 +124,6 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 
 	return reconciliations, nil
 }
-
 func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error {
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Batch saving matches to db")
 	defer span.End()
@@ -140,32 +138,65 @@ func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, 
 		}
 	}()
 
-	stmt, err := txn.PrepareContext(ctx, pq.CopyIn("blnk.matches", "external_transaction_id", "internal_transaction_id", "reconciliation_id", "amount", "date"))
-	if err != nil {
-		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to prepare statement", err)
-	}
-	defer stmt.Close()
-
 	for _, match := range matches {
-		_, err := stmt.ExecContext(ctx,
-			match.ExternalTransactionID,
-			match.InternalTransactionID,
-			reconciliationID,
-			match.Amount,
-			match.Date,
-		)
+		match.ReconciliationID = reconciliationID
+		err := d.recordMatchInTransaction(ctx, txn, &match)
 		if err != nil {
-			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to execute statement", err)
+			return err // The error is already wrapped in an APIError by recordMatchInTransaction
 		}
-	}
-
-	_, err = stmt.ExecContext(ctx)
-	if err != nil {
-		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to flush batch insert", err)
 	}
 
 	if err := txn.Commit(); err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
+	}
+
+	return nil
+}
+
+func (d Datasource) RecordUnmatched(ctx context.Context, reconciliationID string, results []string) error {
+	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Batch saving matches to db")
+	defer span.End()
+
+	txn, err := d.Conn.BeginTx(ctx, nil)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to start transaction", err)
+	}
+	defer func() {
+		if err := txn.Rollback(); err != nil && err != sql.ErrTxDone {
+			span.RecordError(fmt.Errorf("error rolling back transaction: %w", err))
+		}
+	}()
+
+	for _, externalId := range results {
+		_, err := txn.ExecContext(ctx,
+			`INSERT INTO blnk.unmatched(
+					external_transaction_id, reconciliation_id, date
+				) VALUES ($1, $2, $3)`,
+			externalId, reconciliationID, time.Now())
+		if err != nil {
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record unmatched match", err)
+		}
+
+	}
+
+	if err := txn.Commit(); err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
+	}
+
+	return nil
+}
+
+func (d Datasource) recordMatchInTransaction(ctx context.Context, tx *sql.Tx, match *model.Match) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO blnk.matches(
+			external_transaction_id, internal_transaction_id, reconciliation_id, amount, date
+		) VALUES ($1, $2, $3, $4, $5)`,
+		match.ExternalTransactionID, match.InternalTransactionID, match.ReconciliationID, match.Amount, match.Date,
+	)
+
+	if err != nil {
+		// For other errors, return the original error
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record match", err)
 	}
 
 	return nil
@@ -498,7 +529,7 @@ func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliati
 
 	var progressJSON []byte
 	err := d.Conn.QueryRowContext(ctx, `
-		SELECT progress
+		SELECT processed_count, last_processed_external_txn_id
 		FROM blnk.reconciliation_progress
 		WHERE reconciliation_id = $1
 	`, reconciliationID).Scan(&progressJSON)

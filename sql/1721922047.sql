@@ -15,12 +15,20 @@ CREATE TABLE IF NOT EXISTS blnk.reconciliations (
 
 -- Create matches table
 CREATE TABLE IF NOT EXISTS blnk.matches (
+    id SERIAL PRIMARY KEY,
     external_transaction_id TEXT NOT NULL,
     internal_transaction_id TEXT NOT NULL,
     reconciliation_id TEXT NOT NULL,
     amount NUMERIC(12, 2) NOT NULL,
-    date TIMESTAMP NOT NULL,
-    PRIMARY KEY (external_transaction_id,  internal_transaction_id)
+    date TIMESTAMP NOT NULL
+);
+
+-- Create unmatched table
+CREATE TABLE IF NOT EXISTS blnk.unmatched (
+    id SERIAL PRIMARY KEY,
+    external_transaction_id TEXT NOT NULL,
+    reconciliation_id TEXT NOT NULL,
+    date TIMESTAMP NOT NULL
 );
 
 -- Create external_transactions table

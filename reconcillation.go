@@ -261,76 +261,77 @@ func getRequiredField(record []string, columnMap map[string]int, field string) (
 	return "", fmt.Errorf("required field '%s' not found in record", field)
 }
 
-func (s *Blnk) parseAndStoreJSON(ctx context.Context, uploadID, source string, reader io.Reader) error {
+func (s *Blnk) parseAndStoreJSON(ctx context.Context, uploadID, source string, reader io.Reader) (int, error) {
 	decoder := json.NewDecoder(reader)
 	var transactions []model.ExternalTransaction
 	if err := decoder.Decode(&transactions); err != nil {
-		return err
+		return 0, err
 	}
 
-	fmt.Println("uploded transactions", len(transactions))
 	for _, txn := range transactions {
 		txn.Source = source
 		if err := s.storeExternalTransaction(ctx, uploadID, txn); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
-	return nil
+	return len(transactions), nil
 }
 
-func (s *Blnk) UploadExternalData(ctx context.Context, source string, reader io.Reader, filename string) (string, error) {
+func (s *Blnk) UploadExternalData(ctx context.Context, source string, reader io.Reader, filename string) (string, int, error) {
 	uploadID := model.GenerateUUIDWithSuffix("upload")
 
 	// Create a temporary file to store the upload
 	tempFile, err := s.createTempFile(filename)
 	if err != nil {
-		return "", fmt.Errorf("error creating temporary file: %w", err)
+		return "", 0, fmt.Errorf("error creating temporary file: %w", err)
 	}
 	defer s.cleanupTempFile(tempFile)
 
 	// Copy the data to the temporary file
 	if _, err := io.Copy(tempFile, reader); err != nil {
-		return "", fmt.Errorf("error copying upload data: %w", err)
+		return "", 0, fmt.Errorf("error copying upload data: %w", err)
 	}
 
 	// Seek to the beginning of the file
 	if _, err := tempFile.Seek(0, 0); err != nil {
-		return "", fmt.Errorf("error seeking temporary file: %w", err)
+		return "", 0, fmt.Errorf("error seeking temporary file: %w", err)
 	}
 
 	// Read the first 512 bytes for file type detection
 	header := make([]byte, 512)
 	if _, err := tempFile.Read(header); err != nil && err != io.EOF {
-		return "", fmt.Errorf("error reading file header: %w", err)
+		return "", 0, fmt.Errorf("error reading file header: %w", err)
 	}
 
 	// Detect the file type
 	fileType, err := detectFileType(header, filename)
 	if err != nil {
-		return "", fmt.Errorf("error detecting file type: %w", err)
+		return "", 0, fmt.Errorf("error detecting file type: %w", err)
 	}
 
 	// Seek back to the beginning of the file
 	if _, err := tempFile.Seek(0, 0); err != nil {
-		return "", fmt.Errorf("error seeking temporary file: %w", err)
+		return "", 0, fmt.Errorf("error seeking temporary file: %w", err)
 	}
+
+	total := 0
 
 	// Parse and store the data based on the detected file type
 	switch fileType {
 	case "text/csv":
 		err = s.parseAndStoreCSV(ctx, uploadID, source, tempFile)
 	case "application/json":
-		err = s.parseAndStoreJSON(ctx, uploadID, source, tempFile)
+		total, err = s.parseAndStoreJSON(ctx, uploadID, source, tempFile)
 	default:
-		return "", fmt.Errorf("unsupported file type: %s", fileType)
+		return "", 0, fmt.Errorf("unsupported file type: %s", fileType)
 	}
 
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
-	return uploadID, nil
+	return uploadID, total, nil
 }
 
 func (s *Blnk) createTempFile(originalFilename string) (*os.File, error) {
@@ -504,10 +505,6 @@ func (s *Blnk) createTransactionProcessor(reconciliation model.Reconciliation, p
 }
 
 func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transaction) error {
-	if txn.TransactionID <= tp.progress.LastProcessedExternalTxnID {
-		return nil
-	}
-
 	batchMatches, batchUnmatched := tp.reconciler(ctx, []*model.Transaction{txn})
 
 	tp.matches = append(tp.matches, batchMatches...)
@@ -517,16 +514,20 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 		if err := tp.datasource.RecordMatches(ctx, tp.reconciliation.ReconciliationID, batchMatches); err != nil {
 			return err
 		}
-	}
 
-	tp.progress.LastProcessedExternalTxnID = txn.TransactionID
-	tp.progress.ProcessedCount++
-
-	if tp.progress.ProcessedCount%tp.progressSaveCount == 0 {
-		if err := tp.datasource.SaveReconciliationProgress(ctx, tp.reconciliation.ReconciliationID, tp.progress); err != nil {
-			log.Printf("Error saving reconciliation progress: %v", err)
+		if err := tp.datasource.RecordUnmatched(ctx, tp.reconciliation.ReconciliationID, batchUnmatched); err != nil {
+			return err
 		}
 	}
+
+	// tp.progress.LastProcessedExternalTxnID = txn.TransactionID
+	// tp.progress.ProcessedCount++
+
+	// if tp.progress.ProcessedCount%tp.progressSaveCount == 0 {
+	// 	if err := tp.datasource.SaveReconciliationProgress(ctx, tp.reconciliation.ReconciliationID, tp.progress); err != nil {
+	// 		log.Printf("Error saving reconciliation progress: %v", err)
+	// 	}
+	// }
 
 	return nil
 }
@@ -536,6 +537,7 @@ func (tp *transactionProcessor) getResults() (int, int) {
 }
 
 func (s *Blnk) processTransactions(ctx context.Context, uploadID string, processor *transactionProcessor) error {
+	processedCount := 0
 	_, err := s.ProcessTransactionInBatches(
 		ctx,
 		uploadID,
@@ -545,19 +547,29 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 			defer wg.Done()
 			for txn := range txns {
 				if err := processor.process(ctx, txn); err != nil {
+					log.Printf("Error processing transaction %s: %v", txn.TransactionID, err)
 					results <- BatchJobResult{Error: err}
 					return
+				}
+				processedCount++
+				if processedCount%10 == 0 {
+					log.Printf("Processed %d transactions", processedCount)
 				}
 				results <- BatchJobResult{}
 			}
 		},
 	)
+	log.Printf("Total transactions processed: %d", processedCount)
 	return err
 }
 
 func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.Reconciliation, matchCount, unmatchedCount int) error {
 	reconciliation.Status = StatusCompleted
+	reconciliation.UnmatchedTransactions = unmatchedCount
+	reconciliation.MatchedTransactions = matchCount
 	reconciliation.CompletedAt = ptr.Time(time.Now())
+
+	log.Printf("Finalizing reconciliation. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 
 	if !reconciliation.IsDryRun {
 		s.postReconciliationActions(ctx, reconciliation)
@@ -565,30 +577,26 @@ func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.
 		log.Printf("Dry run completed. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 	}
 
-	return s.datasource.UpdateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusCompleted, matchCount, unmatchedCount)
+	err := s.datasource.UpdateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusCompleted, matchCount, unmatchedCount)
+	if err != nil {
+		log.Printf("Error updating reconciliation status: %v", err)
+		return err
+	}
+
+	log.Printf("Reconciliation %s completed. Total matches: %d, Total unmatched: %d", reconciliation.ReconciliationID, matchCount, unmatchedCount)
+
+	return nil
 }
 
 func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model.Transaction, matchingRules []model.MatchingRule) ([]model.Match, []string) {
 	var matches []model.Match
 	var unmatched []string
 
-	// Create buffered channels for parallel processing
 	matchChan := make(chan model.Match, len(externalTxns))
 	unmatchedChan := make(chan string, len(externalTxns))
 
-	workerCount := 10
-	semaphore := make(chan struct{}, workerCount)
-
-	var wg sync.WaitGroup
-
 	for _, externalTxn := range externalTxns {
-		wg.Add(1)
-		go func(extTxn *model.Transaction) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+		func(extTxn *model.Transaction) {
 
 			match, err := s.findMatchingInternalTransaction(ctx, extTxn, matchingRules)
 			if err != nil {
@@ -600,14 +608,8 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 		}(externalTxn)
 	}
 
-	// Close channels when all goroutines are done
-	go func() {
-		wg.Wait()
-		close(matchChan)
-		close(unmatchedChan)
-	}()
-
-	// Collect results
+	close(matchChan)
+	close(unmatchedChan)
 	for match := range matchChan {
 		matches = append(matches, match)
 	}
@@ -635,7 +637,6 @@ func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model
 		groupedTxns = s.fetchAndGroupInternalTransactions(ctx, groupingCriteria, batchSize)
 	}
 
-	// Create a map for faster lookups
 	groupMap := make(map[string]bool)
 	for key := range groupedTxns {
 		groupMap[key] = true
@@ -824,10 +825,13 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 }
 
 func (s *Blnk) getExternalTransactionsPaginated(ctx context.Context, uploadID string, limit int, offset int64) ([]*model.Transaction, error) {
+	log.Printf("Fetching external transactions: uploadID=%s, limit=%d, offset=%d", uploadID, limit, offset)
 	externalTransaction, err := s.datasource.GetExternalTransactionsPaginated(ctx, uploadID, limit, int64(offset))
 	if err != nil {
+		log.Printf("Error fetching external transactions: %v", err)
 		return nil, err
 	}
+	log.Printf("Fetched %d external transactions", len(externalTransaction))
 	transactions := make([]*model.Transaction, len(externalTransaction))
 
 	for i, txn := range externalTransaction {

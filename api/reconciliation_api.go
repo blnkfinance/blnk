@@ -20,14 +20,14 @@ func (a Api) UploadExternalData(c *gin.Context) {
 
 	fileName := header.Filename
 
-	uploadID, err := a.blnk.UploadExternalData(c.Request.Context(), source, file, fileName)
+	uploadID, total, err := a.blnk.UploadExternalData(c.Request.Context(), source, file, fileName)
 	if err != nil {
 		logrus.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process upload"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"upload_id": uploadID})
+	c.JSON(http.StatusOK, gin.H{"upload_id": uploadID, "record_count": total, "source": source})
 }
 
 // StartReconciliation initiates a new reconciliation process

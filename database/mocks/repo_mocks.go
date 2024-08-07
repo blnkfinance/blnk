@@ -256,6 +256,11 @@ func (m *MockDataSource) RecordMatches(ctx context.Context, reconciliationID str
 	return args.Error(0)
 }
 
+func (m *MockDataSource) RecordUnmatched(ctx context.Context, reconciliationID string, unmatched []string) error {
+	args := m.Called(ctx, reconciliationID, unmatched)
+	return args.Error(0)
+}
+
 func (m *MockDataSource) GetMatchesByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.Match, error) {
 	args := m.Called(ctx, reconciliationID)
 	return args.Get(0).([]*model.Match), args.Error(1)
