@@ -331,7 +331,7 @@ func TestReconciliationEdgeCases(t *testing.T) {
 		matches, unmatched := blnk.oneToOneReconciliation(ctx, externalTxns, matchingRules)
 
 		assert.Equal(t, 0, len(matches), "Expected 0 matches")
-		assert.Equal(t, 0, len(unmatched), "Expected 1 unmatched transaction")
+		assert.Equal(t, 1, len(unmatched), "Expected 1 unmatched transaction")
 
 		mockDS.AssertExpectations(t)
 	})
