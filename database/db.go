@@ -41,7 +41,12 @@ func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
 			err = errConn
 			return
 		}
-		instance = &Datasource{Conn: con, Cache: nil} // or Cache: newCache if cache is used
+		cache, err := cache.NewCache()
+		if err != nil {
+			log.Printf("Error creating cache: %v", err)
+			return
+		}
+		instance = &Datasource{Conn: con, Cache: cache} // or Cache: newCache if cache is used
 	})
 	if err != nil {
 		return nil, err

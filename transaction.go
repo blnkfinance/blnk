@@ -200,9 +200,9 @@ func (l *Blnk) GetRefundableTransactionsByParentID(ctx context.Context, parentTr
 
 func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactionID string, amount float64, gt getTxns, tw transactionWorker) ([]*model.Transaction, error) {
 	const (
-		batchSize    = 100
-		maxWorkers   = 5
-		maxQueueSize = 1000
+		batchSize    = 100000000
+		maxWorkers   = 10
+		maxQueueSize = 10000
 	)
 	var allTxns []*model.Transaction
 	var allErrors []error

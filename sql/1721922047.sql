@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS blnk.external_transactions (
 -- Create reconciliation_progress table
 CREATE TABLE IF NOT EXISTS blnk.reconciliation_progress (
     processed_count BIGINT,
-    reconciliation_id TEXT,
+    reconciliation_id TEXT UNIQUE,
     last_processed_external_txn_id TEXT
 );
 

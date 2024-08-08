@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/database"
@@ -26,6 +27,8 @@ import (
 	"github.com/texttheater/golang-levenshtein/levenshtein"
 	"github.com/wacul/ptr"
 )
+
+var totalInternalProcessed int64
 
 const (
 	StatusStarted    = "started"
@@ -219,6 +222,12 @@ func parseExternalTransaction(record []string, columnMap map[string]int, source 
 	if err != nil {
 		return model.ExternalTransaction{}, err
 	}
+
+	currency, err := getRequiredField(record, columnMap, "currency")
+	if err != nil {
+		return model.ExternalTransaction{}, err
+	}
+
 	amount := parseFloat(amountStr)
 	if err != nil {
 		return model.ExternalTransaction{}, fmt.Errorf("invalid amount: %w", err)
@@ -246,6 +255,7 @@ func parseExternalTransaction(record []string, columnMap map[string]int, source 
 	return model.ExternalTransaction{
 		ID:          id,
 		Amount:      amount,
+		Currency:    currency,
 		Reference:   reference,
 		Description: description,
 		Date:        date,
@@ -466,6 +476,7 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 	}
 
 	matched, unmatched := processor.getResults()
+	log.Printf("Total internal transactions processed: %d", atomic.LoadInt64(&totalInternalProcessed))
 
 	return s.finalizeReconciliation(ctx, reconciliation, matched, unmatched)
 }
@@ -525,14 +536,14 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 		}
 	}
 
-	// tp.progress.LastProcessedExternalTxnID = txn.TransactionID
-	// tp.progress.ProcessedCount++
+	tp.progress.LastProcessedExternalTxnID = txn.TransactionID
+	tp.progress.ProcessedCount++
 
-	// if tp.progress.ProcessedCount%tp.progressSaveCount == 0 {
-	// 	if err := tp.datasource.SaveReconciliationProgress(ctx, tp.reconciliation.ReconciliationID, tp.progress); err != nil {
-	// 		log.Printf("Error saving reconciliation progress: %v", err)
-	// 	}
-	// }
+	if tp.progress.ProcessedCount%tp.progressSaveCount == 0 {
+		if err := tp.datasource.SaveReconciliationProgress(ctx, tp.reconciliation.ReconciliationID, tp.progress); err != nil {
+			log.Printf("Error saving reconciliation progress: %v", err)
+		}
+	}
 
 	return nil
 }
@@ -599,22 +610,27 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 
 	matchChan := make(chan model.Match, len(externalTxns))
 	unmatchedChan := make(chan string, len(externalTxns))
+	var wg sync.WaitGroup
 
 	for _, externalTxn := range externalTxns {
-		func(extTxn *model.Transaction) {
-
-			match, err := s.findMatchingInternalTransaction(ctx, extTxn, matchingRules)
+		wg.Add(1)
+		go func(extTxn *model.Transaction) {
+			defer wg.Done()
+			err := s.findMatchingInternalTransaction(ctx, extTxn, matchingRules, matchChan)
 			if err != nil {
 				unmatchedChan <- extTxn.TransactionID
 				log.Printf("No match found for external transaction %s: %v", extTxn.TransactionID, err)
-			} else {
-				matchChan <- *match
 			}
 		}(externalTxn)
 	}
 
-	close(matchChan)
-	close(unmatchedChan)
+	// Close channels after all goroutines are done
+	go func() {
+		wg.Wait()
+		close(matchChan)
+		close(unmatchedChan)
+	}()
+
 	for match := range matchChan {
 		matches = append(matches, match)
 	}
@@ -791,42 +807,59 @@ func (s *Blnk) groupExternalTransactions(externalTxns []*model.Transaction) map[
 	return grouped
 }
 
-func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn *model.Transaction, matchingRules []model.MatchingRule) (*model.Match, error) {
-	var match *model.Match
-	var matchFound bool
+func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn *model.Transaction, matchingRules []model.MatchingRule, matchChan chan model.Match) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	_, err := s.ProcessTransactionInBatches(
-		ctx,
-		externalTxn.TransactionID,
-		externalTxn.Amount,
-		s.getInternalTransactionsPaginated,
-		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
-			defer wg.Done()
-			for internalTxn := range jobs {
-				if s.matchesRules(externalTxn, *internalTxn, matchingRules) {
-					match = &model.Match{
-						ExternalTransactionID: externalTxn.TransactionID,
-						InternalTransactionID: internalTxn.TransactionID,
-						Amount:                externalTxn.Amount,
-						Date:                  externalTxn.CreatedAt,
+	matchCh := make(chan model.Match)
+	errCh := make(chan error)
+	noMatchCh := make(chan struct{})
+
+	go func() {
+		_, err := s.ProcessTransactionInBatches(
+			ctx,
+			externalTxn.TransactionID,
+			externalTxn.Amount,
+			s.getInternalTransactionsPaginated,
+			func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
+				defer wg.Done()
+				for internalTxn := range jobs {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						atomic.AddInt64(&totalInternalProcessed, 1)
+						if s.matchesRules(externalTxn, *internalTxn, matchingRules) {
+							matchCh <- model.Match{
+								ExternalTransactionID: externalTxn.TransactionID,
+								InternalTransactionID: internalTxn.TransactionID,
+								Amount:                externalTxn.Amount,
+								Date:                  externalTxn.CreatedAt,
+							}
+							return
+						}
 					}
-					matchFound = true
-					results <- BatchJobResult{} // Signal to stop processing
-					return
 				}
-			}
-		},
-	)
+			},
+		)
+		if err != nil && err != context.Canceled {
+			errCh <- err
+		} else {
+			noMatchCh <- struct{}{}
+		}
+	}()
 
-	if err != nil {
-		return nil, err
+	select {
+	case match := <-matchCh:
+		matchChan <- match
+		return nil
+	case err := <-errCh:
+		return err
+	case <-noMatchCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-
-	if !matchFound {
-		return nil, fmt.Errorf("no matching internal transaction found")
-	}
-
-	return match, nil
 }
 
 func (s *Blnk) getExternalTransactionsPaginated(ctx context.Context, uploadID string, limit int, offset int64) ([]*model.Transaction, error) {

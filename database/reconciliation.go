@@ -504,17 +504,12 @@ func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliati
 	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving reconciliation progress to db")
 	defer span.End()
 
-	progressJSON, err := json.Marshal(progress)
-	if err != nil {
-		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal reconciliation progress", err)
-	}
-
-	_, err = d.Conn.ExecContext(ctx, `
-		INSERT INTO blnk.reconciliation_progress (reconciliation_id, progress)
-		VALUES ($1, $2)
+	_, err := d.Conn.ExecContext(ctx, `
+		INSERT INTO blnk.reconciliation_progress (reconciliation_id, processed_count, last_processed_external_txn_id)
+		VALUES ($1, $2,$3)
 		ON CONFLICT (reconciliation_id) DO UPDATE
-		SET progress = $2
-	`, reconciliationID, progressJSON)
+		SET processed_count = $2, last_processed_external_txn_id = $3
+	`, reconciliationID, progress.ProcessedCount, progress.LastProcessedExternalTxnID)
 
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to save reconciliation progress", err)

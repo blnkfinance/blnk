@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 
@@ -218,18 +220,28 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
 	defer span.End()
 
+	// Create a cache key based on the pagination parameters
+	cacheKey := fmt.Sprintf("transactions:paginated:%d:%d", batchSize, offset)
+
+	var transactions []*model.Transaction
+	err := d.Cache.Get(ctx, cacheKey, &transactions)
+	if err == nil && len(transactions) > 0 {
+		return transactions, nil
+	}
+
+	// If not in cache or error occurred, fetch from database
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-		FROM blnk.transactions
-		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`, batchSize, offset)
+        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        ORDER BY created_at ASC
+        LIMIT $1 OFFSET $2
+    `, batchSize, offset)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve paginated transactions", err)
 	}
 	defer rows.Close()
 
-	var transactions []*model.Transaction
+	transactions = []*model.Transaction{}
 
 	for rows.Next() {
 		transaction := model.Transaction{}
@@ -268,6 +280,15 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
+	// Cache the fetched data
+	if len(transactions) > 0 {
+		err = d.Cache.Set(ctx, cacheKey, transactions, 5*time.Minute) // Cache for 5 minutes
+		if err != nil {
+			// Log the error, but don't return it as the main operation succeeded
+			log.Printf("Failed to cache transactions: %v", err)
+		}
+	}
+
 	return transactions, nil
 }
 
@@ -297,9 +318,14 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[str
 		query += " AND " + strings.Join(whereClauses, " AND ")
 	}
 
-	if len(groupByColumns) > 0 {
-		query += " GROUP BY " + strings.Join(groupByColumns, ", ")
+	allColumns := []string{
+		"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
+		"precision", "rate", "currency", "destination", "description", "status", "created_at",
+		"meta_data", "scheduled_for", "hash",
 	}
+
+	groupByColumns = append(groupByColumns, allColumns...)
+	query += " GROUP BY " + strings.Join(groupByColumns, ", ")
 
 	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
 	args = append(args, batchSize, offset)
