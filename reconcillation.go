@@ -662,11 +662,11 @@ func (s *Blnk) matchTransactions(singleTxns []*model.Transaction, groupedTxns ma
 
 	groupMap := s.buildGroupMap(groupedTxns)
 
-	matches, unmatched = s.processTransactionrs(singleTxns, groupedTxns, groupMap, matchingRules, isExternalGrouped)
+	matches, unmatched = s.processGroupedTransactions(singleTxns, groupedTxns, groupMap, matchingRules, isExternalGrouped)
 	return matches, unmatched
 }
 
-func (s *Blnk) processTransactionrs(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	const batchSize = 100
 	var matches []model.Match
 	var unmatched []string
