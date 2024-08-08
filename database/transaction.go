@@ -292,7 +292,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	return transactions, nil
 }
 
-func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 	query := `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
@@ -304,27 +304,18 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[str
 
 	argIndex := 1
 
-	for field, value := range groupCriteria {
+	groupFields := strings.Split(groupCriteria, ",")
+	for _, field := range groupFields {
+		field = strings.TrimSpace(field)
 		groupByColumns = append(groupByColumns, field)
 
-		if value != nil {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s = $%d", field, argIndex))
-			args = append(args, value)
-			argIndex++
-		}
+		whereClauses = append(whereClauses, fmt.Sprintf("%s IS NOT NULL", field))
 	}
 
 	if len(whereClauses) > 0 {
 		query += " AND " + strings.Join(whereClauses, " AND ")
 	}
 
-	allColumns := []string{
-		"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
-		"precision", "rate", "currency", "destination", "description", "status", "created_at",
-		"meta_data", "scheduled_for", "hash",
-	}
-
-	groupByColumns = append(groupByColumns, allColumns...)
 	query += " GROUP BY " + strings.Join(groupByColumns, ", ")
 
 	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
@@ -369,7 +360,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria map[str
 		}
 
 		var groupKeyParts []string
-		for field := range groupCriteria {
+		for _, field := range groupFields {
 			groupKeyParts = append(groupKeyParts, fmt.Sprintf("%v", reflect.ValueOf(transaction).FieldByName(field)))
 		}
 		groupKey := strings.Join(groupKeyParts, "-")

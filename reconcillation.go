@@ -389,7 +389,7 @@ func (l *Blnk) postReconciliationActions(_ context.Context, reconciliation model
 	}()
 }
 
-func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strategy string, groupingCriteria map[string]interface{}, matchingRuleIDs []string, isDryRun bool) (string, error) {
+func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strategy string, groupCriteria string, matchingRuleIDs []string, isDryRun bool) (string, error) {
 	reconciliationID := model.GenerateUUIDWithSuffix("recon")
 	reconciliation := model.Reconciliation{
 		ReconciliationID: reconciliationID,
@@ -405,7 +405,7 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 
 	// Start the reconciliation process in a goroutine
 	go func() {
-		err := s.processReconciliation(context.Background(), reconciliation, strategy, groupingCriteria, matchingRuleIDs)
+		err := s.processReconciliation(context.Background(), reconciliation, strategy, groupCriteria, matchingRuleIDs)
 		if err != nil {
 			log.Printf("Error in reconciliation process: %v", err)
 			err := s.datasource.UpdateReconciliationStatus(context.Background(), reconciliationID, StatusFailed, 0, 0)
@@ -451,7 +451,7 @@ func (s *Blnk) loadReconciliationProgress(ctx context.Context, reconciliationID 
 	return s.datasource.LoadReconciliationProgress(ctx, reconciliationID)
 }
 
-func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupingCriteria map[string]interface{}, matchingRuleIDs []string) error {
+func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupCriteria string, matchingRuleIDs []string) error {
 	if err := s.updateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusInProgress); err != nil {
 		return fmt.Errorf("failed to update reconciliation status: %w", err)
 	}
@@ -466,7 +466,7 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 		return fmt.Errorf("failed to initialize reconciliation progress: %w", err)
 	}
 
-	reconciler := s.createReconciler(strategy, groupingCriteria, matchingRules)
+	reconciler := s.createReconciler(strategy, groupCriteria, matchingRules)
 
 	processor := s.createTransactionProcessor(reconciliation, progress, reconciler)
 
@@ -494,15 +494,15 @@ func (s *Blnk) initializeReconciliationProgress(ctx context.Context, reconciliat
 	return progress, nil
 }
 
-func (s *Blnk) createReconciler(strategy string, groupingCriteria map[string]interface{}, matchingRules []model.MatchingRule) reconciler {
+func (s *Blnk) createReconciler(strategy string, groupCriteria string, matchingRules []model.MatchingRule) reconciler {
 	return func(ctx context.Context, txns []*model.Transaction) ([]model.Match, []string) {
 		switch strategy {
 		case "one_to_one":
 			return s.oneToOneReconciliation(ctx, txns, matchingRules)
 		case "one_to_many":
-			return s.groupToNReconciliation(ctx, txns, groupingCriteria, matchingRules, false)
+			return s.groupToNReconciliation(ctx, txns, groupCriteria, matchingRules, false)
 		case "many_to_one":
-			return s.groupToNReconciliation(ctx, txns, groupingCriteria, matchingRules, true)
+			return s.groupToNReconciliation(ctx, txns, groupCriteria, matchingRules, true)
 		default:
 			log.Printf("Unsupported reconciliation strategy: %s", strategy)
 			return nil, nil
@@ -641,27 +641,35 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 	return matches, unmatched
 }
 
-func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupingCriteria map[string]interface{}, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+	groupedTxns, singleTxns := s.prepareTransactions(ctx, externalTxns, groupCriteria, isExternalGrouped)
+	matches, unmatched := s.matchTransactions(singleTxns, groupedTxns, matchingRules, isExternalGrouped)
+	return matches, unmatched
+}
+
+func (s *Blnk) prepareTransactions(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, isExternalGrouped bool) (map[string][]*model.Transaction, []*model.Transaction) {
+	const batchSize = 100
+
+	if isExternalGrouped {
+		return s.groupExternalTransactions(externalTxns), s.fetchAllInternalTransactions(ctx, batchSize)
+	}
+	return s.fetchAndGroupInternalTransactions(ctx, groupCriteria, batchSize), externalTxns
+}
+
+func (s *Blnk) matchTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	var matches []model.Match
 	var unmatched []string
 
+	groupMap := s.buildGroupMap(groupedTxns)
+
+	matches, unmatched = s.processTransactionrs(singleTxns, groupedTxns, groupMap, matchingRules, isExternalGrouped)
+	return matches, unmatched
+}
+
+func (s *Blnk) processTransactionrs(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	const batchSize = 100
-
-	var groupedTxns map[string][]*model.Transaction
-	var singleTxns []*model.Transaction
-
-	if isExternalGrouped {
-		groupedTxns = s.groupExternalTransactions(externalTxns)
-		singleTxns = s.fetchAllInternalTransactions(ctx, batchSize)
-	} else {
-		singleTxns = externalTxns
-		groupedTxns = s.fetchAndGroupInternalTransactions(ctx, groupingCriteria, batchSize)
-	}
-
-	groupMap := make(map[string]bool)
-	for key := range groupedTxns {
-		groupMap[key] = true
-	}
+	var matches []model.Match
+	var unmatched []string
 
 	var wg sync.WaitGroup
 	matchChan := make(chan model.Match, len(singleTxns))
@@ -677,33 +685,7 @@ func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model
 		go func(batch []*model.Transaction) {
 			defer wg.Done()
 			for _, singleTxn := range batch {
-				matched := false
-				for groupKey := range groupMap {
-					if s.matchesGroup(singleTxn, groupedTxns[groupKey], matchingRules) {
-						for _, groupedTxn := range groupedTxns[groupKey] {
-							var externalID, internalID string
-							if isExternalGrouped {
-								externalID = groupedTxn.TransactionID
-								internalID = singleTxn.TransactionID
-							} else {
-								externalID = singleTxn.TransactionID
-								internalID = groupedTxn.TransactionID
-							}
-							matchChan <- model.Match{
-								ExternalTransactionID: externalID,
-								InternalTransactionID: internalID,
-								Amount:                groupedTxn.Amount,
-								Date:                  groupedTxn.CreatedAt,
-							}
-						}
-						matched = true
-						delete(groupMap, groupKey)
-						break
-					}
-				}
-				if !matched {
-					unmatchedChan <- singleTxn.TransactionID
-				}
+				_ = s.matchSingleTransaction(singleTxn, groupedTxns, groupMap, matchingRules, isExternalGrouped, matchChan)
 			}
 		}(singleTxns[i:end])
 	}
@@ -720,15 +702,41 @@ func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model
 	for unmatchedID := range unmatchedChan {
 		unmatched = append(unmatched, unmatchedID)
 	}
+	return matches, unmatched
+}
 
-	// Add remaining unmatched grouped transactions
+func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, matchChan chan model.Match) bool {
 	for groupKey := range groupMap {
-		for _, txn := range groupedTxns[groupKey] {
-			unmatched = append(unmatched, txn.TransactionID)
+		if s.matchesGroup(singleTxn, groupedTxns[groupKey], matchingRules) {
+			for _, groupedTxn := range groupedTxns[groupKey] {
+				var externalID, internalID string
+				if isExternalGrouped {
+					externalID = groupedTxn.TransactionID
+					internalID = singleTxn.TransactionID
+				} else {
+					externalID = singleTxn.TransactionID
+					internalID = groupedTxn.TransactionID
+				}
+				matchChan <- model.Match{
+					ExternalTransactionID: externalID,
+					InternalTransactionID: internalID,
+					Amount:                groupedTxn.Amount,
+					Date:                  groupedTxn.CreatedAt,
+				}
+			}
+			delete(groupMap, groupKey)
+			break
 		}
 	}
+	return true
+}
 
-	return matches, unmatched
+func (s *Blnk) buildGroupMap(groupedTxns map[string][]*model.Transaction) map[string]bool {
+	groupMap := make(map[string]bool)
+	for key := range groupedTxns {
+		groupMap[key] = true
+	}
+	return groupMap
 }
 
 func (s *Blnk) fetchAllInternalTransactions(ctx context.Context, batchSize int) []*model.Transaction {
@@ -749,7 +757,7 @@ func (s *Blnk) fetchAllInternalTransactions(ctx context.Context, batchSize int) 
 	return allTxns
 }
 
-func (s *Blnk) fetchAndGroupInternalTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int) map[string][]*model.Transaction {
+func (s *Blnk) fetchAndGroupInternalTransactions(ctx context.Context, groupingCriteria string, batchSize int) map[string][]*model.Transaction {
 	groupedTxns := make(map[string][]*model.Transaction)
 	offset := int64(0)
 	for {
@@ -769,7 +777,7 @@ func (s *Blnk) fetchAndGroupInternalTransactions(ctx context.Context, groupingCr
 	return groupedTxns
 }
 
-func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 	return s.datasource.GroupTransactions(ctx, groupingCriteria, batchSize, offset)
 }
 

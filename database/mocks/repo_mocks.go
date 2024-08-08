@@ -69,8 +69,8 @@ func (m *MockDataSource) GetRefundableTransactionsByParentID(ctx context.Context
 	return args.Get(0).([]*model.Transaction), args.Error(1)
 }
 
-func (m *MockDataSource) GroupTransactions(ctx context.Context, groupingCriteria map[string]interface{}, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
-	args := m.Called(ctx, groupingCriteria, batchSize, offset)
+func (m *MockDataSource) GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+	args := m.Called(ctx, groupCriteria, batchSize, offset)
 	return args.Get(0).(map[string][]*model.Transaction), args.Error(1)
 }
 

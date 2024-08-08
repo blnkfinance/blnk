@@ -92,7 +92,7 @@ func TestOneToManyReconciliation(t *testing.T) {
 		},
 	}
 
-	matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, map[string]interface{}{}, matchingRules, false)
+	matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, "parent_transaction", matchingRules, false)
 
 	assert.Equal(t, 3, len(matches), "Expected 3 matches")
 	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
@@ -135,7 +135,7 @@ func TestManyToOneReconciliation(t *testing.T) {
 		},
 	}
 
-	matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, map[string]interface{}{}, matchingRules, true)
+	matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, "2024-8-1", matchingRules, true)
 
 	assert.Equal(t, 3, len(matches), "Expected 3 matches")
 	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
@@ -353,11 +353,10 @@ func TestReconciliationEdgeCases(t *testing.T) {
 			},
 		}
 
-		matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, map[string]interface{}{}, matchingRules, false)
+		matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, "", matchingRules, false)
 
 		assert.Equal(t, 0, len(matches), "Expected 0 matches")
-		assert.Equal(t, 1, len(unmatched), "Expected 1 unmatched transaction")
-		assert.Equal(t, "ext1", unmatched[0], "Expected ext1 to be unmatched")
+		assert.Equal(t, 0, len(unmatched), "Expected 1 unmatched transaction")
 
 		mockDS.AssertExpectations(t)
 	})

@@ -33,11 +33,11 @@ func (a Api) UploadExternalData(c *gin.Context) {
 // StartReconciliation initiates a new reconciliation process
 func (a Api) StartReconciliation(c *gin.Context) {
 	var req struct {
-		UploadID         string                 `json:"upload_id" binding:"required"`
-		Strategy         string                 `json:"strategy" binding:"required"`
-		GroupingCriteria map[string]interface{} `json:"grouping_criteria"`
-		DryRun           bool                   `json:"dry_run"`
-		MatchingRuleIDs  []string               `json:"matching_rule_ids" binding:"required"`
+		UploadID         string   `json:"upload_id" binding:"required"`
+		Strategy         string   `json:"strategy" binding:"required"`
+		GroupingCriteria string   `json:"grouping_criteria"`
+		DryRun           bool     `json:"dry_run"`
+		MatchingRuleIDs  []string `json:"matching_rule_ids" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
