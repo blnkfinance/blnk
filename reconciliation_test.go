@@ -27,9 +27,7 @@ func TestOneToOneReconciliation(t *testing.T) {
 	}
 
 	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000000, int64(0)).Return(internalTxns, nil)
-	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000000, int64(2)).Return(internalTxns, nil)
-	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000000, int64(4)).Return(internalTxns, nil)
-	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000000, int64(6)).Return([]*model.Transaction{}, nil)
+	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000000, int64(2)).Return([]*model.Transaction{}, nil)
 
 	matchingRules := []model.MatchingRule{
 		{
