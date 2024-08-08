@@ -616,7 +616,7 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 		wg.Add(1)
 		go func(extTxn *model.Transaction) {
 			defer wg.Done()
-			err := s.findMatchingInternalTransaction(ctx, extTxn, matchingRules, matchChan)
+			err := s.findMatchingInternalTransaction(ctx, extTxn, matchingRules, matchChan, unmatchedChan)
 			if err != nil {
 				unmatchedChan <- extTxn.TransactionID
 				log.Printf("No match found for external transaction %s: %v", extTxn.TransactionID, err)
@@ -807,7 +807,7 @@ func (s *Blnk) groupExternalTransactions(externalTxns []*model.Transaction) map[
 	return grouped
 }
 
-func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn *model.Transaction, matchingRules []model.MatchingRule, matchChan chan model.Match) error {
+func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn *model.Transaction, matchingRules []model.MatchingRule, matchChan chan model.Match, unMatchChan chan string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -856,6 +856,7 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 	case err := <-errCh:
 		return err
 	case <-noMatchCh:
+		unMatchChan <- externalTxn.TransactionID
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
