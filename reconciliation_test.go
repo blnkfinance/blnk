@@ -39,7 +39,6 @@ func TestOneToOneReconciliation(t *testing.T) {
 	}
 
 	matches, unmatched := blnk.oneToOneReconciliation(ctx, externalTxns, matchingRules)
-
 	assert.Equal(t, 2, len(matches), "Expected 2 matches")
 	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
 
