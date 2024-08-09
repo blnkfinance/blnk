@@ -572,6 +572,7 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 					log.Printf("Processed %d transactions", processedCount)
 				}
 				results <- BatchJobResult{}
+
 			}
 		},
 	)
@@ -819,56 +820,49 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	matchCh := make(chan model.Match)
-	errCh := make(chan error)
-	noMatchCh := make(chan struct{})
-
-	go func() {
-		_, err := s.ProcessTransactionInBatches(
-			ctx,
-			externalTxn.TransactionID,
-			externalTxn.Amount,
-			s.getInternalTransactionsPaginated,
-			func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
-				defer wg.Done()
-				for internalTxn := range jobs {
-					select {
-					case <-ctx.Done():
-						return
-					default:
-						atomic.AddInt64(&totalInternalProcessed, 1)
-						if s.matchesRules(externalTxn, *internalTxn, matchingRules) {
-							matchCh <- model.Match{
-								ExternalTransactionID: externalTxn.TransactionID,
-								InternalTransactionID: internalTxn.TransactionID,
-								Amount:                externalTxn.Amount,
-								Date:                  externalTxn.CreatedAt,
-							}
-							return
+	matchFound := false
+	_, err := s.ProcessTransactionInBatches(
+		ctx,
+		externalTxn.TransactionID,
+		externalTxn.Amount,
+		s.getInternalTransactionsPaginated,
+		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
+			defer wg.Done()
+			for internalTxn := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					atomic.AddInt64(&totalInternalProcessed, 1)
+					if s.matchesRules(externalTxn, *internalTxn, matchingRules) {
+						fmt.Println("Match found")
+						matchChan <- model.Match{
+							ExternalTransactionID: externalTxn.TransactionID,
+							InternalTransactionID: internalTxn.TransactionID,
+							Amount:                externalTxn.Amount,
+							Date:                  externalTxn.CreatedAt,
 						}
+						matchFound = true
+						cancel()
+						return
 					}
 				}
-			},
-		)
-		if err != nil && err != context.Canceled {
-			errCh <- err
-		} else {
-			noMatchCh <- struct{}{}
-		}
-	}()
-
-	select {
-	case match := <-matchCh:
-		matchChan <- match
-		return nil
-	case err := <-errCh:
+			}
+		},
+	)
+	if err != nil && err != context.Canceled {
 		return err
-	case <-noMatchCh:
-		unMatchChan <- externalTxn.TransactionID
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+
+	if !matchFound {
+		select {
+		case unMatchChan <- externalTxn.TransactionID:
+		default:
+			return fmt.Errorf("failed to send unmatched transaction ID to channel")
+		}
+	}
+
+	return nil
 }
 
 func (s *Blnk) getExternalTransactionsPaginated(ctx context.Context, uploadID string, limit int, offset int64) ([]*model.Transaction, error) {

@@ -202,7 +202,7 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 	const (
 		batchSize    = 100000000
 		maxWorkers   = 10
-		maxQueueSize = 10000
+		maxQueueSize = 10
 	)
 	var allTxns []*model.Transaction
 	var allErrors []error
