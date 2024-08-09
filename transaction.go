@@ -200,21 +200,19 @@ func (l *Blnk) GetRefundableTransactionsByParentID(ctx context.Context, parentTr
 
 func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactionID string, amount float64, gt getTxns, tw transactionWorker) ([]*model.Transaction, error) {
 	const (
-		batchSize    = 100000000
+		batchSize    = 100000
 		maxWorkers   = 10
-		maxQueueSize = 10
+		maxQueueSize = 1000
 	)
 	var allTxns []*model.Transaction
 	var allErrors []error
+	var mu sync.Mutex
 
-	// Create a buffered channel to queue work
 	jobs := make(chan *model.Transaction, maxQueueSize)
 	results := make(chan BatchJobResult, maxQueueSize)
 
-	// Create a wait group to wait for all goroutines to finish
-	var wg sync.WaitGroup
-
 	// Start worker pool
+	var wg sync.WaitGroup
 	for w := 1; w <= maxWorkers; w++ {
 		wg.Add(1)
 		go tw(ctx, jobs, results, &wg, amount)
@@ -226,56 +224,68 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 		close(results)
 	}()
 
-	// Create a wait group for processing results
-	var resultsWg sync.WaitGroup
-	resultsWg.Add(1)
-
 	// Start a goroutine to process results
+	done := make(chan struct{})
 	go func() {
-		defer resultsWg.Done()
 		for result := range results {
+			mu.Lock()
 			if result.Error != nil {
 				allErrors = append(allErrors, result.Error)
 			} else if result.Txn != nil {
 				allTxns = append(allTxns, result.Txn)
 			}
+			mu.Unlock()
+		}
+		close(done)
+	}()
+
+	// Fetch and process transactions in batches concurrently
+	errChan := make(chan error, 1)
+	go func() {
+		var offset int64 = 0
+		for {
+			select {
+			case <-ctx.Done():
+				errChan <- ctx.Err()
+				return
+			default:
+				txns, err := gt(ctx, parentTransactionID, batchSize, offset)
+				if err != nil {
+					errChan <- err
+					return
+				}
+				if len(txns) == 0 {
+					close(jobs)
+					return
+				}
+
+				for _, txn := range txns {
+					select {
+					case jobs <- txn:
+					case <-ctx.Done():
+						errChan <- ctx.Err()
+						return
+					}
+				}
+
+				offset += int64(len(txns))
+			}
 		}
 	}()
 
-	// Fetch and process transactions in batches
-	var offset int64 = 0
-	for {
-		txns, err := gt(ctx, parentTransactionID, batchSize, offset)
-		if err != nil {
-			return allTxns, err
-		}
-		if len(txns) == 0 {
-			break // No more transactions to process
-		}
-
-		// Queue jobs
-		for _, txn := range txns {
-			jobs <- txn
-		}
-
-		offset += int64(len(txns))
+	// Wait for all processing to complete
+	select {
+	case err := <-errChan:
+		return allTxns, err
+	case <-done:
 	}
-
-	// Close the jobs channel to signal workers to stop
-	close(jobs)
-
-	// Wait for all worker goroutines to finish
-	wg.Wait()
-
-	// Wait for the results processing goroutine to finish
-	resultsWg.Wait()
 
 	if len(allErrors) > 0 {
 		// Log errors and return a combined error
 		for _, err := range allErrors {
 			log.Printf("Error during processing: %v", err)
 		}
-		return allTxns, allErrors[0]
+		return allTxns, fmt.Errorf("multiple errors occurred during processing: %v", allErrors)
 	}
 
 	return allTxns, nil
