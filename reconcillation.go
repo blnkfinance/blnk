@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/database"
@@ -27,8 +26,6 @@ import (
 	"github.com/texttheater/golang-levenshtein/levenshtein"
 	"github.com/wacul/ptr"
 )
-
-var totalInternalProcessed int64
 
 const (
 	StatusStarted    = "started"
@@ -476,7 +473,6 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 	}
 
 	matched, unmatched := processor.getResults()
-	log.Printf("Total internal transactions processed: %d", atomic.LoadInt64(&totalInternalProcessed))
 
 	return s.finalizeReconciliation(ctx, reconciliation, matched, unmatched)
 }
@@ -833,7 +829,6 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 				case <-ctx.Done():
 					return
 				default:
-					atomic.AddInt64(&totalInternalProcessed, 1)
 					if s.matchesRules(externalTxn, *internalTxn, matchingRules) {
 						fmt.Println("Match found")
 						matchChan <- model.Match{
