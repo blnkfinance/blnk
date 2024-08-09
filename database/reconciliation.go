@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/internal/apierror"
@@ -466,6 +467,14 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching external transactions with pagination")
 	defer span.End()
 
+	// Create a cache key based on the pagination parameters
+	cacheKey := fmt.Sprintf("transactions:external:paginated:%d:%d", batchSize, offset)
+	var transactions []*model.ExternalTransaction
+	err := d.Cache.Get(ctx, cacheKey, &transactions)
+	if err == nil && len(transactions) > 0 {
+		return transactions, nil
+	}
+
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT id, amount, reference, currency, description, date, source
 		FROM blnk.external_transactions
@@ -477,8 +486,6 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve external transactions", err)
 	}
 	defer rows.Close()
-
-	var transactions []*model.ExternalTransaction
 
 	for rows.Next() {
 		tx := &model.ExternalTransaction{}
@@ -497,6 +504,14 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over external transactions", err)
 	}
 
+	// Cache the fetched data
+	if len(transactions) > 0 {
+		err = d.Cache.Set(ctx, cacheKey, transactions, 5*time.Minute) // Cache for 5 minutes
+		if err != nil {
+			// Log the error, but don't return it as the main operation succeeded
+			log.Printf("Failed to cache transactions: %v", err)
+		}
+	}
 	return transactions, nil
 }
 
