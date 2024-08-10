@@ -38,8 +38,8 @@ type transactionProcessor struct {
 	reconciliation    model.Reconciliation
 	progress          model.ReconciliationProgress
 	reconciler        reconciler
-	matches           []model.Match
-	unmatched         []string
+	matches           int
+	unmatched         int
 	datasource        database.IDataSource
 	progressSaveCount int
 }
@@ -519,8 +519,8 @@ func (s *Blnk) createTransactionProcessor(reconciliation model.Reconciliation, p
 func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transaction) error {
 	batchMatches, batchUnmatched := tp.reconciler(ctx, []*model.Transaction{txn})
 
-	tp.matches = append(tp.matches, batchMatches...)
-	tp.unmatched = append(tp.unmatched, batchUnmatched...)
+	tp.matches += len(batchMatches)
+	tp.unmatched += len(batchUnmatched)
 
 	if !tp.reconciliation.IsDryRun {
 		if err := tp.datasource.RecordMatches(ctx, tp.reconciliation.ReconciliationID, batchMatches); err != nil {
@@ -545,7 +545,7 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 }
 
 func (tp *transactionProcessor) getResults() (int, int) {
-	return len(tp.matches), len(tp.unmatched)
+	return tp.matches, tp.unmatched
 }
 
 func (s *Blnk) processTransactions(ctx context.Context, uploadID string, processor *transactionProcessor) error {
