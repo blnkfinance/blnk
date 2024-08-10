@@ -63,7 +63,7 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
 	}
-	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, 0, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorker)
+	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, 0, 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorker)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -108,7 +108,7 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 
 	status := req.Status
 	if status == "commit" {
-		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
+		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -119,7 +119,7 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		}
 		resp = transaction[0]
 	} else if status == "void" {
-		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
+		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

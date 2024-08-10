@@ -449,6 +449,8 @@ func (s *Blnk) loadReconciliationProgress(ctx context.Context, reconciliationID 
 }
 
 func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupCriteria string, matchingRuleIDs []string) error {
+	//var wg sync.WaitGroup
+
 	if err := s.updateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusInProgress); err != nil {
 		return fmt.Errorf("failed to update reconciliation status: %w", err)
 	}
@@ -554,6 +556,8 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 		ctx,
 		uploadID,
 		0,
+		10,
+		false,
 		s.getExternalTransactionsPaginated,
 		func(ctx context.Context, txns <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ float64) {
 			defer wg.Done()
@@ -821,6 +825,8 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 		ctx,
 		externalTxn.TransactionID,
 		externalTxn.Amount,
+		10,
+		false,
 		s.getInternalTransactionsPaginated,
 		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
 			defer wg.Done()
@@ -830,7 +836,6 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 					return
 				default:
 					if s.matchesRules(externalTxn, *internalTxn, matchingRules) {
-						fmt.Println("Match found")
 						matchChan <- model.Match{
 							ExternalTransactionID: externalTxn.TransactionID,
 							InternalTransactionID: internalTxn.TransactionID,
@@ -1082,7 +1087,6 @@ func max(a, b int) int {
 	}
 	return b
 }
-
 func (s *Blnk) matchesCurrency(externalValue, internalValue string, criteria model.MatchingCriteria) bool {
 	if internalValue == "MIXED" {
 		// Decide how to handle mixed currencies. Maybe always return true, or implement a more complex logic

@@ -198,10 +198,9 @@ func (l *Blnk) GetRefundableTransactionsByParentID(ctx context.Context, parentTr
 	return l.datasource.GetRefundableTransactionsByParentID(ctx, parentTransactionID, batchSize, offset)
 }
 
-func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactionID string, amount float64, gt getTxns, tw transactionWorker) ([]*model.Transaction, error) {
+func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactionID string, amount float64, maxWorkers int, streamMode bool, gt getTxns, tw transactionWorker) ([]*model.Transaction, error) {
 	const (
 		batchSize    = 100000
-		maxWorkers   = 10
 		maxQueueSize = 1000
 	)
 	var allTxns []*model.Transaction
@@ -224,71 +223,91 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 		close(results)
 	}()
 
-	// Start a goroutine to process results
-	done := make(chan struct{})
-	go func() {
-		for result := range results {
-			mu.Lock()
-			if result.Error != nil {
-				allErrors = append(allErrors, result.Error)
-			} else if result.Txn != nil {
-				allTxns = append(allTxns, result.Txn)
-			}
-			mu.Unlock()
-		}
-		close(done)
-	}()
+	if !streamMode {
+		// Start a goroutine to process results
+		done := make(chan struct{})
+		go processResults(results, &mu, &allTxns, &allErrors, done)
 
-	// Fetch and process transactions in batches concurrently
-	errChan := make(chan error, 1)
-	go func() {
-		var offset int64 = 0
-		for {
-			select {
-			case <-ctx.Done():
-				errChan <- ctx.Err()
+		// Fetch and process transactions in batches concurrently
+		errChan := make(chan error, 1)
+		go fetchTransactions(ctx, parentTransactionID, batchSize, gt, jobs, errChan)
+
+		// Wait for all processing to complete
+		select {
+		case err := <-errChan:
+			return allTxns, err
+		case <-done:
+		}
+
+		if len(allErrors) > 0 {
+			// Log errors and return a combined error
+			for _, err := range allErrors {
+				log.Printf("Error during processing: %v", err)
+			}
+			return allTxns, fmt.Errorf("multiple errors occurred during processing: %v", allErrors)
+		}
+
+		return allTxns, nil
+	} else {
+		var wg sync.WaitGroup
+		// Stream mode: just fetch transactions and send to jobs channel
+		errChan := make(chan error, 1)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fetchTransactions(ctx, parentTransactionID, batchSize, gt, jobs, errChan)
+		}()
+
+		wg.Wait()
+
+		return nil, nil
+	}
+}
+
+func processResults(results chan BatchJobResult, mu *sync.Mutex, allTxns *[]*model.Transaction, allErrors *[]error, done chan struct{}) {
+	for result := range results {
+		mu.Lock()
+		if result.Error != nil {
+			*allErrors = append(*allErrors, result.Error)
+		} else if result.Txn != nil {
+			*allTxns = append(*allTxns, result.Txn)
+		}
+		mu.Unlock()
+	}
+	close(done)
+}
+
+func fetchTransactions(ctx context.Context, parentTransactionID string, batchSize int, gt getTxns, jobs chan *model.Transaction, errChan chan error) {
+	var offset int64 = 0
+	for {
+		select {
+		case <-ctx.Done():
+			errChan <- ctx.Err()
+			return
+		default:
+			txns, err := gt(ctx, parentTransactionID, batchSize, offset)
+			if err != nil {
+				errChan <- err
 				return
-			default:
-				txns, err := gt(ctx, parentTransactionID, batchSize, offset)
-				if err != nil {
-					errChan <- err
-					return
-				}
-				if len(txns) == 0 {
-					close(jobs)
-					return
-				}
-
-				for _, txn := range txns {
-					select {
-					case jobs <- txn:
-					case <-ctx.Done():
-						errChan <- ctx.Err()
-						return
-					}
-				}
-
-				offset += int64(len(txns))
 			}
+			if len(txns) == 0 {
+				close(jobs)
+				return
+			}
+
+			for _, txn := range txns {
+				select {
+				case jobs <- txn:
+				case <-ctx.Done():
+					errChan <- ctx.Err()
+					return
+				}
+			}
+
+			offset += int64(len(txns))
 		}
-	}()
-
-	// Wait for all processing to complete
-	select {
-	case err := <-errChan:
-		return allTxns, err
-	case <-done:
 	}
-
-	if len(allErrors) > 0 {
-		// Log errors and return a combined error
-		for _, err := range allErrors {
-			log.Printf("Error during processing: %v", err)
-		}
-		return allTxns, fmt.Errorf("multiple errors occurred during processing: %v", allErrors)
-	}
-
-	return allTxns, nil
 }
 
 func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {

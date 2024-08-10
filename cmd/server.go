@@ -68,16 +68,15 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 				log.Fatal(err)
 			}
 
-			//todo fix exposed api key
-			// newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
-			// err = newSearch.EnsureCollectionsExist(context.Background())
-			// if err != nil {
-			// 	log.Fatalf("Failed to ensure collections exist: %v", err)
-			// }
-			// err = migrateTypeSenseSchema(context.Background(), newSearch)
-			// if err != nil {
-			// 	log.Fatalf("Failed to migrate typesense schema: %v", err)
-			// }
+			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
+			err = newSearch.EnsureCollectionsExist(context.Background())
+			if err != nil {
+				log.Fatalf("Failed to ensure collections exist: %v", err)
+			}
+			err = migrateTypeSenseSchema(context.Background(), newSearch)
+			if err != nil {
+				log.Fatalf("Failed to migrate typesense schema: %v", err)
+			}
 
 			if cfg.Server.SSL {
 				if err := serveTLS(router, cfg.Server); err != nil {
