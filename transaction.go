@@ -173,6 +173,7 @@ func (l *Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Bal
 	defer span.End()
 
 	if transaction.Status == StatusCommit {
+		// For committed transactions, apply inflight debit to the source balance and inflight credit to the destination balance
 		balances[0].CommitInflightDebit(transaction)
 		balances[1].CommitInflightCredit(transaction)
 		return nil
@@ -180,11 +181,13 @@ func (l *Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Bal
 
 	transactionAmount := new(big.Int).SetInt64(transaction.PreciseAmount)
 	if transaction.Status == StatusVoid {
+		// For void transactions, rollback inflight debit from the source balance and inflight credit from the destination balance
 		balances[0].RollbackInflightDebit(transactionAmount)
 		balances[1].RollbackInflightCredit(transactionAmount)
 		return nil
 	}
 
+	// For other statuses, update the balances normally
 	err := model.UpdateBalances(transaction, balances[0], balances[1])
 	if err != nil {
 		return err
