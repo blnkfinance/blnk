@@ -448,14 +448,6 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 		logrus.Errorf("ERROR saving transaction to db. %s", err)
 	}
 
-	err = SendWebhook(NewWebhook{
-		Event:   "transaction.applied",
-		Payload: transaction,
-	})
-	if err != nil {
-		notification.NotifyError(err)
-	}
-
 	return transaction, nil
 }
 

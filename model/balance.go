@@ -23,7 +23,7 @@ type Balance struct {
 	Identity              *Identity              `json:"identity,omitempty"`
 	Ledger                *Ledger                `json:"ledger,omitempty"`
 	CreatedAt             time.Time              `json:"created_at"`
-	InflighExpiresAt      time.Time              `json:"inflight_expires_at"`
+	InflightExpiresAt     time.Time              `json:"inflight_expires_at"`
 	MetaData              map[string]interface{} `json:"meta_data"`
 }
 

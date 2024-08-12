@@ -4,13 +4,15 @@ import { check, sleep } from "k6";
 
 export const options = {
   vus: 5,
-  duration: "10s",
+  duration: "3s",
 };
+
+const randomAmount = Math.floor(Math.random() * (1000 - 100 + 1)) + 100;
 
 export default function () {
   const url = "http://localhost:5001/transactions";
   const payload = JSON.stringify({
-    amount: 500,
+    amount: randomAmount,
     description: "test transaction",
     precision: 100,
     allow_overdraft: true,
