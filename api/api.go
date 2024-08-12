@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/typesense/typesense-go/typesense/api"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"github.com/jerry-enebeli/blnk/config"
 
@@ -71,6 +72,8 @@ func NewAPI(b *blnk.Blnk) *Api {
 	if conf.Server.Secure {
 		r.Use(middleware.SecretKeyAuthMiddleware())
 	}
+
+	r.Use(otelgin.Middleware("BLNK"))
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")

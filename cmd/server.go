@@ -68,6 +68,16 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 				log.Fatal(err)
 			}
 
+			shutdown, err := blnk.SetupOTelSDK(context.Background(), "BLNK")
+			if err != nil {
+				log.Fatalf("Error setting up OTel SDK: %v", err)
+			}
+			defer func() {
+				if err := shutdown(context.Background()); err != nil {
+					log.Printf("Error shutting down OTel SDK: %v", err)
+				}
+			}()
+
 			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
 			err = newSearch.EnsureCollectionsExist(context.Background())
 			if err != nil {

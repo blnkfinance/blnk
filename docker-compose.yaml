@@ -2,11 +2,12 @@ version: '3.8'
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.4}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:main}
     container_name: server
     restart: on-failure
     environment:
       TZ: ${TZ:-Etc/UTC}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports:
       - "5001:5001"
       - "80:80"
@@ -14,22 +15,26 @@ services:
     depends_on:
       - redis
       - postgres
+      - jaeger
     volumes:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.4}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:main}
     container_name: worker
     restart: on-failure
     entrypoint: [ "blnk", "workers"]
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       - redis
       - postgres
+      - jaeger
     volumes:
       - ./blnk.json:/blnk.json
 
   migration:
-    image:  ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.4}
+    image:  ${BLNK_IMAGE:-jerryenebeli/blnk:main}
     entrypoint: [ "blnk", "migrate","up" ]
     restart: on-failure
     depends_on:
@@ -45,6 +50,8 @@ services:
     image: ${POSTGRES_IMAGE:-postgres:16}
     container_name: ${POSTGRES_CONTAINER:-postgres}
     restart: on-failure
+    ports:
+      - "${POSTGRES_OUTER_PORT:-5432}:5432"
     environment:
       TZ: ${TZ:-Etc/UTC}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -71,6 +78,21 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   pg_data:

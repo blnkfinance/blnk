@@ -13,6 +13,7 @@ import (
 
 	redlock "github.com/jerry-enebeli/blnk/internal/lock"
 	"github.com/jerry-enebeli/blnk/internal/notification"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/sirupsen/logrus"
@@ -22,7 +23,7 @@ import (
 )
 
 var (
-	tracer = otel.Tracer("Queue transaction")
+	tracer = otel.Tracer("transactions")
 )
 
 const (
@@ -612,7 +613,7 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	if err := enqueueTransactions(ctx, l.queue, transaction, transactions); err != nil {
 		return nil, err
 	}
-
+	span.SetAttributes(attribute.String("transaction.id", transaction.TransactionID))
 	return transaction, nil
 }
 
