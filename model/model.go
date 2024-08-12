@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/google/uuid"
 )
@@ -16,53 +17,59 @@ func GenerateUUIDWithSuffix(module string) string {
 	return idWithSuffix
 }
 
+func Int64ToBigInt(value int64) *big.Int {
+	return big.NewInt(value)
+}
+
 func (transaction *Transaction) HashTxn() string {
 	data := fmt.Sprintf("%f%s%s%s%s", transaction.Amount, transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
 
-func compare(value int64, condition string, compareTo int64) bool {
+func compare(value *big.Int, condition string, compareTo *big.Int) bool {
+	cmp := value.Cmp(compareTo)
 	switch condition {
 	case ">":
-		return value > compareTo
+		return cmp > 0
 	case "<":
-		return value < compareTo
+		return cmp < 0
 	case ">=":
-		return value >= compareTo
+		return cmp >= 0
 	case "<=":
-		return value <= compareTo
+		return cmp <= 0
 	case "!=":
-		return value != compareTo
+		return cmp != 0
 	case "==":
-		return value == compareTo
+		return cmp == 0
 	}
 	return false
 }
 
 func (balance *Balance) addCredit(amount int64, inflight bool) {
+	amountBigInt := Int64ToBigInt(amount)
 	if inflight {
-		balance.InflightCreditBalance += amount
-		return
+		balance.InflightCreditBalance.Add(balance.InflightCreditBalance, amountBigInt)
+	} else {
+		balance.CreditBalance.Add(balance.CreditBalance, amountBigInt)
 	}
-
-	balance.CreditBalance += amount
 }
 
 func (balance *Balance) addDebit(amount int64, inflight bool) {
+	amountBigInt := Int64ToBigInt(amount)
 	if inflight {
-		balance.InflightDebitBalance += amount
-		return
+		balance.InflightDebitBalance.Add(balance.InflightDebitBalance, amountBigInt)
+	} else {
+		balance.DebitBalance.Add(balance.DebitBalance, amountBigInt)
 	}
-	balance.DebitBalance += amount
 }
 
 func (balance *Balance) computeBalance(inflight bool) {
 	if inflight {
-		balance.InflightBalance = balance.InflightCreditBalance - balance.InflightDebitBalance
+		balance.InflightBalance.Sub(balance.InflightCreditBalance, balance.InflightDebitBalance)
 		return
 	}
-	balance.Balance = balance.CreditBalance - balance.DebitBalance
+	balance.Balance.Sub(balance.CreditBalance, balance.DebitBalance)
 }
 
 func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
@@ -71,8 +78,10 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 		return nil
 	}
 
-	// Use the provided sourceBalance for the check
-	if sourceBalance.Balance < transaction.PreciseAmount {
+	// Convert transaction.PreciseAmount (int64) to big.Int for comparison
+	transactionAmount := new(big.Int).SetInt64(transaction.PreciseAmount)
+
+	if sourceBalance.Balance.Cmp(transactionAmount) < 0 {
 		return fmt.Errorf("insufficient funds in source balance")
 	}
 
@@ -82,10 +91,12 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
 	preciseAmount := ApplyPrecision(transaction)
 
-	transaction.PreciseAmount = preciseAmount //set transaction precision amount
-	if balance.InflightDebitBalance >= preciseAmount {
-		balance.InflightDebitBalance -= preciseAmount
-		balance.DebitBalance += preciseAmount
+	transactionAmount := new(big.Int).SetInt64(preciseAmount)
+
+	transaction.PreciseAmount = preciseAmount // set transaction precision amount
+	if balance.InflightDebitBalance.Cmp(transactionAmount) >= 0 {
+		balance.InflightDebitBalance.Sub(balance.InflightDebitBalance, transactionAmount)
+		balance.DebitBalance.Add(balance.DebitBalance, transactionAmount)
 		balance.computeBalance(true)  // Update inflight balance
 		balance.computeBalance(false) // Update normal balance
 	}
@@ -93,27 +104,28 @@ func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
 
 func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
 	preciseAmount := ApplyPrecision(transaction)
+	transactionAmount := new(big.Int).SetInt64(preciseAmount)
 	transaction.PreciseAmount = preciseAmount
-	if balance.InflightCreditBalance >= preciseAmount {
-		balance.InflightCreditBalance -= preciseAmount
-		balance.CreditBalance += preciseAmount
+	if balance.InflightCreditBalance.Cmp(transactionAmount) >= 0 {
+		balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, transactionAmount)
+		balance.CreditBalance.Add(balance.CreditBalance, transactionAmount)
 		balance.computeBalance(true)  // Update inflight balance
 		balance.computeBalance(false) // Update normal balance
 	}
 }
 
 // RollbackInflightCredit decreases the InflightCreditBalance by the specified amount
-func (balance *Balance) RollbackInflightCredit(amount int64) {
-	if balance.InflightCreditBalance >= amount {
-		balance.InflightCreditBalance -= amount
+func (balance *Balance) RollbackInflightCredit(amount *big.Int) {
+	if balance.InflightCreditBalance.Cmp(amount) >= 0 {
+		balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, amount)
 		balance.computeBalance(true) // Update inflight balance
 	}
 }
 
 // RollbackInflightDebit decreases the InflightDebitBalance by the specified amount
-func (balance *Balance) RollbackInflightDebit(amount int64) {
-	if balance.InflightDebitBalance >= amount {
-		balance.InflightDebitBalance -= amount
+func (balance *Balance) RollbackInflightDebit(amount *big.Int) {
+	if balance.InflightDebitBalance.Cmp(amount) >= 0 {
+		balance.InflightDebitBalance.Sub(balance.InflightDebitBalance, amount)
 		balance.computeBalance(true) // Update inflight balance
 	}
 }

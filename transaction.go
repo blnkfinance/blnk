@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -177,9 +178,10 @@ func (l *Blnk) applyTransactionToBalances(span trace.Span, balances []*model.Bal
 		return nil
 	}
 
+	transactionAmount := new(big.Int).SetInt64(transaction.PreciseAmount)
 	if transaction.Status == StatusVoid {
-		balances[0].RollbackInflightDebit(int64(transaction.PreciseAmount))
-		balances[1].RollbackInflightCredit(int64(transaction.PreciseAmount))
+		balances[0].RollbackInflightDebit(transactionAmount)
+		balances[1].RollbackInflightCredit(transactionAmount)
 		return nil
 	}
 

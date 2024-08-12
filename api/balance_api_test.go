@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"math/big"
 	"net/http"
 	"testing"
 
@@ -87,9 +88,9 @@ func TestCreateBalance(t *testing.T) {
 					assert.Equal(t, response.BalanceID, balanceFromDB.BalanceID)
 					assert.Equal(t, tt.payload.LedgerId, balanceFromDB.LedgerID)
 					assert.Equal(t, tt.payload.Currency, balanceFromDB.Currency)
-					assert.Equal(t, int64(0), balanceFromDB.Balance)
-					assert.Equal(t, int64(0), balanceFromDB.DebitBalance)
-					assert.Equal(t, int64(0), balanceFromDB.CreditBalance)
+					assert.Equal(t, big.NewInt(0), balanceFromDB.Balance)
+					assert.Equal(t, big.NewInt(0), balanceFromDB.DebitBalance)
+					assert.Equal(t, big.NewInt(0), balanceFromDB.CreditBalance)
 				}
 			}
 		})
@@ -124,11 +125,11 @@ func TestGetBalance(t *testing.T) {
 	assert.Equal(t, response.BalanceID, newBalance.BalanceID)
 	assert.Equal(t, response.LedgerID, newLedger.LedgerID)
 	assert.Equal(t, response.Currency, newBalance.Currency)
-	assert.Equal(t, int64(0), newBalance.Balance)
-	assert.Equal(t, int64(0), newBalance.DebitBalance)
-	assert.Equal(t, int64(0), newBalance.CreditBalance)
-	assert.Equal(t, int64(0), newBalance.InflightBalance)
-	assert.Equal(t, int64(0), newBalance.InflightCreditBalance)
-	assert.Equal(t, int64(0), newBalance.InflightDebitBalance)
+	assert.Equal(t, big.NewInt(0), newBalance.Balance)
+	assert.Equal(t, big.NewInt(0), newBalance.DebitBalance)
+	assert.Equal(t, big.NewInt(0), newBalance.CreditBalance)
+	assert.Equal(t, big.NewInt(0), newBalance.InflightBalance)
+	assert.Equal(t, big.NewInt(0), newBalance.InflightCreditBalance)
+	assert.Equal(t, big.NewInt(0), newBalance.InflightDebitBalance)
 	assert.Equal(t, int64(0), newBalance.Version)
 }

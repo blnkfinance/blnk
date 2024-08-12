@@ -95,7 +95,9 @@ func (l *Blnk) GetAllBalances() ([]model.Balance, error) {
 }
 
 func (l *Blnk) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMonitor, error) {
-	monitor.Condition.PreciseValue = int64(monitor.Condition.Value * monitor.Condition.Precision) //apply precision to value
+	amount := int64(monitor.Condition.Value * monitor.Condition.Precision) //apply precision to value
+	amountBigInt := model.Int64ToBigInt(amount)
+	monitor.Condition.PreciseValue = amountBigInt
 	return l.datasource.CreateMonitor(monitor)
 }
 

@@ -1,19 +1,20 @@
 package model
 
 import (
+	"math/big"
 	"sync"
 	"time"
 )
 
 type Balance struct {
 	ID                    int64                  `json:"-"`
-	Balance               int64                  `json:"balance"`
+	Balance               *big.Int               `json:"balance"`
 	Version               int64                  `json:"version"`
-	InflightBalance       int64                  `json:"inflight_balance"`
-	CreditBalance         int64                  `json:"credit_balance"`
-	InflightCreditBalance int64                  `json:"inflight_credit_balance"`
-	DebitBalance          int64                  `json:"debit_balance"`
-	InflightDebitBalance  int64                  `json:"inflight_debit_balance"`
+	InflightBalance       *big.Int               `json:"inflight_balance"`
+	CreditBalance         *big.Int               `json:"credit_balance"`
+	InflightCreditBalance *big.Int               `json:"inflight_credit_balance"`
+	DebitBalance          *big.Int               `json:"debit_balance"`
+	InflightDebitBalance  *big.Int               `json:"inflight_debit_balance"`
 	CurrencyMultiplier    float64                `json:"precision"`
 	LedgerID              string                 `json:"ledger_id"`
 	IdentityID            string                 `json:"identity_id"`
@@ -53,9 +54,9 @@ type BalanceTracker struct {
 	Mutex       sync.Mutex
 }
 type AlertCondition struct {
-	Value        float64 `json:"value"`
-	Precision    float64 `json:"precision"`
-	PreciseValue int64   `json:"precise_value"`
-	Field        string  `json:"field"`
-	Operator     string  `json:"operator"`
+	Value        float64  `json:"value"`
+	Precision    float64  `json:"precision"`
+	PreciseValue *big.Int `json:"precise_value"`
+	Field        string   `json:"field"`
+	Operator     string   `json:"operator"`
 }

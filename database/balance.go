@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -73,11 +74,16 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 	identity := &model.Identity{}
 	ledger := &model.Ledger{}
 	metaDataJSON := []byte{}
+
+	// Temporary variables to hold string representations of big.Int fields
+	var balanceStr, creditBalanceStr, debitBalanceStr, inflightBalanceStr, inflightCreditBalanceStr, inflightDebitBalanceStr string
+
 	var scanArgs []interface{}
 	// Add scan arguments for default fields
-	scanArgs = append(scanArgs, &balance.BalanceID, &balance.Balance, &balance.CreditBalance,
-		&balance.DebitBalance, &balance.Currency, &balance.CurrencyMultiplier,
-		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.Version)
+	scanArgs = append(scanArgs, &balance.BalanceID, &balanceStr, &creditBalanceStr,
+		&debitBalanceStr, &balance.Currency, &balance.CurrencyMultiplier,
+		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON,
+		&inflightBalanceStr, &inflightCreditBalanceStr, &inflightDebitBalanceStr, &balance.Version)
 
 	if contains(include, "identity") {
 		scanArgs = append(scanArgs, &identity.IdentityID, &identity.FirstName, &identity.OrganizationName, &identity.Category, &identity.LastName,
@@ -92,10 +98,18 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 
 	err := row.Scan(scanArgs...)
 	if err != nil {
-		fmt.Println("Errror: ", err)
+		fmt.Println("Error: ", err)
 		_ = tx.Rollback()
 		return nil, err
 	}
+
+	// Convert string representations to big.Int
+	balance.Balance, _ = new(big.Int).SetString(balanceStr, 10)
+	balance.CreditBalance, _ = new(big.Int).SetString(creditBalanceStr, 10)
+	balance.DebitBalance, _ = new(big.Int).SetString(debitBalanceStr, 10)
+	balance.InflightBalance, _ = new(big.Int).SetString(inflightBalanceStr, 10)
+	balance.InflightCreditBalance, _ = new(big.Int).SetString(inflightCreditBalanceStr, 10)
+	balance.InflightDebitBalance, _ = new(big.Int).SetString(inflightDebitBalanceStr, 10)
 
 	err = json.Unmarshal(metaDataJSON, &balance.MetaData)
 	if err != nil {
@@ -133,10 +147,29 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 		indicator = nil
 	}
 
+	if balance.Balance == nil {
+		balance.Balance = big.NewInt(0)
+	}
+	if balance.CreditBalance == nil {
+		balance.CreditBalance = big.NewInt(0)
+	}
+	if balance.DebitBalance == nil {
+		balance.DebitBalance = big.NewInt(0)
+	}
+
+	if balance.InflightBalance == nil {
+		balance.InflightBalance = big.NewInt(0)
+	}
+	if balance.InflightCreditBalance == nil {
+		balance.InflightCreditBalance = big.NewInt(0)
+	}
+	if balance.InflightDebitBalance == nil {
+		balance.InflightDebitBalance = big.NewInt(0)
+	}
 	_, err = d.Conn.Exec(`
 		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)
-	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON)
+	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON)
 
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)
@@ -186,12 +219,38 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 
 func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	var balance model.Balance
+	var balanceValue, creditBalanceValue, debitBalanceValue, inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue int64
+	var indicator sql.NullString
+
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, indicator, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = $1
+	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version 
+	   FROM blnk.balances 
+	   WHERE balance_id = $1
 	`, id)
 
-	err := row.Scan(&balance.BalanceID, &balance.Indicator, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
-		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
+	err := row.Scan(
+		&balance.BalanceID,
+		&indicator,
+		&balance.Currency,
+		&balance.CurrencyMultiplier,
+		&balance.LedgerID,
+		&balanceValue,
+		&creditBalanceValue,
+		&debitBalanceValue,
+		&inflightBalanceValue,
+		&inflightCreditBalanceValue,
+		&inflightDebitBalanceValue,
+		&balance.CreatedAt,
+		&balance.Version,
+	)
+
+	// Convert sql.NullString to string
+	if indicator.Valid {
+		balance.Indicator = indicator.String
+	} else {
+		balance.Indicator = "" // or set to a default value
+	}
+
 	if err != nil {
 		logrus.Errorf("balance lite error %v", err)
 		if err == sql.ErrNoRows {
@@ -201,17 +260,42 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 		}
 	}
 
+	// Convert the scanned int64 values into big.Int
+	balance.Balance = big.NewInt(balanceValue)
+	balance.CreditBalance = big.NewInt(creditBalanceValue)
+	balance.DebitBalance = big.NewInt(debitBalanceValue)
+	balance.InflightBalance = big.NewInt(inflightBalanceValue)
+	balance.InflightCreditBalance = big.NewInt(inflightCreditBalanceValue)
+	balance.InflightDebitBalance = big.NewInt(inflightDebitBalanceValue)
+
 	return &balance, nil
 }
 
 func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Balance, error) {
 	var balance model.Balance
+	var balanceValue, creditBalanceValue, debitBalanceValue, inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue int64
+
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, indicator, currency, currency_multiplier,ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE indicator = $1 AND currency = $2 
+	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version 
+	   FROM blnk.balances 
+	   WHERE indicator = $1 AND currency = $2
 	`, indicator, currency)
 
-	err := row.Scan(&balance.BalanceID, &balance.Indicator, &balance.Currency, &balance.CurrencyMultiplier, &balance.LedgerID, &balance.Balance, &balance.CreditBalance,
-		&balance.DebitBalance, &balance.InflightBalance, &balance.InflightCreditBalance, &balance.InflightDebitBalance, &balance.CreatedAt, &balance.Version)
+	err := row.Scan(
+		&balance.BalanceID,
+		&balance.Indicator,
+		&balance.Currency,
+		&balance.CurrencyMultiplier,
+		&balance.LedgerID,
+		&balanceValue,
+		&creditBalanceValue,
+		&debitBalanceValue,
+		&inflightBalanceValue,
+		&inflightCreditBalanceValue,
+		&inflightDebitBalanceValue,
+		&balance.CreatedAt,
+		&balance.Version,
+	)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return &model.Balance{}, fmt.Errorf("balance with indicator '%s' not found", indicator)
@@ -219,6 +303,14 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 			return nil, err
 		}
 	}
+
+	// Convert the scanned int64 values into big.Int
+	balance.Balance = big.NewInt(balanceValue)
+	balance.CreditBalance = big.NewInt(creditBalanceValue)
+	balance.DebitBalance = big.NewInt(debitBalanceValue)
+	balance.InflightBalance = big.NewInt(inflightBalanceValue)
+	balance.InflightCreditBalance = big.NewInt(inflightCreditBalanceValue)
+	balance.InflightDebitBalance = big.NewInt(inflightDebitBalanceValue)
 
 	return &balance, nil
 }
@@ -243,6 +335,7 @@ func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 
 	// create slice to store balances
 	var balances []model.Balance
+	var balanceValue, creditBalanceValue, debitBalanceValue, inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue int64
 
 	// iterate through result set and parse metadata from JSON
 	for rows.Next() {
@@ -250,9 +343,9 @@ func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 		var metaDataJSON []byte
 		err = rows.Scan(
 			&balance.BalanceID,
-			&balance.Balance,
-			&balance.CreditBalance,
-			&balance.DebitBalance,
+			&balanceValue,
+			&creditBalanceValue,
+			&debitBalanceValue,
 			&balance.Currency,
 			&balance.CurrencyMultiplier,
 			&balance.LedgerID,
@@ -262,6 +355,14 @@ func (d Datasource) GetAllBalances() ([]model.Balance, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Convert the scanned int64 values into big.Int
+		balance.Balance = big.NewInt(balanceValue)
+		balance.CreditBalance = big.NewInt(creditBalanceValue)
+		balance.DebitBalance = big.NewInt(debitBalanceValue)
+		balance.InflightBalance = big.NewInt(inflightBalanceValue)
+		balance.InflightCreditBalance = big.NewInt(inflightCreditBalanceValue)
+		balance.InflightDebitBalance = big.NewInt(inflightDebitBalanceValue)
 
 		// convert metadata from JSON to map
 		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
@@ -362,7 +463,7 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
         WHERE balance_id = $1 AND version = $13
     `
 
-	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.InflightBalance, balance.InflightCreditBalance, balance.InflightDebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON, balance.Version)
+	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.InflightBalance.String(), balance.InflightCreditBalance.String(), balance.InflightDebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON, balance.Version)
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
 	}
@@ -392,7 +493,7 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 		UPDATE blnk.balances
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
 		WHERE balance_id = $1
-	`, balance.BalanceID, balance.Balance, balance.CreditBalance, balance.DebitBalance, balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
+	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
 
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
@@ -414,10 +515,14 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 	monitor.MonitorID = model.GenerateUUIDWithSuffix("mon")
 	monitor.CreatedAt = time.Now()
 
+	if monitor.Condition.PreciseValue == nil {
+		monitor.Condition.PreciseValue = big.NewInt(0)
+	}
+
 	_, err := d.Conn.Exec(`
 		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue, monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
 
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)
@@ -437,6 +542,8 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 }
 
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
+	var preciseValue int64
+
 	row := d.Conn.QueryRow(`
 		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at 
 		FROM blnk.balance_monitors WHERE monitor_id = $1
@@ -444,7 +551,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 
 	monitor := &model.BalanceMonitor{}
 	condition := &model.AlertCondition{}
-	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &condition.Precision, &condition.PreciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &condition.Precision, &preciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Monitor with ID '%s' not found", id), err)
@@ -452,6 +559,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitor", err)
 	}
 	monitor.Condition = *condition
+	monitor.Condition.PreciseValue = big.NewInt(preciseValue)
 	return monitor, nil
 }
 
