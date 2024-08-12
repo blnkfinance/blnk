@@ -93,19 +93,6 @@ func newTraceProvider(ctx context.Context, serviceName string) (*sdktrace.Tracer
 	return traceProvider, nil
 }
 
-// func newMeterProvider() (*metric.MeterProvider, error) {
-// 	metricExporter, err := stdoutmetric.New()
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	meterProvider := metric.NewMeterProvider(
-// 		metric.WithReader(metric.NewPeriodicReader(metricExporter,
-// 			metric.WithInterval(3*time.Second))),
-// 	)
-// 	return meterProvider, nil
-// }
-
 func newLoggerProvider() (*log.LoggerProvider, error) {
 	logExporter, err := stdoutlog.New()
 	if err != nil {
