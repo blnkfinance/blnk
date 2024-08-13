@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -25,12 +26,12 @@ func TestRecordTransaction(t *testing.T) {
 		t.Fatalf("Failed to create ledger: %v", err)
 	}
 
-	newSourceBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	newSourceBalance, err := b.CreateBalance(context.Background(), model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
 	if err != nil {
 		t.Fatalf("Failed to create source balance: %v", err)
 	}
 
-	newDestinationBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	newDestinationBalance, err := b.CreateBalance(context.Background(), model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
 	if err != nil {
 		t.Fatalf("Failed to create destination balance: %v", err)
 	}
@@ -157,13 +158,13 @@ func TestRecordTransactionWithExitingRef(t *testing.T) {
 		return
 	}
 
-	newSourceBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	newSourceBalance, err := b.CreateBalance(context.Background(), model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
-	newDestinationBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
+	newDestinationBalance, err := b.CreateBalance(context.Background(), model.Balance{LedgerID: newLedger.LedgerID, Currency: "NGN"})
 	if err != nil {
 		t.Error(err)
 		return

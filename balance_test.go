@@ -150,7 +150,7 @@ func TestCreateBalance(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	result, err := d.CreateBalance(balance)
+	result, err := d.CreateBalance(context.Background(), balance)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, result.BalanceID)
 	assert.Contains(t, result.BalanceID, "bln_")
@@ -192,7 +192,7 @@ func TestGetBalanceByID(t *testing.T) {
 
 	mock.ExpectCommit()
 
-	result, err := d.GetBalanceByID(balanceID, nil)
+	result, err := d.GetBalanceByID(context.Background(), balanceID, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, balanceID, result.BalanceID)
@@ -220,7 +220,7 @@ func TestGetAllBalances(t *testing.T) {
 
 	mock.ExpectQuery("SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data FROM blnk.balances LIMIT 20").WillReturnRows(rows)
 
-	result, err := d.GetAllBalances()
+	result, err := d.GetAllBalances(context.Background())
 
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
@@ -319,7 +319,7 @@ func TestCreateMonitor(t *testing.T) {
 
 	mock.ExpectExec("INSERT INTO blnk.balance_monitors").WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	result, err := d.CreateMonitor(monitor)
+	result, err := d.CreateMonitor(context.Background(), monitor)
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, result.MonitorID)
@@ -346,7 +346,7 @@ func TestGetMonitorByID(t *testing.T) {
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnRows(rows)
 
-	result, err := d.GetMonitorByID(monitorID)
+	result, err := d.GetMonitorByID(context.Background(), monitorID)
 
 	assert.NoError(t, err)
 	assert.Equal(t, monitorID, result.MonitorID)
@@ -371,7 +371,7 @@ func TestGetAllMonitors(t *testing.T) {
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors").WillReturnRows(rows)
 
-	result, err := d.GetAllMonitors()
+	result, err := d.GetAllMonitors(context.Background())
 
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
@@ -397,7 +397,7 @@ func TestGetBalanceMonitors(t *testing.T) {
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE balance_id =").WithArgs(balanceID).WillReturnRows(rows)
 
-	result, err := d.GetBalanceMonitors(balanceID)
+	result, err := d.GetBalanceMonitors(context.Background(), balanceID)
 
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
@@ -421,7 +421,7 @@ func TestUpdateMonitor(t *testing.T) {
 
 	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err = d.UpdateMonitor(monitor)
+	err = d.UpdateMonitor(context.Background(), monitor)
 
 	assert.NoError(t, err)
 
@@ -444,7 +444,7 @@ func TestDeleteMonitor(t *testing.T) {
 
 	mock.ExpectExec("DELETE FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err = d.DeleteMonitor(monitorID)
+	err = d.DeleteMonitor(context.Background(), monitorID)
 
 	assert.NoError(t, err)
 

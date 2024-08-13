@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -50,7 +51,7 @@ func TestCalculateDistributions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := CalculateDistributions(tt.totalAmount, tt.distributions)
+			got, err := CalculateDistributions(context.Background(), tt.totalAmount, tt.distributions)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CalculateDistributions() error = %v, wantErr %v", err, tt.wantErr)
 				return

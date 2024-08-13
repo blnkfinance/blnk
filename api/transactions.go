@@ -84,7 +84,7 @@ func (a Api) GetTransaction(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.blnk.GetTransaction(id)
+	resp, err := a.blnk.GetTransaction(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

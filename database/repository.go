@@ -18,13 +18,13 @@ type IDataSource interface {
 
 type transaction interface {
 	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)
-	GetTransaction(id string) (*model.Transaction, error)
-	IsParentTransactionVoid(parentID string) (bool, error)
+	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)
+	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)
 	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)
 	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)
-	UpdateTransactionStatus(id string, status string) error
-	GetAllTransactions() ([]model.Transaction, error)
-	GetTotalCommittedTransactions(parentID string) (int64, error)
+	UpdateTransactionStatus(cxt context.Context, id string, status string) error
+	GetAllTransactions(cxt context.Context) ([]model.Transaction, error)
+	GetTotalCommittedTransactions(cxt context.Context, parentID string) (int64, error)
 	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)
 	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)
 	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)

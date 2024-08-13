@@ -2,38 +2,112 @@ package blnk
 
 import (
 	"context"
-	"log"
+	"errors"
+	"time"
 
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
+	"go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
-	"go.opentelemetry.io/otel/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 )
 
-// Init returns an instance of Jaeger Tracer.
-func Init(ctx context.Context, service string) trace.Tracer {
-	client := otlptracegrpc.NewClient(
-		otlptracegrpc.WithInsecure(),
-	)
-	exporter, err := otlptrace.New(ctx, client)
-	if err != nil {
-		log.Fatal("creating OTLP trace exporter: %w", err)
+// SetupOTelSDK bootstraps the OpenTelemetry pipeline.
+// If it does not return an error, make sure to call shutdown for proper cleanup.
+func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(context.Context) error, err error) {
+	var shutdownFuncs []func(context.Context) error
+
+	// shutdown calls cleanup functions registered via shutdownFuncs.
+	// The errors from the calls are joined.
+	// Each registered cleanup will be invoked once.
+	shutdown = func(ctx context.Context) error {
+		var err error
+		for _, fn := range shutdownFuncs {
+			err = errors.Join(err, fn(ctx))
+		}
+		shutdownFuncs = nil
+		return err
 	}
 
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
-		sdktrace.WithResource(newResource(service)),
-	)
+	// handleErr calls shutdown for cleanup and makes sure that all errors are returned.
+	handleErr := func(inErr error) {
+		err = errors.Join(inErr, shutdown(ctx))
+	}
 
-	return tp.Tracer(service)
+	// Set up propagator.
+	prop := newPropagator()
+	otel.SetTextMapPropagator(prop)
+
+	// Set up trace provider.
+	tracerProvider, err := newTraceProvider(ctx, serviceName)
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
+	otel.SetTracerProvider(tracerProvider)
+
+	// Set up logger provider.
+	loggerProvider, err := newLoggerProvider()
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	shutdownFuncs = append(shutdownFuncs, loggerProvider.Shutdown)
+	global.SetLoggerProvider(loggerProvider)
+
+	return
 }
 
-func newResource(service string) *resource.Resource {
-	return resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName(service),
-		semconv.ServiceVersion("0.0.1"),
+func newPropagator() propagation.TextMapPropagator {
+	return propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
+}
+
+func newTraceProvider(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {
+	exporter, err := newExporter(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String(serviceName),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	traceProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter,
+			sdktrace.WithBatchTimeout(5*time.Second)),
+		sdktrace.WithResource(res),
+	)
+	return traceProvider, nil
+}
+
+func newLoggerProvider() (*log.LoggerProvider, error) {
+	logExporter, err := stdoutlog.New()
+	if err != nil {
+		return nil, err
+	}
+
+	loggerProvider := log.NewLoggerProvider(
+		log.WithProcessor(log.NewBatchProcessor(logExporter)),
+	)
+	return loggerProvider, nil
+}
+
+func newExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+	return otlptracehttp.New(ctx,
+		otlptracehttp.WithInsecure(),
+		otlptracehttp.WithEndpoint("localhost:4318"), // Replace with your OTLP endpoint
 	)
 }
