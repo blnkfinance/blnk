@@ -19,13 +19,13 @@ func (m *MockDataSource) RecordTransaction(ctx context.Context, txn *model.Trans
 	return args.Get(0).(*model.Transaction), args.Error(1)
 }
 
-func (m *MockDataSource) GetTransaction(id string) (*model.Transaction, error) {
-	args := m.Called(id)
+func (m *MockDataSource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
+	args := m.Called(ctx, id)
 	return args.Get(0).(*model.Transaction), args.Error(1)
 }
 
-func (m *MockDataSource) IsParentTransactionVoid(parentID string) (bool, error) {
-	args := m.Called(parentID)
+func (m *MockDataSource) IsParentTransactionVoid(ctx context.Context, parentID string) (bool, error) {
+	args := m.Called(ctx, parentID)
 	return args.Bool(0), args.Error(1)
 }
 
@@ -39,18 +39,18 @@ func (m *MockDataSource) TransactionExistsByRef(ctx context.Context, reference s
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockDataSource) UpdateTransactionStatus(id string, status string) error {
-	args := m.Called(id, status)
+func (m *MockDataSource) UpdateTransactionStatus(ctx context.Context, id string, status string) error {
+	args := m.Called(ctx, id, status)
 	return args.Error(0)
 }
 
-func (m *MockDataSource) GetAllTransactions() ([]model.Transaction, error) {
+func (m *MockDataSource) GetAllTransactions(context.Context) ([]model.Transaction, error) {
 	args := m.Called()
 	return args.Get(0).([]model.Transaction), args.Error(1)
 }
 
-func (m *MockDataSource) GetTotalCommittedTransactions(parentID string) (int64, error) {
-	args := m.Called(parentID)
+func (m *MockDataSource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (int64, error) {
+	args := m.Called(ctx, parentID)
 	return args.Get(0).(int64), args.Error(1)
 }
 

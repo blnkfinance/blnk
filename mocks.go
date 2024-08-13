@@ -1,6 +1,10 @@
 package blnk
 
-import "github.com/jerry-enebeli/blnk/model"
+import (
+	"context"
+
+	"github.com/jerry-enebeli/blnk/model"
+)
 
 type MockBlnk struct {
 	Blnk
@@ -11,5 +15,5 @@ func (m *MockBlnk) GetTransaction(id string) (*model.Transaction, error) {
 	if m.mockGetTransaction != nil {
 		return m.mockGetTransaction(id)
 	}
-	return m.Blnk.GetTransaction(id)
+	return m.Blnk.GetTransaction(context.Background(), id)
 }

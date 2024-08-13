@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
@@ -21,28 +23,38 @@ import (
 )
 
 func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Saving transaction to db")
+	ctx, span := otel.Tracer("database").Start(ctx, "RecordTransaction")
 	defer span.End()
 
 	metaDataJSON, err := json.Marshal(txn.MetaData)
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
 	_, err = d.Conn.ExecContext(ctx,
-		`INSERT INTO blnk.transactions(transaction_id,parent_transaction,source,reference,amount,precise_amount,precision,rate,currency,destination,description,status,created_at,meta_data,scheduled_for,hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		`INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash) 
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.Amount, txn.PreciseAmount, txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash,
 	)
 
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record transaction", err)
 	}
 
+	span.AddEvent("Transaction recorded", trace.WithAttributes(
+		attribute.String("transaction.id", txn.TransactionID),
+		attribute.String("transaction.reference", txn.Reference),
+	))
 	return txn, nil
 }
 
-func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
-	row := d.Conn.QueryRow(`
+func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
+	ctx, span := otel.Tracer("database").Start(ctx, "GetTransaction")
+	defer span.End()
+
+	row := d.Conn.QueryRowContext(ctx, `
 		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data
 		FROM blnk.transactions
 		WHERE transaction_id = $1
@@ -53,22 +65,32 @@ func (d Datasource) GetTransaction(id string) (*model.Transaction, error) {
 	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Transaction with ID '%s' not found", id), err)
 		}
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transaction", err)
 	}
 
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
+	span.AddEvent("Transaction retrieved", trace.WithAttributes(
+		attribute.String("transaction.id", txn.TransactionID),
+		attribute.String("transaction.reference", txn.Reference),
+	))
 	return txn, nil
 }
 
-func (d Datasource) IsParentTransactionVoid(parentID string) (bool, error) {
+func (d Datasource) IsParentTransactionVoid(ctx context.Context, parentID string) (bool, error) {
+	ctx, span := otel.Tracer("database").Start(ctx, "IsParentTransactionVoid")
+	defer span.End()
+
 	var exists bool
-	err := d.Conn.QueryRow(`
+	err := d.Conn.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM blnk.transactions
@@ -78,14 +100,19 @@ func (d Datasource) IsParentTransactionVoid(parentID string) (bool, error) {
 	`, parentID).Scan(&exists)
 
 	if err != nil {
+		span.RecordError(err)
 		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check if parent transaction is void", err)
 	}
 
+	span.AddEvent("Parent transaction void check", trace.WithAttributes(
+		attribute.String("parent_transaction.id", parentID),
+		attribute.Bool("parent_transaction.void", exists),
+	))
 	return exists, nil
 }
 
 func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string) (bool, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Getting transaction from db by reference")
+	ctx, span := otel.Tracer("database").Start(ctx, "TransactionExistsByRef")
 	defer span.End()
 
 	var exists bool
@@ -94,13 +121,21 @@ func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string
 	`, reference).Scan(&exists)
 
 	if err != nil {
+		span.RecordError(err)
 		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check if transaction exists", err)
 	}
 
+	span.AddEvent("Transaction existence check", trace.WithAttributes(
+		attribute.String("transaction.reference", reference),
+		attribute.Bool("transaction.exists", exists),
+	))
 	return exists, nil
 }
 
 func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (model.Transaction, error) {
+	ctx, span := otel.Tracer("database").Start(ctx, "GetTransactionByRef")
+	defer span.End()
+
 	row := d.Conn.QueryRowContext(ctx, `
 		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data
 		FROM blnk.transactions
@@ -112,49 +147,73 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			span.RecordError(err)
 			return model.Transaction{}, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Transaction with reference '%s' not found", reference), err)
 		}
+		span.RecordError(err)
 		return model.Transaction{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transaction", err)
 	}
 
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
 	if err != nil {
+		span.RecordError(err)
 		return model.Transaction{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
+	span.AddEvent("Transaction retrieved by reference", trace.WithAttributes(
+		attribute.String("transaction.id", txn.TransactionID),
+		attribute.String("transaction.reference", txn.Reference),
+	))
 	return txn, nil
 }
 
-func (d Datasource) UpdateTransactionStatus(id string, status string) error {
-	result, err := d.Conn.Exec(`
+func (d Datasource) UpdateTransactionStatus(ctx context.Context, id string, status string) error {
+	ctx, span := otel.Tracer("database").Start(ctx, "UpdateTransactionStatus")
+	defer span.End()
+
+	result, err := d.Conn.ExecContext(ctx, `
 		UPDATE blnk.transactions
 		SET status = $2
 		WHERE transaction_id = $1
 	`, id, status)
 
 	if err != nil {
+		span.RecordError(err)
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update transaction status", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
+		span.RecordError(err)
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
 	}
 
 	if rowsAffected == 0 {
+		span.AddEvent("Transaction not found for status update", trace.WithAttributes(
+			attribute.String("transaction.id", id),
+			attribute.String("transaction.status", status),
+		))
 		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Transaction with ID '%s' not found", id), nil)
 	}
 
+	span.AddEvent("Transaction status updated", trace.WithAttributes(
+		attribute.String("transaction.id", id),
+		attribute.String("transaction.status", status),
+	))
 	return nil
 }
 
-func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
-	rows, err := d.Conn.Query(`
+func (d Datasource) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
+	ctx, span := otel.Tracer("database").Start(ctx, "GetAllTransactions")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 	`)
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions", err)
 	}
 	defer rows.Close()
@@ -178,11 +237,13 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 			&metaDataJSON,
 		)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
@@ -190,13 +251,20 @@ func (d Datasource) GetAllTransactions() ([]model.Transaction, error) {
 	}
 
 	if err = rows.Err(); err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
+	span.AddEvent("All transactions retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+	))
 	return transactions, nil
 }
 
-func (d Datasource) GetTotalCommittedTransactions(parentID string) (int64, error) {
+func (d Datasource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (int64, error) {
+	ctx, span := otel.Tracer("database").Start(ctx, "GetTotalCommittedTransactions")
+	defer span.End()
+
 	query := `
 		SELECT SUM(precise_amount) AS total_amount
 		FROM blnk.transactions
@@ -205,19 +273,24 @@ func (d Datasource) GetTotalCommittedTransactions(parentID string) (int64, error
 	`
 
 	var totalAmount int64
-	err := d.Conn.QueryRow(query, parentID).Scan(&totalAmount)
+	err := d.Conn.QueryRowContext(ctx, query, parentID).Scan(&totalAmount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
+		span.RecordError(err)
 		return 0, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get total committed transactions", err)
 	}
 
+	span.AddEvent("Total committed transactions retrieved", trace.WithAttributes(
+		attribute.String("parent_transaction.id", parentID),
+		attribute.Int64("total_amount", totalAmount),
+	))
 	return totalAmount, nil
 }
 
 func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching transactions by parent ID with pagination")
+	ctx, span := otel.Tracer("database").Start(ctx, "GetTransactionsPaginated")
 	defer span.End()
 
 	// Create a cache key based on the pagination parameters
@@ -226,6 +299,9 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	var transactions []*model.Transaction
 	err := d.Cache.Get(ctx, cacheKey, &transactions)
 	if err == nil && len(transactions) > 0 {
+		span.AddEvent("Transactions retrieved from cache", trace.WithAttributes(
+			attribute.Int("transaction.count", len(transactions)),
+		))
 		return transactions, nil
 	}
 
@@ -237,6 +313,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
         LIMIT $1 OFFSET $2
     `, batchSize, offset)
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve paginated transactions", err)
 	}
 	defer rows.Close()
@@ -265,11 +342,13 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 			&transaction.Hash,
 		)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
@@ -277,6 +356,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	}
 
 	if err = rows.Err(); err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
@@ -289,10 +369,16 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 		}
 	}
 
+	span.AddEvent("Paginated transactions retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+	))
 	return transactions, nil
 }
 
 func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+	ctx, span := otel.Tracer("database").Start(ctx, "GroupTransactions")
+	defer span.End()
+
 	query := `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
@@ -323,6 +409,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 
 	rows, err := d.Conn.QueryContext(ctx, query, args...)
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped transactions", err)
 	}
 	defer rows.Close()
@@ -351,11 +438,13 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			&transaction.Hash,
 		)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
@@ -369,14 +458,18 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	}
 
 	if err = rows.Err(); err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
+	span.AddEvent("Grouped transactions retrieved", trace.WithAttributes(
+		attribute.Int("group.count", len(groupedTransactions)),
+	))
 	return groupedTransactions, nil
 }
 
 func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching inflight transactions by parent ID with pagination")
+	ctx, span := otel.Tracer("database").Start(ctx, "GetInflightTransactionsByParentID")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -387,6 +480,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve inflight transactions", err)
 	}
 	defer rows.Close()
@@ -415,11 +509,13 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			&transaction.Hash,
 		)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
@@ -427,14 +523,18 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	}
 
 	if err = rows.Err(); err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
+	span.AddEvent("Inflight transactions retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+	))
 	return transactions, nil
 }
 
 func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching refundable transactions by parent ID with pagination")
+	ctx, span := otel.Tracer("database").Start(ctx, "GetRefundableTransactionsByParentID")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -445,6 +545,7 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
 	if err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve refundable transactions", err)
 	}
 	defer rows.Close()
@@ -473,11 +574,13 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 			&transaction.Hash,
 		)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
 		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
 		if err != nil {
+			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
@@ -485,8 +588,12 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 	}
 
 	if err = rows.Err(); err != nil {
+		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
+	span.AddEvent("Refundable transactions retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+	))
 	return transactions, nil
 }

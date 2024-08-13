@@ -21,7 +21,7 @@ func (a Api) CreateBalance(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.blnk.CreateBalance(newBalance.ToBalance())
+	resp, err := a.blnk.CreateBalance(c.Request.Context(), newBalance.ToBalance())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -41,7 +41,7 @@ func (a Api) GetBalance(c *gin.Context) {
 	// Extracting 'include' parameter from the query
 	includes := c.QueryArray("include")
 
-	resp, err := a.blnk.GetBalanceByID(id, includes)
+	resp, err := a.blnk.GetBalanceByID(c.Request.Context(), id, includes)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -63,7 +63,7 @@ func (a Api) CreateBalanceMonitor(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.blnk.CreateMonitor(newMonitor.ToBalanceMonitor())
+	resp, err := a.blnk.CreateMonitor(c.Request.Context(), newMonitor.ToBalanceMonitor())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -79,7 +79,7 @@ func (a Api) GetBalanceMonitor(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.blnk.GetMonitorByID(id)
+	resp, err := a.blnk.GetMonitorByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -89,7 +89,7 @@ func (a Api) GetBalanceMonitor(c *gin.Context) {
 }
 
 func (a Api) GetAllBalanceMonitors(c *gin.Context) {
-	monitors, err := a.blnk.GetAllMonitors()
+	monitors, err := a.blnk.GetAllMonitors(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -105,7 +105,7 @@ func (a Api) GetBalanceMonitorsByBalanceID(c *gin.Context) {
 		return
 	}
 
-	monitors, err := a.blnk.GetMonitorByID(balanceID)
+	monitors, err := a.blnk.GetMonitorByID(c.Request.Context(), balanceID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -128,7 +128,7 @@ func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 	}
 
 	monitor.MonitorID = id
-	err := a.blnk.UpdateMonitor(&monitor)
+	err := a.blnk.UpdateMonitor(c.Request.Context(), &monitor)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -144,7 +144,7 @@ func (a Api) DeleteBalanceMonitor(c *gin.Context) {
 		return
 	}
 
-	err := a.blnk.DeleteMonitor(id)
+	err := a.blnk.DeleteMonitor(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

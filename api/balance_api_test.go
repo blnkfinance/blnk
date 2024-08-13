@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -81,7 +82,7 @@ func TestCreateBalance(t *testing.T) {
 
 			if tt.expectedCode == http.StatusCreated {
 				// Verify that the balance is actually created in the database
-				balanceFromDB, err := b.GetBalanceByID(response.BalanceID, nil)
+				balanceFromDB, err := b.GetBalanceByID(context.Background(), response.BalanceID, nil)
 				if err != nil {
 					t.Errorf("Failed to retrieve balance by ID: %v", err)
 				} else {
@@ -103,7 +104,7 @@ func TestGetBalance(t *testing.T) {
 	if err != nil {
 		return
 	}
-	newBalance, err := b.CreateBalance(model.Balance{LedgerID: newLedger.LedgerID, Currency: gofakeit.CurrencyShort()})
+	newBalance, err := b.CreateBalance(context.Background(), model.Balance{LedgerID: newLedger.LedgerID, Currency: gofakeit.CurrencyShort()})
 	if err != nil {
 		return
 	}
