@@ -3,6 +3,7 @@ package blnk
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -108,6 +109,6 @@ func newLoggerProvider() (*log.LoggerProvider, error) {
 func newExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
 	return otlptracehttp.New(ctx,
 		otlptracehttp.WithInsecure(),
-		otlptracehttp.WithEndpoint("localhost:4318"), // Replace with your OTLP endpoint
+		otlptracehttp.WithEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")), // Replace with your OTLP endpoint
 	)
 }
