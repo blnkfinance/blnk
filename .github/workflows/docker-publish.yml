@@ -3,7 +3,6 @@ name: Publish To Docker
 on:
   push:
     branches: [ "main" ]
-    # Publish semver tags as releases.
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main" ]
@@ -36,5 +35,5 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags || 'jerryenebeli/blnk:latest' }}
           labels: ${{ steps.meta.outputs.labels }}
