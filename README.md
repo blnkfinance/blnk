@@ -1,4 +1,4 @@
-![Blnk logo](https://res.cloudinary.com/dmxizylxw/image/upload/v1724847013/blnk_github_pnmhmq.png)
+![Blnk logo](https://res.cloudinary.com/dmxizylxw/image/upload/v1724847576/blnk_github_logo_eyy2lf.png)
 
 ## Status at a Glance
 ![Build and Test Status](https://github.com/blnkfinance/blnk/actions/workflows/go.yml/badge.svg)
