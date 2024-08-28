@@ -67,11 +67,6 @@ func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
 	if err != nil {
 		log.Fatalf("Failed to ensure collections exist: %v", err)
 	}
-	err = migrateTypeSenseSchema(context.Background(), newSearch)
-	if err != nil {
-		log.Fatalf("Failed to migrate typesense schema: %v", err)
-	}
-
 	err = newSearch.HandleNotification(collection, payload)
 
 	if err != nil {

@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"reflect"
-	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -379,47 +377,48 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	ctx, span := otel.Tracer("database").Start(ctx, "GroupTransactions")
 	defer span.End()
 
-	query := `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+	// Validate the groupCriteria to prevent SQL injection
+	validColumns := []string{"transaction_id", "parent_transaction", "source", "reference", "currency", "destination", "status", "created_at"}
+	if !contains(validColumns, groupCriteria) {
+		span.RecordError(fmt.Errorf("invalid group criteria: %s", groupCriteria))
+		return nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid group criteria: %s", groupCriteria), nil)
+	}
+
+	// Create a cache key based on the grouping and pagination parameters
+	cacheKey := fmt.Sprintf("transactions:grouped:%s:%d:%d", groupCriteria, batchSize, offset)
+
+	var groupedTransactions map[string][]*model.Transaction
+	err := d.Cache.Get(ctx, cacheKey, &groupedTransactions)
+	if err == nil && len(groupedTransactions) > 0 {
+		span.AddEvent("Grouped transactions retrieved from cache", trace.WithAttributes(
+			attribute.Int("group.count", len(groupedTransactions)),
+		))
+		return groupedTransactions, nil
+	}
+
+	// If not in cache or error occurred, fetch from database
+	query := fmt.Sprintf(`
+		SELECT %[1]s, transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
-		WHERE 1=1
-	`
-	var args []interface{}
-	var groupByColumns []string
-	var whereClauses []string
+		ORDER BY %[1]s
+		LIMIT $1 OFFSET $2
+	`, groupCriteria)
 
-	argIndex := 1
-
-	groupFields := strings.Split(groupCriteria, ",")
-	for _, field := range groupFields {
-		field = strings.TrimSpace(field)
-		groupByColumns = append(groupByColumns, field)
-
-		whereClauses = append(whereClauses, fmt.Sprintf("%s IS NOT NULL", field))
-	}
-
-	if len(whereClauses) > 0 {
-		query += " AND " + strings.Join(whereClauses, " AND ")
-	}
-
-	query += " GROUP BY " + strings.Join(groupByColumns, ", ")
-
-	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
-	args = append(args, batchSize, offset)
-
-	rows, err := d.Conn.QueryContext(ctx, query, args...)
+	rows, err := d.Conn.QueryContext(ctx, query, batchSize, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped transactions", err)
 	}
 	defer rows.Close()
 
-	groupedTransactions := make(map[string][]*model.Transaction)
+	groupedTransactions = make(map[string][]*model.Transaction)
 
 	for rows.Next() {
-		transaction := model.Transaction{}
+		var groupKey string
+		transaction := &model.Transaction{}
 		var metaDataJSON []byte
 		err = rows.Scan(
+			&groupKey,
 			&transaction.TransactionID,
 			&transaction.ParentTransaction,
 			&transaction.Source,
@@ -447,19 +446,21 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
-
-		var groupKeyParts []string
-		for _, field := range groupFields {
-			groupKeyParts = append(groupKeyParts, fmt.Sprintf("%v", reflect.ValueOf(transaction).FieldByName(field)))
-		}
-		groupKey := strings.Join(groupKeyParts, "-")
-
-		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], &transaction)
+		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], transaction)
 	}
 
 	if err = rows.Err(); err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
+	}
+
+	// Cache the fetched data
+	if len(groupedTransactions) > 0 {
+		err = d.Cache.Set(ctx, cacheKey, groupedTransactions, 5*time.Minute) // Cache for 5 minutes
+		if err != nil {
+			// Log the error, but don't return it as the main operation succeeded
+			log.Printf("Failed to cache grouped transactions: %v", err)
+		}
 	}
 
 	span.AddEvent("Grouped transactions retrieved", trace.WithAttributes(

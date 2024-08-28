@@ -85,7 +85,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			}
 			err = migrateTypeSenseSchema(context.Background(), newSearch)
 			if err != nil {
-				log.Fatalf("Failed to migrate typesense schema: %v", err)
+				log.Printf("Failed to migrate typesense schema: %v", err)
 			}
 
 			if cfg.Server.SSL {
