@@ -23,7 +23,7 @@ services:
     image: ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.4}
     container_name: worker
     restart: on-failure
-    entrypoint: [ "blnk", "workers"]
+    entrypoint: [ "./blnk", "workers"]
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
@@ -35,7 +35,7 @@ services:
 
   migration:
     image:  ${BLNK_IMAGE:-jerryenebeli/blnk:v0.6.4}
-    entrypoint: [ "blnk", "migrate","up" ]
+    entrypoint: [ "./blnk", "migrate","up" ]
     restart: on-failure
     depends_on:
       - postgres
