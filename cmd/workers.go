@@ -78,7 +78,7 @@ func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
 	return nil
 }
 
-func (b *blnkInstance) procesInflightExpiry(cxt context.Context, t *asynq.Task) error {
+func (b *blnkInstance) processInflightExpiry(cxt context.Context, t *asynq.Task) error {
 	var txnID string
 	if err := json.Unmarshal(t.Payload(), &txnID); err != nil {
 		logrus.Error(err)
@@ -132,7 +132,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			mux.HandleFunc(blnk.INDEX_QUEUE, b.indexData)
 			mux.HandleFunc(blnk.WEBHOOK_QUEUE, blnk.ProcessWebhook)
-			mux.HandleFunc(blnk.EXPIREDINFLIGHT_QUEUE, b.procesInflightExpiry)
+			mux.HandleFunc(blnk.EXPIREDINFLIGHT_QUEUE, b.processInflightExpiry)
 			if err := srv.Run(mux); err != nil {
 				log.Fatal("Error running server:", err)
 			}
