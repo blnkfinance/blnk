@@ -659,7 +659,11 @@ func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model
 	unmatchedChan := make(chan string, len(externalTxns))
 	var wg sync.WaitGroup
 
-	s.oneToMany(ctx, externalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, 100000, matchChan, unmatchedChan)
+	err := s.oneToMany(ctx, externalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, 100000, matchChan, unmatchedChan)
+
+	if err != nil {
+		log.Printf(" %v", err)
+	}
 
 	// Close channels after all goroutines are done
 	go func() {
@@ -724,7 +728,10 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 			break
 		}
 		groupMap := s.buildGroupMap(txns)
-		s.processGroupedTransactions(singleTxn, txns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
+		err = s.processGroupedTransactions(singleTxn, txns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
+		if err != nil {
+			log.Printf(" %v", err)
+		}
 		if len(groupMap) == 0 {
 			break
 		}
