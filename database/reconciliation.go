@@ -14,7 +14,7 @@ import (
 )
 
 func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconciliation) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving reconciliation to db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving reconciliation to db")
 	defer span.End()
 
 	_, err := d.Conn.ExecContext(ctx,
@@ -34,7 +34,7 @@ func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconci
 }
 
 func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Reconciliation, error) {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching reconciliation from db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching reconciliation from db")
 	defer span.End()
 
 	rec := &model.Reconciliation{}
@@ -60,7 +60,7 @@ func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Re
 }
 
 func (d Datasource) UpdateReconciliationStatus(ctx context.Context, id string, status string, matchedCount, unmatchedCount int) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Updating reconciliation status")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Updating reconciliation status")
 	defer span.End()
 
 	completedAt := sql.NullTime{Time: time.Now(), Valid: status == "completed"}
@@ -88,7 +88,7 @@ func (d Datasource) UpdateReconciliationStatus(ctx context.Context, id string, s
 }
 
 func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID string) ([]*model.Reconciliation, error) {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching reconciliations by upload ID")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching reconciliations by upload ID")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -126,7 +126,7 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 	return reconciliations, nil
 }
 func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Batch saving matches to db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Batch saving matches to db")
 	defer span.End()
 
 	txn, err := d.Conn.BeginTx(ctx, nil)
@@ -155,7 +155,7 @@ func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, 
 }
 
 func (d Datasource) RecordUnmatched(ctx context.Context, reconciliationID string, results []string) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Batch saving matches to db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Batch saving unmatched to db")
 	defer span.End()
 
 	txn, err := d.Conn.BeginTx(ctx, nil)
@@ -204,7 +204,7 @@ func (d Datasource) recordMatchInTransaction(ctx context.Context, tx *sql.Tx, ma
 }
 
 func (d Datasource) RecordMatch(ctx context.Context, match *model.Match) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving match to db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving match to db")
 	defer span.End()
 
 	_, err := d.Conn.ExecContext(ctx,
@@ -222,7 +222,7 @@ func (d Datasource) RecordMatch(ctx context.Context, match *model.Match) error {
 }
 
 func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.Match, error) {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching matches by reconciliation ID")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching matches by reconciliation ID")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -259,7 +259,7 @@ func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconcilia
 }
 
 func (d Datasource) RecordExternalTransaction(ctx context.Context, tx *model.ExternalTransaction, uploadID string) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving external transaction to db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving external transaction to db")
 	defer span.End()
 
 	_, err := d.Conn.ExecContext(ctx,
@@ -277,7 +277,7 @@ func (d Datasource) RecordExternalTransaction(ctx context.Context, tx *model.Ext
 }
 
 func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.ExternalTransaction, error) {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching external transactions by reconciliation ID")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching external transactions by reconciliation ID")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -313,7 +313,7 @@ func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Contex
 }
 
 func (d Datasource) RecordMatchingRule(ctx context.Context, rule *model.MatchingRule) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving matching rule to db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving matching rule to db")
 	defer span.End()
 
 	criteriaJSON, err := json.Marshal(rule.Criteria)
@@ -336,7 +336,7 @@ func (d Datasource) RecordMatchingRule(ctx context.Context, rule *model.Matching
 }
 
 func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule, error) {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching matching rules")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching matching rules")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -377,7 +377,7 @@ func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule
 }
 
 func (d Datasource) UpdateMatchingRule(ctx context.Context, rule *model.MatchingRule) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Updating matching rule")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Updating matching rule")
 	defer span.End()
 
 	criteriaJSON, err := json.Marshal(rule.Criteria)
@@ -408,7 +408,7 @@ func (d Datasource) UpdateMatchingRule(ctx context.Context, rule *model.Matching
 }
 
 func (d Datasource) DeleteMatchingRule(ctx context.Context, id string) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Deleting matching rule")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Deleting matching rule")
 	defer span.End()
 
 	result, err := d.Conn.ExecContext(ctx, `
@@ -433,7 +433,7 @@ func (d Datasource) DeleteMatchingRule(ctx context.Context, id string) error {
 }
 
 func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.MatchingRule, error) {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Fetching matching rule")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching matching rule")
 	defer span.End()
 
 	var rule model.MatchingRule
@@ -464,7 +464,7 @@ func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.Matc
 }
 
 func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, uploadID string, batchSize int, offset int64) ([]*model.ExternalTransaction, error) {
-	ctx, span := otel.Tracer("Queue transaction").Start(ctx, "Fetching external transactions with pagination")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching external transactions with pagination")
 	defer span.End()
 
 	// Create a cache key based on the pagination parameters
@@ -516,7 +516,7 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 }
 
 func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Saving reconciliation progress to db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving reconciliation progress to db")
 	defer span.End()
 
 	_, err := d.Conn.ExecContext(ctx, `
@@ -534,7 +534,7 @@ func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliati
 }
 
 func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error) {
-	ctx, span := otel.Tracer("Reconciliation").Start(ctx, "Loading reconciliation progress from db")
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Loading reconciliation progress from db")
 	defer span.End()
 
 	var progressJSON []byte

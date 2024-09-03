@@ -25,6 +25,8 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/texttheater/golang-levenshtein/levenshtein"
 	"github.com/wacul/ptr"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -400,12 +402,15 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 		return "", err
 	}
 
+	detachedCtx := context.Background()
+	ctxWithTrace := trace.ContextWithSpan(detachedCtx, trace.SpanFromContext(ctx))
+
 	// Start the reconciliation process in a goroutine
 	go func() {
-		err := s.processReconciliation(context.Background(), reconciliation, strategy, groupCriteria, matchingRuleIDs)
+		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs)
 		if err != nil {
 			log.Printf("Error in reconciliation process: %v", err)
-			err := s.datasource.UpdateReconciliationStatus(context.Background(), reconciliationID, StatusFailed, 0, 0)
+			err := s.datasource.UpdateReconciliationStatus(ctxWithTrace, reconciliationID, StatusFailed, 0, 0)
 			if err != nil {
 				log.Printf("Error updating reconciliation status: %v", err)
 			}
@@ -525,12 +530,16 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 	tp.unmatched += len(batchUnmatched)
 
 	if !tp.reconciliation.IsDryRun {
-		if err := tp.datasource.RecordMatches(ctx, tp.reconciliation.ReconciliationID, batchMatches); err != nil {
-			return err
+		if len(batchMatches) > 0 {
+			if err := tp.datasource.RecordMatches(ctx, tp.reconciliation.ReconciliationID, batchMatches); err != nil {
+				return err
+			}
 		}
 
-		if err := tp.datasource.RecordUnmatched(ctx, tp.reconciliation.ReconciliationID, batchUnmatched); err != nil {
-			return err
+		if len(batchUnmatched) > 0 {
+			if err := tp.datasource.RecordUnmatched(ctx, tp.reconciliation.ReconciliationID, batchUnmatched); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -643,54 +652,16 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 }
 
 func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
-	groupedTxns, singleTxns := s.prepareTransactions(ctx, externalTxns, groupCriteria, isExternalGrouped)
-	matches, unmatched := s.matchTransactions(singleTxns, groupedTxns, matchingRules, isExternalGrouped)
-	return matches, unmatched
-}
-
-func (s *Blnk) prepareTransactions(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, isExternalGrouped bool) (map[string][]*model.Transaction, []*model.Transaction) {
-	const batchSize = 100
-
-	if isExternalGrouped {
-		return s.groupExternalTransactions(externalTxns), s.fetchAllInternalTransactions(ctx, batchSize)
-	}
-	return s.fetchAndGroupInternalTransactions(ctx, groupCriteria, batchSize), externalTxns
-}
-
-func (s *Blnk) matchTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	var matches []model.Match
 	var unmatched []string
 
-	groupMap := s.buildGroupMap(groupedTxns)
-
-	matches, unmatched = s.processGroupedTransactions(singleTxns, groupedTxns, groupMap, matchingRules, isExternalGrouped)
-	return matches, unmatched
-}
-
-func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
-	const batchSize = 100
-	var matches []model.Match
-	var unmatched []string
-
+	matchChan := make(chan model.Match, len(externalTxns))
+	unmatchedChan := make(chan string, len(externalTxns))
 	var wg sync.WaitGroup
-	matchChan := make(chan model.Match, len(singleTxns))
-	unmatchedChan := make(chan string, len(singleTxns))
 
-	for i := 0; i < len(singleTxns); i += batchSize {
-		end := i + batchSize
-		if end > len(singleTxns) {
-			end = len(singleTxns)
-		}
+	s.oneToMany(ctx, externalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, 100000, matchChan, unmatchedChan)
 
-		wg.Add(1)
-		go func(batch []*model.Transaction) {
-			defer wg.Done()
-			for _, singleTxn := range batch {
-				_ = s.matchSingleTransaction(singleTxn, groupedTxns, groupMap, matchingRules, isExternalGrouped, matchChan)
-			}
-		}(singleTxns[i:end])
-	}
-
+	// Close channels after all goroutines are done
 	go func() {
 		wg.Wait()
 		close(matchChan)
@@ -703,10 +674,11 @@ func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, group
 	for unmatchedID := range unmatchedChan {
 		unmatched = append(unmatched, unmatchedID)
 	}
+
 	return matches, unmatched
 }
 
-func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, matchChan chan model.Match) bool {
+func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, matchChan chan model.Match) error {
 	for groupKey := range groupMap {
 		if s.matchesGroup(singleTxn, groupedTxns[groupKey], matchingRules) {
 			for _, groupedTxn := range groupedTxns[groupKey] {
@@ -729,7 +701,8 @@ func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns 
 			break
 		}
 	}
-	return true
+
+	return nil
 }
 
 func (s *Blnk) buildGroupMap(groupedTxns map[string][]*model.Transaction) map[string]bool {
@@ -740,86 +713,43 @@ func (s *Blnk) buildGroupMap(groupedTxns map[string][]*model.Transaction) map[st
 	return groupMap
 }
 
-func (s *Blnk) fetchAllInternalTransactions(ctx context.Context, batchSize int) []*model.Transaction {
-	var allTxns []*model.Transaction
+func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, groupingCriteria string, batchSize int, matchChan chan model.Match, unMatchChan chan string) error {
 	offset := int64(0)
-	for {
-		txns, err := s.getInternalTransactionsPaginated(ctx, "", batchSize, offset)
-		if err != nil {
-			log.Printf("Error fetching internal transactions: %v", err)
-			break
-		}
-		if len(txns) == 0 {
-			break
-		}
-		allTxns = append(allTxns, txns...)
-		offset += int64(len(txns))
-	}
-	return allTxns
-}
-
-func (s *Blnk) fetchAndGroupInternalTransactions(ctx context.Context, groupingCriteria string, batchSize int) map[string][]*model.Transaction {
-	groupedTxns := make(map[string][]*model.Transaction)
-	offset := int64(0)
+	ctx, span := otel.Tracer("blnk.reconciliation").Start(ctx, "ProcessOneToMany")
+	defer span.End()
 	for {
 		txns, err := s.groupInternalTransactions(ctx, groupingCriteria, batchSize, offset)
 		if err != nil {
 			log.Printf("Error grouping internal transactions: %v", err)
 			break
 		}
-		if len(txns) == 0 {
+		groupMap := s.buildGroupMap(txns)
+		s.processGroupedTransactions(singleTxn, txns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
+		if len(groupMap) == 0 {
 			break
-		}
-		for key, group := range txns {
-			groupedTxns[key] = append(groupedTxns[key], group...)
 		}
 		offset += int64(batchSize)
 	}
-	return groupedTxns
+	return nil
+}
+
+func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, matchChan chan model.Match, unMatchChan chan string) error {
+	for _, externalTxn := range singleTxns {
+		wg.Add(1)
+		go func(extTxn *model.Transaction) {
+			defer wg.Done()
+			_ = s.matchSingleTransaction(extTxn, groupedTxns, groupMap, matchingRules, isExternalGrouped, matchChan)
+		}(externalTxn)
+	}
+
+	return nil
 }
 
 func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 	return s.datasource.GroupTransactions(ctx, groupingCriteria, batchSize, offset)
 }
 
-func (s *Blnk) groupExternalTransactions(externalTxns []*model.Transaction) map[string][]*model.Transaction {
-	grouped := make(map[string][]*model.Transaction)
-	const timeWindow = 2 * time.Hour // Adjust this value as needed
-
-	for _, txn := range externalTxns {
-		var key string
-		var assigned bool
-
-		// Check existing groups for a close match
-		for existingKey, group := range grouped {
-			for _, groupTxn := range group {
-				if txn.Currency == groupTxn.Currency &&
-					math.Abs(txn.CreatedAt.Sub(groupTxn.CreatedAt).Hours()) <= timeWindow.Hours() {
-					key = existingKey
-					assigned = true
-					break
-				}
-			}
-			if assigned {
-				break
-			}
-		}
-
-		// If no close match found, create a new group
-		if !assigned {
-			key = fmt.Sprintf("%s_%s", txn.Currency, txn.CreatedAt.Format("2006-01-02T15:04:05"))
-		}
-
-		grouped[key] = append(grouped[key], txn)
-	}
-
-	return grouped
-}
-
 func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn *model.Transaction, matchingRules []model.MatchingRule, matchChan chan model.Match, unMatchChan chan string) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	matchFound := false
 	_, err := s.ProcessTransactionInBatches(
 		ctx,
@@ -843,7 +773,6 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 							Date:                  externalTxn.CreatedAt,
 						}
 						matchFound = true
-						cancel()
 						return
 					}
 				}

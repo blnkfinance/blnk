@@ -21,7 +21,7 @@ import (
 )
 
 func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "RecordTransaction")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "RecordTransaction")
 	defer span.End()
 
 	metaDataJSON, err := json.Marshal(txn.MetaData)
@@ -49,7 +49,7 @@ func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transactio
 }
 
 func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GetTransaction")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetTransaction")
 	defer span.End()
 
 	row := d.Conn.QueryRowContext(ctx, `
@@ -84,7 +84,7 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 }
 
 func (d Datasource) IsParentTransactionVoid(ctx context.Context, parentID string) (bool, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "IsParentTransactionVoid")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "IsParentTransactionVoid")
 	defer span.End()
 
 	var exists bool
@@ -110,7 +110,7 @@ func (d Datasource) IsParentTransactionVoid(ctx context.Context, parentID string
 }
 
 func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string) (bool, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "TransactionExistsByRef")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "TransactionExistsByRef")
 	defer span.End()
 
 	var exists bool
@@ -131,7 +131,7 @@ func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string
 }
 
 func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GetTransactionByRef")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetTransactionByRef")
 	defer span.End()
 
 	row := d.Conn.QueryRowContext(ctx, `
@@ -166,7 +166,7 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 }
 
 func (d Datasource) UpdateTransactionStatus(ctx context.Context, id string, status string) error {
-	ctx, span := otel.Tracer("database").Start(ctx, "UpdateTransactionStatus")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "UpdateTransactionStatus")
 	defer span.End()
 
 	result, err := d.Conn.ExecContext(ctx, `
@@ -202,7 +202,7 @@ func (d Datasource) UpdateTransactionStatus(ctx context.Context, id string, stat
 }
 
 func (d Datasource) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GetAllTransactions")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetAllTransactions")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -260,7 +260,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context) ([]model.Transaction
 }
 
 func (d Datasource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (int64, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GetTotalCommittedTransactions")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetTotalCommittedTransactions")
 	defer span.End()
 
 	query := `
@@ -288,7 +288,7 @@ func (d Datasource) GetTotalCommittedTransactions(ctx context.Context, parentID 
 }
 
 func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GetTransactionsPaginated")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetInternalTransactionsPaginated")
 	defer span.End()
 
 	// Create a cache key based on the pagination parameters
@@ -360,7 +360,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 
 	// Cache the fetched data
 	if len(transactions) > 0 {
-		err = d.Cache.Set(ctx, cacheKey, transactions, 5*time.Minute) // Cache for 5 minutes
+		err = d.Cache.Set(ctx, cacheKey, transactions, 1*time.Hour) // Cache for 1 hr
 		if err != nil {
 			// Log the error, but don't return it as the main operation succeeded
 			log.Printf("Failed to cache transactions: %v", err)
@@ -374,12 +374,15 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 }
 
 func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GroupTransactions")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GroupTransactions")
 	defer span.End()
 
-	// Validate the groupCriteria to prevent SQL injection
-	validColumns := []string{"transaction_id", "parent_transaction", "source", "reference", "currency", "destination", "status", "created_at"}
-	if !contains(validColumns, groupCriteria) {
+	validColumns := map[string]bool{
+		"transaction_id": true, "parent_transaction": true, "source": true,
+		"reference": true, "currency": true, "destination": true,
+		"status": true, "created_at": true,
+	}
+	if !validColumns[groupCriteria] {
 		span.RecordError(fmt.Errorf("invalid group criteria: %s", groupCriteria))
 		return nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid group criteria: %s", groupCriteria), nil)
 	}
@@ -398,11 +401,14 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 
 	// If not in cache or error occurred, fetch from database
 	query := fmt.Sprintf(`
-		SELECT %[1]s, transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-		FROM blnk.transactions
-		ORDER BY %[1]s
-		LIMIT $1 OFFSET $2
-	`, groupCriteria)
+        SELECT %[1]s, transaction_id, parent_transaction, source, reference, 
+               amount, precise_amount, precision, rate, currency, destination, 
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE %[1]s IS NOT NULL AND %[1]s != ''
+        ORDER BY %[1]s
+        LIMIT $1 OFFSET $2
+    `, groupCriteria)
 
 	rows, err := d.Conn.QueryContext(ctx, query, batchSize, offset)
 	if err != nil {
@@ -441,8 +447,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
 
-		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
-		if err != nil {
+		if err := json.Unmarshal(metaDataJSON, &transaction.MetaData); err != nil {
 			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
@@ -454,11 +459,9 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
 	}
 
-	// Cache the fetched data
+	// Cache the fetched data if not empty
 	if len(groupedTransactions) > 0 {
-		err = d.Cache.Set(ctx, cacheKey, groupedTransactions, 5*time.Minute) // Cache for 5 minutes
-		if err != nil {
-			// Log the error, but don't return it as the main operation succeeded
+		if err := d.Cache.Set(ctx, cacheKey, groupedTransactions, 5*time.Minute); err != nil {
 			log.Printf("Failed to cache grouped transactions: %v", err)
 		}
 	}
@@ -470,7 +473,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 }
 
 func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GetInflightTransactionsByParentID")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetInflightTransactionsByParentID")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
@@ -535,7 +538,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 }
 
 func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("database").Start(ctx, "GetRefundableTransactionsByParentID")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetRefundableTransactionsByParentID")
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `

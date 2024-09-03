@@ -5,9 +5,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/jerry-enebeli/blnk/cache"
-
 	"github.com/jerry-enebeli/blnk/config"
+	"github.com/jerry-enebeli/blnk/internal/cache"
 )
 
 // Declare a package-level variable to hold the singleton instance.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel"
 
 	"github.com/jerry-enebeli/blnk"
 
@@ -23,20 +24,23 @@ type indexData struct {
 	Payload    map[string]interface{} `json:"payload"`
 }
 
-func (b *blnkInstance) processTransaction(cxt context.Context, t *asynq.Task) error {
+func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) error {
+	ctx, span := otel.Tracer("blnk.transactions.worker").Start(ctx, "Process Transaction From Redis Queue")
+	defer span.End()
+
 	var txn model.Transaction
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
 		logrus.Error(err)
 		return err
 	}
-	_, err := b.blnk.RecordTransaction(cxt, &txn)
+	_, err := b.blnk.RecordTransaction(ctx, &txn)
 	if err != nil {
 		return err
 	}
 	//todo only reject insufficient balance transaction and push the rest back for retry
 
 	if err != nil {
-		_, err := b.blnk.RejectTransaction(cxt, &txn, err.Error())
+		_, err := b.blnk.RejectTransaction(ctx, &txn, err.Error())
 		if err != nil {
 			return err
 		}
@@ -104,6 +108,16 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				log.Println("Error fetching config:", err)
 				return
 			}
+
+			shutdown, err := blnk.SetupOTelSDK(context.Background(), "BLNK WORKERS")
+			if err != nil {
+				log.Fatalf("Error setting up OTel SDK: %v", err)
+			}
+			defer func() {
+				if err := shutdown(context.Background()); err != nil {
+					log.Printf("Error shutting down OTel SDK: %v", err)
+				}
+			}()
 
 			queues := make(map[string]int)
 			queues[blnk.WEBHOOK_QUEUE] = 3

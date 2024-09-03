@@ -267,9 +267,7 @@ func (l *Blnk) GetRefundableTransactionsByParentID(ctx context.Context, parentTr
 }
 
 func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactionID string, amount float64, maxWorkers int, streamMode bool, gt getTxns, tw transactionWorker) ([]*model.Transaction, error) {
-	ctx, span := tracer.Start(ctx, "ProcessTransactionInBatches")
-	defer span.End()
-
+	_, span := tracer.Start(ctx, "ProcessTransactionInBatches")
 	const (
 		batchSize    = 100000
 		maxQueueSize = 1000
@@ -353,7 +351,7 @@ func processResults(results chan BatchJobResult, mu *sync.Mutex, allTxns *[]*mod
 }
 
 func fetchTransactions(ctx context.Context, parentTransactionID string, batchSize int, gt getTxns, jobs chan *model.Transaction, errChan chan error) {
-	ctx, span := tracer.Start(ctx, "FetchTransactions")
+	newCtx, span := tracer.Start(ctx, "FetchTransactions")
 	defer span.End()
 
 	var offset int64 = 0
@@ -364,7 +362,7 @@ func fetchTransactions(ctx context.Context, parentTransactionID string, batchSiz
 			span.RecordError(ctx.Err())
 			return
 		default:
-			txns, err := gt(ctx, parentTransactionID, batchSize, offset)
+			txns, err := gt(newCtx, parentTransactionID, batchSize, offset)
 			if err != nil {
 				errChan <- err
 				span.RecordError(err)

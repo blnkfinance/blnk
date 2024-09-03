@@ -75,12 +75,15 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 	return nil
 }
 
-func (q *Queue) Enqueue(_ context.Context, transaction *model.Transaction) error {
+func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) error {
+	ctx, span := tracer.Start(ctx, "Adding Transaction To Redis Queue")
+	defer span.End()
+
 	payload, err := json.Marshal(transaction)
 	if err != nil {
 		log.Fatal(err)
 	}
-	info, err := q.Client.Enqueue(q.geTask(transaction, payload), asynq.MaxRetry(5))
+	info, err := q.Client.EnqueueContext(ctx, q.geTask(transaction, payload), asynq.MaxRetry(5))
 	if err != nil {
 		log.Println(err, info)
 		return err

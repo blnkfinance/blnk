@@ -8,8 +8,7 @@ import (
 
 	"github.com/brianvoe/gofakeit/v6"
 
-	"github.com/jerry-enebeli/blnk/cache"
-
+	"github.com/jerry-enebeli/blnk/internal/cache"
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/jerry-enebeli/blnk/config"
