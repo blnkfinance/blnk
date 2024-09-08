@@ -49,39 +49,39 @@ type transactionProcessor struct {
 type reconciler func(ctx context.Context, txns []*model.Transaction) ([]model.Match, []string)
 
 func detectFileType(data []byte, filename string) (string, error) {
-	// First, try to detect by file extension
-	if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
-		if mimeType := mime.TypeByExtension(ext); mimeType != "" {
-			return mimeType, nil
-		}
+	if mimeType := detectByExtension(filename); mimeType != "" {
+		return mimeType, nil
 	}
 
-	// If extension doesn't work, try content-based detection
+	return detectByContent(data)
+}
+
+func detectByExtension(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return mime.TypeByExtension(ext)
+}
+
+func detectByContent(data []byte) (string, error) {
 	mimeType := http.DetectContentType(data)
 
 	switch mimeType {
-	case "application/octet-stream":
-		// Further analysis for common types
-		if looksLikeCSV(data) {
-			return "text/csv", nil
-		}
-		if json.Valid(data) {
-			return "application/json", nil
-		}
-	case "text/plain":
-		// Additional checks for text-based formats
-		if looksLikeCSV(data) {
-			return "text/csv", nil
-		}
-		if json.Valid(data) {
-			return "application/json", nil
-		}
+	case "application/octet-stream", "text/plain":
+		return analyzeTextContent(data)
 	case "text/csv; charset=utf-8":
-		// Fix for CSV files with charset
+		return "text/csv", nil
+	default:
+		return mimeType, nil
+	}
+}
+
+func analyzeTextContent(data []byte) (string, error) {
+	if looksLikeCSV(data) {
 		return "text/csv", nil
 	}
-
-	return mimeType, nil
+	if json.Valid(data) {
+		return "application/json", nil
+	}
+	return "text/plain", nil
 }
 
 func looksLikeCSV(data []byte) bool {
@@ -293,59 +293,70 @@ func (s *Blnk) parseAndStoreJSON(ctx context.Context, uploadID, source string, r
 func (s *Blnk) UploadExternalData(ctx context.Context, source string, reader io.Reader, filename string) (string, int, error) {
 	uploadID := model.GenerateUUIDWithSuffix("upload")
 
-	// Create a temporary file to store the upload
-	tempFile, err := s.createTempFile(filename)
+	tempFile, err := s.createAndPopulateTempFile(filename, reader)
 	if err != nil {
-		return "", 0, fmt.Errorf("error creating temporary file: %w", err)
+		return "", 0, err
 	}
 	defer s.cleanupTempFile(tempFile)
 
-	// Copy the data to the temporary file
-	if _, err := io.Copy(tempFile, reader); err != nil {
-		return "", 0, fmt.Errorf("error copying upload data: %w", err)
-	}
-
-	// Seek to the beginning of the file
-	if _, err := tempFile.Seek(0, 0); err != nil {
-		return "", 0, fmt.Errorf("error seeking temporary file: %w", err)
-	}
-
-	// Read the first 512 bytes for file type detection
-	header := make([]byte, 512)
-	if _, err := tempFile.Read(header); err != nil && err != io.EOF {
-		return "", 0, fmt.Errorf("error reading file header: %w", err)
-	}
-
-	// Detect the file type
-	fileType, err := detectFileType(header, filename)
+	fileType, err := s.detectFileTypeFromTempFile(tempFile, filename)
 	if err != nil {
-		return "", 0, fmt.Errorf("error detecting file type: %w", err)
+		return "", 0, err
 	}
 
-	// Seek back to the beginning of the file
-	if _, err := tempFile.Seek(0, 0); err != nil {
-		return "", 0, fmt.Errorf("error seeking temporary file: %w", err)
-	}
-
-	total := 0
-
-	// Parse and store the data based on the detected file type
-	switch fileType {
-	case "text/csv":
-		err = s.parseAndStoreCSV(ctx, uploadID, source, tempFile)
-	case "application/json":
-		total, err = s.parseAndStoreJSON(ctx, uploadID, source, tempFile)
-	case "text/csv; charset=utf-8":
-		err = s.parseAndStoreCSV(ctx, uploadID, source, tempFile)
-	default:
-		return "", 0, fmt.Errorf("unsupported file type: %s", fileType)
-	}
-
+	total, err := s.parseAndStoreData(ctx, uploadID, source, tempFile, fileType)
 	if err != nil {
 		return "", 0, err
 	}
 
 	return uploadID, total, nil
+}
+
+func (s *Blnk) createAndPopulateTempFile(filename string, reader io.Reader) (*os.File, error) {
+	tempFile, err := s.createTempFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("error creating temporary file: %w", err)
+	}
+
+	if _, err := io.Copy(tempFile, reader); err != nil {
+		return nil, fmt.Errorf("error copying upload data: %w", err)
+	}
+
+	if _, err := tempFile.Seek(0, 0); err != nil {
+		return nil, fmt.Errorf("error seeking temporary file: %w", err)
+	}
+
+	return tempFile, nil
+}
+
+func (s *Blnk) detectFileTypeFromTempFile(tempFile *os.File, filename string) (string, error) {
+	header := make([]byte, 512)
+	if _, err := tempFile.Read(header); err != nil && err != io.EOF {
+		return "", fmt.Errorf("error reading file header: %w", err)
+	}
+
+	fileType, err := detectFileType(header, filename)
+	if err != nil {
+		return "", fmt.Errorf("error detecting file type: %w", err)
+	}
+
+	if _, err := tempFile.Seek(0, 0); err != nil {
+		return "", fmt.Errorf("error seeking temporary file: %w", err)
+	}
+
+	return fileType, nil
+}
+
+func (s *Blnk) parseAndStoreData(ctx context.Context, uploadID, source string, reader io.Reader, fileType string) (int, error) {
+	switch fileType {
+	case "text/csv", "text/csv; charset=utf-8":
+		err := s.parseAndStoreCSV(ctx, uploadID, source, reader)
+		return 0, err // CSV parsing doesn't return a count
+	case "application/json":
+		return s.parseAndStoreJSON(ctx, uploadID, source, reader)
+	default:
+		return 0, fmt.Errorf("unsupported file type: %s", fileType)
+	}
 }
 
 func (s *Blnk) createTempFile(originalFilename string) (*os.File, error) {
@@ -454,8 +465,6 @@ func (s *Blnk) loadReconciliationProgress(ctx context.Context, reconciliationID 
 }
 
 func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupCriteria string, matchingRuleIDs []string) error {
-	//var wg sync.WaitGroup
-
 	if err := s.updateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusInProgress); err != nil {
 		return fmt.Errorf("failed to update reconciliation status: %w", err)
 	}
@@ -474,7 +483,7 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 
 	processor := s.createTransactionProcessor(reconciliation, progress, reconciler)
 
-	err = s.processTransactions(ctx, reconciliation.UploadID, processor)
+	err = s.processTransactions(ctx, reconciliation.UploadID, processor, strategy)
 	if err != nil {
 		return fmt.Errorf("failed to process transactions: %w", err)
 	}
@@ -503,9 +512,9 @@ func (s *Blnk) createReconciler(strategy string, groupCriteria string, matchingR
 		case "one_to_one":
 			return s.oneToOneReconciliation(ctx, txns, matchingRules)
 		case "one_to_many":
-			return s.groupToNReconciliation(ctx, txns, groupCriteria, matchingRules, false)
+			return s.oneToManyReconciliation(ctx, txns, groupCriteria, matchingRules, false)
 		case "many_to_one":
-			return s.groupToNReconciliation(ctx, txns, groupCriteria, matchingRules, true)
+			return s.manyToOneReconciliation(ctx, txns, groupCriteria, matchingRules, true)
 		default:
 			log.Printf("Unsupported reconciliation strategy: %s", strategy)
 			return nil, nil
@@ -559,15 +568,22 @@ func (tp *transactionProcessor) getResults() (int, int) {
 	return tp.matches, tp.unmatched
 }
 
-func (s *Blnk) processTransactions(ctx context.Context, uploadID string, processor *transactionProcessor) error {
+func (s *Blnk) processTransactions(ctx context.Context, uploadID string, processor *transactionProcessor, strategy string) error {
 	processedCount := 0
+	var transactionProcessor getTxns
+	if strategy == "many_to_one" {
+		transactionProcessor = s.getInternalTransactionsPaginated
+	} else {
+		transactionProcessor = s.getExternalTransactionsPaginated
+	}
+
 	_, err := s.ProcessTransactionInBatches(
 		ctx,
 		uploadID,
 		0,
 		10,
 		false,
-		s.getExternalTransactionsPaginated,
+		transactionProcessor,
 		func(ctx context.Context, txns <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ float64) {
 			defer wg.Done()
 			for txn := range txns {
@@ -651,7 +667,7 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 	return matches, unmatched
 }
 
-func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	var matches []model.Match
 	var unmatched []string
 
@@ -682,7 +698,86 @@ func (s *Blnk) groupToNReconciliation(ctx context.Context, externalTxns []*model
 	return matches, unmatched
 }
 
-func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, matchChan chan model.Match) error {
+func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+	var matches []model.Match
+	var unmatched []string
+
+	matchChan := make(chan model.Match, len(internalTxns))
+	unmatchedChan := make(chan string, len(internalTxns))
+	var wg sync.WaitGroup
+
+	err := s.manyToOne(ctx, internalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, 100000, matchChan, unmatchedChan)
+
+	if err != nil {
+		log.Printf("Error in manyToOne reconciliation: %v", err)
+	}
+
+	// Close channels after all goroutines are done
+	go func() {
+		wg.Wait()
+		close(matchChan)
+		close(unmatchedChan)
+	}()
+
+	for match := range matchChan {
+		matches = append(matches, match)
+	}
+	for unmatchedID := range unmatchedChan {
+		unmatched = append(unmatched, unmatchedID)
+	}
+
+	return matches, unmatched
+}
+
+func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, groupingCriteria string, batchSize int, matchChan chan model.Match, unMatchChan chan string) error {
+	offset := int64(0)
+	ctx, span := otel.Tracer("blnk.reconciliation").Start(ctx, "ProcessManyToOne")
+	defer span.End()
+	for {
+		groupedExternalTxns, err := s.groupExternalTransactions(ctx, groupingCriteria, batchSize, offset)
+		if err != nil {
+			log.Printf("Error grouping external transactions: %v", err)
+			break
+		}
+		//Check if the returned map is empty
+		if len(groupedExternalTxns) == 0 {
+			span.AddEvent("No more grouped transactions to process")
+			break
+		}
+		groupMap := s.buildGroupMap(groupedExternalTxns)
+		err = s.processGroupedTransactions(internalTxns, groupedExternalTxns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
+		if err != nil {
+			log.Printf("Error processing grouped transactions: %v", err)
+		}
+		if len(groupMap) == 0 {
+			break
+		}
+		offset += int64(batchSize)
+	}
+	return nil
+}
+
+func (s *Blnk) groupExternalTransactions(ctx context.Context, groupingCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+	return s.datasource.FetchAndGroupExternalTransactions(ctx, "", groupingCriteria, batchSize, offset)
+}
+
+// Update the existing processGroupedTransactions function to handle both one-to-many and many-to-one scenarios
+func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, matchChan chan model.Match, unMatchChan chan string) error {
+	for _, singleTxn := range singleTxns {
+		wg.Add(1)
+		go func(txn *model.Transaction) {
+			defer wg.Done()
+			matched := s.matchSingleTransaction(txn, groupedTxns, groupMap, matchingRules, isExternalGrouped, matchChan)
+			if !matched {
+				unMatchChan <- txn.TransactionID
+			}
+		}(singleTxn)
+	}
+
+	return nil
+}
+
+func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, matchChan chan model.Match) bool {
 	for groupKey := range groupMap {
 		if s.matchesGroup(singleTxn, groupedTxns[groupKey], matchingRules) {
 			for _, groupedTxn := range groupedTxns[groupKey] {
@@ -702,19 +797,10 @@ func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns 
 				}
 			}
 			delete(groupMap, groupKey)
-			break
+			return true
 		}
 	}
-
-	return nil
-}
-
-func (s *Blnk) buildGroupMap(groupedTxns map[string][]*model.Transaction) map[string]bool {
-	groupMap := make(map[string]bool)
-	for key := range groupedTxns {
-		groupMap[key] = true
-	}
-	return groupMap
+	return false
 }
 
 func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, groupingCriteria string, batchSize int, matchChan chan model.Match, unMatchChan chan string) error {
@@ -725,6 +811,11 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 		txns, err := s.groupInternalTransactions(ctx, groupingCriteria, batchSize, offset)
 		if err != nil {
 			log.Printf("Error grouping internal transactions: %v", err)
+			break
+		}
+		//Check if the returned map is empty
+		if len(txns) == 0 {
+			span.AddEvent("No more grouped transactions to process")
 			break
 		}
 		groupMap := s.buildGroupMap(txns)
@@ -740,16 +831,12 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 	return nil
 }
 
-func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, matchChan chan model.Match, unMatchChan chan string) error {
-	for _, externalTxn := range singleTxns {
-		wg.Add(1)
-		go func(extTxn *model.Transaction) {
-			defer wg.Done()
-			_ = s.matchSingleTransaction(extTxn, groupedTxns, groupMap, matchingRules, isExternalGrouped, matchChan)
-		}(externalTxn)
+func (s *Blnk) buildGroupMap(groupedTxns map[string][]*model.Transaction) map[string]bool {
+	groupMap := make(map[string]bool)
+	for key := range groupedTxns {
+		groupMap[key] = true
 	}
-
-	return nil
+	return groupMap
 }
 
 func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
@@ -920,6 +1007,20 @@ func (s *Blnk) ListMatchingRules(ctx context.Context) ([]*model.MatchingRule, er
 }
 
 func (s *Blnk) validateRule(rule *model.MatchingRule) error {
+	if err := s.validateRuleBasics(rule); err != nil {
+		return err
+	}
+
+	for _, criteria := range rule.Criteria {
+		if err := s.validateCriteria(criteria); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *Blnk) validateRuleBasics(rule *model.MatchingRule) error {
 	if rule.Name == "" {
 		return errors.New("rule name is required")
 	}
@@ -928,37 +1029,54 @@ func (s *Blnk) validateRule(rule *model.MatchingRule) error {
 		return errors.New("at least one matching criteria is required")
 	}
 
-	for _, criteria := range rule.Criteria {
-		if criteria.Field == "" || criteria.Operator == "" {
-			return errors.New("field and operator are required for each criteria")
-		}
+	return nil
+}
 
-		// Validate operator
-		validOperators := []string{"equals", "greater_than", "less_than", "contains"}
-		if !contains(validOperators, criteria.Operator) {
-			return errors.New("invalid operator")
-		}
+func (s *Blnk) validateCriteria(criteria model.MatchingCriteria) error {
+	if criteria.Field == "" || criteria.Operator == "" {
+		return errors.New("field and operator are required for each criteria")
+	}
 
-		// Validate field
-		validFields := []string{"amount", "date", "description", "reference", "currency"}
-		if !contains(validFields, criteria.Field) {
-			return errors.New("invalid field")
-		}
+	if err := s.validateOperator(criteria.Operator); err != nil {
+		return err
+	}
 
-		// Validate Drift
-		if criteria.Operator == "equals" {
-			if criteria.Field == "amount" {
-				if criteria.AllowableDrift < 0 || criteria.AllowableDrift > 100 {
-					return errors.New("drift for amount must be between 0 and 100 (percentage)")
-				}
-			} else if criteria.Field == "date" {
-				if criteria.AllowableDrift < 0 {
-					return errors.New("drift for date must be non-negative (seconds)")
-				}
+	if err := s.validateField(criteria.Field); err != nil {
+		return err
+	}
+
+	return s.validateDrift(criteria)
+}
+
+func (s *Blnk) validateOperator(operator string) error {
+	validOperators := []string{"equals", "greater_than", "less_than", "contains"}
+	if !contains(validOperators, operator) {
+		return errors.New("invalid operator")
+	}
+	return nil
+}
+
+func (s *Blnk) validateField(field string) error {
+	validFields := []string{"amount", "date", "description", "reference", "currency"}
+	if !contains(validFields, field) {
+		return errors.New("invalid field")
+	}
+	return nil
+}
+
+func (s *Blnk) validateDrift(criteria model.MatchingCriteria) error {
+	if criteria.Operator == "equals" {
+		switch criteria.Field {
+		case "amount":
+			if criteria.AllowableDrift < 0 || criteria.AllowableDrift > 100 {
+				return errors.New("drift for amount must be between 0 and 100 (percentage)")
+			}
+		case "date":
+			if criteria.AllowableDrift < 0 {
+				return errors.New("drift for date must be non-negative (seconds)")
 			}
 		}
 	}
-
 	return nil
 }
 

@@ -91,7 +91,7 @@ func TestOneToManyReconciliation(t *testing.T) {
 		},
 	}
 
-	matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, "parent_transaction", matchingRules, false)
+	matches, unmatched := blnk.oneToManyReconciliation(ctx, externalTxns, "parent_transaction", matchingRules, false)
 
 	assert.Equal(t, 3, len(matches), "Expected 3 matches")
 	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
@@ -102,6 +102,48 @@ func TestOneToManyReconciliation(t *testing.T) {
 	assert.Equal(t, "int2", matches[1].InternalTransactionID)
 	assert.Equal(t, "ext1", matches[2].ExternalTransactionID)
 	assert.Equal(t, "int3", matches[2].InternalTransactionID)
+	mockDS.AssertExpectations(t)
+}
+
+func TestOneToManyReconciliationNoMatches(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	blnk := &Blnk{datasource: mockDS}
+
+	ctx := context.Background()
+	externalTxns := []*model.Transaction{
+		{TransactionID: "ext1", Amount: 300, CreatedAt: time.Now(), Description: "External 1 Internal 1 2 3", Reference: "REF1", Currency: "USD"},
+	}
+	internalTxns := []*model.Transaction{
+		{TransactionID: "int1", Amount: 100, CreatedAt: time.Now().Add(-1 * time.Hour), Description: "Internal 1", Reference: "REF1-A", Currency: "USD"},
+		{TransactionID: "int2", Amount: 150, CreatedAt: time.Now(), Description: "Internal 2", Reference: "REF1-B", Currency: "USD"},
+		{TransactionID: "int3", Amount: 54, CreatedAt: time.Now().Add(1 * time.Hour), Description: "Internal 3", Reference: "REF1-C", Currency: "USD"},
+	}
+
+	groupedInternalTxns := map[string][]*model.Transaction{
+		"parent_transaction": internalTxns,
+	}
+
+	emptyGroup := map[string][]*model.Transaction{}
+
+	mockDS.On("GroupTransactions", mock.Anything, mock.Anything, 100000, int64(0)).Return(groupedInternalTxns, nil)
+	mockDS.On("GroupTransactions", mock.Anything, mock.Anything, 100000, int64(100000)).Return(emptyGroup, nil)
+
+	matchingRules := []model.MatchingRule{
+		{
+			RuleID: "parent_transaction",
+			Criteria: []model.MatchingCriteria{
+				{Field: "amount", Operator: "equals", AllowableDrift: 0.01}, // 1% drift allowed
+				{Field: "description", Operator: "contains"},
+				{Field: "reference", Operator: "contains"},
+				{Field: "currency", Operator: "equals"},
+			},
+		},
+	}
+
+	matches, unmatched := blnk.oneToManyReconciliation(ctx, externalTxns, "parent_transaction", matchingRules, false)
+
+	assert.Equal(t, 0, len(matches), "Expected 3 matches")
+	assert.Equal(t, 1, len(unmatched), "Expected 0 unmatched transactions")
 	mockDS.AssertExpectations(t)
 }
 
@@ -351,7 +393,7 @@ func TestReconciliationEdgeCases(t *testing.T) {
 			},
 		}
 
-		matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, "", matchingRules, false)
+		matches, unmatched := blnk.oneToManyReconciliation(ctx, externalTxns, "", matchingRules, false)
 
 		assert.Equal(t, 0, len(matches), "Expected 0 matches")
 		assert.Equal(t, 0, len(unmatched), "Expected 1 unmatched transaction")

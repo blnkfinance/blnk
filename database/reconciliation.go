@@ -11,6 +11,8 @@ import (
 	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconciliation) error {
@@ -558,4 +560,83 @@ func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliati
 	}
 
 	return progress, nil
+}
+
+func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploadID string, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "FetchAndGroupExternalTransactions")
+	defer span.End()
+
+	validColumns := map[string]bool{
+		"id": true, "amount": true, "reference": true, "currency": true,
+		"description": true, "date": true, "source": true,
+	}
+	if !validColumns[groupCriteria] {
+		span.RecordError(fmt.Errorf("invalid group criteria: %s", groupCriteria))
+		return nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid group criteria: %s", groupCriteria), nil)
+	}
+
+	// Create a cache key based on the grouping and pagination parameters
+	cacheKey := fmt.Sprintf("external_transactions:grouped:%s:%s:%d:%d", uploadID, groupCriteria, batchSize, offset)
+
+	var groupedTransactions map[string][]*model.Transaction
+	err := d.Cache.Get(ctx, cacheKey, &groupedTransactions)
+	if err == nil && len(groupedTransactions) > 0 {
+		span.AddEvent("Grouped external transactions retrieved from cache", trace.WithAttributes(
+			attribute.Int("group.count", len(groupedTransactions)),
+		))
+		return groupedTransactions, nil
+	}
+
+	// If not in cache or error occurred, fetch from database
+	query := fmt.Sprintf(`
+        SELECT %[1]s, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND %[1]s IS NOT NULL AND %[1]s != ''
+        ORDER BY %[1]s
+        LIMIT $2 OFFSET $3
+    `, groupCriteria)
+
+	rows, err := d.Conn.QueryContext(ctx, query, uploadID, batchSize, offset)
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped external transactions", err)
+	}
+	defer rows.Close()
+
+	groupedTransactions = make(map[string][]*model.Transaction)
+
+	for rows.Next() {
+		var groupKey string
+		tx := &model.ExternalTransaction{}
+		err = rows.Scan(
+			&groupKey,
+			&tx.ID, &tx.Amount, &tx.Reference, &tx.Currency,
+			&tx.Description, &tx.Date, &tx.Source,
+		)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan external transaction data", err)
+		}
+
+		// Convert ExternalTransaction to Transaction
+		transaction := tx.ToInternalTransaction()
+		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], transaction)
+	}
+
+	if err = rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over external transactions", err)
+	}
+
+	// Cache the fetched data if not empty
+	if len(groupedTransactions) > 0 {
+		if err := d.Cache.Set(ctx, cacheKey, groupedTransactions, 5*time.Minute); err != nil {
+			log.Printf("Failed to cache grouped external transactions: %v", err)
+		}
+	}
+
+	span.AddEvent("Grouped external transactions retrieved", trace.WithAttributes(
+		attribute.Int("group.count", len(groupedTransactions)),
+	))
+	return groupedTransactions, nil
 }

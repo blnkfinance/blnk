@@ -310,3 +310,8 @@ func (m *MockDataSource) LoadReconciliationProgress(ctx context.Context, reconci
 	args := m.Called(ctx, reconciliationID)
 	return args.Get(0).(model.ReconciliationProgress), args.Error(1)
 }
+
+func (m *MockDataSource) FetchAndGroupExternalTransactions(ctx context.Context, uploadID string, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+	args := m.Called(ctx, uploadID, groupCriteria, batchSize, offset)
+	return args.Get(0).(map[string][]*model.Transaction), args.Error(1)
+}

@@ -92,4 +92,5 @@ type reconciliation interface {
 	LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error)
 	RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error
 	RecordUnmatched(ctx context.Context, reconciliationID string, results []string) error
+	FetchAndGroupExternalTransactions(ctx context.Context, uploadID string, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)
 }
