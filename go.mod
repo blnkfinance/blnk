@@ -1,6 +1,6 @@
 module github.com/jerry-enebeli/blnk
 
-go 1.21
+go 1.21.1
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.1
