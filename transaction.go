@@ -562,7 +562,7 @@ func (l *Blnk) releaseLock(ctx context.Context, locker *redlock.Locker) {
 func (l *Blnk) logAndRecordError(span trace.Span, msg string, err error) error {
 	span.RecordError(err)
 	logrus.Error(msg, err)
-	return fmt.Errorf("%s: %w", msg, err)
+	return fmt.Errorf("%s: %w\t", msg, err)
 }
 
 func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transaction, reason string) (*model.Transaction, error) {
@@ -766,16 +766,6 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "QueueTransaction")
 	defer span.End()
-
-	// Validate the transaction
-	if err := l.validateTxn(ctx, transaction); err != nil {
-		span.RecordError(err)
-		span.AddEvent("Transaction validation failed", trace.WithAttributes(
-			attribute.String("transaction.id", transaction.TransactionID),
-			attribute.String("transaction.reference", transaction.Reference),
-		))
-		return nil, err
-	}
 
 	// Set transaction status and metadata
 	span.AddEvent("Setting transaction status and metadata")
