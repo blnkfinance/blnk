@@ -73,6 +73,8 @@ func NewAPI(b *blnk.Blnk) *Api {
 		r.Use(middleware.SecretKeyAuthMiddleware())
 	}
 
+	r.Use(middleware.RateLimitMiddleware(conf))
+
 	r.Use(otelgin.Middleware("BLNK"))
 
 	r.GET("/", func(c *gin.Context) {

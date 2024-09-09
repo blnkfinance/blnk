@@ -15,7 +15,7 @@ type Balance struct {
 	InflightCreditBalance *big.Int               `json:"inflight_credit_balance"`
 	DebitBalance          *big.Int               `json:"debit_balance"`
 	InflightDebitBalance  *big.Int               `json:"inflight_debit_balance"`
-	CurrencyMultiplier    float64                `json:"precision"`
+	CurrencyMultiplier    float64                `json:"currency_multiplier"`
 	LedgerID              string                 `json:"ledger_id"`
 	IdentityID            string                 `json:"identity_id"`
 	BalanceID             string                 `json:"balance_id"`
