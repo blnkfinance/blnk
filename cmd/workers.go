@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -35,19 +36,21 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 	}
 	_, err := b.blnk.RecordTransaction(ctx, &txn)
 	if err != nil {
-		return err
-	}
-	//todo only reject insufficient balance transaction and push the rest back for retry
-
-	if err != nil {
-		_, err := b.blnk.RejectTransaction(ctx, &txn, err.Error())
-		if err != nil {
-			return err
+		// Check if the error message contains "insufficient funds"
+		if strings.Contains(strings.ToLower(err.Error()), "insufficient funds") {
+			// Reject the transaction due to insufficient funds
+			_, rejectErr := b.blnk.RejectTransaction(ctx, &txn, err.Error())
+			if rejectErr != nil {
+				return rejectErr
+			}
+			// Send webhook for rejected transaction
+			webhookErr := blnk.SendWebhook(blnk.NewWebhook{
+				Event:   "transaction.rejected",
+				Payload: txn,
+			})
+			return webhookErr
 		}
-		err = blnk.SendWebhook(blnk.NewWebhook{
-			Event:   "transaction.rejected",
-			Payload: txn,
-		})
+		logrus.Infof("Transaction %s pushed back for retry due to error: %v", txn.TransactionID, err)
 		return err
 	}
 
