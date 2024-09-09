@@ -562,7 +562,7 @@ func (l *Blnk) releaseLock(ctx context.Context, locker *redlock.Locker) {
 func (l *Blnk) logAndRecordError(span trace.Span, msg string, err error) error {
 	span.RecordError(err)
 	logrus.Error(msg, err)
-	return fmt.Errorf("%s: %w\t", msg, err)
+	return fmt.Errorf("%s: %w", msg, err)
 }
 
 func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transaction, reason string) (*model.Transaction, error) {
