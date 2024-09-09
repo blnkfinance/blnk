@@ -83,6 +83,11 @@ type Configuration struct {
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
 	OtelGrafanaCloud        OtelGrafanaCloud              `json:"otel_grafana_cloud"`
+	RateLimit               struct {
+		RequestsPerSecond  *float64 `json:"requests_per_second" envconfig:"BLNK_RATE_LIMIT_RPS"`
+		Burst              *int     `json:"burst" envconfig:"BLNK_RATE_LIMIT_BURST"`
+		CleanupIntervalSec *int     `json:"cleanup_interval_sec" envconfig:"BLNK_RATE_LIMIT_CLEANUP_INTERVAL_SEC"`
+	} `json:"rate_limit"`
 }
 
 func loadConfigFromFile(file string) error {
@@ -182,6 +187,25 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	if cnf.Server.Port == "" {
 		cnf.Server.Port = DEFAULT_PORT
 		log.Printf("Warning: Port not specified in config. Setting default port: %s", DEFAULT_PORT)
+	}
+
+	// Rate limiting is disabled by default (when both RPS and Burst are nil)
+	if cnf.RateLimit.RequestsPerSecond != nil && cnf.RateLimit.Burst == nil {
+		defaultBurst := 2 * int(*cnf.RateLimit.RequestsPerSecond)
+		cnf.RateLimit.Burst = &defaultBurst
+		log.Printf("Warning: Rate limit burst not specified. Setting default value: %d", defaultBurst)
+	}
+	if cnf.RateLimit.RequestsPerSecond == nil && cnf.RateLimit.Burst != nil {
+		defaultRPS := float64(*cnf.RateLimit.Burst) / 2
+		cnf.RateLimit.RequestsPerSecond = &defaultRPS
+		log.Printf("Warning: Rate limit RPS not specified. Setting default value: %.2f", defaultRPS)
+	}
+
+	// Set default cleanup interval if not specified
+	if cnf.RateLimit.CleanupIntervalSec == nil {
+		defaultCleanup := 10800 // 3 hours in seconds
+		cnf.RateLimit.CleanupIntervalSec = &defaultCleanup
+		log.Printf("Warning: Rate limit cleanup interval not specified. Setting default value: %d seconds", defaultCleanup)
 	}
 
 	return nil

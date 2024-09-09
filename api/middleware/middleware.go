@@ -3,11 +3,40 @@ package middleware
 import (
 	"crypto/subtle"
 	"net/http"
+	"time"
 
-	"github.com/jerry-enebeli/blnk/config"
-
+	"github.com/didip/tollbooth/v7"
+	"github.com/didip/tollbooth/v7/limiter"
 	"github.com/gin-gonic/gin"
+	"github.com/jerry-enebeli/blnk/config"
 )
+
+// RateLimitMiddleware creates a middleware for rate limiting using Tollbooth
+func RateLimitMiddleware(conf *config.Configuration) gin.HandlerFunc {
+	if conf.RateLimit.RequestsPerSecond == nil || conf.RateLimit.Burst == nil {
+		// Rate limiting is disabled
+		return func(c *gin.Context) {
+			c.Next()
+		}
+	}
+
+	rps := *conf.RateLimit.RequestsPerSecond
+	burst := *conf.RateLimit.Burst
+	ttl := time.Duration(*conf.RateLimit.CleanupIntervalSec) * time.Second
+
+	lmt := tollbooth.NewLimiter(rps, &limiter.ExpirableOptions{
+		DefaultExpirationTTL: ttl,
+	})
+	lmt.SetBurst(burst)
+	return func(c *gin.Context) {
+		httpError := tollbooth.LimitByRequest(lmt, c.Writer, c.Request)
+		if httpError != nil {
+			c.AbortWithStatusJSON(httpError.StatusCode, gin.H{"error": httpError.Message})
+			return
+		}
+		c.Next()
+	}
+}
 
 func SecretKeyAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
