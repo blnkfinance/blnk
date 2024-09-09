@@ -400,17 +400,17 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	}
 
 	// If not in cache or error occurred, fetch from database
-	query := fmt.Sprintf(`
-        SELECT %[1]s, transaction_id, parent_transaction, source, reference, 
+	query := `
+        SELECT $1::text AS group_key, transaction_id, parent_transaction, source, reference, 
                amount, precise_amount, precision, rate, currency, destination, 
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
-        WHERE %[1]s IS NOT NULL AND %[1]s != ''
-        ORDER BY %[1]s
-        LIMIT $1 OFFSET $2
-    `, groupCriteria)
+        WHERE $1::text IS NOT NULL AND $1::text != ''
+        ORDER BY $1::text
+        LIMIT $2 OFFSET $3
+    `
 
-	rows, err := d.Conn.QueryContext(ctx, query, batchSize, offset)
+	rows, err := d.Conn.QueryContext(ctx, query, groupCriteria, batchSize, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped transactions", err)
