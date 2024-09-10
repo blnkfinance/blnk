@@ -1,18 +1,3 @@
-/*
-Copyright 2024 Blnk Finance Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 package model
 
 import (
@@ -61,7 +46,30 @@ func compare(value *big.Int, condition string, compareTo *big.Int) bool {
 	return false
 }
 
+// InitializeBalanceFields initializes the fields of the Balance struct if they are nil
+func (balance *Balance) InitializeBalanceFields() {
+	if balance.InflightDebitBalance == nil {
+		balance.InflightDebitBalance = big.NewInt(0)
+	}
+	if balance.InflightCreditBalance == nil {
+		balance.InflightCreditBalance = big.NewInt(0)
+	}
+	if balance.InflightBalance == nil {
+		balance.InflightBalance = big.NewInt(0)
+	}
+	if balance.DebitBalance == nil {
+		balance.DebitBalance = big.NewInt(0)
+	}
+	if balance.CreditBalance == nil {
+		balance.CreditBalance = big.NewInt(0)
+	}
+	if balance.Balance == nil {
+		balance.Balance = big.NewInt(0)
+	}
+}
+
 func (balance *Balance) addCredit(amount int64, inflight bool) {
+	balance.InitializeBalanceFields()
 	amountBigInt := Int64ToBigInt(amount)
 	if inflight {
 		balance.InflightCreditBalance.Add(balance.InflightCreditBalance, amountBigInt)
@@ -71,6 +79,7 @@ func (balance *Balance) addCredit(amount int64, inflight bool) {
 }
 
 func (balance *Balance) addDebit(amount int64, inflight bool) {
+	balance.InitializeBalanceFields()
 	amountBigInt := Int64ToBigInt(amount)
 	if inflight {
 		balance.InflightDebitBalance.Add(balance.InflightDebitBalance, amountBigInt)
@@ -80,6 +89,7 @@ func (balance *Balance) addDebit(amount int64, inflight bool) {
 }
 
 func (balance *Balance) computeBalance(inflight bool) {
+	balance.InitializeBalanceFields()
 	if inflight {
 		balance.InflightBalance.Sub(balance.InflightCreditBalance, balance.InflightDebitBalance)
 		return
@@ -104,8 +114,8 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 }
 
 func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
+	balance.InitializeBalanceFields()
 	preciseAmount := ApplyPrecision(transaction)
-
 	transactionAmount := new(big.Int).SetInt64(preciseAmount)
 
 	transaction.PreciseAmount = preciseAmount // set transaction precision amount
@@ -118,8 +128,10 @@ func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
 }
 
 func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
+	balance.InitializeBalanceFields()
 	preciseAmount := ApplyPrecision(transaction)
 	transactionAmount := new(big.Int).SetInt64(preciseAmount)
+
 	transaction.PreciseAmount = preciseAmount
 	if balance.InflightCreditBalance.Cmp(transactionAmount) >= 0 {
 		balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, transactionAmount)
@@ -131,6 +143,7 @@ func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
 
 // RollbackInflightCredit decreases the InflightCreditBalance by the specified amount
 func (balance *Balance) RollbackInflightCredit(amount *big.Int) {
+	balance.InitializeBalanceFields()
 	if balance.InflightCreditBalance.Cmp(amount) >= 0 {
 		balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, amount)
 		balance.computeBalance(true) // Update inflight balance
@@ -139,6 +152,7 @@ func (balance *Balance) RollbackInflightCredit(amount *big.Int) {
 
 // RollbackInflightDebit decreases the InflightDebitBalance by the specified amount
 func (balance *Balance) RollbackInflightDebit(amount *big.Int) {
+	balance.InitializeBalanceFields()
 	if balance.InflightDebitBalance.Cmp(amount) >= 0 {
 		balance.InflightDebitBalance.Sub(balance.InflightDebitBalance, amount)
 		balance.computeBalance(true) // Update inflight balance
@@ -169,7 +183,7 @@ func (transaction *Transaction) validate() error {
 
 func UpdateBalances(transaction *Transaction, source, destination *Balance) error {
 	transaction.PreciseAmount = ApplyPrecision(transaction)
-	origanialAmount := transaction.Amount
+	originalAmount := transaction.Amount
 	err := transaction.validate()
 	if err != nil {
 		return err
@@ -179,6 +193,9 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	if err != nil {
 		return err
 	}
+
+	source.InitializeBalanceFields()
+	destination.InitializeBalanceFields()
 
 	//compute source balance
 	source.addDebit(transaction.PreciseAmount, transaction.Inflight)
@@ -190,7 +207,7 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	destination.addCredit(transaction.PreciseAmount, transaction.Inflight)
 	destination.computeBalance(transaction.Inflight)
 
-	transaction.Amount = origanialAmount //revert *Transaction.Amount back original amount after modification for destination rates
+	transaction.Amount = originalAmount // revert *Transaction.Amount back original amount after modification for destination rates
 	transaction.PreciseAmount = ApplyPrecision(transaction)
 	return nil
 }

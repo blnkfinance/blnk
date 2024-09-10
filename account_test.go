@@ -64,7 +64,7 @@ func TestCreateAccount(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, sqlmock.AnyArg(), metaDataJSON).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	config.MockConfig(false, "http://example.com/generateAccount", "some-auth-token")
+	config.MockConfig(&config.Configuration{Server: config.ServerConfig{SecretKey: "some-secret"}, AccountNumberGeneration: config.AccountNumberGenerationConfig{HttpService: config.AccountGenerationHttpService{}}})
 
 	result, err := d.CreateAccount(account)
 	assert.NoError(t, err)
@@ -92,8 +92,7 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	httpmock.RegisterResponder("GET", "http://example.com/generateAccount",
 		httpmock.NewStringResponder(200, `{"account_number": "123456789", "bank_name": "Blnk Bank"}`))
 
-	// Mock configuration settings to enable automatic account number generation
-	config.MockConfig(true, "http://example.com/generateAccount", "some-auth-token")
+	config.MockConfig(&config.Configuration{Server: config.ServerConfig{SecretKey: "some-secret"}, AccountNumberGeneration: config.AccountNumberGenerationConfig{HttpService: config.AccountGenerationHttpService{Url: "http://example.com/generateAccount"}}})
 
 	account := model.Account{
 		Name:       "Test Account",

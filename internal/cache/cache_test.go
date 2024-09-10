@@ -26,7 +26,7 @@ import (
 )
 
 func TestSet(t *testing.T) {
-	config.MockConfig(false, "", "")
+	config.MockConfig(&config.Configuration{})
 	ctx := context.Background()
 	mockCache, err := NewCache()
 	assert.NoError(t, err)
@@ -44,7 +44,7 @@ func TestSet(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	config.MockConfig(false, "", "")
+	config.MockConfig(&config.Configuration{})
 	ctx := context.Background()
 	mockCache, err := NewCache()
 	assert.NoError(t, err)
@@ -69,7 +69,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestGetNonExistentKey(t *testing.T) {
-	config.MockConfig(false, "", "")
+	config.MockConfig(&config.Configuration{})
 	ctx := context.Background()
 	mockCache, err := NewCache()
 	assert.NoError(t, err)
@@ -81,7 +81,7 @@ func TestGetNonExistentKey(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	config.MockConfig(false, "", "")
+	config.MockConfig(&config.Configuration{})
 	ctx := context.Background()
 	mockCache, err := NewCache()
 	assert.NoError(t, err)

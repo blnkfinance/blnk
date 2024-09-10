@@ -127,15 +127,20 @@ func (l *Blnk) updateTransactionDetails(ctx context.Context, transaction *model.
 	_, span := tracer.Start(ctx, "Updating Transaction Details")
 	defer span.End()
 
-	transaction.Source = sourceBalance.BalanceID
-	transaction.Destination = destinationBalance.BalanceID
+	// Create a new transaction object with updated details (immutable pattern)
+	newTransaction := *transaction // Copy the original transaction
+	newTransaction.Source = sourceBalance.BalanceID
+	newTransaction.Destination = destinationBalance.BalanceID
+
+	// Update the status based on the current status and inflight flag
 	applicableStatus := map[string]string{StatusQueued: StatusApplied, StatusScheduled: StatusApplied, StatusCommit: StatusApplied, StatusVoid: StatusVoid}
-	transaction.Status = applicableStatus[transaction.Status]
+	newTransaction.Status = applicableStatus[transaction.Status]
 	if transaction.Inflight {
-		transaction.Status = StatusInflight
+		newTransaction.Status = StatusInflight
 	}
+
 	span.AddEvent("Transaction details updated")
-	return transaction
+	return &newTransaction
 }
 
 func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
@@ -470,7 +475,7 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	defer span.End()
 
 	return l.executeWithLock(ctx, transaction, func(ctx context.Context) (*model.Transaction, error) {
-		sourceBalance, destinationBalance, err := l.validateAndPrepareTransaction(ctx, transaction)
+		transaction, sourceBalance, destinationBalance, err := l.validateAndPrepareTransaction(ctx, transaction)
 		if err != nil {
 			span.RecordError(err)
 			return nil, err
@@ -508,27 +513,32 @@ func (l *Blnk) executeWithLock(ctx context.Context, transaction *model.Transacti
 	return fn(ctx)
 }
 
-func (l *Blnk) validateAndPrepareTransaction(ctx context.Context, transaction *model.Transaction) (*model.Balance, *model.Balance, error) {
+func (l *Blnk) validateAndPrepareTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, *model.Balance, *model.Balance, error) {
 	ctx, span := tracer.Start(ctx, "ValidateAndPrepareTransaction")
 	defer span.End()
 
 	if err := l.validateTxn(ctx, transaction); err != nil {
 		span.RecordError(err)
-		return nil, nil, l.logAndRecordError(span, "transaction validation failed", err)
+		return nil, nil, nil, l.logAndRecordError(span, "transaction validation failed", err)
 	}
 
 	sourceBalance, destinationBalance, err := l.getSourceAndDestination(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
-		return nil, nil, l.logAndRecordError(span, "failed to get source and destination balances", err)
+		return nil, nil, nil, l.logAndRecordError(span, "failed to get source and destination balances", err)
 	}
 
-	transaction.Source = sourceBalance.BalanceID
-	transaction.Destination = destinationBalance.BalanceID
+	// Create a copy of the transaction and update it (immutable)
+	newTransaction := *transaction // Copy the original transaction
+	newTransaction.Source = sourceBalance.BalanceID
+	newTransaction.Destination = destinationBalance.BalanceID
 
-	span.AddEvent("Transaction validated and prepared", trace.WithAttributes(attribute.String("source.balance_id", sourceBalance.BalanceID), attribute.String("destination.balance_id", destinationBalance.BalanceID)))
+	span.AddEvent("Transaction validated and prepared", trace.WithAttributes(
+		attribute.String("source.balance_id", sourceBalance.BalanceID),
+		attribute.String("destination.balance_id", destinationBalance.BalanceID)))
 
-	return sourceBalance, destinationBalance, nil
+	// Return the new transaction, source, and destination balances
+	return &newTransaction, sourceBalance, destinationBalance, nil
 }
 
 func (l *Blnk) processBalances(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) error {

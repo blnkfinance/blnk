@@ -29,6 +29,7 @@ import (
 	"github.com/jerry-enebeli/blnk"
 
 	"github.com/jerry-enebeli/blnk/config"
+	trace "github.com/jerry-enebeli/blnk/internal/traces"
 
 	"github.com/jerry-enebeli/blnk/model"
 
@@ -127,7 +128,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				return
 			}
 
-			shutdown, err := blnk.SetupOTelSDK(context.Background(), "BLNK WORKERS")
+			shutdown, err := trace.SetupOTelSDK(context.Background(), "BLNK WORKERS")
 			if err != nil {
 				log.Fatalf("Error setting up OTel SDK: %v", err)
 			}

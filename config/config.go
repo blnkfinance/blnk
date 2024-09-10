@@ -55,21 +55,30 @@ type TypeSenseConfig struct {
 	Dns string `json:"dns" envconfig:"BLNK_TYPESENSE_DNS"`
 }
 
+type AccountGenerationHttpService struct {
+	Url     string `json:"url"`
+	Timeout int    `json:"timeout"`
+	Headers struct {
+		Authorization string `json:"Authorization"`
+	} `json:"headers"`
+}
 type AccountNumberGenerationConfig struct {
-	EnableAutoGeneration bool `json:"enable_auto_generation"`
-	HttpService          struct {
-		Url     string `json:"url"`
-		Timeout int    `json:"timeout"`
-		Headers struct {
-			Authorization string `json:"Authorization"`
-		} `json:"headers"`
-	} `json:"http_service"`
+	EnableAutoGeneration bool                         `json:"enable_auto_generation"`
+	HttpService          AccountGenerationHttpService `json:"http_service"`
+}
+
+type RateLimitConfig struct {
+	RequestsPerSecond  *float64 `json:"requests_per_second" envconfig:"BLNK_RATE_LIMIT_RPS"`
+	Burst              *int     `json:"burst" envconfig:"BLNK_RATE_LIMIT_BURST"`
+	CleanupIntervalSec *int     `json:"cleanup_interval_sec" envconfig:"BLNK_RATE_LIMIT_CLEANUP_INTERVAL_SEC"`
+}
+
+type SlackWebhook struct {
+	WebhookUrl string `json:"webhook_url"`
 }
 
 type Notification struct {
-	Slack struct {
-		WebhookUrl string `json:"webhook_url"`
-	} `json:"slack"`
+	Slack   SlackWebhook `json:"slack"`
 	Webhook struct {
 		Url     string            `json:"url"`
 		Headers map[string]string `json:"headers"`
@@ -98,11 +107,7 @@ type Configuration struct {
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
 	OtelGrafanaCloud        OtelGrafanaCloud              `json:"otel_grafana_cloud"`
-	RateLimit               struct {
-		RequestsPerSecond  *float64 `json:"requests_per_second" envconfig:"BLNK_RATE_LIMIT_RPS"`
-		Burst              *int     `json:"burst" envconfig:"BLNK_RATE_LIMIT_BURST"`
-		CleanupIntervalSec *int     `json:"cleanup_interval_sec" envconfig:"BLNK_RATE_LIMIT_CLEANUP_INTERVAL_SEC"`
-	} `json:"rate_limit"`
+	RateLimit               RateLimitConfig               `json:"rate_limit"`
 }
 
 func loadConfigFromFile(file string) error {
@@ -227,31 +232,8 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 }
 
 // MockConfig sets a mock configuration for testing purposes.
-func MockConfig(enableAutoGeneration bool, url string, authorizationToken string) {
-	mockConfig := Configuration{
-		ProjectName: "",
-		Redis:       RedisConfig{Dns: "localhost:6379"},
-		DataSource:  DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
-		AccountNumberGeneration: AccountNumberGenerationConfig{
-			EnableAutoGeneration: enableAutoGeneration,
-			HttpService: struct {
-				Url     string `json:"url"`
-				Timeout int    `json:"timeout"`
-				Headers struct {
-					Authorization string `json:"Authorization"`
-				} `json:"headers"`
-			}{
-				Url: url,
-				Headers: struct {
-					Authorization string `json:"Authorization"`
-				}{
-					Authorization: authorizationToken,
-				},
-			},
-		},
-	}
-
-	ConfigStore.Store(&mockConfig)
+func MockConfig(mockConfig *Configuration) {
+	ConfigStore.Store(mockConfig)
 }
 
 func logger() {

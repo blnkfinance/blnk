@@ -66,7 +66,10 @@ func SetUpTestRequest(s TestRequest) (*httptest.ResponseRecorder, error) {
 }
 
 func setupRouter() (*gin.Engine, *blnk.Blnk, error) {
-	config.MockConfig(false, "", "")
+	config.MockConfig(&config.Configuration{
+		Redis:      config.RedisConfig{Dns: "localhost:6379"},
+		DataSource: config.DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
+	})
 	cnf, err := config.Fetch()
 	if err != nil {
 		return nil, nil, err
