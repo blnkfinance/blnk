@@ -80,7 +80,7 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 		log.Fatal(err)
 	}
 
-	taskOptions := []asynq.Option{asynq.TaskID(id), asynq.Queue(INDEX_QUEUE)}
+	taskOptions := []asynq.Option{asynq.Queue(INDEX_QUEUE)}
 	task := asynq.NewTask(INDEX_QUEUE, IPayload, taskOptions...)
 	info, err := q.Client.Enqueue(task)
 	if err != nil {

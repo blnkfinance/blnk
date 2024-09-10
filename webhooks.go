@@ -17,6 +17,7 @@ package blnk
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -26,7 +27,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk/config"
-	"golang.org/x/net/context"
 
 	"github.com/hibiken/asynq"
 )

@@ -191,20 +191,20 @@ func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBal
 	go func() {
 		defer wg.Done()
 		l.checkBalanceMonitors(ctx, sourceBalance)
-		//	err := l.queue.queueIndexData(sourceBalance.BalanceID, "balances", sourceBalance)
-		// if err != nil {
-		// 	span.RecordError(err)
-		// 	notification.NotifyError(err)
-		// }
+		err := l.queue.queueIndexData(sourceBalance.BalanceID, "balances", sourceBalance)
+		if err != nil {
+			span.RecordError(err)
+			notification.NotifyError(err)
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		// l.checkBalanceMonitors(ctx, destinationBalance)
-		// err := l.queue.queueIndexData(destinationBalance.BalanceID, "balances", destinationBalance)
-		// if err != nil {
-		// 	span.RecordError(err)
-		// 	notification.NotifyError(err)
-		// }
+		l.checkBalanceMonitors(ctx, destinationBalance)
+		err := l.queue.queueIndexData(destinationBalance.BalanceID, "balances", destinationBalance)
+		if err != nil {
+			span.RecordError(err)
+			notification.NotifyError(err)
+		}
 	}()
 	wg.Wait()
 	span.AddEvent("Balances updated")
