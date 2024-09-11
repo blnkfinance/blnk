@@ -24,6 +24,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CreateAccount handles the creation of a new account.
+// It binds the incoming JSON request body to a CreateAccount model, validates it,
+// and creates the account if the input is valid.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding the JSON or validation fails.
+// - 201 Created: If the account is successfully created.
+// - 500 Internal Server Error: If there's an error in account creation.
 func (a Api) CreateAccount(c *gin.Context) {
 	var newAccount model2.CreateAccount
 	if err := c.ShouldBindJSON(&newAccount); err != nil {
@@ -45,6 +56,17 @@ func (a Api) CreateAccount(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// GetAccount retrieves an account by its ID.
+// It uses the provided account ID and optional query parameters to fetch the account.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+// - id: The unique identifier of the account to retrieve.
+// - includes: Optional query parameters to include related data.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in fetching the account.
+// - 200 OK: If the account is successfully retrieved.
 func (a Api) GetAccount(c *gin.Context) {
 	id := c.Param("id")
 
@@ -58,6 +80,15 @@ func (a Api) GetAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, account)
 }
 
+// GetAllAccounts retrieves all accounts.
+// It fetches a list of all accounts in the system.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in fetching the accounts.
+// - 200 OK: If the accounts are successfully retrieved.
 func (a Api) GetAllAccounts(c *gin.Context) {
 	accounts, err := a.blnk.GetAllAccounts()
 	if err != nil {
@@ -67,8 +98,16 @@ func (a Api) GetAllAccounts(c *gin.Context) {
 	c.JSON(http.StatusOK, accounts)
 }
 
+// generateMockAccount generates and returns a mock account for testing purposes.
+// It provides a mock bank name and account number.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 200 OK: Returns a mock account with bank name and account number.
 func (a Api) generateMockAccount(c *gin.Context) {
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"bank_name":      "Blnk Bank",
 		"account_number": gofakeit.AchAccount(),
 	})

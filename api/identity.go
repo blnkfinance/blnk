@@ -22,20 +22,44 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 )
 
+// CreateIdentity creates a new identity record in the system.
+// It binds the incoming JSON request to an Identity object, validates it,
+// and then creates the identity record. If any errors occur during validation
+// or creation, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON or creating the identity.
+// - 201 Created: If the identity is successfully created.
 func (a Api) CreateIdentity(c *gin.Context) {
 	var identity model.Identity
 	if err := c.ShouldBindJSON(&identity); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	resp, err := a.blnk.CreateIdentity(identity)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusCreated, resp)
 }
 
+// GetIdentity retrieves an identity record by its ID.
+// It extracts the ID from the route parameters and fetches the identity record.
+// If the ID is missing or there's an error retrieving the identity, it responds
+// with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the ID is missing or there's an error retrieving the identity.
+// - 200 OK: If the identity is successfully retrieved.
 func (a Api) GetIdentity(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
@@ -52,6 +76,17 @@ func (a Api) GetIdentity(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// UpdateIdentity updates an existing identity record by its ID.
+// It binds the incoming JSON request to an Identity object, updates the record,
+// and responds with a success message. If any errors occur during binding,
+// validation, or update, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON, updating the identity, or missing ID.
+// - 200 OK: If the identity is successfully updated.
 func (a Api) UpdateIdentity(c *gin.Context) {
 	var identity model.Identity
 	id, passed := c.Params.Get("id")
@@ -75,6 +110,16 @@ func (a Api) UpdateIdentity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Identity updated successfully"})
 }
 
+// DeleteIdentity deletes an existing identity record by its ID.
+// It extracts the ID from the route parameters and deletes the record. If the ID is missing
+// or there's an error deleting the identity, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the ID is missing or there's an error deleting the identity.
+// - 200 OK: If the identity is successfully deleted.
 func (a Api) DeleteIdentity(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
@@ -91,11 +136,22 @@ func (a Api) DeleteIdentity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Identity deleted successfully"})
 }
 
+// GetAllIdentities retrieves all identity records in the system.
+// It fetches the identity records and responds with the list of identities.
+// If there's an error retrieving the identities, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error retrieving the identities.
+// - 200 OK: If the identities are successfully retrieved.
 func (a Api) GetAllIdentities(c *gin.Context) {
 	identities, err := a.blnk.GetAllIdentities()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusOK, identities)
 }

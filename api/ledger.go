@@ -23,6 +23,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CreateLedger creates a new ledger record in the system.
+// It binds the incoming JSON request to a CreateLedger object, validates it,
+// and then creates the ledger record. If any errors occur during validation
+// or creation, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON or validating the ledger.
+// - 201 Created: If the ledger is successfully created.
 func (a Api) CreateLedger(c *gin.Context) {
 	var newLedger model2.CreateLedger
 	if err := c.ShouldBindJSON(&newLedger); err != nil {
@@ -45,11 +56,22 @@ func (a Api) CreateLedger(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// GetLedger retrieves a ledger record by its ID.
+// It extracts the ID from the route parameters and fetches the ledger record.
+// If the ID is missing or there's an error retrieving the ledger, it responds
+// with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the ID is missing or there's an error retrieving the ledger.
+// - 200 OK: If the ledger is successfully retrieved.
 func (a Api) GetLedger(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. Pass id in the route /:id"})
 		return
 	}
 
@@ -62,6 +84,16 @@ func (a Api) GetLedger(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetAllLedgers retrieves all ledger records in the system.
+// It fetches the ledger records and responds with the list of ledgers.
+// If there's an error retrieving the ledgers, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error retrieving the ledger records.
+// - 200 OK: If the ledger records are successfully retrieved.
 func (a Api) GetAllLedgers(c *gin.Context) {
 	resp, err := a.blnk.GetAllLedgers()
 	if err != nil {

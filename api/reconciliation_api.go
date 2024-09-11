@@ -23,7 +23,17 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// UploadExternalData handles the upload of external transaction data
+// UploadExternalData handles the upload of external transaction data.
+// It receives the file and source details from the request, processes the upload,
+// and returns an upload ID along with the record count and source information.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the file upload fails.
+// - 500 Internal Server Error: If there is an error processing the upload.
+// - 200 OK: If the upload is successful.
 func (a Api) UploadExternalData(c *gin.Context) {
 	source := c.PostForm("source")
 	file, header, err := c.Request.FormFile("file")
@@ -45,7 +55,16 @@ func (a Api) UploadExternalData(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"upload_id": uploadID, "record_count": total, "source": source})
 }
 
-// StartReconciliation initiates a new reconciliation process
+// StartReconciliation initiates a new reconciliation process based on the provided parameters.
+// It starts the reconciliation process and returns the reconciliation ID.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the request body is invalid or required fields are missing.
+// - 500 Internal Server Error: If there is an error starting the reconciliation process.
+// - 200 OK: If the reconciliation process is successfully started.
 func (a Api) StartReconciliation(c *gin.Context) {
 	var req struct {
 		UploadID         string   `json:"upload_id" binding:"required"`
@@ -59,6 +78,7 @@ func (a Api) StartReconciliation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	reconciliationID, err := a.blnk.StartReconciliation(c.Request.Context(), req.UploadID, req.Strategy, req.GroupingCriteria, req.MatchingRuleIDs, req.DryRun)
 	if err != nil {
 		logrus.Error(err)
@@ -69,7 +89,16 @@ func (a Api) StartReconciliation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"reconciliation_id": reconciliationID})
 }
 
-// CreateMatchingRule creates a new matching rule
+// CreateMatchingRule creates a new matching rule based on the provided rule details.
+// It returns the created matching rule.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the request body is invalid.
+// - 500 Internal Server Error: If there is an error creating the matching rule.
+// - 201 Created: If the matching rule is successfully created.
 func (a Api) CreateMatchingRule(c *gin.Context) {
 	var rule model.MatchingRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
@@ -87,7 +116,16 @@ func (a Api) CreateMatchingRule(c *gin.Context) {
 	c.JSON(http.StatusCreated, createdRule)
 }
 
-// UpdateMatchingRule updates an existing matching rule
+// UpdateMatchingRule updates an existing matching rule identified by its ID.
+// It returns the updated matching rule.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the Matching Rule ID is missing or the request body is invalid.
+// - 500 Internal Server Error: If there is an error updating the matching rule.
+// - 200 OK: If the matching rule is successfully updated.
 func (a Api) UpdateMatchingRule(c *gin.Context) {
 	ruleID := c.Param("id")
 	if ruleID == "" {
@@ -112,7 +150,16 @@ func (a Api) UpdateMatchingRule(c *gin.Context) {
 	c.JSON(http.StatusOK, updatedRule)
 }
 
-// DeleteMatchingRule deletes a matching rule
+// DeleteMatchingRule deletes a matching rule identified by its ID.
+// It confirms the deletion with a success message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the Matching Rule ID is missing.
+// - 500 Internal Server Error: If there is an error deleting the matching rule.
+// - 200 OK: If the matching rule is successfully deleted.
 func (a Api) DeleteMatchingRule(c *gin.Context) {
 	ruleID := c.Param("id")
 	if ruleID == "" {

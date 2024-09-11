@@ -24,9 +24,21 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 )
 
+// CreateBalance creates a new balance record in the system.
+// It binds the incoming JSON request to a CreateBalance object, validates it,
+// and then creates the balance record. If any errors occur during validation
+// or creation, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON or validating the balance.
+// - 201 Created: If the balance is successfully created.
 func (a Api) CreateBalance(c *gin.Context) {
 	var newBalance model2.CreateBalance
 	if err := c.ShouldBindJSON(&newBalance); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -45,6 +57,17 @@ func (a Api) CreateBalance(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// GetBalance retrieves a balance record by its ID.
+// It extracts the ID from the route parameters and the 'include' query
+// parameter to fetch additional related information. If the ID is missing
+// or there's an error retrieving the balance, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the ID is missing or there's an error retrieving the balance.
+// - 200 OK: If the balance is successfully retrieved.
 func (a Api) GetBalance(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 
@@ -65,6 +88,17 @@ func (a Api) GetBalance(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// CreateBalanceMonitor creates a new balance monitor record in the system.
+// It binds the incoming JSON request to a CreateBalanceMonitor object, validates it,
+// and then creates the monitor record. If any errors occur during validation
+// or creation, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON or validating the balance monitor.
+// - 201 Created: If the balance monitor is successfully created.
 func (a Api) CreateBalanceMonitor(c *gin.Context) {
 	var newMonitor model2.CreateBalanceMonitor
 	if err := c.ShouldBindJSON(&newMonitor); err != nil {
@@ -87,6 +121,16 @@ func (a Api) CreateBalanceMonitor(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// GetBalanceMonitor retrieves a balance monitor record by its ID.
+// It extracts the ID from the route parameters. If the ID is missing
+// or there's an error retrieving the monitor, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the ID is missing or there's an error retrieving the balance monitor.
+// - 200 OK: If the balance monitor is successfully retrieved.
 func (a Api) GetBalanceMonitor(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
@@ -103,6 +147,16 @@ func (a Api) GetBalanceMonitor(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetAllBalanceMonitors retrieves all balance monitor records in the system.
+// It fetches the monitor records and responds with the list of monitors.
+// If there's an error retrieving the monitors, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error retrieving the balance monitors.
+// - 200 OK: If the balance monitors are successfully retrieved.
 func (a Api) GetAllBalanceMonitors(c *gin.Context) {
 	monitors, err := a.blnk.GetAllMonitors(c.Request.Context())
 	if err != nil {
@@ -113,6 +167,16 @@ func (a Api) GetAllBalanceMonitors(c *gin.Context) {
 	c.JSON(http.StatusOK, monitors)
 }
 
+// GetBalanceMonitorsByBalanceID retrieves all balance monitors associated with a specific balance ID.
+// It extracts the balance ID from the route parameters. If the balance ID is missing
+// or there's an error retrieving the monitors, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the balance ID is missing or there's an error retrieving the balance monitors.
+// - 200 OK: If the balance monitors are successfully retrieved.
 func (a Api) GetBalanceMonitorsByBalanceID(c *gin.Context) {
 	balanceID, passed := c.Params.Get("balance_id")
 	if !passed {
@@ -129,6 +193,17 @@ func (a Api) GetBalanceMonitorsByBalanceID(c *gin.Context) {
 	c.JSON(http.StatusOK, monitors)
 }
 
+// UpdateBalanceMonitor updates an existing balance monitor record by its ID.
+// It binds the incoming JSON request to a BalanceMonitor object, updates the record,
+// and responds with a success message. If any errors occur during binding, validation,
+// or update, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON, validating the balance monitor, or updating the record.
+// - 200 OK: If the balance monitor is successfully updated.
 func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 	var monitor model.BalanceMonitor
 	id, passed := c.Params.Get("id")
@@ -152,6 +227,16 @@ func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "BalanceMonitor updated successfully"})
 }
 
+// DeleteBalanceMonitor deletes an existing balance monitor record by its ID.
+// It extracts the ID from the route parameters and deletes the record. If the ID is missing
+// or there's an error deleting the monitor, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the ID is missing or there's an error deleting the balance monitor.
+// - 200 OK: If the balance monitor is successfully deleted.
 func (a Api) DeleteBalanceMonitor(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
