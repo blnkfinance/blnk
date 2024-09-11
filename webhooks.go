@@ -29,12 +29,20 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+// NewWebhook represents the structure of a webhook notification.
+// It includes an event type and associated payload data.
 type NewWebhook struct {
-	Event   string      `json:"event"`
-	Payload interface{} `json:"data"`
+	Event   string      `json:"event"` // The event type that triggered the webhook.
+	Payload interface{} `json:"data"`  // The data associated with the event.
 }
 
 // getEventFromStatus maps a transaction status to a corresponding event string.
+//
+// Parameters:
+// - status string: The status of the transaction.
+//
+// Returns:
+// - string: The corresponding event string for the transaction status.
 func getEventFromStatus(status string) string {
 	switch strings.ToLower(status) {
 	case strings.ToLower(StatusQueued):
@@ -55,6 +63,12 @@ func getEventFromStatus(status string) string {
 }
 
 // processHTTP sends a webhook notification via HTTP POST request.
+//
+// Parameters:
+// - data NewWebhook: The webhook notification data to send.
+//
+// Returns:
+// - error: An error if the request or processing fails.
 func processHTTP(data NewWebhook) error {
 	conf, err := config.Fetch()
 	if err != nil {
@@ -106,11 +120,16 @@ func processHTTP(data NewWebhook) error {
 	}
 
 	log.Println("Webhook notification sent successfully:", response)
-
 	return nil
 }
 
 // SendWebhook enqueues a webhook notification task.
+//
+// Parameters:
+// - newWebhook NewWebhook: The webhook notification data to enqueue.
+//
+// Returns:
+// - error: An error if the task could not be enqueued.
 func SendWebhook(newWebhook NewWebhook) error {
 	conf, err := config.Fetch()
 	if err != nil {
@@ -137,7 +156,14 @@ func SendWebhook(newWebhook NewWebhook) error {
 	return err
 }
 
-// ProcessWebhook processes a webhook notification task.
+// ProcessWebhook processes a webhook notification task from the queue.
+//
+// Parameters:
+// - _ context.Context: The context for the operation.
+// - task *asynq.Task: The task containing the webhook notification data.
+//
+// Returns:
+// - error: An error if the webhook processing fails.
 func ProcessWebhook(_ context.Context, task *asynq.Task) error {
 	conf, err := config.Fetch()
 	if err != nil {
