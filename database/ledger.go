@@ -26,20 +26,33 @@ import (
 	"github.com/lib/pq"
 )
 
+// CreateLedger inserts a new ledger record into the database, ensuring metadata is properly marshaled into JSON format.
+// It assigns a unique ledger ID with a suffix and captures the current timestamp as the creation time.
+//
+// Parameters:
+// - ledger: The ledger data to be inserted into the database.
+//
+// Returns:
+// - model.Ledger: The created ledger object including the generated LedgerID and creation timestamp.
+// - error: An error if the ledger creation fails, including specific database error handling for conflicts.
 func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
+	// Marshal the metadata into JSON format
 	metaDataJSON, err := json.Marshal(ledger.MetaData)
 	if err != nil {
 		return model.Ledger{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
+	// Assign a unique ledger ID and record the creation time
 	ledger.LedgerID = model.GenerateUUIDWithSuffix("ldg")
 	ledger.CreatedAt = time.Now()
 
+	// Insert the ledger into the database
 	_, err = d.Conn.Exec(`
 		INSERT INTO blnk.ledgers (meta_data, name, ledger_id)
 		VALUES ($1, $2, $3)
 	`, metaDataJSON, ledger.Name, ledger.LedgerID)
 
+	// Handle database errors, specifically unique constraint violations
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)
 		if ok {
@@ -56,7 +69,14 @@ func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 	return ledger, nil
 }
 
+// GetAllLedgers retrieves up to 20 ledger records from the database, unmarshaling their metadata from JSON format.
+// This method is limited to return 20 ledgers at a time to optimize query performance.
+//
+// Returns:
+// - []model.Ledger: A slice of ledgers retrieved from the database.
+// - error: An error if the query fails or if there's an issue processing the results.
 func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
+	// Execute a query to select up to 20 ledgers from the database
 	rows, err := d.Conn.Query(`
 		SELECT ledger_id, name, created_at, meta_data
 		FROM blnk.ledgers
@@ -69,6 +89,7 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 
 	ledgers := []model.Ledger{}
 
+	// Iterate through the query results, scanning each row into a ledger object
 	for rows.Next() {
 		ledger := model.Ledger{}
 		var metaDataJSON []byte
@@ -77,6 +98,7 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan ledger data", err)
 		}
 
+		// Unmarshal the metadata JSON into the ledger's MetaData field
 		err = json.Unmarshal(metaDataJSON, &ledger.MetaData)
 		if err != nil {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
@@ -85,6 +107,7 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 		ledgers = append(ledgers, ledger)
 	}
 
+	// Check for any errors that occurred during the iteration of the rows
 	if err = rows.Err(); err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over ledgers", err)
 	}
@@ -92,9 +115,19 @@ func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
 	return ledgers, nil
 }
 
+// GetLedgerByID retrieves a ledger record from the database by its ID.
+// It handles cases where the ledger is not found and unmarshals the metadata from JSON format.
+//
+// Parameters:
+// - id: The unique ID of the ledger to retrieve.
+//
+// Returns:
+// - *model.Ledger: The ledger object, if found.
+// - error: An error if the ledger is not found or if the query fails.
 func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	ledger := model.Ledger{}
 
+	// Query the database to find the ledger by its ID
 	row := d.Conn.QueryRow(`
 		SELECT ledger_id, name, created_at, meta_data
 		FROM blnk.ledgers
@@ -104,12 +137,14 @@ func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	var metaDataJSON []byte
 	err := row.Scan(&ledger.LedgerID, &ledger.Name, &ledger.CreatedAt, &metaDataJSON)
 	if err != nil {
+		// Handle case where the ledger is not found
 		if err == sql.ErrNoRows {
 			return nil, apierror.NewAPIError(apierror.ErrNotFound, "Ledger not found", err)
 		}
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve ledger", err)
 	}
 
+	// Unmarshal the metadata JSON into the ledger's MetaData field
 	err = json.Unmarshal(metaDataJSON, &ledger.MetaData)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)

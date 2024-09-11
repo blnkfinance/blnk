@@ -28,15 +28,18 @@ import (
 	"github.com/typesense/typesense-go/typesense/api"
 )
 
+// TypesenseClient wraps the Typesense client and provides methods to interact with it.
 type TypesenseClient struct {
 	Client *typesense.Client
 }
 
+// NotificationPayload represents the payload structure for notifications, containing the table and data.
 type NotificationPayload struct {
 	Table string                 `json:"table"`
 	Data  map[string]interface{} `json:"data"`
 }
 
+// NewTypesenseClient initializes and returns a new Typesense client instance.
 func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
 	client := typesense.NewClient(
 		typesense.WithServer(hosts[0]),
@@ -49,6 +52,8 @@ func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
 	return &TypesenseClient{Client: client}
 }
 
+// EnsureCollectionsExist ensures that all the necessary collections exist in the Typesense schema.
+// If a collection doesn't exist, it will create the collection based on the latest schema.
 func (t *TypesenseClient) EnsureCollectionsExist(ctx context.Context) error {
 	collections := []string{"ledgers", "balances", "transactions", "reconciliations", "identities"}
 
@@ -57,11 +62,12 @@ func (t *TypesenseClient) EnsureCollectionsExist(ctx context.Context) error {
 		if _, err := t.CreateCollection(ctx, latestSchema); err != nil {
 			return fmt.Errorf("failed to create collection %s: %w", c, err)
 		}
-
 	}
 	return nil
 }
 
+// CreateCollection creates a collection in Typesense based on the provided schema.
+// If the collection already exists, it will return without error.
 func (t *TypesenseClient) CreateCollection(ctx context.Context, schema *api.CollectionSchema) (*api.CollectionResponse, error) {
 	resp, err := t.Client.Collections().Create(ctx, schema)
 	if err != nil {
@@ -73,10 +79,13 @@ func (t *TypesenseClient) CreateCollection(ctx context.Context, schema *api.Coll
 	return resp, nil
 }
 
+// Search performs a search query on a specific collection with the provided search parameters.
 func (t *TypesenseClient) Search(ctx context.Context, collection string, searchParams *api.SearchCollectionParams) (*api.SearchResult, error) {
 	return t.Client.Collection(collection).Documents().Search(ctx, searchParams)
 }
 
+// HandleNotification processes incoming notifications and updates Typesense collections based on the table and data.
+// It ensures the required fields exist and upserts the data into Typesense.
 func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
 	ctx := context.Background()
 	if err := t.EnsureCollectionsExist(ctx); err != nil {
@@ -93,14 +102,14 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 
 	latestSchema := getLatestSchema(table)
 
-	// Ensure all fields from the latest schema are present
+	// Ensure all fields from the latest schema are present in the data.
 	for _, field := range latestSchema.Fields {
 		if _, ok := data[field.Name]; !ok {
 			data[field.Name] = getDefaultValue(field.Type)
 		}
 	}
 
-	// Handle time fields
+	// Handle time fields and convert them to Unix timestamps if necessary.
 	timeFields := []string{"created_at", "scheduled_for", "inflight_expiry_date", "inflight_expires_at", "completed_at", "started_at"}
 	for _, field := range timeFields {
 		if fieldValue, ok := data[field]; ok {
@@ -108,14 +117,15 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 			case time.Time:
 				data[field] = v.Unix()
 			case int64:
-				// do nothing
+				// Time already in Unix format, no action needed
 			default:
+				// Set current time if value type is not recognized
 				data[field] = time.Now().Unix()
 			}
 		}
 	}
 
-	// Special handling for balances and ledgers
+	// Special handling for balances and ledgers collections
 	if table == "balances" || table == "ledgers" {
 		var idField string
 		if table == "balances" {
@@ -125,7 +135,7 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 		}
 
 		if id, ok := data[idField].(string); ok && id != "" {
-			// Use the Upsert operation with the ID explicitly set
+			// Upsert the document in Typesense with the provided ID
 			data["id"] = id
 			_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
 			if err != nil {
@@ -135,7 +145,7 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 		}
 	}
 
-	// Special handling for reconciliations and identities
+	// Special handling for reconciliations and identities collections
 	if table == "reconciliations" || table == "identities" {
 		var idField string
 		if table == "reconciliations" {
@@ -145,7 +155,7 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 		}
 
 		if id, ok := data[idField].(string); ok && id != "" {
-			// Use the Upsert operation with the ID explicitly set
+			// Upsert the document in Typesense with the provided ID
 			data["id"] = id
 			_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
 			if err != nil {
@@ -155,7 +165,7 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 		}
 	}
 
-	// For other tables or if ID is not present, perform a regular upsert
+	// For other collections, perform a regular upsert.
 	_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
 	if err != nil {
 		return fmt.Errorf("failed to index document in Typesense: %w", err)
@@ -164,6 +174,8 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 	return nil
 }
 
+// MigrateTypeSenseSchema adds new fields from the latest schema to the existing collection schema in Typesense.
+// This is useful when the schema has been updated, and new fields need to be added.
 func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collectionName string) error {
 	collection := t.Client.Collection(collectionName)
 
@@ -179,8 +191,10 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 
 	latestSchema := getLatestSchema(collectionName)
 
+	// Compare the current schema with the latest schema and get any new fields.
 	newFields := compareSchemas(currentSchema, latestSchema)
 
+	// Add each new field to the collection.
 	for _, field := range newFields {
 		updateSchema := &api.CollectionUpdateSchema{
 			Fields: []api.Field{field},
@@ -195,14 +209,18 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 
 	return nil
 }
+
+// compareSchemas compares the old schema with the new schema and returns any new fields that are present in the new schema but not in the old one.
 func compareSchemas(oldSchema, newSchema *api.CollectionSchema) []api.Field {
 	var newFields []api.Field
 	oldFieldMap := make(map[string]bool)
 
+	// Create a map of the old fields.
 	for _, field := range oldSchema.Fields {
 		oldFieldMap[field.Name] = true
 	}
 
+	// Identify new fields that are in the new schema but not in the old schema.
 	for _, field := range newSchema.Fields {
 		if !oldFieldMap[field.Name] {
 			newFields = append(newFields, field)
@@ -212,6 +230,7 @@ func compareSchemas(oldSchema, newSchema *api.CollectionSchema) []api.Field {
 	return newFields
 }
 
+// getDefaultValue returns the default value for a given field type in Typesense.
 func getDefaultValue(fieldType string) interface{} {
 	switch fieldType {
 	case "string":
@@ -229,6 +248,7 @@ func getDefaultValue(fieldType string) interface{} {
 	}
 }
 
+// getLatestSchema returns the latest schema for a given collection name. This function should be updated whenever the schema changes.
 func getLatestSchema(collectionName string) *api.CollectionSchema {
 	switch collectionName {
 	case "ledgers":
@@ -246,6 +266,7 @@ func getLatestSchema(collectionName string) *api.CollectionSchema {
 	}
 }
 
+// getLedgerSchema returns the schema for the "ledgers" collection.
 func getLedgerSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
@@ -261,6 +282,7 @@ func getLedgerSchema() *api.CollectionSchema {
 	}
 }
 
+// getBalanceSchema returns the schema for the "balances" collection.
 func getBalanceSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
@@ -288,6 +310,7 @@ func getBalanceSchema() *api.CollectionSchema {
 	}
 }
 
+// getTransactionSchema returns the schema for the "transactions" collection.
 func getTransactionSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
@@ -320,6 +343,7 @@ func getTransactionSchema() *api.CollectionSchema {
 	}
 }
 
+// getReconciliationSchema returns the schema for the "reconciliations" collection.
 func getReconciliationSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "started_at"
@@ -338,6 +362,7 @@ func getReconciliationSchema() *api.CollectionSchema {
 	}
 }
 
+// getIdentitySchema returns the schema for the "identities" collection.
 func getIdentitySchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"

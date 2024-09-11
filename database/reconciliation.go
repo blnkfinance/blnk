@@ -31,6 +31,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// RecordReconciliation saves a reconciliation record to the database.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - rec: The reconciliation data to be stored.
+// Returns:
+// - An error if the reconciliation record fails to save, otherwise nil.
 func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconciliation) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving reconciliation to db")
 	defer span.End()
@@ -51,6 +57,12 @@ func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconci
 	return nil
 }
 
+// GetReconciliation fetches a reconciliation record from the database based on its ID.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - id: The reconciliation ID to search for.
+// Returns:
+// - A pointer to the reconciliation record if found, or an error if not found or if a failure occurs.
 func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Reconciliation, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching reconciliation from db")
 	defer span.End()
@@ -77,6 +89,16 @@ func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Re
 	return rec, nil
 }
 
+// UpdateReconciliationStatus updates the status, matched transactions, unmatched transactions,
+// and completed_at timestamp of a reconciliation in the database.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - id: The reconciliation ID to update.
+// - status: The new status of the reconciliation.
+// - matchedCount: The number of matched transactions.
+// - unmatchedCount: The number of unmatched transactions.
+// Returns:
+// - An error if the update fails or the reconciliation is not found.
 func (d Datasource) UpdateReconciliationStatus(ctx context.Context, id string, status string, matchedCount, unmatchedCount int) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Updating reconciliation status")
 	defer span.End()
@@ -105,6 +127,12 @@ func (d Datasource) UpdateReconciliationStatus(ctx context.Context, id string, s
 	return nil
 }
 
+// GetReconciliationsByUploadID retrieves all reconciliations associated with a specific upload ID, ordered by the start date in descending order.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - uploadID: The upload ID to filter the reconciliations.
+// Returns:
+// - A slice of Reconciliation pointers and an error if the query fails.
 func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID string) ([]*model.Reconciliation, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching reconciliations by upload ID")
 	defer span.End()
@@ -143,6 +171,15 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 
 	return reconciliations, nil
 }
+
+// RecordMatches batches the saving of match records associated with a specific reconciliation ID.
+// It uses a database transaction to ensure atomicity and consistency of the batch insert operation.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - reconciliationID: The ID of the reconciliation the matches are associated with.
+// - matches: A slice of Match objects to be recorded.
+// Returns:
+// - An error if the operation fails, wrapped in an APIError for consistency.
 func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Batch saving matches to db")
 	defer span.End()
@@ -172,6 +209,14 @@ func (d Datasource) RecordMatches(ctx context.Context, reconciliationID string, 
 	return nil
 }
 
+// RecordUnmatched batches the saving of unmatched external transactions related to a specific reconciliation.
+// It uses a database transaction to ensure atomicity and consistency of the batch insert operation.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - reconciliationID: The ID of the reconciliation the unmatched transactions are associated with.
+// - results: A slice of external transaction IDs (as strings) representing unmatched transactions.
+// Returns:
+// - An error if the operation fails, wrapped in an APIError for consistency.
 func (d Datasource) RecordUnmatched(ctx context.Context, reconciliationID string, results []string) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Batch saving unmatched to db")
 	defer span.End()
@@ -195,7 +240,6 @@ func (d Datasource) RecordUnmatched(ctx context.Context, reconciliationID string
 		if err != nil {
 			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record unmatched match", err)
 		}
-
 	}
 
 	if err := txn.Commit(); err != nil {
@@ -205,6 +249,14 @@ func (d Datasource) RecordUnmatched(ctx context.Context, reconciliationID string
 	return nil
 }
 
+// recordMatchInTransaction inserts a match into the database within a transaction context.
+// It is used to save matches during a reconciliation process, ensuring atomicity in batch operations.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - tx: The current database transaction in which the match is recorded.
+// - match: A pointer to the Match struct containing details of the external and internal transactions, and their match status.
+// Returns:
+// - An error if the operation fails, wrapped in an APIError for consistency.
 func (d Datasource) recordMatchInTransaction(ctx context.Context, tx *sql.Tx, match *model.Match) error {
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO blnk.matches(
@@ -221,6 +273,13 @@ func (d Datasource) recordMatchInTransaction(ctx context.Context, tx *sql.Tx, ma
 	return nil
 }
 
+// RecordMatch inserts a single match into the database.
+// It is used to record the match between external and internal transactions during reconciliation.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - match: A pointer to the Match struct containing details of the external and internal transactions, and their match status.
+// Returns:
+// - An error if the operation fails, wrapped in an APIError for consistency.
 func (d Datasource) RecordMatch(ctx context.Context, match *model.Match) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving match to db")
 	defer span.End()
@@ -239,6 +298,14 @@ func (d Datasource) RecordMatch(ctx context.Context, match *model.Match) error {
 	return nil
 }
 
+// GetMatchesByReconciliationID retrieves all matches associated with a given reconciliation ID.
+// It joins the matches table with external transactions to filter matches by reconciliation ID.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - reconciliationID: The ID of the reconciliation to filter matches.
+// Returns:
+// - A slice of Match structs representing the matched transactions.
+// - An error if the operation fails, wrapped in an APIError for consistency.
 func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.Match, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching matches by reconciliation ID")
 	defer span.End()
@@ -276,6 +343,14 @@ func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconcilia
 	return matches, nil
 }
 
+// RecordExternalTransaction inserts a new external transaction into the database.
+// It associates the transaction with an upload ID and records its details.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - tx: Pointer to the ExternalTransaction struct containing transaction data.
+// - uploadID: The ID of the upload batch this transaction belongs to.
+// Returns:
+// - An error if the operation fails, wrapped in an APIError for consistency.
 func (d Datasource) RecordExternalTransaction(ctx context.Context, tx *model.ExternalTransaction, uploadID string) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving external transaction to db")
 	defer span.End()
@@ -294,6 +369,12 @@ func (d Datasource) RecordExternalTransaction(ctx context.Context, tx *model.Ext
 	return nil
 }
 
+// GetExternalTransactionsByReconciliationID fetches all external transactions associated with a given reconciliation ID.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - reconciliationID: The ID of the reconciliation to fetch external transactions for.
+// Returns:
+// - A slice of ExternalTransaction pointers or an error wrapped in an APIError if the operation fails.
 func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.ExternalTransaction, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching external transactions by reconciliation ID")
 	defer span.End()
@@ -330,15 +411,23 @@ func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Contex
 	return transactions, nil
 }
 
+// RecordMatchingRule saves a new matching rule to the database.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - rule: A pointer to the MatchingRule object containing rule details.
+// Returns:
+// - An error wrapped in an APIError if the operation fails.
 func (d Datasource) RecordMatchingRule(ctx context.Context, rule *model.MatchingRule) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving matching rule to db")
 	defer span.End()
 
+	// Marshal the matching rule criteria into JSON format
 	criteriaJSON, err := json.Marshal(rule.Criteria)
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal matching rule criteria", err)
 	}
 
+	// Execute the SQL insert query to record the rule in the database
 	_, err = d.Conn.ExecContext(ctx,
 		`INSERT INTO blnk.matching_rules(
 			rule_id, created_at, updated_at, name, description, criteria
@@ -353,10 +442,16 @@ func (d Datasource) RecordMatchingRule(ctx context.Context, rule *model.Matching
 	return nil
 }
 
+// GetMatchingRules retrieves all matching rules from the database.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// Returns:
+// - A slice of MatchingRule pointers or an error wrapped in an APIError if the operation fails.
 func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching matching rules")
 	defer span.End()
 
+	// Execute the query to fetch all matching rules
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT id, rule_id, created_at, updated_at, name, description, criteria
 		FROM blnk.matching_rules
@@ -368,6 +463,7 @@ func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule
 
 	var rules []*model.MatchingRule
 
+	// Iterate over the rows to scan each rule into a MatchingRule object
 	for rows.Next() {
 		rule := &model.MatchingRule{}
 		var criteriaJSON []byte
@@ -379,14 +475,17 @@ func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan matching rule data", err)
 		}
 
+		// Unmarshal the criteria JSON into the MatchingRule's Criteria field
 		err = json.Unmarshal(criteriaJSON, &rule.Criteria)
 		if err != nil {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal matching rule criteria", err)
 		}
 
+		// Append the rule to the rules slice
 		rules = append(rules, rule)
 	}
 
+	// Check for any errors that occurred during the iteration
 	if err = rows.Err(); err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over matching rules", err)
 	}
@@ -394,15 +493,23 @@ func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule
 	return rules, nil
 }
 
+// UpdateMatchingRule updates a specific matching rule in the database.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - rule: The matching rule to be updated, including the RuleID, name, description, and criteria.
+// Returns:
+// - An error wrapped in an APIError if the operation fails, or nil if the update is successful.
 func (d Datasource) UpdateMatchingRule(ctx context.Context, rule *model.MatchingRule) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Updating matching rule")
 	defer span.End()
 
+	// Marshal the Criteria field into JSON
 	criteriaJSON, err := json.Marshal(rule.Criteria)
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal matching rule criteria", err)
 	}
 
+	// Execute the SQL update statement
 	result, err := d.Conn.ExecContext(ctx, `
 		UPDATE blnk.matching_rules
 		SET name = $2, description = $3, criteria = $4
@@ -413,11 +520,13 @@ func (d Datasource) UpdateMatchingRule(ctx context.Context, rule *model.Matching
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update matching rule", err)
 	}
 
+	// Check how many rows were affected
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
 	}
 
+	// If no rows were affected, return a NotFound error
 	if rowsAffected == 0 {
 		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Matching rule with ID '%s' not found", rule.RuleID), nil)
 	}
@@ -425,10 +534,17 @@ func (d Datasource) UpdateMatchingRule(ctx context.Context, rule *model.Matching
 	return nil
 }
 
+// DeleteMatchingRule deletes a specific matching rule from the database.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - id: The ID of the matching rule to be deleted.
+// Returns:
+// - An error wrapped in an APIError if the operation fails, or nil if the deletion is successful.
 func (d Datasource) DeleteMatchingRule(ctx context.Context, id string) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Deleting matching rule")
 	defer span.End()
 
+	// Execute the SQL delete statement
 	result, err := d.Conn.ExecContext(ctx, `
 		DELETE FROM blnk.matching_rules
 		WHERE rule_id = $1
@@ -438,11 +554,13 @@ func (d Datasource) DeleteMatchingRule(ctx context.Context, id string) error {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to delete matching rule", err)
 	}
 
+	// Check how many rows were affected
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
 	}
 
+	// If no rows were affected, return a NotFound error
 	if rowsAffected == 0 {
 		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Matching rule with ID '%s' not found", id), nil)
 	}
@@ -450,6 +568,12 @@ func (d Datasource) DeleteMatchingRule(ctx context.Context, id string) error {
 	return nil
 }
 
+// GetMatchingRule retrieves a specific matching rule from the database by its rule ID.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - id: The ID of the matching rule to be retrieved.
+// Returns:
+// - A pointer to the MatchingRule object if found, or an APIError if the operation fails.
 func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.MatchingRule, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching matching rule")
 	defer span.End()
@@ -457,6 +581,7 @@ func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.Matc
 	var rule model.MatchingRule
 	var criteriaJSON []byte
 
+	// Execute SQL query to retrieve the matching rule by rule_id
 	err := d.Conn.QueryRowContext(ctx, `
 		SELECT id, rule_id, created_at, updated_at, name, description, criteria
 		FROM blnk.matching_rules
@@ -467,12 +592,15 @@ func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.Matc
 	)
 
 	if err != nil {
+		// Return NotFound error if no rows are returned
 		if err == sql.ErrNoRows {
 			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Matching rule with ID '%s' not found", id), err)
 		}
+		// Return InternalServer error for any other failure
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matching rule", err)
 	}
 
+	// Unmarshal JSON criteria into the MatchingRule object
 	err = json.Unmarshal(criteriaJSON, &rule.Criteria)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal matching rule criteria", err)
@@ -481,6 +609,16 @@ func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.Matc
 	return &rule, nil
 }
 
+// GetExternalTransactionsPaginated retrieves external transactions based on the provided upload ID
+// with pagination. It first checks the cache, and if the data is not available, it fetches from the
+// database and caches the result for 5 minutes.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - uploadID: The ID of the upload to filter external transactions.
+// - batchSize: The number of transactions to retrieve per batch.
+// - offset: The starting point to retrieve transactions from.
+// Returns:
+// - A slice of ExternalTransaction objects or an APIError if the operation fails.
 func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, uploadID string, batchSize int, offset int64) ([]*model.ExternalTransaction, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching external transactions with pagination")
 	defer span.End()
@@ -488,11 +626,14 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 	// Create a cache key based on the pagination parameters
 	cacheKey := fmt.Sprintf("transactions:external:paginated:%d:%d", batchSize, offset)
 	var transactions []*model.ExternalTransaction
+
+	// Check if the data exists in the cache
 	err := d.Cache.Get(ctx, cacheKey, &transactions)
 	if err == nil && len(transactions) > 0 {
 		return transactions, nil
 	}
 
+	// Query the database for external transactions if not found in cache
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT id, amount, reference, currency, description, date, source
 		FROM blnk.external_transactions
@@ -505,6 +646,7 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 	}
 	defer rows.Close()
 
+	// Iterate through the rows and scan data into the transaction slice
 	for rows.Next() {
 		tx := &model.ExternalTransaction{}
 		err = rows.Scan(
@@ -518,11 +660,12 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 		transactions = append(transactions, tx)
 	}
 
+	// Handle any error encountered during row iteration
 	if err = rows.Err(); err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over external transactions", err)
 	}
 
-	// Cache the fetched data
+	// Cache the fetched data for future queries
 	if len(transactions) > 0 {
 		err = d.Cache.Set(ctx, cacheKey, transactions, 5*time.Minute) // Cache for 5 minutes
 		if err != nil {
@@ -533,17 +676,27 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 	return transactions, nil
 }
 
+// SaveReconciliationProgress saves the progress of a reconciliation process to the database. If a record with the given reconciliation ID
+// already exists, it updates the progress information. The function ensures that the reconciliation progress is stored and updated properly.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - reconciliationID: The ID of the reconciliation to track progress.
+// - progress: A ReconciliationProgress object containing the number of processed transactions and the last processed external transaction ID.
+// Returns:
+// - An error if the operation fails, wrapped in an APIError if needed.
 func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliationID string, progress model.ReconciliationProgress) error {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Saving reconciliation progress to db")
 	defer span.End()
 
+	// Execute the query, with conflict handling to update if the record already exists
 	_, err := d.Conn.ExecContext(ctx, `
 		INSERT INTO blnk.reconciliation_progress (reconciliation_id, processed_count, last_processed_external_txn_id)
-		VALUES ($1, $2,$3)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (reconciliation_id) DO UPDATE
 		SET processed_count = $2, last_processed_external_txn_id = $3
 	`, reconciliationID, progress.ProcessedCount, progress.LastProcessedExternalTxnID)
 
+	// Return an API error if the query fails
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to save reconciliation progress", err)
 	}
@@ -551,17 +704,25 @@ func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliati
 	return nil
 }
 
+// LoadReconciliationProgress retrieves the progress of a reconciliation process from the database. If the reconciliation progress
+// is not found, it returns an empty ReconciliationProgress object.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - reconciliationID: The ID of the reconciliation whose progress is being retrieved.
+// Returns:
+// - A ReconciliationProgress object containing the current progress, or an error wrapped in an APIError if any issues occur.
 func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Loading reconciliation progress from db")
 	defer span.End()
 
-	var progressJSON []byte
+	var progress model.ReconciliationProgress
 	err := d.Conn.QueryRowContext(ctx, `
 		SELECT processed_count, last_processed_external_txn_id
 		FROM blnk.reconciliation_progress
 		WHERE reconciliation_id = $1
-	`, reconciliationID).Scan(&progressJSON)
+	`, reconciliationID).Scan(&progress.ProcessedCount, &progress.LastProcessedExternalTxnID)
 
+	// Handle potential errors
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return model.ReconciliationProgress{}, nil // Return empty progress if not found
@@ -569,15 +730,19 @@ func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliati
 		return model.ReconciliationProgress{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to load reconciliation progress", err)
 	}
 
-	var progress model.ReconciliationProgress
-	err = json.Unmarshal(progressJSON, &progress)
-	if err != nil {
-		return model.ReconciliationProgress{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal reconciliation progress", err)
-	}
-
 	return progress, nil
 }
 
+// FetchAndGroupExternalTransactions retrieves external transactions from the database based on a specific grouping criterion and paginates the results.
+// The function first checks if the results are available in cache, and if not, fetches the data from the database, groups it by the specified criterion, and stores the result in cache.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - uploadID: The ID of the upload to filter external transactions.
+// - groupCriteria: The field by which to group the transactions (e.g., "amount", "currency").
+// - batchSize: The number of transactions to retrieve.
+// - offset: The pagination offset.
+// Returns:
+// - A map of grouped transactions where the key is the group criterion value and the value is a slice of transactions, or an error wrapped in an APIError if any issues occur.
 func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploadID string, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "FetchAndGroupExternalTransactions")
 	defer span.End()
