@@ -18,8 +18,8 @@ import { uuidv4 } from "https://jslib.k6.io/k6-utils/1.4.0/index.js";
 import { check, sleep } from "k6";
 
 export const options = {
-  vus: 5,
-  duration: "3s",
+  vus: 10,
+  duration: "10s",
 };
 
 const randomAmount = Math.floor(Math.random() * (1000 - 100 + 1)) + 100;

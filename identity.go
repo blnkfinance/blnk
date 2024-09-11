@@ -18,22 +18,57 @@ package blnk
 
 import "github.com/jerry-enebeli/blnk/model"
 
+// CreateIdentity creates a new identity in the database.
+//
+// Parameters:
+// - identity model.Identity: The Identity model to be created.
+//
+// Returns:
+// - model.Identity: The created Identity model.
+// - error: An error if the identity could not be created.
 func (l *Blnk) CreateIdentity(identity model.Identity) (model.Identity, error) {
 	return l.datasource.CreateIdentity(identity)
 }
 
+// GetIdentity retrieves an identity by its ID.
+//
+// Parameters:
+// - id string: The ID of the identity to retrieve.
+//
+// Returns:
+// - *model.Identity: A pointer to the Identity model if found.
+// - error: An error if the identity could not be retrieved.
 func (l *Blnk) GetIdentity(id string) (*model.Identity, error) {
 	return l.datasource.GetIdentityByID(id)
 }
 
+// GetAllIdentities retrieves all identities from the database.
+//
+// Returns:
+// - []model.Identity: A slice of Identity models.
+// - error: An error if the identities could not be retrieved.
 func (l *Blnk) GetAllIdentities() ([]model.Identity, error) {
 	return l.datasource.GetAllIdentities()
 }
 
+// UpdateIdentity updates an existing identity in the database.
+//
+// Parameters:
+// - identity *model.Identity: A pointer to the Identity model to be updated.
+//
+// Returns:
+// - error: An error if the identity could not be updated.
 func (l *Blnk) UpdateIdentity(identity *model.Identity) error {
 	return l.datasource.UpdateIdentity(identity)
 }
 
+// DeleteIdentity deletes an identity by its ID.
+//
+// Parameters:
+// - id string: The ID of the identity to delete.
+//
+// Returns:
+// - error: An error if the identity could not be deleted.
 func (l *Blnk) DeleteIdentity(id string) error {
 	return l.datasource.DeleteIdentity(id)
 }

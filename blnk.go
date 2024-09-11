@@ -30,6 +30,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Blnk represents the main struct for the Blnk application.
 type Blnk struct {
 	queue      *Queue
 	search     *TypesenseClient
@@ -45,6 +46,15 @@ const (
 //go:embed sql/*.sql
 var SQLFiles embed.FS
 
+// NewBlnk initializes a new instance of Blnk with the provided database datasource.
+// It fetches the configuration, initializes Redis client, balance tracker, queue, and search client.
+//
+// Parameters:
+// - db database.IDataSource: The datasource for database operations.
+//
+// Returns:
+// - *Blnk: A pointer to the newly created Blnk instance.
+// - error: An error if any of the initialization steps fail.
 func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	configuration, err := config.Fetch()
 	if err != nil {
@@ -62,6 +72,15 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	return newBlnk, nil
 }
 
+// Search performs a search on the specified collection using the provided query parameters.
+//
+// Parameters:
+// - collection string: The name of the collection to search.
+// - query *api.SearchCollectionParams: The search query parameters.
+//
+// Returns:
+// - interface{}: The search results.
+// - error: An error if the search operation fails.
 func (l *Blnk) Search(collection string, query *api.SearchCollectionParams) (interface{}, error) {
 	return l.search.Search(context.Background(), collection, query)
 }

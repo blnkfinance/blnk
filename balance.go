@@ -27,10 +27,16 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// balanceTracer is an OpenTelemetry tracer for tracking balance-related transactions.
 var (
 	balanceTracer = otel.Tracer("blnk.transactions")
 )
 
+// NewBalanceTracker creates a new BalanceTracker instance.
+// It initializes the Balances and Frequencies maps.
+//
+// Returns:
+// - *model.BalanceTracker: A pointer to the newly created BalanceTracker instance.
 func NewBalanceTracker() *model.BalanceTracker {
 	return &model.BalanceTracker{
 		Balances:    make(map[string]*model.Balance),
@@ -38,6 +44,13 @@ func NewBalanceTracker() *model.BalanceTracker {
 	}
 }
 
+// checkBalanceMonitors checks the balance monitors for a given updated balance.
+// It starts a tracing span, fetches the monitors, and checks each monitor's condition.
+// If a condition is met, it sends a webhook notification.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - updatedBalance *model.Balance: A pointer to the updated Balance model.
 func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.Balance) {
 	_, span := balanceTracer.Start(ctx, "CheckBalanceMonitors")
 	defer span.End()
@@ -67,6 +80,18 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 	}
 }
 
+// getOrCreateBalanceByIndicator retrieves a balance by its indicator and currency.
+// If the balance does not exist, it creates a new one.
+// It starts a tracing span, fetches or creates the balance, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - indicator string: The indicator for the balance.
+// - currency string: The currency for the balance.
+//
+// Returns:
+// - *model.Balance: A pointer to the Balance model.
+// - error: An error if the balance could not be retrieved or created.
 func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, currency string) (*model.Balance, error) {
 	ctx, span := balanceTracer.Start(ctx, "GetOrCreateBalanceByIndicator")
 	defer span.End()
@@ -96,6 +121,12 @@ func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, cur
 	return balance, nil
 }
 
+// postBalanceActions performs some actions after a balance has been created.
+// It starts a tracing span, sends the balance to the search index queue, and sends a webhook notification.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balance *model.Balance: A pointer to the newly created Balance model.
 func (l *Blnk) postBalanceActions(ctx context.Context, balance *model.Balance) {
 	_, span := balanceTracer.Start(ctx, "PostBalanceActions")
 	defer span.End()
@@ -118,6 +149,16 @@ func (l *Blnk) postBalanceActions(ctx context.Context, balance *model.Balance) {
 	}()
 }
 
+// CreateBalance creates a new balance.
+// It starts a tracing span, creates the balance, and performs post-creation actions.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balance model.Balance: The Balance model to be created.
+//
+// Returns:
+// - model.Balance: The created Balance model.
+// - error: An error if the balance could not be created.
 func (l *Blnk) CreateBalance(ctx context.Context, balance model.Balance) (model.Balance, error) {
 	ctx, span := balanceTracer.Start(ctx, "CreateBalance")
 	defer span.End()
@@ -132,6 +173,17 @@ func (l *Blnk) CreateBalance(ctx context.Context, balance model.Balance) (model.
 	return balance, nil
 }
 
+// GetBalanceByID retrieves a balance by its ID.
+// It starts a tracing span, fetches the balance, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - id string: The ID of the balance to retrieve.
+// - include []string: A slice of strings specifying additional data to include.
+//
+// Returns:
+// - *model.Balance: A pointer to the Balance model if found.
+// - error: An error if the balance could not be retrieved.
 func (l *Blnk) GetBalanceByID(ctx context.Context, id string, include []string) (*model.Balance, error) {
 	_, span := balanceTracer.Start(ctx, "GetBalanceByID")
 	defer span.End()
@@ -145,6 +197,15 @@ func (l *Blnk) GetBalanceByID(ctx context.Context, id string, include []string) 
 	return balance, nil
 }
 
+// GetAllBalances retrieves all balances.
+// It starts a tracing span, fetches all balances, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+//
+// Returns:
+// - []model.Balance: A slice of Balance models.
+// - error: An error if the balances could not be retrieved.
 func (l *Blnk) GetAllBalances(ctx context.Context) ([]model.Balance, error) {
 	_, span := balanceTracer.Start(ctx, "GetAllBalances")
 	defer span.End()
@@ -158,6 +219,17 @@ func (l *Blnk) GetAllBalances(ctx context.Context) ([]model.Balance, error) {
 	return balances, nil
 }
 
+// CreateMonitor creates a new balance monitor.
+// It starts a tracing span, applies precision to the monitor's condition value, and creates the monitor.
+// It records relevant events and errors.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - monitor model.BalanceMonitor: The BalanceMonitor model to be created.
+//
+// Returns:
+// - model.BalanceMonitor: The created BalanceMonitor model.
+// - error: An error if the monitor could not be created.
 func (l *Blnk) CreateMonitor(ctx context.Context, monitor model.BalanceMonitor) (model.BalanceMonitor, error) {
 	_, span := balanceTracer.Start(ctx, "CreateMonitor")
 	defer span.End()
@@ -174,6 +246,16 @@ func (l *Blnk) CreateMonitor(ctx context.Context, monitor model.BalanceMonitor) 
 	return monitor, nil
 }
 
+// GetMonitorByID retrieves a balance monitor by its ID.
+// It starts a tracing span, fetches the monitor, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - id string: The ID of the monitor to retrieve.
+//
+// Returns:
+// - *model.BalanceMonitor: A pointer to the BalanceMonitor model if found.
+// - error: An error if the monitor could not be retrieved.
 func (l *Blnk) GetMonitorByID(ctx context.Context, id string) (*model.BalanceMonitor, error) {
 	_, span := balanceTracer.Start(ctx, "GetMonitorByID")
 	defer span.End()
@@ -187,6 +269,15 @@ func (l *Blnk) GetMonitorByID(ctx context.Context, id string) (*model.BalanceMon
 	return monitor, nil
 }
 
+// GetAllMonitors retrieves all balance monitors.
+// It starts a tracing span, fetches all monitors, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+//
+// Returns:
+// - []model.BalanceMonitor: A slice of BalanceMonitor models.
+// - error: An error if the monitors could not be retrieved.
 func (l *Blnk) GetAllMonitors(ctx context.Context) ([]model.BalanceMonitor, error) {
 	_, span := balanceTracer.Start(ctx, "GetAllMonitors")
 	defer span.End()
@@ -200,6 +291,16 @@ func (l *Blnk) GetAllMonitors(ctx context.Context) ([]model.BalanceMonitor, erro
 	return monitors, nil
 }
 
+// GetBalanceMonitors retrieves all monitors for a given balance ID.
+// It starts a tracing span, fetches the monitors, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balanceID string: The ID of the balance for which to retrieve monitors.
+//
+// Returns:
+// - []model.BalanceMonitor: A slice of BalanceMonitor models.
+// - error: An error if the monitors could not be retrieved.
 func (l *Blnk) GetBalanceMonitors(ctx context.Context, balanceID string) ([]model.BalanceMonitor, error) {
 	_, span := balanceTracer.Start(ctx, "GetBalanceMonitors")
 	defer span.End()
@@ -213,6 +314,15 @@ func (l *Blnk) GetBalanceMonitors(ctx context.Context, balanceID string) ([]mode
 	return monitors, nil
 }
 
+// UpdateMonitor updates an existing balance monitor.
+// It starts a tracing span, updates the monitor, and records relevant events and errors.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - monitor *model.BalanceMonitor: A pointer to the BalanceMonitor model to be updated.
+//
+// Returns:
+// - error: An error if the monitor could not be updated.
 func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor) error {
 	_, span := balanceTracer.Start(ctx, "UpdateMonitor")
 	defer span.End()
@@ -226,6 +336,15 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	return nil
 }
 
+// DeleteMonitor deletes a balance monitor by its ID.
+// It starts a tracing span, deletes the monitor, and records relevant events and errors.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - id string: The ID of the monitor to delete.
+//
+// Returns:
+// - error: An error if the monitor could not be deleted.
 func (l *Blnk) DeleteMonitor(ctx context.Context, id string) error {
 	_, span := balanceTracer.Start(ctx, "DeleteMonitor")
 	defer span.End()

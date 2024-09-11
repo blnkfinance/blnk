@@ -23,6 +23,13 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 )
 
+// postLedgerActions performs some actions after a ledger has been created.
+// It sends the newly created ledger to the search index queue, which indexes the ledger in Typesense.
+// It also sends a webhook notification.
+//
+// Parameters:
+// - _ context.Context: The context for the operation (not used in this function).
+// - ledger *model.Ledger: A pointer to the newly created Ledger model.
 func (l *Blnk) postLedgerActions(_ context.Context, ledger *model.Ledger) {
 	go func() {
 		err := l.queue.queueIndexData(ledger.LedgerID, "ledgers", ledger)
@@ -39,6 +46,15 @@ func (l *Blnk) postLedgerActions(_ context.Context, ledger *model.Ledger) {
 	}()
 }
 
+// CreateLedger creates a new ledger.
+// It calls postLedgerActions after a successful creation.
+//
+// Parameters:
+// - ledger: A Ledger model representing the ledger to be created.
+//
+// Returns:
+// - model.Ledger: The created Ledger model.
+// - error: An error if the ledger could not be created.
 func (l *Blnk) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 	ledger, err := l.datasource.CreateLedger(ledger)
 	if err != nil {
@@ -48,10 +64,25 @@ func (l *Blnk) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 	return ledger, nil
 }
 
+// GetAllLedgers retrieves all ledgers from the datasource.
+// It returns a slice of Ledger models and an error if the operation fails.
+//
+// Returns:
+// - []model.Ledger: A slice of Ledger models.
+// - error: An error if the ledgers could not be retrieved.
 func (l *Blnk) GetAllLedgers() ([]model.Ledger, error) {
 	return l.datasource.GetAllLedgers()
 }
 
+// GetLedgerByID retrieves a ledger by its ID from the datasource.
+// It returns a pointer to the Ledger model and an error if the operation fails.
+//
+// Parameters:
+// - id: A string representing the ID of the ledger to retrieve.
+//
+// Returns:
+// - *model.Ledger: A pointer to the Ledger model if found.
+// - error: An error if the ledger could not be retrieved.
 func (l *Blnk) GetLedgerByID(id string) (*model.Ledger, error) {
 	return l.datasource.GetLedgerByID(id)
 }

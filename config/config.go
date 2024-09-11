@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package config
 
 import (
@@ -85,12 +86,6 @@ type Notification struct {
 	} `json:"webhook"`
 }
 
-type OtelGrafanaCloud struct {
-	OtelExporterOtlpProtocol string `json:"OTEL_EXPORTER_OTLP_PROTOCOL"`
-	OtelExporterOtlpEndpoint string `json:"OTEL_EXPORTER_OTLP_ENDPOINT"`
-	OtelExporterOtlpHeaders  string `json:"OTEL_EXPORTER_OTLP_HEADERS"`
-}
-
 type Configuration struct {
 	ProjectName             string                        `json:"project_name" envconfig:"BLNK_PROJECT_NAME"`
 	BackupDir               string                        `json:"backup_dir" envconfig:"BLNK_BACKUP_DIR"`
@@ -106,7 +101,6 @@ type Configuration struct {
 	TypeSenseKey            string                        `json:"type_sense_key"`
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
-	OtelGrafanaCloud        OtelGrafanaCloud              `json:"otel_grafana_cloud"`
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
 }
 
@@ -154,27 +148,6 @@ func Fetch() (*Configuration, error) {
 		return nil, errors.New("config not loaded from file. Create a json file called blnk.json with your config ❌")
 	}
 	return c, nil
-}
-
-func SetGrafanaExporterEnvs() error {
-	cnf, err := Fetch()
-	if err != nil {
-		return err
-	}
-	err = os.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", cnf.OtelGrafanaCloud.OtelExporterOtlpProtocol)
-	if err != nil {
-		return err
-	}
-	err = os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", cnf.OtelGrafanaCloud.OtelExporterOtlpEndpoint)
-	if err != nil {
-		return err
-	}
-	err = os.Setenv("OTEL_EXPORTER_OTLP_HEADERS", cnf.OtelGrafanaCloud.OtelExporterOtlpHeaders)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (cnf *Configuration) validateAndAddDefaults() error {

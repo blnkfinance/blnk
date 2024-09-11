@@ -1,6 +1,4 @@
 /*
-Copyright 2024 Blnk Finance Authors.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -36,6 +34,7 @@ type NewWebhook struct {
 	Payload interface{} `json:"data"`
 }
 
+// getEventFromStatus maps a transaction status to a corresponding event string.
 func getEventFromStatus(status string) string {
 	switch strings.ToLower(status) {
 	case strings.ToLower(StatusQueued):
@@ -55,6 +54,7 @@ func getEventFromStatus(status string) string {
 	}
 }
 
+// processHTTP sends a webhook notification via HTTP POST request.
 func processHTTP(data NewWebhook) error {
 	conf, err := config.Fetch()
 	if err != nil {
@@ -110,6 +110,7 @@ func processHTTP(data NewWebhook) error {
 	return nil
 }
 
+// SendWebhook enqueues a webhook notification task.
 func SendWebhook(newWebhook NewWebhook) error {
 	conf, err := config.Fetch()
 	if err != nil {
@@ -124,7 +125,6 @@ func SendWebhook(newWebhook NewWebhook) error {
 	payload, err := json.Marshal(newWebhook)
 	if err != nil {
 		log.Fatal(err)
-
 		return err
 	}
 	taskOptions := []asynq.Option{asynq.Queue(WEBHOOK_QUEUE)}
@@ -137,6 +137,7 @@ func SendWebhook(newWebhook NewWebhook) error {
 	return err
 }
 
+// ProcessWebhook processes a webhook notification task.
 func ProcessWebhook(_ context.Context, task *asynq.Task) error {
 	conf, err := config.Fetch()
 	if err != nil {

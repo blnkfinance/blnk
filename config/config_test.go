@@ -168,32 +168,3 @@ func TestInitConfig(t *testing.T) {
 		t.Errorf("Expected DataSource.Dns to be 'init-config-dns', got '%s'", loadedConfig.DataSource.Dns)
 	}
 }
-
-func TestSetGrafanaExporterEnvs(t *testing.T) {
-	// Load a mock configuration into ConfigStore
-	mockConfig := Configuration{
-		OtelGrafanaCloud: OtelGrafanaCloud{
-			OtelExporterOtlpProtocol: "http/protobuf",
-			OtelExporterOtlpEndpoint: "localhost:4317",
-			OtelExporterOtlpHeaders:  "api-key=12345",
-		},
-	}
-	ConfigStore.Store(&mockConfig)
-
-	// Attempt to set Grafana exporter environment variables
-	err := SetGrafanaExporterEnvs()
-	if err != nil {
-		t.Fatalf("SetGrafanaExporterEnvs failed: %v", err)
-	}
-
-	// Verify the environment variables were set correctly
-	if os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL") != "http/protobuf" {
-		t.Errorf("Expected OTEL_EXPORTER_OTLP_PROTOCOL to be 'http/protobuf', got '%s'", os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))
-	}
-	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "localhost:4317" {
-		t.Errorf("Expected OTEL_EXPORTER_OTLP_ENDPOINT to be 'localhost:4317', got '%s'", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
-	}
-	if os.Getenv("OTEL_EXPORTER_OTLP_HEADERS") != "api-key=12345" {
-		t.Errorf("Expected OTEL_EXPORTER_OTLP_HEADERS to be 'api-key=12345', got '%s'", os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"))
-	}
-}

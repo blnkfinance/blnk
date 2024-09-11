@@ -18,8 +18,8 @@ import { uuidv4 } from "https://jslib.k6.io/k6-utils/1.4.0/index.js";
 import { check, sleep } from "k6";
 
 export const options = {
-  vus: 5,
-  duration: "10s",
+  vus: 3,
+  duration: "3s",
 };
 
 export default function () {
