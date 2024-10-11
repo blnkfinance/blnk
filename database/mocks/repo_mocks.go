@@ -59,8 +59,8 @@ func (m *MockDataSource) UpdateTransactionStatus(ctx context.Context, id string,
 	return args.Error(0)
 }
 
-func (m *MockDataSource) GetAllTransactions(context.Context) ([]model.Transaction, error) {
-	args := m.Called()
+func (m *MockDataSource) GetAllTransactions(ctx context.Context, limit, offset int) ([]model.Transaction, error) {
+	args := m.Called(limit, offset)
 	return args.Get(0).([]model.Transaction), args.Error(1)
 }
 
@@ -96,8 +96,8 @@ func (m *MockDataSource) CreateLedger(ledger model.Ledger) (model.Ledger, error)
 	return args.Get(0).(model.Ledger), args.Error(1)
 }
 
-func (m *MockDataSource) GetAllLedgers() ([]model.Ledger, error) {
-	args := m.Called()
+func (m *MockDataSource) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
+	args := m.Called(limit, offset)
 	return args.Get(0).([]model.Ledger), args.Error(1)
 }
 
@@ -123,8 +123,8 @@ func (m *MockDataSource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	return args.Get(0).(*model.Balance), args.Error(1)
 }
 
-func (m *MockDataSource) GetAllBalances() ([]model.Balance, error) {
-	args := m.Called()
+func (m *MockDataSource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
+	args := m.Called(limit, offset)
 	return args.Get(0).([]model.Balance), args.Error(1)
 }
 

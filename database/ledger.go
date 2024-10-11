@@ -69,21 +69,32 @@ func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 	return ledger, nil
 }
 
-// GetAllLedgers retrieves up to 20 ledger records from the database, unmarshaling their metadata from JSON format.
-// This method is limited to return 20 ledgers at a time to optimize query performance.
+// GetAllLedgers retrieves a paginated list of ledger records from the database, unmarshaling their metadata from JSON format.
+// This method supports pagination and can be used to efficiently retrieve all ledgers over multiple requests.
+//
+// Parameters:
+// - limit: The maximum number of ledgers to return (e.g., 20).
+// - offset: The offset to start fetching ledgers from (for pagination).
 //
 // Returns:
 // - []model.Ledger: A slice of ledgers retrieved from the database.
 // - error: An error if the query fails or if there's an issue processing the results.
-func (d Datasource) GetAllLedgers() ([]model.Ledger, error) {
-	// Execute a query to select up to 20 ledgers from the database
-	rows, err := d.Conn.Query(`
+func (d Datasource) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20 // Default limit to 20 if the provided limit is invalid or too large
+	}
+
+	// Execute a paginated query to select ledgers from the database
+	query := `
 		SELECT ledger_id, name, created_at, meta_data
 		FROM blnk.ledgers
-		LIMIT 20
-	`)
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := d.Conn.Query(query, limit, offset)
 	if err != nil {
-		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve ledgers", err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, err.Error(), err)
 	}
 	defer rows.Close()
 

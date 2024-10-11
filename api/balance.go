@@ -17,6 +17,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	model2 "github.com/jerry-enebeli/blnk/api/model"
 
@@ -80,6 +81,40 @@ func (a Api) GetBalance(c *gin.Context) {
 	includes := c.QueryArray("include")
 
 	resp, err := a.blnk.GetBalanceByID(c.Request.Context(), id, includes)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// GetBalances retrieves a list of balance records with pagination.
+// It extracts the 'limit' and 'offset' query parameters to control pagination,
+// and the 'include' query parameter to fetch additional related information.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error retrieving the balances or invalid query parameters.
+// - 200 OK: If the balances are successfully retrieved.
+func (a Api) GetBalances(c *gin.Context) {
+	// Extract pagination parameters (limit and offset)
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "10")) // Default to 10 if not specified
+	if err != nil || limit <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit value"})
+		return
+	}
+
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0")) // Default to 0 if not specified
+	if err != nil || offset < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid offset value"})
+		return
+	}
+
+	// Fetch balances with pagination
+	resp, err := a.blnk.GetAllBalances(c.Request.Context(), limit, offset)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

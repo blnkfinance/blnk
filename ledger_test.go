@@ -95,9 +95,11 @@ func TestGetAllLedgers(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"ledger_id", "name", "created_at", "meta_data"}).
 		AddRow("ldg_1234567", "general ledger", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers LIMIT 20").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers ORDER BY created_at DESC LIMIT \\$1 OFFSET \\$2").
+		WithArgs(1, 1).
+		WillReturnRows(rows)
 
-	result, err := d.GetAllLedgers()
+	result, err := d.GetAllLedgers(1, 1)
 
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)

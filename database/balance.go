@@ -408,16 +408,22 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 // It processes each balance by scanning the query result, converting numerical fields to big.Int, and parsing metadata from JSON format.
 // The function returns a slice of Balance objects or an error if any issues occur during the database query or data processing.
 //
+// Parameters:
+// - limit: The maximum number of balances to return (e.g., 20).
+// - offset: The offset to start fetching balances from (for pagination).
+//
 // Returns:
 // - []model.Balance: A slice of Balance objects containing balance information such as balance amount, credit balance, debit balance, and metadata.
 // - error: An error if any occurs during the query execution, data retrieval, or JSON parsing.
-func (d Datasource) GetAllBalances() ([]model.Balance, error) {
+func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
+
 	// Execute SQL query to select all balances with a limit of 20 records
 	rows, err := d.Conn.Query(`
 		SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
 		FROM blnk.balances
-		LIMIT 20
-	`)
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
 		return nil, err // Return error if the query fails
 	}
@@ -839,7 +845,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	// Query the database for monitors associated with the given balance ID
 	rows, err := d.Conn.Query(`
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value 
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`, balanceID)
 	if err != nil {
@@ -853,11 +859,12 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 
 	// Iterate through each row in the result set
 	for rows.Next() {
+		var preciseValue int64              // Temporary variable to hold the precise value as int64
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &condition.Precision, &preciseValue)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
@@ -865,6 +872,7 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 
 		// Assign the scanned AlertCondition to the monitor
 		monitor.Condition = condition
+		monitor.Condition.PreciseValue = big.NewInt(preciseValue)
 
 		// Append the monitor to the slice
 		monitors = append(monitors, monitor)

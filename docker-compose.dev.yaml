@@ -22,7 +22,7 @@ services:
       TZ: ${TZ:-Etc/UTC}
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
     ports:
-      - "5001:5001"
+      - "5002:5002"
       - "80:80"
       - "443:443"
     depends_on:

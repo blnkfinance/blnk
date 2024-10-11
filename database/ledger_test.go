@@ -102,10 +102,10 @@ func TestGetAllLedgers_Success(t *testing.T) {
 		AddRow("ldg1", "Ledger 1", time.Now(), metaDataJSON).
 		AddRow("ldg2", "Ledger 2", time.Now(), metaDataJSON)
 
-	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers").
+	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers ORDER BY created_at DESC LIMIT \\$1 OFFSET \\$2").
+		WithArgs(2, 0).
 		WillReturnRows(rows)
-
-	ledgers, err := ds.GetAllLedgers()
+	ledgers, err := ds.GetAllLedgers(2, 0)
 	assert.NoError(t, err)
 	assert.Len(t, ledgers, 2)
 	assert.Equal(t, "Ledger 1", ledgers[0].Name)

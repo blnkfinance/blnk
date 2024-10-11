@@ -1378,12 +1378,12 @@ func (l *Blnk) GetTransaction(ctx context.Context, TransactionID string) (*model
 // Returns:
 // - []model.Transaction: A slice of all retrieved Transaction models.
 // - error: An error if the transactions could not be retrieved.
-func (l *Blnk) GetAllTransactions() ([]model.Transaction, error) {
+func (l *Blnk) GetAllTransactions(limit, offset int) ([]model.Transaction, error) {
 	ctx, span := tracer.Start(context.Background(), "GetAllTransactions")
 	defer span.End()
 
 	// Fetch all transactions from the datasource
-	transactions, err := l.datasource.GetAllTransactions(ctx)
+	transactions, err := l.datasource.GetAllTransactions(ctx, limit, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err

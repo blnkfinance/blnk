@@ -17,6 +17,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	model2 "github.com/jerry-enebeli/blnk/api/model"
 
@@ -95,7 +96,25 @@ func (a Api) GetLedger(c *gin.Context) {
 // - 400 Bad Request: If there's an error retrieving the ledger records.
 // - 200 OK: If the ledger records are successfully retrieved.
 func (a Api) GetAllLedgers(c *gin.Context) {
-	resp, err := a.blnk.GetAllLedgers()
+	// Extract limit and offset from query parameters
+	limit := c.DefaultQuery("limit", "10")  // Default limit is 10 if not provided
+	offset := c.DefaultQuery("offset", "0") // Default offset is 0 if not provided
+
+	// Convert limit and offset to integers
+	limitInt, err := strconv.Atoi(limit)
+	if err != nil || limitInt < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value"})
+		return
+	}
+
+	offsetInt, err := strconv.Atoi(offset)
+	if err != nil || offsetInt < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid offset value"})
+		return
+	}
+
+	// Call the GetAllLedgers method with limit and offset
+	resp, err := a.blnk.GetAllLedgers(limitInt, offsetInt)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

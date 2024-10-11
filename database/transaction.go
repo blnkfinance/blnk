@@ -306,7 +306,7 @@ func (d Datasource) UpdateTransactionStatus(ctx context.Context, id string, stat
 // - ctx: Context for managing the request and tracing.
 // Returns:
 // - A slice of transactions or an error if the retrieval fails.
-func (d Datasource) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
+func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) ([]model.Transaction, error) {
 	// Start a new tracing span for the operation
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetAllTransactions")
 	defer span.End()
@@ -316,7 +316,8 @@ func (d Datasource) GetAllTransactions(ctx context.Context) ([]model.Transaction
 		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
 		FROM blnk.transactions
 		ORDER BY created_at DESC
-	`)
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions", err)

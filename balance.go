@@ -206,11 +206,11 @@ func (l *Blnk) GetBalanceByID(ctx context.Context, id string, include []string) 
 // Returns:
 // - []model.Balance: A slice of Balance models.
 // - error: An error if the balances could not be retrieved.
-func (l *Blnk) GetAllBalances(ctx context.Context) ([]model.Balance, error) {
+func (l *Blnk) GetAllBalances(ctx context.Context, limit, offset int) ([]model.Balance, error) {
 	_, span := balanceTracer.Start(ctx, "GetAllBalances")
 	defer span.End()
 
-	balances, err := l.datasource.GetAllBalances()
+	balances, err := l.datasource.GetAllBalances(limit, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err

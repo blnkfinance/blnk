@@ -49,6 +49,7 @@ func (a Api) Router() *gin.Engine {
 
 	// Balance routes
 	router.POST("/balances", a.CreateBalance)
+	router.GET("/balances", a.GetBalances)
 	router.GET("/balances/:id", a.GetBalance)
 
 	// Balance Monitor routes

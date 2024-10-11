@@ -234,9 +234,11 @@ func TestGetAllBalances(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "created_at", "meta_data"}).
 		AddRow("test-balance", 100, 50, 50, "USD", 1.0, "test-ledger", time.Now(), `{"key":"value"}`)
 
-	mock.ExpectQuery("SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data FROM blnk.balances LIMIT 20").WillReturnRows(rows)
+	mock.ExpectQuery("SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data FROM blnk.balances ORDER BY created_at DESC LIMIT \\$1 OFFSET \\$2").
+		WithArgs(1, 1).
+		WillReturnRows(rows)
 
-	result, err := d.GetAllBalances(context.Background())
+	result, err := d.GetAllBalances(context.Background(), 1, 1)
 
 	assert.NoError(t, err)
 	assert.Len(t, result, 1)
@@ -408,8 +410,8 @@ func TestGetBalanceMonitors(t *testing.T) {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
 	balanceID := gofakeit.UUID()
-	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at"}).
-		AddRow("test-monitor", balanceID, "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now())
+	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}).
+		AddRow("test-monitor", balanceID, "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now(), 100, 100000)
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE balance_id =").WithArgs(balanceID).WillReturnRows(rows)
 

@@ -70,8 +70,8 @@ func (l *Blnk) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 // Returns:
 // - []model.Ledger: A slice of Ledger models.
 // - error: An error if the ledgers could not be retrieved.
-func (l *Blnk) GetAllLedgers() ([]model.Ledger, error) {
-	return l.datasource.GetAllLedgers()
+func (l *Blnk) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
+	return l.datasource.GetAllLedgers(limit, offset)
 }
 
 // GetLedgerByID retrieves a ledger by its ID from the datasource.
