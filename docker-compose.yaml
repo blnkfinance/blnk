@@ -11,11 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-version: '3.8'
+version: "3.8"
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.2}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.3}
     container_name: server
     restart: on-failure
     environment:
@@ -33,10 +33,10 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.2}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.3}
     container_name: worker
     restart: on-failure
-    entrypoint: [ "blnk", "workers"]
+    entrypoint: ["blnk", "workers"]
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
@@ -47,8 +47,8 @@ services:
       - ./blnk.json:/blnk.json
 
   migration:
-    image:  ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.2}
-    entrypoint: [ "blnk", "migrate","up" ]
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.3}
+    entrypoint: ["blnk", "migrate", "up"]
     restart: on-failure
     depends_on:
       - postgres
@@ -73,7 +73,7 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER:-postgres}" ]
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -81,7 +81,8 @@ services:
   typesense:
     image: typesense/typesense:0.23.1
     container_name: typesense
-    command: ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
+    command:
+      ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
     volumes:
       - typesense_data:/data
     logging:
@@ -96,9 +97,9 @@ services:
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
     ports:
-      - "16686:16686"  # Jaeger UI
-      - "4317:4317"    # OTLP gRPC
-      - "4318:4318"    # OTLP HTTP
+      - "16686:16686" # Jaeger UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     healthcheck:
