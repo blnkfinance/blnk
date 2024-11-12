@@ -51,7 +51,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	selectFields = append(selectFields,
 		"b.balance_id", "b.balance", "b.credit_balance", "b.debit_balance",
 		"b.currency", "b.currency_multiplier", "b.ledger_id",
-		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data", "b.inflight_balance", "b.inflight_credit_balance", "b.inflight_debit_balance", "b.version")
+		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data", "b.inflight_balance", "b.inflight_credit_balance", "b.inflight_debit_balance", "b.version", "b.indicator")
 
 	// Conditionally include identity fields
 	if contains(include, "identity") {
@@ -102,13 +102,14 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 
 	// Temporary variables to hold string representations of big.Int fields
 	var balanceStr, creditBalanceStr, debitBalanceStr, inflightBalanceStr, inflightCreditBalanceStr, inflightDebitBalanceStr string
+	var indicator sql.NullString
 
 	var scanArgs []interface{}
 	// Add scan arguments for default balance fields
 	scanArgs = append(scanArgs, &balance.BalanceID, &balanceStr, &creditBalanceStr,
 		&debitBalanceStr, &balance.Currency, &balance.CurrencyMultiplier,
 		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON,
-		&inflightBalanceStr, &inflightCreditBalanceStr, &inflightDebitBalanceStr, &balance.Version)
+		&inflightBalanceStr, &inflightCreditBalanceStr, &inflightDebitBalanceStr, &balance.Version, &indicator)
 
 	// Conditionally scan for identity fields
 	if contains(include, "identity") {
@@ -136,6 +137,13 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 	balance.InflightBalance, _ = new(big.Int).SetString(inflightBalanceStr, 10)
 	balance.InflightCreditBalance, _ = new(big.Int).SetString(inflightCreditBalanceStr, 10)
 	balance.InflightDebitBalance, _ = new(big.Int).SetString(inflightDebitBalanceStr, 10)
+
+	// Handle null indicator field
+	if indicator.Valid {
+		balance.Indicator = indicator.String
+	} else {
+		balance.Indicator = ""
+	}
 
 	// Unmarshal metadata JSON
 	err = json.Unmarshal(metaDataJSON, &balance.MetaData)
@@ -296,8 +304,8 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 
 	// Execute the query
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version 
-	   FROM blnk.balances 
+	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+	   FROM blnk.balances
 	   WHERE balance_id = $1
 	`, id)
 
@@ -362,8 +370,8 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 
 	// Execute query to find the balance with the given indicator and currency
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version 
-	   FROM blnk.balances 
+	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+	   FROM blnk.balances
 	   WHERE indicator = $1 AND currency = $2
 	`, indicator, currency)
 
@@ -416,10 +424,10 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 // - []model.Balance: A slice of Balance objects containing balance information such as balance amount, credit balance, debit balance, and metadata.
 // - error: An error if any occurs during the query execution, data retrieval, or JSON parsing.
 func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
-
+	var indicator sql.NullString
 	// Execute SQL query to select all balances with a limit of 20 records
 	rows, err := d.Conn.Query(`
-		SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+		SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
 		FROM blnk.balances
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -446,6 +454,7 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 		// Scan values from the current row into the balance object and temporary variables
 		err = rows.Scan(
 			&balance.BalanceID,
+			&indicator,
 			&balanceValue,
 			&creditBalanceValue,
 			&debitBalanceValue,
@@ -457,6 +466,14 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 		)
 		if err != nil {
 			return nil, err // Return error if scanning fails
+		}
+
+		fmt.Println("Indicator: ", indicator.String)
+		// Handle null indicator field
+		if indicator.Valid {
+			balance.Indicator = indicator.String
+		} else {
+			balance.Indicator = ""
 		}
 
 		// Convert the scanned int64 values into big.Int for accurate balance calculations
@@ -755,7 +772,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 
 	// Query the database to get the monitor details by MonitorID
 	row := d.Conn.QueryRow(`
-		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at 
+		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
 
@@ -792,7 +809,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	// Query the database for all balance monitors
 	rows, err := d.Conn.Query(`
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at 
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at
 		FROM blnk.balance_monitors
 	`)
 	if err != nil {
@@ -845,7 +862,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	// Query the database for monitors associated with the given balance ID
 	rows, err := d.Conn.Query(`
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value 
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`, balanceID)
 	if err != nil {

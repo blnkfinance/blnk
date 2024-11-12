@@ -34,7 +34,7 @@ type Balance struct {
 	LedgerID              string                 `json:"ledger_id"`
 	IdentityID            string                 `json:"identity_id"`
 	BalanceID             string                 `json:"balance_id"`
-	Indicator             string                 `json:"indicator"`
+	Indicator             string                 `json:"indicator,omitempty"`
 	Currency              string                 `json:"currency"`
 	Identity              *Identity              `json:"identity,omitempty"`
 	Ledger                *Ledger                `json:"ledger,omitempty"`
