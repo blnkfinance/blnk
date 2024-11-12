@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/brianvoe/gofakeit/v6"
 	"github.com/jerry-enebeli/blnk/internal/apierror"
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/lib/pq"
@@ -112,6 +113,7 @@ func TestGetBalanceByID_Success(t *testing.T) {
 		CreditBalance:      big.NewInt(500),
 		DebitBalance:       big.NewInt(500),
 		Currency:           "USD",
+		Indicator:          gofakeit.Name(),
 		CurrencyMultiplier: 100,
 		LedgerID:           "ldg1",
 		MetaData: map[string]interface{}{
@@ -122,9 +124,9 @@ func TestGetBalanceByID_Success(t *testing.T) {
 	metaDataJSON, err := json.Marshal(balance.MetaData)
 	assert.NoError(t, err)
 
-	// Use the exact query in your code
+	// Use the exact query in your code and fix the typo for 'indicator'
 	query := `
-		SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version 
+		SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator
 		FROM ( SELECT * FROM blnk.balances WHERE balance_id = $1 ) AS b
 	`
 
@@ -132,8 +134,8 @@ func TestGetBalanceByID_Success(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("bln1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version",
-		}).AddRow(balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), 1))
+			"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator",
+		}).AddRow(balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator))
 
 	// Mock the transaction commit call
 	mock.ExpectCommit()
