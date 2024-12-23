@@ -102,7 +102,8 @@ func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
 	newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{b.cnf.TypeSense.Dns})
 	err := newSearch.EnsureCollectionsExist(context.Background())
 	if err != nil {
-		log.Fatalf("Failed to ensure collections exist: %v", err)
+		log.Printf("Failed to ensure collections exist: %v", err)
+		return err
 	}
 
 	// Handle the notification and send the payload to the collection for indexing.

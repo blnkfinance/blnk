@@ -122,11 +122,10 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 
 			// Create a new TypeSense client for managing search capabilities in Blnk
 			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
-
 			// Ensure that all necessary collections exist in TypeSense
 			err = newSearch.EnsureCollectionsExist(context.Background())
 			if err != nil {
-				log.Fatalf("Failed to ensure collections exist: %v", err)
+				log.Printf("Failed to ensure collections exist: %v", err)
 			}
 
 			// Migrate TypeSense schema for the necessary collections
