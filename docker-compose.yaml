@@ -15,7 +15,7 @@ version: "3.8"
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.41}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.42}
     container_name: server
     restart: on-failure
     environment:
@@ -33,7 +33,7 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.41}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.42}
     container_name: worker
     restart: on-failure
     entrypoint: ["blnk", "workers"]
@@ -47,7 +47,7 @@ services:
       - ./blnk.json:/blnk.json
 
   migration:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.41}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.42}
     entrypoint: ["blnk", "migrate", "up"]
     restart: on-failure
     depends_on:
@@ -78,20 +78,20 @@ services:
       timeout: 5s
       retries: 5
 
-  typesense:
-    image: typesense/typesense:0.23.1
-    container_name: typesense
-    command:
-      ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
-    volumes:
-      - typesense_data:/data
-    logging:
-      driver: "none"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+  # typesense:
+  #   image: typesense/typesense:0.23.1
+  #   container_name: typesense
+  #   command:
+  #     ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
+  #   volumes:
+  #     - typesense_data:/data
+  #   logging:
+  #     driver: "none"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
 
   jaeger:
     image: jaegertracing/all-in-one:latest
