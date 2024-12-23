@@ -1,0 +1,108 @@
+x-omnistrate-service-plan:
+  name: "Blnk Core Deployment"
+  tenancyType: 'OMNISTRATE_MULTI_TENANCY'
+  deployment:
+    hostedDeployment:
+      AwsAccountId: "008971660390"
+      AwsBootstrapRoleAccountArn: arn:aws:iam::008971660390:role/omnistrate-bootstrap-role
+services:
+  postgres:
+    x-omnistrate-mode-internal: true
+    container_name: pg_server
+    environment:
+      POSTGRES_DB: blnk
+      POSTGRES_PASSWORD: 'password'
+      POSTGRES_USER: postgres
+      TZ: Etc/UTC
+    healthcheck:
+      interval: 10s
+      retries: 5
+      test:
+      - CMD
+      - pg_isready
+      - -U
+      - postgres
+      timeout: 5s
+    image: postgres:alpine3.19
+    restart: on-failure
+    volumes:
+    - pg_data:/var/lib/postgresql/data:rw
+
+  redis:
+    x-omnistrate-mode-internal: true
+    container_name: redis
+    image: redis:7.2.4
+
+  server:
+    labels:
+      - "name=Ledger"
+      - "description=The Ledger Service"
+    container_name: server
+    command: /bin/sh -c "blnk migrate up && blnk start"
+    depends_on:
+      typesense:
+        condition: service_started
+      worker:
+        condition: service_started
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      TZ: Etc/UTC
+    image: jerryenebeli/blnk:0.7.2
+    ports:
+    - published: 5001
+      target: 5001
+    restart: on-failure
+    volumes:
+    - /Users/jerryenebeli/projects/blnk/blnk.json:/blnk.json:rw
+
+  typesense:
+    x-omnistrate-mode-internal: true
+    command:
+    - --data-dir
+    - /data
+    - --api-key=blnk-api-key
+    - --listen-port
+    - '8108'
+    container_name: typesense
+    healthcheck:
+      interval: 30s
+      retries: 5
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8108/health
+      timeout: 10s
+    image: typesense/typesense:0.23.1
+    logging:
+      driver: none
+    volumes:
+    - typesense_data:/data:rw
+
+  worker:
+    x-omnistrate-mode-internal: true
+    container_name: worker
+    depends_on:
+      jaeger:
+        condition: service_started
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    entrypoint:
+    - blnk
+    - workers
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    image: jerryenebeli/blnk:0.7.2
+    restart: on-failure
+    volumes:
+    - /Users/jerryenebeli/projects/blnk/blnk.json:/blnk.json:rw
+version: '3.8'
+volumes:
+  pg_data: {}
+  typesense_data: {}
