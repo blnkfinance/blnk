@@ -15,7 +15,7 @@ version: "3.8"
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.4}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.41}
     container_name: server
     restart: on-failure
     environment:
@@ -33,7 +33,7 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.4}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.41}
     container_name: worker
     restart: on-failure
     entrypoint: ["blnk", "workers"]
@@ -47,7 +47,7 @@ services:
       - ./blnk.json:/blnk.json
 
   migration:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.4}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.41}
     entrypoint: ["blnk", "migrate", "up"]
     restart: on-failure
     depends_on:
