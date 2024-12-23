@@ -19,7 +19,6 @@ package blnk
 import (
 	"context"
 	"embed"
-	"fmt"
 
 	"github.com/typesense/typesense-go/typesense/api"
 
@@ -60,7 +59,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	if err != nil {
 		return nil, err
 	}
-	redisClient, err := redis_db.NewRedisClient([]string{fmt.Sprintf("redis://%s", configuration.Redis.Dns)})
+	redisClient, err := redis_db.NewRedisClient([]string{configuration.Redis.Dns})
 	if err != nil {
 		return nil, err
 	}

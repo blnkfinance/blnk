@@ -19,16 +19,23 @@ package blnk
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"testing"
 
 	"github.com/hibiken/asynq"
 	"github.com/jerry-enebeli/blnk/config"
+	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
-	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
-	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
+	redisOption, err := redis_db.ParseRedisURL("localhost:6379")
+	if err != nil {
+		log.Fatalf("Error parsing Redis URL: %v", err)
+	}
+	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB}
+	client := asynq.NewClient(queueOptions)
+	inspector := asynq.NewInspector(queueOptions)
 
 	q := NewQueue(&config.Configuration{
 		Redis: config.RedisConfig{
@@ -39,7 +46,7 @@ func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
 	q.Inspector = inspector
 
 	transaction := getTransactionMock(100, false)
-	_, err := json.Marshal(transaction)
+	_, err = json.Marshal(transaction)
 	assert.NoError(t, err)
 
 	err = q.Enqueue(context.Background(), &transaction)

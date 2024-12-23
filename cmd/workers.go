@@ -29,6 +29,7 @@ import (
 
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/config"
+	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 	trace "github.com/jerry-enebeli/blnk/internal/traces"
 	"github.com/jerry-enebeli/blnk/model"
 
@@ -173,8 +174,13 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			// Initialize the Asynq server with Redis as the backend and the queue configuration.
+			redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
+			if err != nil {
+				log.Fatalf("Error parsing Redis URL: %v", err)
+			}
+
 			srv := asynq.NewServer(
-				asynq.RedisClientOpt{Addr: conf.Redis.Dns},
+				asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB},
 				asynq.Config{
 					Concurrency: 1, // Set the concurrency level for processing tasks
 					Queues:      queues,

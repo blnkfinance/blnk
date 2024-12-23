@@ -18,7 +18,6 @@ package cache
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/go-redis/cache/v9"
@@ -71,7 +70,7 @@ func NewCache() (Cache, error) {
 	}
 
 	// Initialize Redis cache with the configured Redis DNS
-	ca, err := newRedisCache([]string{fmt.Sprintf("redis://%s", cfg.Redis.Dns)})
+	ca, err := newRedisCache([]string{cfg.Redis.Dns})
 	if err != nil {
 		return nil, err
 	}

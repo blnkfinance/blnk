@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,10 @@ limitations under the License.
 package redis_db
 
 import (
+	"crypto/tls"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -27,6 +30,57 @@ import (
 type Redis struct {
 	addresses []string              // Redis server addresses
 	client    redis.UniversalClient // Redis universal client (works for both single and clustered Redis)
+}
+
+// parseRedisURL parses a Redis URL into Redis options, handling various URL formats
+// including Azure Redis Cache URLs with special characters in passwords.
+func ParseRedisURL(rawURL string) (*redis.Options, error) {
+	// Don't modify docker-style addresses (e.g. redis:6379)
+	if strings.Count(rawURL, ":") == 1 && !strings.Contains(rawURL, "@") && !strings.Contains(rawURL, "//") {
+		return &redis.Options{
+			Addr: rawURL,
+		}, nil
+	}
+
+	// Handle URLs that have redis:// prefix with password but no colon
+	if strings.HasPrefix(rawURL, "redis://") && strings.Contains(rawURL, "@") {
+		parts := strings.Split(strings.TrimPrefix(rawURL, "redis://"), "@")
+		if len(parts) == 2 {
+			rawURL = fmt.Sprintf("redis://:%s@%s", parts[0], parts[1])
+		}
+	}
+
+	// Parse the URL
+	opts, err := redis.ParseURL(rawURL)
+	if err != nil {
+		// If ParseURL fails, try manual parsing
+		host := rawURL
+		var password string
+
+		// Extract password if present
+		if strings.Contains(rawURL, "@") {
+			parts := strings.Split(rawURL, "@")
+			if len(parts) == 2 {
+				password = strings.TrimPrefix(parts[0], "redis://")
+				host = parts[1]
+			}
+		}
+
+		opts = &redis.Options{
+			Addr:     host,
+			Password: password,
+			DB:       0,
+		}
+
+		// Enable TLS for Azure Redis
+		if strings.Contains(host, "redis.cache.windows.net") {
+			opts.TLSConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+		}
+	}
+
+	return opts, nil
 }
 
 // NewRedisClient creates a new Redis client connection based on the provided list of addresses.
@@ -48,7 +102,7 @@ func NewRedisClient(addresses []string) (*Redis, error) {
 
 	// If a single address is provided, use it to create a standalone Redis client
 	if len(addresses) == 1 {
-		opts, err := redis.ParseURL(addresses[0])
+		opts, err := ParseRedisURL(addresses[0])
 		if err != nil {
 			return nil, err
 		}
@@ -56,8 +110,37 @@ func NewRedisClient(addresses []string) (*Redis, error) {
 		client = redis.NewClient(opts)
 	} else {
 		// For multiple addresses, create a Redis Cluster client
+		// Parse each URL for cluster setup
+		var clusterAddrs []string
+		var password string
+		useTLS := false
+
+		for _, addr := range addresses {
+			opts, err := ParseRedisURL(addr)
+			if err != nil {
+				return nil, err
+			}
+			clusterAddrs = append(clusterAddrs, opts.Addr)
+
+			// Use the password from the first URL that has one
+			if password == "" && opts.Password != "" {
+				password = opts.Password
+			}
+
+			// Enable TLS if any URL requires it
+			if opts.TLSConfig != nil {
+				useTLS = true
+			}
+		}
+		var tlsConfig *tls.Config
+		if useTLS {
+			tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+
 		client = redis.NewUniversalClient(&redis.UniversalOptions{
-			Addrs: addresses,
+			Addrs:     clusterAddrs,
+			Password:  password,
+			TLSConfig: tlsConfig,
 		})
 	}
 
