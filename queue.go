@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jerry-enebeli/blnk/config"
+	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 
 	"github.com/hibiken/asynq"
 	"github.com/jerry-enebeli/blnk/model"
@@ -57,8 +58,13 @@ type TransactionTypePayload struct {
 // Returns:
 // - *Queue: A pointer to the newly created Queue instance.
 func NewQueue(conf *config.Configuration) *Queue {
-	client := asynq.NewClient(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
-	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
+	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
+	if err != nil {
+		log.Fatalf("Error parsing Redis URL: %v", err)
+	}
+	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB}
+	client := asynq.NewClient(queueOptions)
+	inspector := asynq.NewInspector(queueOptions)
 	return &Queue{
 		Client:    client,
 		Inspector: inspector,
