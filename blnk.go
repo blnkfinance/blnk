@@ -83,3 +83,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 func (l *Blnk) Search(collection string, query *api.SearchCollectionParams) (interface{}, error) {
 	return l.search.Search(context.Background(), collection, query)
 }
+
+func (l *Blnk) MultiSearch(collection string, query api.MultiSearchSearchesParameter) (interface{}, error) {
+	return l.search.MultiSearch(context.Background(), query)
+}

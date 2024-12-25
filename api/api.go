@@ -91,6 +91,9 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/reconciliation/matching-rules", a.CreateMatchingRule)
 	router.POST("/reconciliation/start", a.StartReconciliation)
 
+	// Multi-search route
+	router.POST("/multi-search", a.MultiSearchHandler)
+
 	return a.router
 }
 
@@ -163,4 +166,23 @@ func (a Api) Search(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// MultiSearchHandler handles multi-search requests.
+func (a Api) MultiSearchHandler(c *gin.Context) {
+	var req struct {
+		Searches api.MultiSearchSearchesParameter `json:"searches"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// result, err := a.blnk.MultiSearch(req.Searches)
+	// if err != nil {
+	// 	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// 	return
+	// }
+
+	// c.JSON(http.StatusOK, result)
 }

@@ -84,6 +84,11 @@ func (t *TypesenseClient) Search(ctx context.Context, collection string, searchP
 	return t.Client.Collection(collection).Documents().Search(ctx, searchParams)
 }
 
+// MultiSearch performs multiple search queries in a single request.
+func (t *TypesenseClient) MultiSearch(ctx context.Context, searches api.MultiSearchSearchesParameter) (*api.MultiSearchResult, error) {
+	return t.Client.MultiSearch.Perform(ctx, &api.MultiSearchParams{}, searches)
+}
+
 // HandleNotification processes incoming notifications and updates Typesense collections based on the table and data.
 // It ensures the required fields exist and upserts the data into Typesense.
 func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
