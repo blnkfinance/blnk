@@ -78,20 +78,20 @@ services:
       timeout: 5s
       retries: 5
 
-  # typesense:
-  #   image: typesense/typesense:0.23.1
-  #   container_name: typesense
-  #   command:
-  #     ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
-  #   volumes:
-  #     - typesense_data:/data
-  #   logging:
-  #     driver: "none"
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 5
+  typesense:
+    image: typesense/typesense:0.23.1
+    container_name: typesense
+    command:
+      ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
+    volumes:
+      - typesense_data:/data
+    logging:
+      driver: "none"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   jaeger:
     image: jaegertracing/all-in-one:latest
