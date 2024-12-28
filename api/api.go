@@ -83,8 +83,9 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/backup", a.BackupDB)
 	router.GET("/backup-s3", a.BackupDBS3)
 
-	// Search route
+	// Search routes
 	router.POST("/search/:collection", a.Search)
+	router.POST("/multi-search", a.MultiSearch) // Add this line
 
 	// Reconciliation routes
 	router.POST("/reconciliation/upload", a.UploadExternalData)
@@ -92,7 +93,7 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/reconciliation/start", a.StartReconciliation)
 
 	// Multi-search route
-	router.POST("/multi-search", a.MultiSearchHandler)
+	router.POST("/multi-search", a.MultiSearch)
 
 	return a.router
 }
@@ -168,21 +169,28 @@ func (a Api) Search(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-// MultiSearchHandler handles multi-search requests.
-func (a Api) MultiSearchHandler(c *gin.Context) {
-	var req struct {
-		Searches api.MultiSearchSearchesParameter `json:"searches"`
-	}
-	if err := c.BindJSON(&req); err != nil {
+// MultiSearch performs a multi-search query.
+// It binds the incoming JSON request to a MultiSearchParameter object,
+// executes the multi-search query, and responds with the search results.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON or performing the search.
+// - 200 OK: If the multi-search query is successfully executed and results are returned.
+func (a Api) MultiSearch(c *gin.Context) {
+	var searchRequests api.MultiSearchSearchesParameter
+	if err := c.BindJSON(&searchRequests); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// result, err := a.blnk.MultiSearch(req.Searches)
-	// if err != nil {
-	// 	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	// 	return
-	// }
+	resp, err := a.blnk.MultiSearch(&searchRequests)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-	// c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, resp)
 }

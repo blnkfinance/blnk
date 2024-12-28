@@ -84,6 +84,7 @@ func (l *Blnk) Search(collection string, query *api.SearchCollectionParams) (int
 	return l.search.Search(context.Background(), collection, query)
 }
 
-func (l *Blnk) MultiSearch(collection string, query api.MultiSearchSearchesParameter) (interface{}, error) {
-	return l.search.MultiSearch(context.Background(), query)
+// MultiSearch performs a multi-search operation across collections.
+func (l *Blnk) MultiSearch(searchParams *api.MultiSearchSearchesParameter) (*api.MultiSearchResult, error) {
+	return l.search.MultiSearch(context.Background(), *searchParams)
 }
