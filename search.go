@@ -91,7 +91,7 @@ type MultiSearchRequest struct {
 
 // Remove the incorrect MultiSearch method and replace with this:
 func (t *TypesenseClient) MultiSearch(ctx context.Context, searchRequests api.MultiSearchSearchesParameter) (*api.MultiSearchResult, error) {
-	return t.Client.MultiSearch.Perform(ctx, nil, searchRequests)
+	return t.Client.MultiSearch.Perform(ctx, &api.MultiSearchParams{}, searchRequests)
 }
 
 // HandleNotification processes incoming notifications and updates Typesense collections based on the table and data.

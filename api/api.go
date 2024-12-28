@@ -85,15 +85,12 @@ func (a Api) Router() *gin.Engine {
 
 	// Search routes
 	router.POST("/search/:collection", a.Search)
-	router.POST("/multi-search", a.MultiSearch) // Add this line
+	router.POST("/multi-search", a.MultiSearch)
 
 	// Reconciliation routes
 	router.POST("/reconciliation/upload", a.UploadExternalData)
 	router.POST("/reconciliation/matching-rules", a.CreateMatchingRule)
 	router.POST("/reconciliation/start", a.StartReconciliation)
-
-	// Multi-search route
-	router.POST("/multi-search", a.MultiSearch)
 
 	return a.router
 }
