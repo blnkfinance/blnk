@@ -16,7 +16,30 @@ limitations under the License.
 
 package blnk
 
-import "github.com/jerry-enebeli/blnk/model"
+import (
+	"context"
+
+	"github.com/jerry-enebeli/blnk/internal/notification"
+	"github.com/jerry-enebeli/blnk/model"
+)
+
+// postIdentityActions performs actions after an identity has been created.
+// It sends the newly created identity to the search index queue and sends a webhook notification.
+func (l *Blnk) postIdentityActions(_ context.Context, identity *model.Identity) {
+	go func() {
+		err := l.queue.queueIndexData(identity.IdentityID, "identities", identity)
+		if err != nil {
+			notification.NotifyError(err)
+		}
+		err = SendWebhook(NewWebhook{
+			Event:   "identity.created",
+			Payload: identity,
+		})
+		if err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
 
 // CreateIdentity creates a new identity in the database.
 //
@@ -27,7 +50,12 @@ import "github.com/jerry-enebeli/blnk/model"
 // - model.Identity: The created Identity model.
 // - error: An error if the identity could not be created.
 func (l *Blnk) CreateIdentity(identity model.Identity) (model.Identity, error) {
-	return l.datasource.CreateIdentity(identity)
+	identity, err := l.datasource.CreateIdentity(identity)
+	if err != nil {
+		return model.Identity{}, err
+	}
+	l.postIdentityActions(context.Background(), &identity)
+	return identity, nil
 }
 
 // GetIdentity retrieves an identity by its ID.
