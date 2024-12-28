@@ -15,9 +15,12 @@ version: "3.8"
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.42}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.8.0}
     container_name: server
     restart: on-failure
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "blnk migrate up && blnk start"
     environment:
       TZ: ${TZ:-Etc/UTC}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
@@ -33,7 +36,7 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.42}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.8.0}
     container_name: worker
     restart: on-failure
     entrypoint: ["blnk", "workers"]
@@ -43,15 +46,6 @@ services:
       - redis
       - postgres
       - jaeger
-    volumes:
-      - ./blnk.json:/blnk.json
-
-  migration:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.7.42}
-    entrypoint: ["blnk", "migrate", "up"]
-    restart: on-failure
-    depends_on:
-      - postgres
     volumes:
       - ./blnk.json:/blnk.json
 

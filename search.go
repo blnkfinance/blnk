@@ -120,7 +120,7 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 	}
 
 	// Handle time fields and convert them to Unix timestamps if necessary.
-	timeFields := []string{"created_at", "scheduled_for", "inflight_expiry_date", "inflight_expires_at", "completed_at", "started_at"}
+	timeFields := []string{"created_at", "dob", "scheduled_for", "inflight_expiry_date", "inflight_expires_at", "completed_at", "started_at"}
 	for _, field := range timeFields {
 		if fieldValue, ok := data[field]; ok {
 			switch v := fieldValue.(type) {
