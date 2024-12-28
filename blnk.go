@@ -83,3 +83,8 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 func (l *Blnk) Search(collection string, query *api.SearchCollectionParams) (interface{}, error) {
 	return l.search.Search(context.Background(), collection, query)
 }
+
+// MultiSearch performs a multi-search operation across collections.
+func (l *Blnk) MultiSearch(searchParams *api.MultiSearchSearchesParameter) (*api.MultiSearchResult, error) {
+	return l.search.MultiSearch(context.Background(), *searchParams)
+}

@@ -84,6 +84,16 @@ func (t *TypesenseClient) Search(ctx context.Context, collection string, searchP
 	return t.Client.Collection(collection).Documents().Search(ctx, searchParams)
 }
 
+// MultiSearchRequest represents a request for multiple searches
+type MultiSearchRequest struct {
+	Searches []api.MultiSearchSearchesParameter `json:"searches"`
+}
+
+// Remove the incorrect MultiSearch method and replace with this:
+func (t *TypesenseClient) MultiSearch(ctx context.Context, searchRequests api.MultiSearchSearchesParameter) (*api.MultiSearchResult, error) {
+	return t.Client.MultiSearch.Perform(ctx, &api.MultiSearchParams{}, searchRequests)
+}
+
 // HandleNotification processes incoming notifications and updates Typesense collections based on the table and data.
 // It ensures the required fields exist and upserts the data into Typesense.
 func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
