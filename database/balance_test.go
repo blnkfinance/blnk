@@ -17,8 +17,10 @@ limitations under the License.
 package database
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"regexp"
 	"testing"
@@ -163,6 +165,265 @@ func TestGetBalanceByID_NotFound(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 
 	_, err = ds.GetBalanceByID("bln1", []string{})
+	assert.Error(t, err)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestUpdateBalances_Success(t *testing.T) {
+	// Setup mock database
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		BalanceID:          "bln1",
+		Balance:            big.NewInt(1000),
+		CreditBalance:      big.NewInt(500),
+		DebitBalance:       big.NewInt(500),
+		Version:            1,
+		Currency:           "USD",
+		CurrencyMultiplier: 100,
+	}
+
+	destBalance := &model.Balance{
+		BalanceID:          "bln2",
+		Balance:            big.NewInt(2000),
+		CreditBalance:      big.NewInt(1000),
+		DebitBalance:       big.NewInt(1000),
+		Version:            1,
+		Currency:           "USD",
+		CurrencyMultiplier: 100,
+	}
+
+	// Set up expectations
+	mock.ExpectBegin()
+
+	// Expect source balance update
+	mock.ExpectExec(regexp.QuoteMeta(`
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
+        WHERE balance_id = $1 AND version = $13
+    `)).WithArgs(
+		sourceBalance.BalanceID,
+		sourceBalance.Balance.String(),
+		sourceBalance.CreditBalance.String(),
+		sourceBalance.DebitBalance.String(),
+		sourceBalance.InflightBalance.String(),
+		sourceBalance.InflightCreditBalance.String(),
+		sourceBalance.InflightDebitBalance.String(),
+		sourceBalance.Currency,
+		sourceBalance.CurrencyMultiplier,
+		sourceBalance.LedgerID,
+		sourceBalance.CreatedAt,
+		sourceBalance.Version,
+	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Expect destination balance update
+	mock.ExpectExec(regexp.QuoteMeta(`
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
+        WHERE balance_id = $1 AND version = $13
+    `)).WithArgs(
+		destBalance.BalanceID,
+		destBalance.Balance.String(),
+		destBalance.CreditBalance.String(),
+		destBalance.DebitBalance.String(),
+		destBalance.InflightBalance.String(),
+		destBalance.InflightCreditBalance.String(),
+		destBalance.InflightDebitBalance.String(),
+		destBalance.Currency,
+		destBalance.CurrencyMultiplier,
+		destBalance.LedgerID,
+		destBalance.CreatedAt,
+		destBalance.Version,
+	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectCommit()
+
+	// Execute the function
+	err = ds.UpdateBalances(ctx, sourceBalance, destBalance)
+	assert.NoError(t, err)
+
+	// Verify that all expectations were met
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestUpdateBalances_BeginTxError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	mock.ExpectBegin().WillReturnError(fmt.Errorf("begin transaction error"))
+
+	err = ds.UpdateBalances(ctx, &model.Balance{}, &model.Balance{})
+	assert.Error(t, err)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestUpdateBalances_SourceUpdateError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	sourceBalance := &model.Balance{
+		BalanceID: "bln1",
+		Version:   1,
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE blnk.balances`)).
+		WithArgs(
+			sourceBalance.BalanceID,
+			"0",              // Balance string
+			"0",              // CreditBalance string
+			"0",              // DebitBalance string
+			"0",              // InflightBalance string
+			"0",              // InflightCreditBalance string
+			"0",              // InflightDebitBalance string
+			"",               // Currency
+			0,                // CurrencyMultiplier
+			"",               // LedgerID
+			sqlmock.AnyArg(), // CreatedAt
+			sourceBalance.Version,
+		).
+		WillReturnError(fmt.Errorf("source update error"))
+	mock.ExpectRollback()
+
+	err = ds.UpdateBalances(ctx, sourceBalance, &model.Balance{})
+	assert.Error(t, err)
+}
+
+func TestUpdateBalances_DestUpdateError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	sourceBalance := &model.Balance{
+		BalanceID: "bln1",
+		Version:   1,
+	}
+	destBalance := &model.Balance{
+		BalanceID: "bln2",
+		Version:   1,
+	}
+
+	mock.ExpectBegin()
+	// Expect successful source balance update
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE blnk.balances`)).
+		WithArgs(
+			sourceBalance.BalanceID,
+			"0",              // Balance string
+			"0",              // CreditBalance string
+			"0",              // DebitBalance string
+			"0",              // InflightBalance string
+			"0",              // InflightCreditBalance string
+			"0",              // InflightDebitBalance string
+			"",               // Currency
+			0,                // CurrencyMultiplier
+			"",               // LedgerID
+			sqlmock.AnyArg(), // CreatedAt
+			sourceBalance.Version,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Expect failed destination balance update
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE blnk.balances`)).
+		WithArgs(
+			destBalance.BalanceID,
+			"0",              // Balance string
+			"0",              // CreditBalance string
+			"0",              // DebitBalance string
+			"0",              // InflightBalance string
+			"0",              // InflightCreditBalance string
+			"0",              // InflightDebitBalance string
+			"",               // Currency
+			0,                // CurrencyMultiplier
+			"",               // LedgerID
+			sqlmock.AnyArg(), // CreatedAt
+			destBalance.Version,
+		).
+		WillReturnError(fmt.Errorf("destination update error"))
+	mock.ExpectRollback()
+
+	err = ds.UpdateBalances(ctx, sourceBalance, destBalance)
+	assert.Error(t, err)
+}
+
+func TestUpdateBalances_CommitError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	sourceBalance := &model.Balance{
+		BalanceID: "bln1",
+		Version:   1,
+	}
+	destBalance := &model.Balance{
+		BalanceID: "bln2",
+		Version:   1,
+	}
+
+	mock.ExpectBegin()
+	// Expect successful source balance update
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE blnk.balances`)).
+		WithArgs(
+			sourceBalance.BalanceID,
+			"0",              // Balance string
+			"0",              // CreditBalance string
+			"0",              // DebitBalance string
+			"0",              // InflightBalance string
+			"0",              // InflightCreditBalance string
+			"0",              // InflightDebitBalance string
+			"",               // Currency
+			0,                // CurrencyMultiplier
+			"",               // LedgerID
+			sqlmock.AnyArg(), // CreatedAt
+			sourceBalance.Version,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Expect successful destination balance update
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE blnk.balances`)).
+		WithArgs(
+			destBalance.BalanceID,
+			"0",              // Balance string
+			"0",              // CreditBalance string
+			"0",              // DebitBalance string
+			"0",              // InflightBalance string
+			"0",              // InflightCreditBalance string
+			"0",              // InflightDebitBalance string
+			"",               // Currency
+			0,                // CurrencyMultiplier
+			"",               // LedgerID
+			sqlmock.AnyArg(), // CreatedAt
+			destBalance.Version,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectCommit().WillReturnError(fmt.Errorf("commit error"))
+
+	err = ds.UpdateBalances(ctx, sourceBalance, destBalance)
 	assert.Error(t, err)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)

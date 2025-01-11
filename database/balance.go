@@ -625,21 +625,15 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 // Returns:
 // - error: Returns an error if the update operation fails at any point, including issues with metadata marshalling, query execution, or optimistic locking.
 func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) error {
-	// Marshal the MetaData into JSON format
-	metaDataJSON, err := json.Marshal(balance.MetaData)
-	if err != nil {
-		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
-	}
-
 	// SQL query to update the balance
 	query := `
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, meta_data = $12, version = version + 1
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
         WHERE balance_id = $1 AND version = $13
     `
 
 	// Execute the update query within the provided transaction context
-	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.InflightBalance.String(), balance.InflightCreditBalance.String(), balance.InflightDebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON, balance.Version)
+	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.InflightBalance.String(), balance.InflightCreditBalance.String(), balance.InflightDebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, balance.Version)
 	if err != nil {
 		// Return an error if the query execution fails
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
