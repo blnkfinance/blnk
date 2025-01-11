@@ -1233,59 +1233,92 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	return transaction, nil
 }
 
+// prepareTransactionForQueue prepares a transaction for queueing by setting status, metadata,
+// and resolving source/destination balances.
+func (l *Blnk) prepareTransactionForQueue(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+	ctx, span := tracer.Start(ctx, "PrepareTransactionForQueue")
+	defer span.End()
+
+	setTransactionStatus(transaction)
+	setTransactionMetadata(transaction)
+
+	// Get and update source/destination
+	sourceBalance, destinationBalance, err := l.getSourceAndDestination(ctx, transaction)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to get source/destination balances: %w", err)
+	}
+
+	transaction.Source = sourceBalance.BalanceID
+	transaction.Destination = destinationBalance.BalanceID
+
+	return transaction, nil
+}
+
+// createQueueCopy creates a copy of the transaction for queueing with new IDs and references
+func createQueueCopy(persistedTxn *model.Transaction, originalRef string) *model.Transaction {
+	queueTxn := *persistedTxn
+	queueTxn.TransactionID = model.GenerateUUIDWithSuffix("txn")
+	queueTxn.ParentTransaction = persistedTxn.TransactionID
+	queueTxn.Reference = fmt.Sprintf("%s_q", originalRef)
+	return &queueTxn
+}
+
+// updateSplitTransactions updates split transactions with parent ID and linked references
+func updateSplitTransactions(transactions []*model.Transaction, parentID, originalRef string) {
+	for i, txn := range transactions {
+		txn.ParentTransaction = parentID
+		txn.Reference = fmt.Sprintf("%s_q%d", originalRef, i+1)
+	}
+}
+
 // QueueTransaction queues a transaction by setting its status and metadata, attempting to split it if needed, and enqueuing it.
-// It starts a tracing span, sets the transaction status and metadata, splits the transaction if necessary, and enqueues it.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction to be queued.
-//
-// Returns:
-// - *model.Transaction: A pointer to the queued Transaction model.
-// - error: An error if the transaction could not be queued.
 func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "QueueTransaction")
 	defer span.End()
 
-	// Set transaction status and metadata
-	span.AddEvent("Setting transaction status and metadata")
-	setTransactionStatus(transaction)
-	setTransactionMetadata(transaction)
+	// Store original reference before any modifications
+	originalRef := transaction.Reference
 
-	// Attempt to split the transaction if needed
-	transactions, err := transaction.SplitTransaction(ctx)
+	// Prepare transaction for queueing
+	preparedTxn, err := l.prepareTransactionForQueue(ctx, transaction)
+	if err != nil {
+		return nil, err
+	}
+
+	// Persist the transaction first
+	persistedTxn, err := l.datasource.RecordTransaction(ctx, preparedTxn)
 	if err != nil {
 		span.RecordError(err)
-		span.AddEvent("Transaction split failed", trace.WithAttributes(
-			attribute.String("transaction.id", transaction.TransactionID),
-		))
-		return nil, err
+		return nil, fmt.Errorf("failed to persist transaction: %w", err)
 	}
 
-	// Enqueue the transaction(s)
-	if len(transactions) == 0 {
-		transactions = []*model.Transaction{transaction}
-	}
-
-	span.AddEvent("Enqueuing transactions", trace.WithAttributes(
-		attribute.Int("transaction.count", len(transactions)),
-		attribute.String("transaction.id", transaction.TransactionID),
-	))
-
-	if err := enqueueTransactions(ctx, l.queue, transaction, transactions); err != nil {
+	// Handle transaction splitting
+	transactions, err := persistedTxn.SplitTransaction(ctx)
+	if err != nil {
 		span.RecordError(err)
-		span.AddEvent("Failed to enqueue transactions", trace.WithAttributes(
-			attribute.String("transaction.id", transaction.TransactionID),
-		))
 		return nil, err
 	}
 
-	span.SetAttributes(attribute.String("transaction.id", transaction.TransactionID))
+	// Prepare transactions for queueing
+	if len(transactions) == 0 {
+		queueTxn := createQueueCopy(persistedTxn, originalRef)
+		transactions = []*model.Transaction{queueTxn}
+	} else {
+		updateSplitTransactions(transactions, persistedTxn.TransactionID, originalRef)
+	}
+
+	// Enqueue all transactions
+	if err := enqueueTransactions(ctx, l.queue, persistedTxn, transactions); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
-		attribute.String("transaction.id", transaction.TransactionID),
+		attribute.String("transaction.id", persistedTxn.TransactionID),
 	))
 
-	return transaction, nil
+	return persistedTxn, nil
 }
 
 // setTransactionStatus sets the status of a transaction based on its scheduled time, inflight status, and current status.
@@ -1298,8 +1331,6 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 func setTransactionStatus(transaction *model.Transaction) {
 	if !transaction.ScheduledFor.IsZero() {
 		transaction.Status = StatusScheduled
-	} else if transaction.Inflight {
-		transaction.Status = StatusInflight
 	} else if transaction.Status == "" {
 		transaction.Status = StatusQueued
 	}

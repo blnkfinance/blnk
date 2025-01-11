@@ -74,7 +74,7 @@ func TestRecordTransaction(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
 	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $13
+	  WHERE balance_id = $1 AND version = $12
 	`)).WithArgs(
 		source,
 		big.NewInt(9000).String(),
@@ -93,7 +93,7 @@ func TestRecordTransaction(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
 	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $13
+	  WHERE balance_id = $1 AND version = $12
 	`)).WithArgs(
 		destination,
 		big.NewInt(1000).String(),
@@ -184,7 +184,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
 	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $13
+	  WHERE balance_id = $1 AND version = $12
 	`)).WithArgs(
 		source,
 		big.NewInt(-100000000).String(),
@@ -203,7 +203,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
 	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $13
+	  WHERE balance_id = $1 AND version = $12
 	`)).WithArgs(
 		destination,
 		big.NewInt(130000000000).String(),

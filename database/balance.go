@@ -629,7 +629,7 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 	query := `
         UPDATE blnk.balances
         SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-        WHERE balance_id = $1 AND version = $13
+        WHERE balance_id = $1 AND version = $12
     `
 
 	// Execute the update query within the provided transaction context
