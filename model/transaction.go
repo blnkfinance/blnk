@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -135,10 +136,98 @@ func (transaction *Transaction) SplitTransaction(ctx context.Context) ([]*Transa
 	return transactions, nil
 }
 
-// CalculateDistributions calculates and returns the amount for each identifier (source or destination) based on its distribution.
+// bankersRound implements round-half-to-even rounding
+func bankersRound(num float64) float64 {
+	// Handle very small amounts specially
+	if math.Abs(num) < 1e-10 {
+		return 0
+	}
+
+	// Move two decimal places left
+	shifted := num * 100
+	whole := math.Floor(shifted)
+	fraction := shifted - whole
+
+	// If exactly 0.5, round to nearest even number
+	if math.Abs(fraction-0.5) < 1e-10 {
+		if math.Mod(whole, 2) == 0 {
+			return whole / 100 // Round down for even
+		}
+		return (whole + 1) / 100 // Round up for odd
+	}
+
+	return math.Round(shifted) / 100
+}
+
+// handleSmallAmount ensures proper handling of very small amounts
+func handleSmallAmount(amount float64) float64 {
+	if amount > 0 && amount < 0.01 {
+		return 0
+	}
+	return bankersRound(amount)
+}
+
+// adjustRoundingDifference distributes rounding difference to maintain total
+func adjustRoundingDifference(amounts map[string]float64, targetTotal float64) map[string]float64 {
+	// Handle special case for very small total
+	if targetTotal <= 0.01 && targetTotal > 0 {
+		// Find the first non-zero amount and adjust it
+		for id := range amounts {
+			amounts[id] = 0
+		}
+		// Assign the entire amount to the first entry
+		if len(amounts) > 0 {
+			for id := range amounts {
+				amounts[id] = targetTotal
+				break
+			}
+		}
+		return amounts
+	}
+
+	// Calculate current total after rounding
+	currentTotal := 0.0
+	for _, amount := range amounts {
+		currentTotal = bankersRound(currentTotal + amount)
+	}
+
+	diff := bankersRound(targetTotal - currentTotal)
+	if math.Abs(diff) < 1e-10 {
+		return amounts
+	}
+
+	// Find the largest amount to adjust
+	var largestKey string
+	var largestAmount float64
+	for id, amount := range amounts {
+		if amount > largestAmount {
+			largestAmount = amount
+			largestKey = id
+		}
+	}
+
+	if largestKey != "" {
+		amounts[largestKey] = bankersRound(amounts[largestKey] + diff)
+	}
+
+	return amounts
+}
+
 func CalculateDistributions(ctx context.Context, totalAmount float64, distributions []Distribution) (map[string]float64, error) {
 	_, span := tracer.Start(ctx, "CalculateDistributions")
 	defer span.End()
+
+	// Handle zero total amount case
+	if totalAmount == 0 {
+		result := make(map[string]float64)
+		for _, dist := range distributions {
+			result[dist.Identifier] = 0
+		}
+		return result, nil
+	}
+
+	// Round total amount using banker's rounding
+	totalAmount = bankersRound(totalAmount)
 
 	resultDistributions := make(map[string]float64)
 	var amountLeft = totalAmount
@@ -150,57 +239,84 @@ func CalculateDistributions(ctx context.Context, totalAmount float64, distributi
 		attribute.Int("distribution.count", len(distributions)),
 	))
 
-	// First pass: calculate fixed and percentage amounts, track total percentage
-	for _, dist := range distributions {
-		if dist.Distribution == "left" {
-			continue // Handle "left" distribution later
-		} else if dist.Distribution[len(dist.Distribution)-1] == '%' {
-			// Percentage distribution
-			percentage, err := strconv.ParseFloat(dist.Distribution[:len(dist.Distribution)-1], 64)
-			if err != nil {
-				span.RecordError(err)
-				return nil, errors.New("invalid percentage format")
+	// Special handling for very small amounts (≤ 0.01)
+	if totalAmount <= 0.01 {
+		// Assign the entire amount to the first distribution
+		if len(distributions) > 0 {
+			resultDistributions[distributions[0].Identifier] = totalAmount
+			for i := 1; i < len(distributions); i++ {
+				resultDistributions[distributions[i].Identifier] = 0
 			}
-			totalPercentage += percentage
-			amount := (percentage / 100) * totalAmount
-			resultDistributions[dist.Identifier] = amount
-			amountLeft -= amount
-			span.AddEvent("Calculated percentage distribution", trace.WithAttributes(
-				attribute.String("identifier", dist.Identifier),
-				attribute.Float64("percentage", percentage),
-				attribute.Float64("amount", amount),
-			))
-		} else {
-			// Fixed amount distribution
-			fixedAmount, err := strconv.ParseFloat(dist.Distribution, 64)
-			if err != nil {
-				span.RecordError(err)
-				return nil, errors.New("invalid fixed amount format")
-			}
-			if fixedAmount > amountLeft {
-				err := errors.New("fixed amount exceeds remaining transaction amount")
-				span.RecordError(err)
-				return nil, err
-			}
-			resultDistributions[dist.Identifier] = fixedAmount
-			fixedTotal += fixedAmount
-			amountLeft -= fixedAmount
-			span.AddEvent("Calculated fixed amount distribution", trace.WithAttributes(
-				attribute.String("identifier", dist.Identifier),
-				attribute.Float64("fixed_amount", fixedAmount),
-				attribute.Float64("amount_left", amountLeft),
-			))
+			return resultDistributions, nil
 		}
 	}
 
-	// Validate total percentage and fixed amounts do not exceed 100% or total amount
+	// First pass: Handle fixed amounts
+	fixedAmounts := make(map[string]float64)
+	for _, dist := range distributions {
+		if dist.Distribution == "left" || dist.Distribution[len(dist.Distribution)-1] == '%' {
+			continue
+		}
+
+		fixedAmount, err := strconv.ParseFloat(dist.Distribution, 64)
+		if err != nil {
+			span.RecordError(err)
+			return nil, errors.New("invalid fixed amount format")
+		}
+
+		fixedAmount = bankersRound(fixedAmount)
+		if fixedAmount > amountLeft {
+			err := errors.New("fixed amount exceeds remaining transaction amount")
+			span.RecordError(err)
+			return nil, err
+		}
+
+		fixedAmounts[dist.Identifier] = fixedAmount
+		fixedTotal = bankersRound(fixedTotal + fixedAmount)
+		amountLeft = bankersRound(amountLeft - fixedAmount)
+	}
+
+	// Second pass: Handle percentage distributions
+	percentageAmounts := make(map[string]float64)
+	for _, dist := range distributions {
+		if dist.Distribution == "left" || dist.Distribution[len(dist.Distribution)-1] != '%' {
+			continue
+		}
+
+		percentage, err := strconv.ParseFloat(dist.Distribution[:len(dist.Distribution)-1], 64)
+		if err != nil {
+			span.RecordError(err)
+			return nil, errors.New("invalid percentage format")
+		}
+
+		totalPercentage = bankersRound(totalPercentage + percentage)
+		rawAmount := (percentage / 100) * totalAmount
+		percentageAmounts[dist.Identifier] = handleSmallAmount(rawAmount)
+	}
+
+	// Validate total percentage
 	if totalPercentage > 100 || fixedTotal > totalAmount {
 		err := errors.New("total distributions exceed 100% or total amount")
 		span.RecordError(err)
 		return nil, err
 	}
 
-	// Second pass: calculate "left" distribution
+	// Adjust percentage amounts to maintain total
+	if len(percentageAmounts) > 0 {
+		targetPercentageTotal := bankersRound(totalAmount * (totalPercentage / 100))
+		percentageAmounts = adjustRoundingDifference(percentageAmounts, targetPercentageTotal)
+	}
+
+	// Combine all amounts
+	for id, amount := range fixedAmounts {
+		resultDistributions[id] = amount
+	}
+	for id, amount := range percentageAmounts {
+		resultDistributions[id] = amount
+		amountLeft = bankersRound(amountLeft - amount)
+	}
+
+	// Final pass: Handle "left" distribution
 	for _, dist := range distributions {
 		if dist.Distribution == "left" {
 			if _, exists := resultDistributions[dist.Identifier]; exists {
@@ -208,17 +324,23 @@ func CalculateDistributions(ctx context.Context, totalAmount float64, distributi
 				span.RecordError(err)
 				return nil, err
 			}
-			resultDistributions[dist.Identifier] = amountLeft
-			span.AddEvent("Calculated 'left' distribution", trace.WithAttributes(
-				attribute.String("identifier", dist.Identifier),
-				attribute.Float64("amount_left", amountLeft),
-			))
-			break // Only one identifier should have "left" distribution
+			resultDistributions[dist.Identifier] = bankersRound(amountLeft)
+			break
 		}
 	}
 
+	// Final validation and adjustment
+	finalTotal := 0.0
+	for _, amount := range resultDistributions {
+		finalTotal = bankersRound(finalTotal + amount)
+	}
+
+	if math.Abs(finalTotal-totalAmount) > 1e-10 {
+		resultDistributions = adjustRoundingDifference(resultDistributions, totalAmount)
+	}
+
 	span.AddEvent("Distribution calculation completed", trace.WithAttributes(
-		attribute.Float64("amount_left", amountLeft),
+		attribute.Float64("final_total", finalTotal),
 		attribute.Int("result.count", len(resultDistributions)),
 	))
 
