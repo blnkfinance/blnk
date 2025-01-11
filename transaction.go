@@ -1424,17 +1424,17 @@ func setTransactionStatus(transaction *model.Transaction) {
 }
 
 // setTransactionMetadata initializes and sets the required metadata for a transaction.
-// It sets the skip balance update flag, creation time, generates a new transaction ID,
 // calculates the transaction hash, and sets the precise amount based on the transaction's precision.
 //
 // Parameters:
 // - transaction *model.Transaction: The transaction for which to set metadata.
 func setTransactionMetadata(transaction *model.Transaction) {
-	transaction.SkipBalanceUpdate = true
 	transaction.CreatedAt = time.Now()
-	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Hash = transaction.HashTxn()
 	transaction.PreciseAmount = int64(transaction.Amount * transaction.Precision)
+	if transaction.TransactionID == "" {
+		transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
+	}
 }
 
 // createQueueCopy creates a new copy of a transaction specifically for queueing.
@@ -1464,7 +1464,7 @@ func createQueueCopy(persistedTxn *model.Transaction, originalRef string) *model
 func updateSplitTransactions(transactions []*model.Transaction, parentID, originalRef string) {
 	for i, txn := range transactions {
 		txn.ParentTransaction = parentID
-		txn.Reference = fmt.Sprintf("%s_q%d", originalRef, i+1)
+		txn.Reference = fmt.Sprintf("%s_%d", originalRef, i+1)
 	}
 }
 
