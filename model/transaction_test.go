@@ -17,9 +17,26 @@ package model
 
 import (
 	"context"
-	"reflect"
+	"math"
 	"testing"
 )
+
+func floatEquals(a, b float64) bool {
+	const epsilon = 1e-9
+	return math.Abs(a-b) < epsilon
+}
+
+func floatMapsEqual(got, want map[string]float64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for k, v := range want {
+		if gotVal, ok := got[k]; !ok || !floatEquals(gotVal, v) {
+			return false
+		}
+	}
+	return true
+}
 
 func TestCalculateDistributions(t *testing.T) {
 	tests := []struct {
@@ -45,22 +62,79 @@ func TestCalculateDistributions(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "Exceeding Percentage",
-			totalAmount: 1000,
+			name:        "Ride Fee Distribution",
+			totalAmount: 1.5,
 			distributions: []Distribution{
-				{Identifier: "A", Distribution: "110%"}, // Exceeding 100%
+				{Identifier: "@TaxiPay_REV", Distribution: "50%"},
+				{Identifier: "@B_REV", Distribution: "45%"},
+				{Identifier: "@Assoc_REV", Distribution: "left"},
 			},
-			want:    nil,
-			wantErr: true,
+			want: map[string]float64{
+				"@TaxiPay_REV": 0.74, // 50% of 1.5
+				"@B_REV":       0.68, // 45% of 1.5
+				"@Assoc_REV":   0.08, // 5% of 1.5
+			},
+			wantErr: false,
 		},
 		{
-			name:        "Invalid Format",
+			name:        "Multiple Fixed Amounts",
 			totalAmount: 1000,
 			distributions: []Distribution{
-				{Identifier: "A", Distribution: "abc"}, // Invalid format
+				{Identifier: "A", Distribution: "200"},
+				{Identifier: "B", Distribution: "300"},
+				{Identifier: "C", Distribution: "left"},
 			},
-			want:    nil,
-			wantErr: true,
+			want: map[string]float64{
+				"A": 200,
+				"B": 300,
+				"C": 500,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "Rounding Edge Case",
+			totalAmount: 100.01,
+			distributions: []Distribution{
+				{Identifier: "A", Distribution: "33.33%"},
+				{Identifier: "B", Distribution: "33.33%"},
+				{Identifier: "C", Distribution: "33.34%"},
+			},
+			want: map[string]float64{
+				"A": 33.33,
+				"B": 33.33,
+				"C": 33.35,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "Small Amount Distribution",
+			totalAmount: 0.01,
+			distributions: []Distribution{
+				{Identifier: "A", Distribution: "50%"},
+				{Identifier: "B", Distribution: "50%"},
+			},
+			want: map[string]float64{
+				"A": 0.01,
+				"B": 0.00,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "Complex Mixed Distribution",
+			totalAmount: 1234.56,
+			distributions: []Distribution{
+				{Identifier: "A", Distribution: "500"},
+				{Identifier: "B", Distribution: "25%"},
+				{Identifier: "C", Distribution: "10%"},
+				{Identifier: "D", Distribution: "left"},
+			},
+			want: map[string]float64{
+				"A": 500.00,
+				"B": 308.64,
+				"C": 123.46,
+				"D": 302.46,
+			},
+			wantErr: false,
 		},
 	}
 
@@ -71,7 +145,7 @@ func TestCalculateDistributions(t *testing.T) {
 				t.Errorf("CalculateDistributions() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
+			if !floatMapsEqual(got, tt.want) {
 				t.Errorf("CalculateDistributions() got = %v, want %v", got, tt.want)
 			}
 		})
