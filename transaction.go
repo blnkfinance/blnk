@@ -1272,53 +1272,102 @@ func updateSplitTransactions(transactions []*model.Transaction, parentID, origin
 	}
 }
 
-// QueueTransaction queues a transaction by setting its status and metadata, attempting to split it if needed, and enqueuing it.
+// QueueTransaction processes and queues a transaction, handling both single and split transactions.
 func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "QueueTransaction")
 	defer span.End()
 
-	// Store original reference before any modifications
+	// Initialize transaction metadata and status
 	originalRef := transaction.Reference
+	setTransactionMetadata(transaction)
+	setTransactionStatus(transaction)
+	originalTxnID := transaction.TransactionID
 
-	// Prepare transaction for queueing
-	preparedTxn, err := l.prepareTransactionForQueue(ctx, transaction)
-	if err != nil {
-		return nil, err
-	}
-
-	// Persist the transaction first
-	persistedTxn, err := l.datasource.RecordTransaction(ctx, preparedTxn)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to persist transaction: %w", err)
-	}
-
-	// Handle transaction splitting
-	transactions, err := persistedTxn.SplitTransaction(ctx)
+	// Handle split transactions if needed
+	transactions, err := l.handleSplitTransactions(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
 
-	// Prepare transactions for queueing
-	if len(transactions) == 0 {
-		queueTxn := createQueueCopy(persistedTxn, originalRef)
-		transactions = []*model.Transaction{queueTxn}
-	} else {
-		updateSplitTransactions(transactions, persistedTxn.TransactionID, originalRef)
+	// Process transactions based on whether they were split
+	queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
 	}
 
 	// Enqueue all transactions
-	if err := enqueueTransactions(ctx, l.queue, persistedTxn, transactions); err != nil {
+	if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
 
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
-		attribute.String("transaction.id", persistedTxn.TransactionID),
+		attribute.String("transaction.id", transaction.TransactionID),
 	))
 
-	return persistedTxn, nil
+	return transaction, nil
+}
+
+// handleSplitTransactions attempts to split a transaction and validates the result
+func (l *Blnk) handleSplitTransactions(ctx context.Context, transaction *model.Transaction) ([]*model.Transaction, error) {
+	transactions, err := transaction.SplitTransaction(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to split transaction: %w", err)
+	}
+	return transactions, nil
+}
+
+// processTxns handles both single and split transactions
+func (l *Blnk) processTxns(ctx context.Context, originalTxn *model.Transaction, splitTxns []*model.Transaction, originalTxnID, originalRef string) ([]*model.Transaction, error) {
+	if len(splitTxns) == 0 {
+		return l.processSingleTransaction(ctx, originalTxn, originalRef)
+	}
+	return l.processSplitTransactions(ctx, splitTxns, originalTxnID, originalRef)
+}
+
+// processSingleTransaction handles a single transaction case
+func (l *Blnk) processSingleTransaction(ctx context.Context, transaction *model.Transaction, originalRef string) ([]*model.Transaction, error) {
+	if len(transaction.Sources) == 0 && len(transaction.Destinations) == 0 {
+		preparedTxn, err := l.prepareTransactionForQueue(ctx, transaction)
+		if err != nil {
+			return nil, err
+		}
+		transaction = preparedTxn
+	}
+
+	persistedTxn, err := l.datasource.RecordTransaction(ctx, transaction)
+	if err != nil {
+		return nil, fmt.Errorf("failed to persist original transaction: %w", err)
+	}
+
+	queueTxn := createQueueCopy(persistedTxn, originalRef)
+	return []*model.Transaction{queueTxn}, nil
+}
+
+// processSplitTransactions handles multiple split transactions
+func (l *Blnk) processSplitTransactions(ctx context.Context, transactions []*model.Transaction, originalTxnID, originalRef string) ([]*model.Transaction, error) {
+	queueTransactions := make([]*model.Transaction, len(transactions))
+	updateSplitTransactions(transactions, originalTxnID, originalRef)
+
+	for i, splitTxn := range transactions {
+		preparedSplitTxn, err := l.prepareTransactionForQueue(ctx, splitTxn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare split transaction %d: %w", i, err)
+		}
+
+		// Persist the original transaction
+		persistedTxn, err := l.datasource.RecordTransaction(ctx, preparedSplitTxn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to persist original transaction: %w", err)
+		}
+
+		queueTxn := createQueueCopy(persistedTxn, splitTxn.Reference)
+		queueTransactions[i] = queueTxn
+	}
+
+	return queueTransactions, nil
 }
 
 // setTransactionStatus sets the status of a transaction based on its scheduled time, inflight status, and current status.
