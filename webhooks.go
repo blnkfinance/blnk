@@ -25,6 +25,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk/config"
+	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 
 	"github.com/hibiken/asynq"
 )
@@ -112,11 +113,18 @@ func processHTTP(data NewWebhook) error {
 		return nil
 	}
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Println("Error decoding response:", err)
+		log.Println("Error reading response body:", err)
 		return err
+	}
+
+	// Try to decode JSON response, but don't fail if it's not JSON
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Response is not JSON (this is OK): %s\n", string(body))
+		return nil
 	}
 
 	log.Println("Webhook notification sent successfully:", response)
@@ -140,7 +148,13 @@ func SendWebhook(newWebhook NewWebhook) error {
 		return nil
 	}
 
-	client := asynq.NewClient(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
+	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
+	if err != nil {
+		log.Fatalf("Error parsing Redis URL: %v", err)
+	}
+	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB}
+	client := asynq.NewClient(queueOptions)
+
 	payload, err := json.Marshal(newWebhook)
 	if err != nil {
 		return err
@@ -177,7 +191,6 @@ func ProcessWebhook(_ context.Context, task *asynq.Task) error {
 		log.Printf("Error unmarshaling task payload: %v", err)
 		return err
 	}
-	log.Printf("Processing webhook: %+v\n", payload.Event)
 	err = processHTTP(payload)
 	if err != nil {
 		return err
