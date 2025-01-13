@@ -41,7 +41,7 @@ func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
 	}
 	// Set the default schema for this connection.
 	if _, err := con.Conn.Exec("SET search_path TO blnk"); err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	return con, nil
 }

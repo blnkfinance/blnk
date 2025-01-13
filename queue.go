@@ -82,7 +82,7 @@ func NewQueue(conf *config.Configuration) *Queue {
 func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) error {
 	IPayload, err := json.Marshal(transactionID)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	taskOptions := []asynq.Option{asynq.TaskID(transactionID), asynq.Queue(EXPIREDINFLIGHT_QUEUE), asynq.ProcessIn(time.Until(expiresAt))}
 	task := asynq.NewTask(EXPIREDINFLIGHT_QUEUE, IPayload, taskOptions...)
@@ -112,7 +112,7 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 
 	IPayload, err := json.Marshal(payload)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	taskOptions := []asynq.Option{asynq.Queue(INDEX_QUEUE)}
@@ -140,7 +140,7 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 
 	payload, err := json.Marshal(transaction)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	info, err := q.Client.EnqueueContext(ctx, q.geTask(transaction, payload), asynq.MaxRetry(5))
 	if err != nil {
@@ -150,7 +150,6 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	log.Printf(" [*] Successfully enqueued transaction: %+v", transaction.Reference)
 
 	if !transaction.InflightExpiryDate.IsZero() {
-		fmt.Println(transaction.InflightExpiryDate)
 		return q.queueInflightExpiry(transaction.TransactionID, transaction.InflightExpiryDate)
 	}
 

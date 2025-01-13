@@ -143,7 +143,6 @@ func SendWebhook(newWebhook NewWebhook) error {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: conf.Redis.Dns})
 	payload, err := json.Marshal(newWebhook)
 	if err != nil {
-		log.Fatal(err)
 		return err
 	}
 	taskOptions := []asynq.Option{asynq.Queue(WEBHOOK_QUEUE)}
