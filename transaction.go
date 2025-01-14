@@ -1223,7 +1223,7 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	transaction.Hash = transaction.HashTxn()
 
 	// Queue the transaction for further processing
-	transaction, err := l.QueueTransaction(ctx, transaction)
+	transaction, err := l.RecordTransaction(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
 		return nil, l.logAndRecordError(span, "saving transaction to db error", err)
