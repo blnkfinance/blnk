@@ -206,3 +206,159 @@ func TestTransactionExistsByRef_Failure(t *testing.T) {
 	assert.Error(t, err)
 	assert.IsType(t, apierror.APIError{}, err)
 }
+
+func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	tracer := otel.Tracer("transaction.database")
+	ctx, span := tracer.Start(context.Background(), "TestGetInflightTransactionsByParentID")
+	defer span.End()
+
+	ds := Datasource{Conn: db}
+
+	// Create test data
+	parentID := "parent123"
+	metaData := map[string]interface{}{"key": "value"}
+	metaDataJSON, err := json.Marshal(metaData)
+	assert.NoError(t, err)
+
+	mockRows := sqlmock.NewRows([]string{
+		"transaction_id", "parent_transaction", "source", "reference",
+		"amount", "precise_amount", "precision", "rate", "currency",
+		"destination", "description", "status", "created_at",
+		"meta_data", "scheduled_for", "hash",
+	}).AddRow(
+		"txn123", parentID, "source1", "ref123",
+		1000, 1000, 2, 1.0, "USD",
+		"dest1", "Test Transaction", "INFLIGHT", time.Now(),
+		metaDataJSON, time.Now(), "hash123",
+	)
+
+	// Expect the query with the correct WHERE clause
+	mock.ExpectQuery("SELECT .+ FROM blnk.transactions WHERE \\(transaction_id = \\$1 OR parent_transaction = \\$1\\) AND status = 'INFLIGHT'").
+		WithArgs(parentID, 10, int64(0)). // Add all three expected arguments
+		WillReturnRows(mockRows)
+
+	transactions, err := ds.GetInflightTransactionsByParentID(ctx, parentID, 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 1)
+	assert.Equal(t, "txn123", transactions[0].TransactionID)
+	assert.Equal(t, "INFLIGHT", transactions[0].Status)
+}
+
+func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	tracer := otel.Tracer("transaction.database")
+	ctx, span := tracer.Start(context.Background(), "TestGetInflightTransactionsByParentID_NoRows")
+	defer span.End()
+
+	ds := Datasource{Conn: db}
+
+	parentID := "parent123"
+	mock.ExpectQuery("SELECT .+ FROM blnk.transactions WHERE \\(transaction_id = \\$1 OR parent_transaction = \\$1\\) AND status = 'INFLIGHT'").
+		WithArgs(parentID, 10, int64(0)). // Add all three expected arguments
+		WillReturnRows(sqlmock.NewRows([]string{}))
+
+	transactions, err := ds.GetInflightTransactionsByParentID(ctx, parentID, 10, 0)
+	assert.NoError(t, err)
+	assert.Empty(t, transactions)
+}
+
+func TestGetInflightTransactionsByParentID_Error(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	tracer := otel.Tracer("transaction.database")
+	ctx, span := tracer.Start(context.Background(), "TestGetInflightTransactionsByParentID_Error")
+	defer span.End()
+
+	ds := Datasource{Conn: db}
+
+	parentID := "parent123"
+	mock.ExpectQuery("SELECT .+ FROM blnk.transactions WHERE \\(transaction_id = \\$1 OR parent_transaction = \\$1\\) AND status = 'INFLIGHT'").
+		WithArgs(parentID, 10, int64(0)). // Add all three expected arguments
+		WillReturnError(errors.New("database error"))
+
+	transactions, err := ds.GetInflightTransactionsByParentID(ctx, parentID, 10, 0)
+	assert.Error(t, err)
+	assert.Nil(t, transactions)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestGetTotalCommittedTransactions_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	tracer := otel.Tracer("transaction.database")
+	ctx, span := tracer.Start(context.Background(), "TestGetTotalCommittedTransactions")
+	defer span.End()
+
+	ds := Datasource{Conn: db}
+
+	parentID := "parent123"
+	expectedTotal := int64(2000)
+
+	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 GROUP BY parent_transaction").
+		WithArgs(parentID).
+		WillReturnRows(sqlmock.NewRows([]string{"total_amount"}).AddRow(expectedTotal))
+
+	total, err := ds.GetTotalCommittedTransactions(ctx, parentID)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedTotal, total)
+}
+
+func TestGetTotalCommittedTransactions_NoRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	tracer := otel.Tracer("transaction.database")
+	ctx, span := tracer.Start(context.Background(), "TestGetTotalCommittedTransactions_NoRows")
+	defer span.End()
+
+	ds := Datasource{Conn: db}
+
+	parentID := "parent123"
+
+	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 GROUP BY parent_transaction").
+		WithArgs(parentID).
+		WillReturnError(sql.ErrNoRows)
+
+	total, err := ds.GetTotalCommittedTransactions(ctx, parentID)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), total)
+}
+
+func TestGetTotalCommittedTransactions_Error(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	tracer := otel.Tracer("transaction.database")
+	ctx, span := tracer.Start(context.Background(), "TestGetTotalCommittedTransactions_Error")
+	defer span.End()
+
+	ds := Datasource{Conn: db}
+
+	parentID := "parent123"
+
+	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 GROUP BY parent_transaction").
+		WithArgs(parentID).
+		WillReturnError(errors.New("database error"))
+
+	total, err := ds.GetTotalCommittedTransactions(ctx, parentID)
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), total)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}

@@ -393,7 +393,7 @@ func (d Datasource) GetTotalCommittedTransactions(ctx context.Context, parentID 
 	query := `
 		SELECT SUM(precise_amount) AS total_amount
 		FROM blnk.transactions
-		WHERE parent_transaction = $1
+		WHERE parent_transaction = $1 AND status = 'APPLIED'
 		GROUP BY parent_transaction;
 	`
 
@@ -644,7 +644,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
-		WHERE transaction_id = $1 OR parent_transaction = $1 AND status = 'INFLIGHT'
+		WHERE (transaction_id = $1 OR parent_transaction = $1) AND status = 'INFLIGHT'
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
