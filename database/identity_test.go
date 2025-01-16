@@ -245,17 +245,49 @@ func TestUpdateIdentity_Success(t *testing.T) {
 		FirstName:    "John",
 		LastName:     "Doe",
 		EmailAddress: "john.doe@example.com",
-		PhoneNumber:  "123456789",
-		MetaData: map[string]interface{}{
-			"key": "value",
-		},
 	}
 
-	metaDataJSON, err := json.Marshal(identity.MetaData)
-	assert.NoError(t, err)
+	// Use a more flexible regexp pattern that matches the dynamic query building
+	mock.ExpectExec("UPDATE blnk\\.identity SET (.+) WHERE identity_id = \\$[0-9]+").
+		WithArgs(identity.FirstName, identity.LastName, identity.EmailAddress, identity.IdentityID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	mock.ExpectExec("UPDATE blnk.identity").
-		WithArgs(identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON).
+	err = ds.UpdateIdentity(identity)
+	assert.NoError(t, err)
+}
+
+func TestUpdateIdentity_NoFieldsProvided(t *testing.T) {
+	db, _, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	identity := &model.Identity{
+		IdentityID: "idt1",
+	}
+
+	err = ds.UpdateIdentity(identity)
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrBadRequest, err.(apierror.APIError).Code)
+}
+
+func TestUpdateIdentity_PartialUpdate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	identity := &model.Identity{
+		IdentityID:   "idt1",
+		EmailAddress: "new.email@example.com",
+		PhoneNumber:  "987654321",
+	}
+
+	// Use a more flexible regexp pattern
+	mock.ExpectExec("UPDATE blnk\\.identity SET (.+) WHERE identity_id = \\$[0-9]+").
+		WithArgs(identity.EmailAddress, identity.PhoneNumber, identity.IdentityID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = ds.UpdateIdentity(identity)
