@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/config"
 	redlock "github.com/jerry-enebeli/blnk/internal/lock"
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"go.opentelemetry.io/otel/attribute"
@@ -159,8 +160,13 @@ func (l *Blnk) acquireLock(ctx context.Context, transaction *model.Transaction) 
 	ctx, span := tracer.Start(ctx, "Acquiring Lock")
 	defer span.End()
 
+	config, err := config.Fetch()
+	if err != nil {
+		return nil, err
+	}
+
 	locker := redlock.NewLocker(l.redis, transaction.Source, model.GenerateUUIDWithSuffix("loc"))
-	err := locker.Lock(ctx, time.Minute*30)
+	err = locker.Lock(ctx, config.Transaction.LockDuration)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -240,8 +246,14 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 	_, span := tracer.Start(ctx, "Post Transaction Actions")
 	defer span.End()
 
+	config, err := config.Fetch()
+	if err != nil {
+		span.RecordError(err)
+		return
+	}
+
 	go func() {
-		err := l.queue.queueIndexData(transaction.TransactionID, "transactions", transaction)
+		err := l.queue.queueIndexData(transaction.TransactionID, config.Transaction.IndexQueuePrefix, transaction)
 		if err != nil {
 			span.RecordError(err)
 			notification.NotifyError(err)
@@ -460,11 +472,14 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 	ctx, span := tracer.Start(ctx, "ProcessTransactionInBatches")
 	defer span.End()
 
-	// Constants for batch and queue sizes
-	const (
-		batchSize    = 100000
-		maxQueueSize = 1000
-	)
+	config, err := config.Fetch()
+	if err != nil {
+		return nil, err
+	}
+
+	// Use configuration values
+	batchSize := config.Transaction.BatchSize
+	maxQueueSize := config.Transaction.MaxQueueSize
 
 	// Slice to collect all processed transactions and errors
 	var allTxns []*model.Transaction

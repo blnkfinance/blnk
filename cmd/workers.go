@@ -137,13 +137,19 @@ func (b *blnkInstance) processInflightExpiry(cxt context.Context, t *asynq.Task)
 }
 
 func initializeQueues() map[string]int {
-	queues := make(map[string]int)
-	queues[blnk.WEBHOOK_QUEUE] = 3
-	queues[blnk.INDEX_QUEUE] = 1
-	queues[blnk.EXPIREDINFLIGHT_QUEUE] = 3
+	cfg, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching config, using defaults: %v", err)
+		return nil
+	}
 
-	for i := 1; i <= blnk.NumberOfQueues; i++ {
-		queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
+	queues := make(map[string]int)
+	queues[cfg.Queue.WebhookQueue] = 3
+	queues[cfg.Queue.IndexQueue] = 1
+	queues[cfg.Queue.InflightExpiryQueue] = 3
+
+	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
+		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
 		queues[queueName] = 1
 	}
 	return queues
@@ -169,16 +175,22 @@ func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (
 }
 
 func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
+	cfg, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching config, using defaults: %v", err)
+		return
+	}
+
 	// Register handlers for transaction queues
-	for i := 1; i <= blnk.NumberOfQueues; i++ {
-		queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
+	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
+		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
 		mux.HandleFunc(queueName, b.processTransaction)
 	}
 
 	// Register handlers for other task types
-	mux.HandleFunc(blnk.INDEX_QUEUE, b.indexData)
-	mux.HandleFunc(blnk.WEBHOOK_QUEUE, blnk.ProcessWebhook)
-	mux.HandleFunc(blnk.EXPIREDINFLIGHT_QUEUE, b.processInflightExpiry)
+	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
+	mux.HandleFunc(cfg.Queue.WebhookQueue, blnk.ProcessWebhook)
+	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
 }
 
 // workerCommands defines the "workers" command to start worker processes.

@@ -159,8 +159,8 @@ func SendWebhook(newWebhook NewWebhook) error {
 	if err != nil {
 		return err
 	}
-	taskOptions := []asynq.Option{asynq.Queue(WEBHOOK_QUEUE)}
-	task := asynq.NewTask(WEBHOOK_QUEUE, payload, taskOptions...)
+	taskOptions := []asynq.Option{asynq.Queue(conf.Queue.WebhookQueue)}
+	task := asynq.NewTask(conf.Queue.WebhookQueue, payload, taskOptions...)
 	info, err := client.Enqueue(task)
 	if err != nil {
 		log.Println(err, info)

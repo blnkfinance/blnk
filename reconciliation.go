@@ -36,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/database"
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"github.com/jerry-enebeli/blnk/model"
@@ -826,12 +827,16 @@ func (s *Blnk) createReconciler(strategy string, groupCriteria string, matchingR
 // Returns:
 // - *transactionProcessor: The created transaction processor.
 func (s *Blnk) createTransactionProcessor(reconciliation model.Reconciliation, progress model.ReconciliationProgress, reconciler func(ctx context.Context, txns []*model.Transaction) ([]model.Match, []string)) *transactionProcessor {
+	conf, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching configuration: %v", err)
+	}
 	return &transactionProcessor{
 		reconciliation:    reconciliation,
 		progress:          progress,
 		reconciler:        reconciler,
 		datasource:        s.datasource,
-		progressSaveCount: 100, // Save progress every 100 transactions.
+		progressSaveCount: conf.Reconciliation.ProgressInterval,
 	}
 }
 
@@ -897,6 +902,10 @@ func (tp *transactionProcessor) getResults() (int, int) {
 // Returns:
 // - error: If any error occurs during processing.
 func (s *Blnk) processTransactions(ctx context.Context, uploadID string, processor *transactionProcessor, strategy string) error {
+	conf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
 	processedCount := 0
 	var transactionProcessor getTxns
 	// Use different transaction retrieval methods depending on the strategy.
@@ -907,11 +916,11 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 	}
 
 	// Process the transactions in batches.
-	_, err := s.ProcessTransactionInBatches(
+	_, err = s.ProcessTransactionInBatches(
 		ctx,
 		uploadID,
-		0,     // Offset for pagination.
-		10,    // Batch size.
+		0,
+		conf.Transaction.MaxWorkers,
 		false, // Stream mode is disabled.
 		transactionProcessor,
 		func(ctx context.Context, txns <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ float64) {
@@ -1029,6 +1038,11 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 // - []model.Match: A list of matched transactions.
 // - []string: A list of unmatched transaction IDs.
 func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+	conf, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching configuration: %v", err)
+	}
+
 	var matches []model.Match
 	var unmatched []string
 
@@ -1037,7 +1051,7 @@ func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*mode
 	var wg sync.WaitGroup
 
 	// Initiate the one-to-many reconciliation process.
-	err := s.oneToMany(ctx, externalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, 100000, matchChan, unmatchedChan)
+	err = s.oneToMany(ctx, externalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, conf.Transaction.BatchSize, matchChan, unmatchedChan)
 	if err != nil {
 		log.Printf("Error in one-to-many reconciliation: %v", err)
 	}
@@ -1066,6 +1080,11 @@ func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*mode
 // - []model.Match: A list of matched transactions.
 // - []string: A list of unmatched transaction IDs.
 func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+	conf, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching configuration: %v", err)
+	}
+
 	var matches []model.Match
 	var unmatched []string
 
@@ -1074,7 +1093,7 @@ func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*mode
 	var wg sync.WaitGroup
 
 	// Initiate the many-to-one reconciliation process.
-	err := s.manyToOne(ctx, internalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, 100000, matchChan, unmatchedChan)
+	err = s.manyToOne(ctx, internalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, conf.Transaction.BatchSize, matchChan, unmatchedChan)
 	if err != nil {
 		log.Printf("Error in many-to-one reconciliation: %v", err)
 	}
@@ -1284,14 +1303,19 @@ func (s *Blnk) groupInternalTransactions(ctx context.Context, groupingCriteria s
 // Returns:
 // - error: If any error occurs during processing.
 func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn *model.Transaction, matchingRules []model.MatchingRule, matchChan chan model.Match, unMatchChan chan string) error {
+	conf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+
 	matchFound := false
 
 	// Process transactions in batches, applying the matching rules.
-	_, err := s.ProcessTransactionInBatches(
+	_, err = s.ProcessTransactionInBatches(
 		ctx,
 		externalTxn.TransactionID,
 		externalTxn.Amount,
-		10,    // Batch size
+		conf.Transaction.MaxWorkers,
 		false, // Stream mode
 		s.getInternalTransactionsPaginated,
 		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
