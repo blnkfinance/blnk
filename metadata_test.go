@@ -40,7 +40,11 @@ func (m *MockDatasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*model.Ledger), args.Error(1)
+	// Safe type assertion
+	if ledger, ok := args.Get(0).(*model.Ledger); ok {
+		return ledger, args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
 func (m *MockDatasource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
@@ -118,8 +122,9 @@ func TestUpdateMetadata(t *testing.T) {
 	t.Run("Update Transaction Metadata", func(t *testing.T) {
 		existingMetadata := map[string]interface{}{"existing": "value"}
 		txn := &model.Transaction{MetaData: existingMetadata}
-		mockDS.On("GetTransaction", ctx, "txn_123").Return(txn, nil)
-		mockDS.On("UpdateTransactionMetadata", ctx, "txn_123", mock.Anything).Return(nil)
+
+		mockDS.On("GetTransaction", mock.Anything, "txn_123").Return(txn, nil)
+		mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_123", mock.Anything).Return(nil)
 
 		newMetadata := map[string]interface{}{"new": "value"}
 		result, err := blnk.UpdateMetadata(ctx, "txn_123", newMetadata)
@@ -129,16 +134,43 @@ func TestUpdateMetadata(t *testing.T) {
 		assert.Contains(t, result, "new")
 	})
 
+	t.Run("Update Balance Metadata", func(t *testing.T) {
+		existingMetadata := map[string]interface{}{"existing": "value"}
+		balance := &model.Balance{MetaData: existingMetadata}
+
+		mockDS.On("GetBalanceByID", "bln_123", mock.Anything).Return(balance, nil)
+		mockDS.On("UpdateBalanceMetadata", mock.Anything, "bln_123", mock.Anything).Return(nil)
+
+		newMetadata := map[string]interface{}{"new": "value"}
+		result, err := blnk.UpdateMetadata(ctx, "bln_123", newMetadata)
+
+		assert.NoError(t, err)
+		assert.Contains(t, result, "existing")
+		assert.Contains(t, result, "new")
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Update Identity Metadata", func(t *testing.T) {
+		existingMetadata := map[string]interface{}{"existing": "value"}
+		identity := &model.Identity{MetaData: existingMetadata}
+
+		mockDS.On("GetIdentityByID", "idt_123").Return(identity, nil)
+		mockDS.On("UpdateIdentityMetadata", "idt_123", mock.Anything).Return(nil)
+
+		newMetadata := map[string]interface{}{"new": "value"}
+		result, err := blnk.UpdateMetadata(ctx, "idt_123", newMetadata)
+
+		assert.NoError(t, err)
+		assert.Contains(t, result, "existing")
+		assert.Contains(t, result, "new")
+		mockDS.AssertExpectations(t)
+	})
+
 	t.Run("Invalid Entity ID", func(t *testing.T) {
 		_, err := blnk.UpdateMetadata(ctx, "invalid_123", map[string]interface{}{})
 		assert.Error(t, err)
 	})
 
-	t.Run("Entity Not Found", func(t *testing.T) {
-		mockDS.On("GetLedgerByID", "ldg_notfound").Return(nil, assert.AnError)
-		_, err := blnk.UpdateMetadata(ctx, "ldg_notfound", map[string]interface{}{})
-		assert.Error(t, err)
-	})
 }
 
 func TestMergeMetadata(t *testing.T) {

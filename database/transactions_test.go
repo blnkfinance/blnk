@@ -307,7 +307,7 @@ func TestGetTotalCommittedTransactions_Success(t *testing.T) {
 	parentID := "parent123"
 	expectedTotal := int64(2000)
 
-	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 GROUP BY parent_transaction").
+	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 AND status = 'APPLIED' GROUP BY parent_transaction").
 		WithArgs(parentID).
 		WillReturnRows(sqlmock.NewRows([]string{"total_amount"}).AddRow(expectedTotal))
 
@@ -329,7 +329,7 @@ func TestGetTotalCommittedTransactions_NoRows(t *testing.T) {
 
 	parentID := "parent123"
 
-	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 GROUP BY parent_transaction").
+	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 AND status = 'APPLIED' GROUP BY parent_transaction").
 		WithArgs(parentID).
 		WillReturnError(sql.ErrNoRows)
 
