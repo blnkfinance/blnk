@@ -180,7 +180,6 @@ func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Ta
 		// Use default values if config fetch fails
 		return q.geTaskWithDefaults(transaction, payload)
 	}
-	log.Println("here", cnf.Queue)
 	queueIndex := hashBalanceID(transaction.Source) % cnf.Queue.NumberOfQueues
 	queueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, queueIndex+1)
 
