@@ -92,6 +92,9 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/reconciliation/matching-rules", a.CreateMatchingRule)
 	router.POST("/reconciliation/start", a.StartReconciliation)
 
+	// Metadata routes
+	router.POST("/:entity-id/metadata", a.UpdateMetadata)
+
 	return a.router
 }
 
