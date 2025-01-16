@@ -98,13 +98,15 @@ func sendHeartbeat(client posthog.Client, heartbeatID string) {
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
 		for range ticker.C {
-			client.Enqueue(posthog.Capture{
+			if err := client.Enqueue(posthog.Capture{
 				DistinctId: heartbeatID,
 				Event:      "server_heartbeat",
 				Properties: map[string]interface{}{
 					"timestamp": time.Now().UTC(),
 				},
-			})
+			}); err != nil {
+				log.Printf("Failed to send heartbeat: %v", err)
+			}
 		}
 	}()
 }
@@ -191,7 +193,11 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 				log.Fatal(err)
 			}
 			if shutdown != nil {
-				defer shutdown(ctx)
+				defer func() {
+					if err := shutdown(ctx); err != nil {
+						log.Printf("Error during shutdown: %v", err)
+					}
+				}()
 			}
 			if phClient != nil {
 				defer phClient.Close()

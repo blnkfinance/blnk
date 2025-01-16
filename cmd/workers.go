@@ -202,7 +202,11 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				log.Fatal(err)
 			}
 			if shutdown != nil {
-				defer shutdown(ctx)
+				defer func() {
+					if err := shutdown(ctx); err != nil {
+						log.Printf("Error during shutdown: %v", err)
+					}
+				}()
 			}
 			if phClient != nil {
 				defer phClient.Close()
