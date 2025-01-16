@@ -102,6 +102,7 @@ type Configuration struct {
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
+	EnableTelemetry         bool                          `json:"enable_telemetry" envconfig:"BLNK_ENABLE_TELEMETRY"`
 }
 
 func loadConfigFromFile(file string) error {
@@ -199,6 +200,12 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 		defaultCleanup := 10800 // 3 hours in seconds
 		cnf.RateLimit.CleanupIntervalSec = &defaultCleanup
 		log.Printf("Warning: Rate limit cleanup interval not specified. Setting default value: %d seconds", defaultCleanup)
+	}
+
+	// Set default value for EnableTelemetry
+	if !cnf.EnableTelemetry {
+		cnf.EnableTelemetry = true
+		log.Println("Warning: Telemetry setting not specified. Enabling by default.")
 	}
 
 	return nil

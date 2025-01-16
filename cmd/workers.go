@@ -30,7 +30,6 @@ import (
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/config"
 	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
-	trace "github.com/jerry-enebeli/blnk/internal/traces"
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/hibiken/asynq"
@@ -137,6 +136,51 @@ func (b *blnkInstance) processInflightExpiry(cxt context.Context, t *asynq.Task)
 	return nil
 }
 
+func initializeQueues() map[string]int {
+	queues := make(map[string]int)
+	queues[blnk.WEBHOOK_QUEUE] = 3
+	queues[blnk.INDEX_QUEUE] = 1
+	queues[blnk.EXPIREDINFLIGHT_QUEUE] = 3
+
+	for i := 1; i <= blnk.NumberOfQueues; i++ {
+		queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
+		queues[queueName] = 1
+	}
+	return queues
+}
+
+func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
+	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing Redis URL: %v", err)
+	}
+
+	return asynq.NewServer(
+		asynq.RedisClientOpt{
+			Addr:     redisOption.Addr,
+			Password: redisOption.Password,
+			DB:       redisOption.DB,
+		},
+		asynq.Config{
+			Concurrency: 1,
+			Queues:      queues,
+		},
+	), nil
+}
+
+func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
+	// Register handlers for transaction queues
+	for i := 1; i <= blnk.NumberOfQueues; i++ {
+		queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
+		mux.HandleFunc(queueName, b.processTransaction)
+	}
+
+	// Register handlers for other task types
+	mux.HandleFunc(blnk.INDEX_QUEUE, b.indexData)
+	mux.HandleFunc(blnk.WEBHOOK_QUEUE, blnk.ProcessWebhook)
+	mux.HandleFunc(blnk.EXPIREDINFLIGHT_QUEUE, b.processInflightExpiry)
+}
+
 // workerCommands defines the "workers" command to start worker processes.
 // The workers listen to various queues such as transaction processing, indexing, and inflight expiry.
 func workerCommands(b *blnkInstance) *cobra.Command {
@@ -144,63 +188,40 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 		Use:   "workers",
 		Short: "start blnk workers", // Short description of the command
 		Run: func(cmd *cobra.Command, args []string) {
-			// Fetch the configuration for the worker environment.
+			ctx := context.Background()
+
+			// Load configuration
 			conf, err := config.Fetch()
 			if err != nil {
-				log.Println("Error fetching config:", err)
-				return
+				log.Fatal("Error fetching config:", err)
 			}
 
-			// Set up OpenTelemetry for tracing worker actions.
-			shutdown, err := trace.SetupOTelSDK(context.Background(), "BLNK WORKERS")
+			// Initialize observability (tracing and PostHog)
+			phClient, shutdown, err := initializeObservability(ctx, conf)
 			if err != nil {
-				log.Fatalf("Error setting up OTel SDK: %v", err)
+				log.Fatal(err)
 			}
-			defer func() {
-				if err := shutdown(context.Background()); err != nil {
-					log.Printf("Error shutting down OTel SDK: %v", err)
-				}
-			}()
-
-			// Define the queue names and their concurrency.
-			queues := make(map[string]int)
-			queues[blnk.WEBHOOK_QUEUE] = 3
-			queues[blnk.INDEX_QUEUE] = 1
-			queues[blnk.EXPIREDINFLIGHT_QUEUE] = 3
-
-			// Set up individual transaction queues with concurrency.
-			for i := 1; i <= blnk.NumberOfQueues; i++ {
-				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
-				queues[queueName] = 1
+			if shutdown != nil {
+				defer shutdown(ctx)
+			}
+			if phClient != nil {
+				defer phClient.Close()
 			}
 
-			// Initialize the Asynq server with Redis as the backend and the queue configuration.
-			redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
+			// Initialize queues
+			queues := initializeQueues()
+
+			// Initialize worker server
+			srv, err := initializeWorkerServer(conf, queues)
 			if err != nil {
-				log.Fatalf("Error parsing Redis URL: %v", err)
+				log.Fatal(err)
 			}
 
-			srv := asynq.NewServer(
-				asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB},
-				asynq.Config{
-					Concurrency: 1, // Set the concurrency level for processing tasks
-					Queues:      queues,
-				},
-			)
-
-			// Set up the serve multiplexer to handle task processing for each queue.
+			// Initialize task handlers
 			mux := asynq.NewServeMux()
-			for i := 1; i <= blnk.NumberOfQueues; i++ {
-				queueName := fmt.Sprintf("%s_%d", blnk.TRANSACTION_QUEUE, i)
-				mux.HandleFunc(queueName, b.processTransaction)
-			}
+			initializeTaskHandlers(b, mux)
 
-			// Register handlers for other task types (indexing, webhook, inflight expiry).
-			mux.HandleFunc(blnk.INDEX_QUEUE, b.indexData)
-			mux.HandleFunc(blnk.WEBHOOK_QUEUE, blnk.ProcessWebhook)
-			mux.HandleFunc(blnk.EXPIREDINFLIGHT_QUEUE, b.processInflightExpiry)
-
-			// Run the Asynq server and start processing tasks from the queues.
+			// Run the server
 			if err := srv.Run(mux); err != nil {
 				log.Fatal("Error running server:", err)
 			}
