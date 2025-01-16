@@ -47,6 +47,10 @@ type transaction interface {
 	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)   // Retrieves inflight transactions by parent ID
 	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) // Retrieves refundable transactions by parent ID
 	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)              // Groups transactions based on specified criteria
+	UpdateLedgerMetadata(id string, metadata map[string]interface{}) error
+	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
+	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
+	UpdateIdentityMetadata(id string, metadata map[string]interface{}) error
 }
 
 // ledger defines methods for handling ledgers.

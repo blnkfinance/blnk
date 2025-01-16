@@ -106,6 +106,27 @@ func (m *MockDataSource) GetLedgerByID(id string) (*model.Ledger, error) {
 	return args.Get(0).(*model.Ledger), args.Error(1)
 }
 
+// Metadata update methods
+func (m *MockDataSource) UpdateLedgerMetadata(id string, metadata map[string]interface{}) error {
+	args := m.Called(id, metadata)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error {
+	args := m.Called(ctx, id, metadata)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error {
+	args := m.Called(ctx, id, metadata)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) UpdateIdentityMetadata(id string, metadata map[string]interface{}) error {
+	args := m.Called(id, metadata)
+	return args.Error(0)
+}
+
 // Balance methods
 
 func (m *MockDataSource) CreateBalance(balance model.Balance) (model.Balance, error) {
