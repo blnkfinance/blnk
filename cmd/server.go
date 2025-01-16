@@ -18,15 +18,19 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/api"
 	"github.com/jerry-enebeli/blnk/config"
 	trace "github.com/jerry-enebeli/blnk/internal/traces"
+	"github.com/posthog/posthog-go"
 	"github.com/spf13/cobra"
 )
 
@@ -89,6 +93,79 @@ func migrateTypeSenseSchema(ctx context.Context, t *blnk.TypesenseClient) error 
 	return nil
 }
 
+// sendHeartbeat initializes and maintains a periodic heartbeat to PostHog
+func sendHeartbeat(client posthog.Client, heartbeatID string) {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for range ticker.C {
+			if err := client.Enqueue(posthog.Capture{
+				DistinctId: heartbeatID,
+				Event:      "server_heartbeat",
+				Properties: map[string]interface{}{
+					"timestamp": time.Now().UTC(),
+				},
+			}); err != nil {
+				log.Printf("Failed to send heartbeat: %v", err)
+			}
+		}
+	}()
+}
+
+func initializeRouter(b *blnkInstance) *gin.Engine {
+	return api.NewAPI(b.blnk).Router()
+}
+
+func initializeTracing(ctx context.Context) (func(context.Context) error, error) {
+	shutdown, err := trace.SetupOTelSDK(ctx, "BLNK")
+	if err != nil {
+		return nil, fmt.Errorf("error setting up OTel SDK: %v", err)
+	}
+	return shutdown, nil
+}
+
+func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*blnk.TypesenseClient, error) {
+	newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
+	if err := newSearch.EnsureCollectionsExist(ctx); err != nil {
+		return nil, fmt.Errorf("failed to ensure collections exist: %v", err)
+	}
+	if err := migrateTypeSenseSchema(ctx, newSearch); err != nil {
+		return nil, fmt.Errorf("failed to migrate typesense schema: %v", err)
+	}
+	return newSearch, nil
+}
+
+func initializePostHog() (posthog.Client, string) {
+	client, _ := posthog.NewWithConfig("phc_XbsHF5iBSnPiTA96gl7xygazrwBa0r2Ut4vEHoBHNiG",
+		posthog.Config{Endpoint: "https://us.i.posthog.com"})
+	heartbeatID := uuid.New().String()
+	sendHeartbeat(client, heartbeatID)
+	return client, heartbeatID
+}
+
+func startServer(router *gin.Engine, cfg config.ServerConfig) error {
+	if cfg.SSL {
+		return serveTLS(router, cfg)
+	}
+	log.Printf("Starting server on http://localhost:%s", cfg.Port)
+	return router.Run(":" + cfg.Port)
+}
+
+func initializeObservability(ctx context.Context, cfg *config.Configuration) (posthog.Client, func(context.Context) error, error) {
+	if !cfg.EnableTelemetry {
+		return nil, func(context.Context) error { return nil }, nil
+	}
+
+	// Initialize tracing
+	shutdown, err := initializeTracing(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Initialize PostHog
+	phClient, _ := initializePostHog()
+	return phClient, shutdown, nil
+}
+
 /*
 serverCommands returns the Cobra command responsible for starting the Blnk server.
 It sets up the API routes, traces, and TypeSense client before launching the server.
@@ -99,53 +176,42 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 		Use:   "start",
 		Short: "start blnk server", // Short description of the command
 		Run: func(cmd *cobra.Command, args []string) {
-			// Create a new API router using the instance's Blnk object
-			router := api.NewAPI(b.blnk).Router()
+			ctx := context.Background()
 
-			// Fetch server configuration from the config package
+			// Initialize router
+			router := initializeRouter(b)
+
+			// Load configuration
 			cfg, err := config.Fetch()
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			// Set up OpenTelemetry tracing with Blnk service instrumentation
-			shutdown, err := trace.SetupOTelSDK(context.Background(), "BLNK")
+			// Initialize observability (tracing and PostHog)
+			phClient, shutdown, err := initializeObservability(ctx, cfg)
 			if err != nil {
-				log.Fatalf("Error setting up OTel SDK: %v", err)
+				log.Fatal(err)
 			}
-			// Ensure proper shutdown of the tracing system when the function exits
-			defer func() {
-				if err := shutdown(context.Background()); err != nil {
-					log.Printf("Error shutting down OTel SDK: %v", err)
-				}
-			}()
-
-			// Create a new TypeSense client for managing search capabilities in Blnk
-			newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
-			// Ensure that all necessary collections exist in TypeSense
-			err = newSearch.EnsureCollectionsExist(context.Background())
-			if err != nil {
-				log.Printf("Failed to ensure collections exist: %v", err)
+			if shutdown != nil {
+				defer func() {
+					if err := shutdown(ctx); err != nil {
+						log.Printf("Error during shutdown: %v", err)
+					}
+				}()
+			}
+			if phClient != nil {
+				defer phClient.Close()
 			}
 
-			// Migrate TypeSense schema for the necessary collections
-			err = migrateTypeSenseSchema(context.Background(), newSearch)
+			// Initialize TypeSense
+			_, err = initializeTypeSense(ctx, cfg)
 			if err != nil {
-				log.Printf("Failed to migrate typesense schema: %v", err)
+				log.Printf("TypeSense initialization error: %v", err)
 			}
 
-			// Check if SSL/TLS is enabled and start server accordingly
-			if cfg.Server.SSL {
-				// If SSL is enabled, start the server with TLS
-				if err := serveTLS(router, cfg.Server); err != nil {
-					log.Fatalf("Error setting up TLS: %v", err)
-				}
-			} else {
-				// If SSL is not enabled, start a regular HTTP server
-				log.Printf("Starting server on http://localhost:%s", cfg.Server.Port)
-				if err := router.Run(":" + cfg.Server.Port); err != nil {
-					log.Fatal(err)
-				}
+			// Start server
+			if err := startServer(router, cfg.Server); err != nil {
+				log.Fatal(err)
 			}
 		},
 	}
