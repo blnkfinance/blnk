@@ -174,32 +174,49 @@ func TestUpdateIdentity(t *testing.T) {
 	}
 
 	identity := &model.Identity{
+		IdentityID:       "idt_123",
 		IdentityType:     "individual",
-		OrganizationName: "",
-		Category:         "",
-		FirstName:        gofakeit.FirstName(),
-		LastName:         gofakeit.LastName(),
-		OtherNames:       gofakeit.LastName(),
-		Gender:           gofakeit.Gender(),
-		DOB:              gofakeit.Date(),
-		EmailAddress:     gofakeit.Email(),
-		PhoneNumber:      gofakeit.Phone(),
-		Nationality:      gofakeit.Country(),
-		Street:           gofakeit.Street(),
-		Country:          gofakeit.Country(),
-		State:            gofakeit.State(),
-		PostCode:         "0000",
-		City:             gofakeit.City(),
-		MetaData:         nil,
+		OrganizationName: "Test Org",
+		Category:         "Test Category",
+		FirstName:        "John",
+		LastName:         "Doe",
+		OtherNames:       "Middle",
+		Gender:           "Male",
+		DOB:              time.Now(),
+		EmailAddress:     "john.doe@example.com",
+		PhoneNumber:      "1234567890",
+		Nationality:      "US",
+		Street:           "123 Main St",
+		Country:          "United States",
+		State:            "NY",
+		PostCode:         "10001",
+		City:             "New York",
+		MetaData:         map[string]interface{}{"key": "value"},
 	}
-	metaDataJSON, _ := json.Marshal(identity.MetaData)
 
-	mock.ExpectExec("UPDATE blnk.identity SET").
-		WithArgs(sqlmock.AnyArg(), identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, sqlmock.AnyArg(), metaDataJSON).
+	mock.ExpectExec(`UPDATE blnk\.identity SET identity_type = \$1, first_name = \$2, last_name = \$3, other_names = \$4, gender = \$5, dob = \$6, email_address = \$7, phone_number = \$8, nationality = \$9, organization_name = \$10, category = \$11, street = \$12, country = \$13, state = \$14, post_code = \$15, city = \$16 WHERE identity_id = \$17`).
+		WithArgs(
+			identity.IdentityType,
+			identity.FirstName,
+			identity.LastName,
+			identity.OtherNames,
+			identity.Gender,
+			identity.DOB,
+			identity.EmailAddress,
+			identity.PhoneNumber,
+			identity.Nationality,
+			identity.OrganizationName,
+			identity.Category,
+			identity.Street,
+			identity.Country,
+			identity.State,
+			identity.PostCode,
+			identity.City,
+			identity.IdentityID,
+		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.UpdateIdentity(identity)
-
 	assert.NoError(t, err)
 
 	if err := mock.ExpectationsWereMet(); err != nil {

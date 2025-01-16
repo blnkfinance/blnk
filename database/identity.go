@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/internal/apierror"
@@ -180,30 +181,78 @@ func (d Datasource) GetAllIdentities() ([]model.Identity, error) {
 // Returns:
 // - An error if the update fails, or nil if successful.
 func (d Datasource) UpdateIdentity(identity *model.Identity) error {
-	// Marshal the MetaData field into JSON
-	metaDataJSON, err := json.Marshal(identity.MetaData)
-	if err != nil {
-		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
+	var setFields []string
+	var args []interface{}
+	argPosition := 1
+
+	// Helper function to add a field to the update query if it has a value
+	addField := func(value interface{}, fieldName string) {
+		switch v := value.(type) {
+		case time.Time:
+			if !v.IsZero() {
+				setFields = append(setFields, fmt.Sprintf("%s = $%d", fieldName, argPosition))
+				args = append(args, v)
+				argPosition++
+			}
+		case string:
+			if v != "" {
+				setFields = append(setFields, fmt.Sprintf("%s = $%d", fieldName, argPosition))
+				args = append(args, v)
+				argPosition++
+			}
+		default:
+			if v != nil {
+				setFields = append(setFields, fmt.Sprintf("%s = $%d", fieldName, argPosition))
+				args = append(args, v)
+				argPosition++
+			}
+		}
 	}
 
-	// Execute the SQL update query with the provided identity details
-	result, err := d.Conn.Exec(`
-		UPDATE blnk.identity
-		SET identity_type = $2, first_name = $3, last_name = $4, other_names = $5, gender = $6, dob = $7, email_address = $8, phone_number = $9, nationality = $10, organization_name = $11, category = $12, street = $13, country = $14, state = $15, post_code = $16, city = $17, created_at = $18, meta_data = $19
-		WHERE identity_id = $1
-	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
+	// Add fields to update only if they have values
+	addField(identity.IdentityType, "identity_type")
+	addField(identity.FirstName, "first_name")
+	addField(identity.LastName, "last_name")
+	addField(identity.OtherNames, "other_names")
+	addField(identity.Gender, "gender")
+	addField(identity.DOB, "dob")
+	addField(identity.EmailAddress, "email_address")
+	addField(identity.PhoneNumber, "phone_number")
+	addField(identity.Nationality, "nationality")
+	addField(identity.OrganizationName, "organization_name")
+	addField(identity.Category, "category")
+	addField(identity.Street, "street")
+	addField(identity.Country, "country")
+	addField(identity.State, "state")
+	addField(identity.PostCode, "post_code")
+	addField(identity.City, "city")
 
+	// If no fields to update, return early
+	if len(setFields) == 0 {
+		return apierror.NewAPIError(apierror.ErrBadRequest, "No fields provided for update", nil)
+	}
+
+	// Build the SQL query
+	query := fmt.Sprintf(`
+		UPDATE blnk.identity
+		SET %s
+		WHERE identity_id = $%d
+	`, strings.Join(setFields, ", "), argPosition)
+
+	// Add identity ID as the last argument
+	args = append(args, identity.IdentityID)
+
+	// Execute the update query
+	result, err := d.Conn.Exec(query, args...)
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update identity", err)
 	}
 
-	// Check the number of rows affected to ensure the update was applied
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
 	}
 
-	// Return an error if no rows were updated (i.e., the identity was not found)
 	if rowsAffected == 0 {
 		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Identity with ID '%s' not found", identity.IdentityID), nil)
 	}
