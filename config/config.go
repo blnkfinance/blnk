@@ -341,7 +341,11 @@ func (cnf *Configuration) setupRateLimiting() {
 
 // MockConfig sets a mock configuration for testing purposes.
 func MockConfig(mockConfig *Configuration) {
-	mockConfig.validateAndAddDefaults()
+	err := mockConfig.validateAndAddDefaults()
+	if err != nil {
+		log.Printf("Error setting mock config: %v", err)
+		return
+	}
 	ConfigStore.Store(mockConfig)
 }
 
