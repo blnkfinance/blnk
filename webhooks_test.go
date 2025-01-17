@@ -56,7 +56,7 @@ func TestSendWebhook(t *testing.T) {
 			},
 		},
 	}
-	config.MockConfig(cnf)
+	config.ConfigStore.Store(cnf)
 
 	testData := NewWebhook{
 		Event:   "transaction.queued",

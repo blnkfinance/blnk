@@ -20,7 +20,7 @@ func TestGetDBConnection_Singleton(t *testing.T) {
 		},
 	}
 
-	config.MockConfig(mockConfig)
+	config.ConfigStore.Store(mockConfig)
 
 	// First call to GetDBConnection should initialize the instance
 	ds1, err := GetDBConnection(mockConfig)

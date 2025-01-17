@@ -35,7 +35,7 @@ func TestOneToOneReconciliation(t *testing.T) {
 			MaxWorkers: 1,
 		},
 	}
-	config.MockConfig(cnf)
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 	blnk := &Blnk{datasource: mockDS}
 
@@ -82,10 +82,11 @@ func TestOneToOneReconciliation(t *testing.T) {
 func TestOneToManyReconciliation(t *testing.T) {
 	cnf := &config.Configuration{
 		Transaction: config.TransactionConfig{
-			BatchSize: 100000,
+			BatchSize:  100000,
+			MaxWorkers: 1,
 		},
 	}
-	config.MockConfig(cnf)
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 	blnk := &Blnk{datasource: mockDS}
 
@@ -140,14 +141,15 @@ func TestOneToManyReconciliationNoMatches(t *testing.T) {
 			Dns: "localhost:6379",
 		},
 		Transaction: config.TransactionConfig{
-			BatchSize: 100000,
+			BatchSize:  100000,
+			MaxWorkers: 1,
 		},
 		Queue: config.QueueConfig{
 			WebhookQueue:   "webhook_queue",
 			NumberOfQueues: 1,
 		},
 	}
-	config.MockConfig(cnf)
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 	blnk := &Blnk{datasource: mockDS}
 
@@ -375,15 +377,18 @@ func TestReconciliationEdgeCases(t *testing.T) {
 			Dns: "localhost:6379",
 		},
 		Transaction: config.TransactionConfig{
-			BatchSize: 100000,
+			BatchSize:  100000,
+			MaxWorkers: 1,
 		},
 		Queue: config.QueueConfig{
 			WebhookQueue:   "webhook_queue",
 			NumberOfQueues: 1,
 		},
+		Reconciliation: config.ReconciliationConfig{
+			ProgressInterval: 100,
+		},
 	}
-	config.MockConfig(cnf)
-
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 
 	blnk := &Blnk{datasource: mockDS}
@@ -411,9 +416,8 @@ func TestReconciliationEdgeCases(t *testing.T) {
 		externalTxns := []*model.Transaction{
 			{TransactionID: "ext1", Amount: 100, CreatedAt: time.Now()},
 		}
-		internalTxns := []*model.Transaction{}
 
-		mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(0)).Return(internalTxns, nil)
+		mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(0)).Return([]*model.Transaction{}, nil).Once()
 
 		matchingRules := []model.MatchingRule{
 			{

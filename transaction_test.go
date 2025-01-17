@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/brianvoe/gofakeit/v6"
@@ -34,6 +35,23 @@ import (
 )
 
 func TestRecordTransaction(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+		Server: config.ServerConfig{SecretKey: "some-secret"},
+		AccountNumberGeneration: config.AccountNumberGenerationConfig{
+			HttpService: config.AccountGenerationHttpService{
+				Url: "http://example.com/generateAccount",
+			},
+		},
+	}
+
+	config.ConfigStore.Store(cnf)
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)
 
@@ -143,6 +161,23 @@ func TestRecordTransaction(t *testing.T) {
 }
 
 func TestRecordTransactionWithRate(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+		Server: config.ServerConfig{SecretKey: "some-secret"},
+		AccountNumberGeneration: config.AccountNumberGenerationConfig{
+			HttpService: config.AccountGenerationHttpService{
+				Url: "http://example.com/generateAccount",
+			},
+		},
+	}
+
+	config.ConfigStore.Store(cnf)
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)
 
