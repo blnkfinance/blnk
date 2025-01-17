@@ -92,6 +92,7 @@ func setupBlnk(cfg *config.Configuration) (*blnk.Blnk, error) {
 	// Create a new Blnk instance using the initialized data source.
 	newBlnk, err := blnk.NewBlnk(db)
 	if err != nil {
+		logrus.Error(err) // Log the error using Logrus
 		return &blnk.Blnk{}, fmt.Errorf("error creating blnk: %v", err)
 	}
 	return newBlnk, nil

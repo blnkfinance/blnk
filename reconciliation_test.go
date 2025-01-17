@@ -23,11 +23,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/database/mocks"
 	"github.com/jerry-enebeli/blnk/model"
 )
 
 func TestOneToOneReconciliation(t *testing.T) {
+	cnf := &config.Configuration{
+		Transaction: config.TransactionConfig{
+			BatchSize:  100000,
+			MaxWorkers: 1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 	blnk := &Blnk{datasource: mockDS}
 
@@ -72,6 +80,13 @@ func TestOneToOneReconciliation(t *testing.T) {
 
 // TestOneToManyReconciliation tests the one-to-many reconciliation strategy
 func TestOneToManyReconciliation(t *testing.T) {
+	cnf := &config.Configuration{
+		Transaction: config.TransactionConfig{
+			BatchSize:  100000,
+			MaxWorkers: 1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 	blnk := &Blnk{datasource: mockDS}
 
@@ -121,6 +136,20 @@ func TestOneToManyReconciliation(t *testing.T) {
 }
 
 func TestOneToManyReconciliationNoMatches(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:  100000,
+			MaxWorkers: 1,
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 	blnk := &Blnk{datasource: mockDS}
 
@@ -343,6 +372,23 @@ func TestMatchingRules(t *testing.T) {
 
 // TestReconciliationEdgeCases tests edge cases in the reconciliation process
 func TestReconciliationEdgeCases(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:  100000,
+			MaxWorkers: 1,
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+		Reconciliation: config.ReconciliationConfig{
+			ProgressInterval: 100,
+		},
+	}
+	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
 
 	blnk := &Blnk{datasource: mockDS}
@@ -370,9 +416,8 @@ func TestReconciliationEdgeCases(t *testing.T) {
 		externalTxns := []*model.Transaction{
 			{TransactionID: "ext1", Amount: 100, CreatedAt: time.Now()},
 		}
-		internalTxns := []*model.Transaction{}
 
-		mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(0)).Return(internalTxns, nil)
+		mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(0)).Return([]*model.Transaction{}, nil).Once()
 
 		matchingRules := []model.MatchingRule{
 			{

@@ -78,6 +78,7 @@ func TestCreateAccount(t *testing.T) {
 }
 
 func TestCreateAccountWithExternalGenerator(t *testing.T) {
+
 	// Initialize the mock HTTP responder
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
@@ -91,8 +92,6 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	// Mock the external account generator response
 	httpmock.RegisterResponder("GET", "http://example.com/generateAccount",
 		httpmock.NewStringResponder(200, `{"account_number": "123456789", "bank_name": "Blnk Bank"}`))
-
-	config.MockConfig(&config.Configuration{Server: config.ServerConfig{SecretKey: "some-secret"}, AccountNumberGeneration: config.AccountNumberGenerationConfig{HttpService: config.AccountGenerationHttpService{Url: "http://example.com/generateAccount"}}})
 
 	account := model.Account{
 		Name:       "Test Account",
@@ -129,6 +128,23 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 }
 
 func TestGetAccountByID(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+		Server: config.ServerConfig{SecretKey: "some-secret"},
+		AccountNumberGeneration: config.AccountNumberGenerationConfig{
+			HttpService: config.AccountGenerationHttpService{
+				Url: "http://example.com/generateAccount",
+			},
+		},
+	}
+
+	config.ConfigStore.Store(cnf)
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)
 
@@ -172,6 +188,23 @@ func TestGetAccountByID(t *testing.T) {
 }
 
 func TestGetAllAccounts(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+		Server: config.ServerConfig{SecretKey: "some-secret"},
+		AccountNumberGeneration: config.AccountNumberGenerationConfig{
+			HttpService: config.AccountGenerationHttpService{
+				Url: "http://example.com/generateAccount",
+			},
+		},
+	}
+
+	config.ConfigStore.Store(cnf)
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)
 

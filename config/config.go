@@ -23,14 +23,44 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/kelseyhightower/envconfig"
 
 	"github.com/sirupsen/logrus"
 )
 
+// Default constants
 const (
-	DEFAULT_PORT = "5001"
+	DEFAULT_PORT          = "5001"
+	DEFAULT_TYPESENSE_URL = "http://typesense:8108"
+	DEFAULT_CLEANUP_SEC   = 10800 // 3 hours in seconds
+)
+
+// Default values for different configurations
+var (
+	defaultTransaction = TransactionConfig{
+		BatchSize:        100000,
+		MaxQueueSize:     1000,
+		MaxWorkers:       10,
+		LockDuration:     30 * time.Minute,
+		IndexQueuePrefix: "transactions",
+	}
+
+	defaultReconciliation = ReconciliationConfig{
+		DefaultStrategy:  "one_to_one",
+		ProgressInterval: 100,
+		MaxRetries:       3,
+		RetryDelay:       5 * time.Second,
+	}
+
+	defaultQueue = QueueConfig{
+		TransactionQueue:    "new:transaction",
+		WebhookQueue:        "new:webhook",
+		IndexQueue:          "new:index",
+		InflightExpiryQueue: "new:inflight-expiry",
+		NumberOfQueues:      20,
+	}
 )
 
 var ConfigStore atomic.Value
@@ -78,12 +108,37 @@ type SlackWebhook struct {
 	WebhookUrl string `json:"webhook_url"`
 }
 
+type WebhookConfig struct {
+	Url     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+}
+
 type Notification struct {
-	Slack   SlackWebhook `json:"slack"`
-	Webhook struct {
-		Url     string            `json:"url"`
-		Headers map[string]string `json:"headers"`
-	} `json:"webhook"`
+	Slack   SlackWebhook  `json:"slack"`
+	Webhook WebhookConfig `json:"webhook"`
+}
+
+type TransactionConfig struct {
+	BatchSize        int           `json:"batch_size" envconfig:"BLNK_TRANSACTION_BATCH_SIZE"`
+	MaxQueueSize     int           `json:"max_queue_size" envconfig:"BLNK_TRANSACTION_MAX_QUEUE_SIZE"`
+	MaxWorkers       int           `json:"max_workers" envconfig:"BLNK_TRANSACTION_MAX_WORKERS"`
+	LockDuration     time.Duration `json:"lock_duration" envconfig:"BLNK_TRANSACTION_LOCK_DURATION"`
+	IndexQueuePrefix string        `json:"index_queue_prefix" envconfig:"BLNK_TRANSACTION_INDEX_QUEUE_PREFIX"`
+}
+
+type ReconciliationConfig struct {
+	DefaultStrategy  string        `json:"default_strategy" envconfig:"BLNK_RECONCILIATION_DEFAULT_STRATEGY"`
+	ProgressInterval int           `json:"progress_interval" envconfig:"BLNK_RECONCILIATION_PROGRESS_INTERVAL"`
+	MaxRetries       int           `json:"max_retries" envconfig:"BLNK_RECONCILIATION_MAX_RETRIES"`
+	RetryDelay       time.Duration `json:"retry_delay" envconfig:"BLNK_RECONCILIATION_RETRY_DELAY"`
+}
+
+type QueueConfig struct {
+	TransactionQueue    string `json:"transaction_queue" envconfig:"BLNK_QUEUE_TRANSACTION"`
+	WebhookQueue        string `json:"webhook_queue" envconfig:"BLNK_QUEUE_WEBHOOK"`
+	IndexQueue          string `json:"index_queue" envconfig:"BLNK_QUEUE_INDEX"`
+	InflightExpiryQueue string `json:"inflight_expiry_queue" envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
+	NumberOfQueues      int    `json:"number_of_queues" envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
 }
 
 type Configuration struct {
@@ -103,6 +158,9 @@ type Configuration struct {
 	Notification            Notification                  `json:"notification"`
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
 	EnableTelemetry         bool                          `json:"enable_telemetry" envconfig:"BLNK_ENABLE_TELEMETRY"`
+	Transaction             TransactionConfig             `json:"transaction"`
+	Reconciliation          ReconciliationConfig          `json:"reconciliation"`
+	Queue                   QueueConfig                   `json:"queue"`
 }
 
 func loadConfigFromFile(file string) error {
@@ -152,38 +210,118 @@ func Fetch() (*Configuration, error) {
 }
 
 func (cnf *Configuration) validateAndAddDefaults() error {
-	if cnf.ProjectName == "" {
-		log.Println("Warning: Project name is empty. Setting a default name.")
-		cnf.ProjectName = "Blnk Server"
+	if err := cnf.validateRequiredFields(); err != nil {
+		return err
 	}
 
-	if cnf.TypeSense.Dns == "" {
-		cnf.TypeSense.Dns = "http://typesense:8108"
-	}
+	cnf.setDefaultValues()
+	cnf.trimWhitespace()
+	cnf.setupRateLimiting()
 
+	return nil
+}
+
+func (cnf *Configuration) validateRequiredFields() error {
 	if cnf.DataSource.Dns == "" {
-		log.Println("Error: Data source DNS is empty. It's a required field.")
 		return errors.New("data source DNS is required")
 	}
 
 	if cnf.Redis.Dns == "" {
-		log.Println("Error: Redis DNS is empty. It's a required field.")
 		return errors.New("redis DNS is required")
 	}
 
-	// Trim white spaces from fields
-	cnf.ProjectName = strings.TrimSpace(cnf.ProjectName)
-	cnf.Server.Port = strings.TrimSpace(cnf.Server.Port)
-	cnf.DataSource.Dns = strings.TrimSpace(cnf.DataSource.Dns)
-	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
+	return nil
+}
 
-	// Set default value for Port if it's empty
+func (cnf *Configuration) setDefaultValues() {
+	// Project defaults
+	if cnf.ProjectName == "" {
+		cnf.ProjectName = "Blnk Server"
+		log.Println("Warning: Project name is empty. Setting a default name.")
+	}
+
+	// Server defaults
 	if cnf.Server.Port == "" {
 		cnf.Server.Port = DEFAULT_PORT
 		log.Printf("Warning: Port not specified in config. Setting default port: %s", DEFAULT_PORT)
 	}
 
-	// Rate limiting is disabled by default (when both RPS and Burst are nil)
+	// TypeSense defaults
+	if cnf.TypeSense.Dns == "" {
+		cnf.TypeSense.Dns = DEFAULT_TYPESENSE_URL
+	}
+
+	// Set module defaults
+	cnf.setTransactionDefaults()
+	cnf.setReconciliationDefaults()
+	cnf.setQueueDefaults()
+
+	// Enable telemetry by default
+	if !cnf.EnableTelemetry {
+		cnf.EnableTelemetry = true
+		log.Println("Warning: Telemetry setting not specified. Enabling by default.")
+	}
+}
+
+func (cnf *Configuration) setTransactionDefaults() {
+	if cnf.Transaction.BatchSize == 0 {
+		cnf.Transaction.BatchSize = defaultTransaction.BatchSize
+	}
+	if cnf.Transaction.MaxQueueSize == 0 {
+		cnf.Transaction.MaxQueueSize = defaultTransaction.MaxQueueSize
+	}
+	if cnf.Transaction.MaxWorkers == 0 {
+		cnf.Transaction.MaxWorkers = defaultTransaction.MaxWorkers
+	}
+	if cnf.Transaction.LockDuration == 0 {
+		cnf.Transaction.LockDuration = defaultTransaction.LockDuration
+	}
+	if cnf.Transaction.IndexQueuePrefix == "" {
+		cnf.Transaction.IndexQueuePrefix = defaultTransaction.IndexQueuePrefix
+	}
+}
+
+func (cnf *Configuration) setReconciliationDefaults() {
+	if cnf.Reconciliation.DefaultStrategy == "" {
+		cnf.Reconciliation.DefaultStrategy = defaultReconciliation.DefaultStrategy
+	}
+	if cnf.Reconciliation.ProgressInterval == 0 {
+		cnf.Reconciliation.ProgressInterval = defaultReconciliation.ProgressInterval
+	}
+	if cnf.Reconciliation.MaxRetries == 0 {
+		cnf.Reconciliation.MaxRetries = defaultReconciliation.MaxRetries
+	}
+	if cnf.Reconciliation.RetryDelay == 0 {
+		cnf.Reconciliation.RetryDelay = defaultReconciliation.RetryDelay
+	}
+}
+
+func (cnf *Configuration) setQueueDefaults() {
+	if cnf.Queue.TransactionQueue == "" {
+		cnf.Queue.TransactionQueue = defaultQueue.TransactionQueue
+	}
+	if cnf.Queue.WebhookQueue == "" {
+		cnf.Queue.WebhookQueue = defaultQueue.WebhookQueue
+	}
+	if cnf.Queue.IndexQueue == "" {
+		cnf.Queue.IndexQueue = defaultQueue.IndexQueue
+	}
+	if cnf.Queue.InflightExpiryQueue == "" {
+		cnf.Queue.InflightExpiryQueue = defaultQueue.InflightExpiryQueue
+	}
+	if cnf.Queue.NumberOfQueues == 0 {
+		cnf.Queue.NumberOfQueues = defaultQueue.NumberOfQueues
+	}
+}
+
+func (cnf *Configuration) trimWhitespace() {
+	cnf.ProjectName = strings.TrimSpace(cnf.ProjectName)
+	cnf.Server.Port = strings.TrimSpace(cnf.Server.Port)
+	cnf.DataSource.Dns = strings.TrimSpace(cnf.DataSource.Dns)
+	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
+}
+
+func (cnf *Configuration) setupRateLimiting() {
 	if cnf.RateLimit.RequestsPerSecond != nil && cnf.RateLimit.Burst == nil {
 		defaultBurst := 2 * int(*cnf.RateLimit.RequestsPerSecond)
 		cnf.RateLimit.Burst = &defaultBurst
@@ -194,25 +332,20 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 		cnf.RateLimit.RequestsPerSecond = &defaultRPS
 		log.Printf("Warning: Rate limit RPS not specified. Setting default value: %.2f", defaultRPS)
 	}
-
-	// Set default cleanup interval if not specified
 	if cnf.RateLimit.CleanupIntervalSec == nil {
-		defaultCleanup := 10800 // 3 hours in seconds
+		defaultCleanup := DEFAULT_CLEANUP_SEC
 		cnf.RateLimit.CleanupIntervalSec = &defaultCleanup
 		log.Printf("Warning: Rate limit cleanup interval not specified. Setting default value: %d seconds", defaultCleanup)
 	}
-
-	// Set default value for EnableTelemetry
-	if !cnf.EnableTelemetry {
-		cnf.EnableTelemetry = true
-		log.Println("Warning: Telemetry setting not specified. Enabling by default.")
-	}
-
-	return nil
 }
 
 // MockConfig sets a mock configuration for testing purposes.
 func MockConfig(mockConfig *Configuration) {
+	err := mockConfig.validateAndAddDefaults()
+	if err != nil {
+		log.Printf("Error setting mock config: %v", err)
+		return
+	}
 	ConfigStore.Store(mockConfig)
 }
 

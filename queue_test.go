@@ -29,6 +29,17 @@ import (
 )
 
 func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
 	redisOption, err := redis_db.ParseRedisURL("localhost:6379")
 	if err != nil {
 		log.Fatalf("Error parsing Redis URL: %v", err)
@@ -37,11 +48,7 @@ func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
 	client := asynq.NewClient(queueOptions)
 	inspector := asynq.NewInspector(queueOptions)
 
-	q := NewQueue(&config.Configuration{
-		Redis: config.RedisConfig{
-			Dns: "localhost:6379",
-		},
-	})
+	q := NewQueue(cnf)
 	q.Client = client
 	q.Inspector = inspector
 
@@ -52,7 +59,7 @@ func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
 	err = q.Enqueue(context.Background(), &transaction)
 	assert.NoError(t, err)
 
-	task, err := inspector.GetTaskInfo(WEBHOOK_QUEUE, transaction.TransactionID)
+	task, err := inspector.GetTaskInfo(cnf.Queue.WebhookQueue, transaction.TransactionID)
 	if err != nil {
 		return
 	}
@@ -61,6 +68,16 @@ func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
 }
 
 func TestEnqueueScheduledTransaction(t *testing.T) {
+	conf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+	}
+	config.ConfigStore.Store(conf)
 
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
@@ -81,7 +98,7 @@ func TestEnqueueScheduledTransaction(t *testing.T) {
 	err = q.Enqueue(context.Background(), &transaction)
 	assert.NoError(t, err)
 
-	task, err := inspector.GetTaskInfo(WEBHOOK_QUEUE, transaction.TransactionID)
+	task, err := inspector.GetTaskInfo(conf.Queue.WebhookQueue, transaction.TransactionID)
 	if err != nil {
 		return
 	}
@@ -89,6 +106,16 @@ func TestEnqueueScheduledTransaction(t *testing.T) {
 }
 
 func TestEnqueueWithAsynqClientEnqueueError(t *testing.T) {
+	conf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+	}
+
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 
@@ -108,7 +135,7 @@ func TestEnqueueWithAsynqClientEnqueueError(t *testing.T) {
 	err = q.Enqueue(context.Background(), &transaction)
 	assert.NoError(t, err)
 
-	task, err := inspector.GetTaskInfo(WEBHOOK_QUEUE, "tx_1235")
+	task, err := inspector.GetTaskInfo(conf.Queue.WebhookQueue, "tx_1235")
 	if err != nil {
 		return
 	}

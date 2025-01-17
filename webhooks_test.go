@@ -42,20 +42,22 @@ func TestSendWebhook(t *testing.T) {
 	}
 	defer mr.Close()
 
-	mockConfig := &config.Configuration{
+	cnf := &config.Configuration{
 		Redis: config.RedisConfig{
 			Dns: mr.Addr(),
 		},
-		Notification: config.Notification{Webhook: struct {
-			Url     string            `json:"url"`
-			Headers map[string]string `json:"headers"`
-		}(struct {
-			Url     string
-			Headers map[string]string
-		}{Url: "https:localhost:5001/webhook", Headers: nil})},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+		Notification: config.Notification{
+			Webhook: config.WebhookConfig{
+				Url: "http://localhost:8080",
+			},
+		},
 	}
+	config.ConfigStore.Store(cnf)
 
-	config.ConfigStore.Store(mockConfig)
 	testData := NewWebhook{
 		Event:   "transaction.queued",
 		Payload: getTransactionMock(10000, false),
@@ -67,7 +69,6 @@ func TestSendWebhook(t *testing.T) {
 	// Verify that the task was enqueued
 	assert.NoError(t, err)
 	tasks := mr.Keys()
-	t.Log(tasks)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, tasks)
 

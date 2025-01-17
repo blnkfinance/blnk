@@ -31,14 +31,6 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 )
 
-const (
-	TRANSACTION_QUEUE     = "new:transaction"
-	WEBHOOK_QUEUE         = "new:webhoook"
-	INDEX_QUEUE           = "new:index"
-	EXPIREDINFLIGHT_QUEUE = "new:inflight-expiry"
-	NumberOfQueues        = 20
-)
-
 // Queue represents a queue for handling various tasks.
 type Queue struct {
 	Client    *asynq.Client
@@ -80,12 +72,21 @@ func NewQueue(conf *config.Configuration) *Queue {
 // Returns:
 // - error: An error if the task could not be enqueued.
 func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) error {
+	cfg, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+
 	IPayload, err := json.Marshal(transactionID)
 	if err != nil {
 		return err
 	}
-	taskOptions := []asynq.Option{asynq.TaskID(transactionID), asynq.Queue(EXPIREDINFLIGHT_QUEUE), asynq.ProcessIn(time.Until(expiresAt))}
-	task := asynq.NewTask(EXPIREDINFLIGHT_QUEUE, IPayload, taskOptions...)
+	taskOptions := []asynq.Option{
+		asynq.TaskID(transactionID),
+		asynq.Queue(cfg.Queue.InflightExpiryQueue),
+		asynq.ProcessIn(time.Until(expiresAt)),
+	}
+	task := asynq.NewTask(cfg.Queue.InflightExpiryQueue, IPayload, taskOptions...)
 	info, err := q.Client.Enqueue(task)
 	if err != nil {
 		log.Println(err, info)
@@ -105,6 +106,11 @@ func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) e
 // Returns:
 // - error: An error if the task could not be enqueued.
 func (q *Queue) queueIndexData(id string, collection string, data interface{}) error {
+	cfg, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+
 	payload := map[string]interface{}{
 		"collection": collection,
 		"payload":    data,
@@ -115,8 +121,8 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 		return err
 	}
 
-	taskOptions := []asynq.Option{asynq.Queue(INDEX_QUEUE)}
-	task := asynq.NewTask(INDEX_QUEUE, IPayload, taskOptions...)
+	taskOptions := []asynq.Option{asynq.Queue(cfg.Queue.IndexQueue)}
+	task := asynq.NewTask(cfg.Queue.IndexQueue, IPayload, taskOptions...)
 	info, err := q.Client.Enqueue(task)
 	if err != nil {
 		log.Println(err, info)
@@ -168,20 +174,38 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 // Returns:
 // - *asynq.Task: The generated task ready to be enqueued.
 func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Task {
-	// Hash the balance ID and use modulo to select a queue
-	queueIndex := hashBalanceID(transaction.Source) % NumberOfQueues
-	// Queue names are 1-based, so we add 1 to the index
-	queueName := fmt.Sprintf("%s_%d", TRANSACTION_QUEUE, queueIndex+1)
+	cnf, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching config: %v", err)
+		// Use default values if config fetch fails
+		return q.geTaskWithDefaults(transaction, payload)
+	}
+	queueIndex := hashBalanceID(transaction.Source) % cnf.Queue.NumberOfQueues
+	queueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, queueIndex+1)
 
-	// Initialize task options with the task ID and the selected queue name
 	taskOptions := []asynq.Option{asynq.TaskID(transaction.TransactionID), asynq.Queue(queueName)}
-
-	// If the transaction is scheduled for a future time, add a processing delay
 	if !transaction.ScheduledFor.IsZero() {
 		taskOptions = append(taskOptions, asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
 	}
 
-	// Create and return the new task with the specified options
+	return asynq.NewTask(queueName, payload, taskOptions...)
+}
+
+// Fallback function for when config fetch fails
+func (q *Queue) geTaskWithDefaults(transaction *model.Transaction, payload []byte) *asynq.Task {
+	conf, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching config: %v", err)
+		return nil
+	}
+	queueIndex := hashBalanceID(transaction.Source) % conf.Queue.NumberOfQueues
+	queueName := fmt.Sprintf("new:transaction_%d", queueIndex+1) // Default prefix
+
+	taskOptions := []asynq.Option{asynq.TaskID(transaction.TransactionID), asynq.Queue(queueName)}
+	if !transaction.ScheduledFor.IsZero() {
+		taskOptions = append(taskOptions, asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
+	}
+
 	return asynq.NewTask(queueName, payload, taskOptions...)
 }
 
@@ -207,9 +231,14 @@ func hashBalanceID(balanceID string) int {
 // - *model.Transaction: A pointer to the Transaction model if found.
 // - error: An error if the transaction could not be retrieved.
 func (q *Queue) GetTransactionFromQueue(transactionID string) (*model.Transaction, error) {
+	cfg, err := config.Fetch()
+	if err != nil {
+		return nil, err
+	}
+
 	// Iterate over all specific transaction queues
-	for i := 1; i <= NumberOfQueues; i++ {
-		queueName := fmt.Sprintf("%s_%d", TRANSACTION_QUEUE, i)
+	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
+		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
 		task, err := q.Inspector.GetTaskInfo(queueName, transactionID)
 		if err == nil && task != nil {
 			var txn model.Transaction

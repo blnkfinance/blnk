@@ -184,7 +184,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			// Load configuration
 			cfg, err := config.Fetch()
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 			}
 
 			// Initialize observability (tracing and PostHog)

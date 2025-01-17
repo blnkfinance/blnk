@@ -221,6 +221,7 @@ func TestGetBalanceByID(t *testing.T) {
 }
 
 func TestGetAllBalances(t *testing.T) {
+
 	datasource, mock, err := newTestDataSource()
 	if err != nil {
 		t.Fatalf("Error creating test data source: %s", err)

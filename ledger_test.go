@@ -36,7 +36,23 @@ import (
 )
 
 func newTestDataSource() (database.IDataSource, sqlmock.Sqlmock, error) {
-	config.MockConfig(&config.Configuration{})
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:   "webhook_queue",
+			NumberOfQueues: 1,
+		},
+		Server: config.ServerConfig{SecretKey: "some-secret"},
+		AccountNumberGeneration: config.AccountNumberGenerationConfig{
+			HttpService: config.AccountGenerationHttpService{
+				Url: "http://example.com/generateAccount",
+			},
+		},
+	}
+
+	config.ConfigStore.Store(cnf)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		log.Printf("an error '%s' was not expected when opening a stub database Connection", err)
