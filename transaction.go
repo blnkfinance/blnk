@@ -1076,9 +1076,10 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
+	transaction.PreciseAmount = model.ApplyPrecision(transaction)
 
 	// Queue the transaction for further processing
-	transaction, err := l.QueueTransaction(ctx, transaction)
+	transaction, err := l.RecordTransaction(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
 		return nil, l.logAndRecordError(span, "saving transaction to db error", err)
@@ -1662,6 +1663,7 @@ func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string) (*mo
 
 	// Create a new refund transaction
 	newTransaction := *originalTxn
+	newTransaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	newTransaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	newTransaction.ParentTransaction = originalTxn.TransactionID
 	newTransaction.Source = originalTxn.Destination
