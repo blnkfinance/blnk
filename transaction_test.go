@@ -19,12 +19,14 @@ package blnk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/config"
+	"github.com/jerry-enebeli/blnk/database"
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/brianvoe/gofakeit/v6"
@@ -32,6 +34,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRecordTransaction(t *testing.T) {
@@ -208,7 +211,6 @@ func TestRecordTransactionWithRate(t *testing.T) {
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
 		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0)
 
-	// Updated regex to be more flexible
 	balanceQuery := `SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
 
@@ -332,4 +334,124 @@ func TestVoidInflightTransaction_Negative(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
+}
+
+func TestQueueTransactionFlow(t *testing.T) {
+	// Skip in short mode as this is a long-running test
+	if testing.Short() {
+		t.Skip("Skipping queue flow test in short mode")
+	}
+
+	// Initialize test context
+	ctx := context.Background()
+
+	// Setup real test configuration
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	// Create real datasource for integration test
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	// Create real Blnk instance
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test")
+
+	// Create source balance
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	// Create destination balance
+	destBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	// Create balances in database
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err, "Failed to create destination balance")
+
+	sourceID := source.BalanceID
+	destID := dest.BalanceID
+
+	// Create transaction
+	txn := &model.Transaction{
+		Reference:      txnRef,
+		Source:         sourceID,
+		Destination:    destID,
+		Amount:         500, // $5.00
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": true},
+	}
+
+	// Queue the transaction
+	queuedTxn, err := blnk.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue transaction")
+
+	// Verify initial transaction state
+	require.Equal(t, StatusQueued, queuedTxn.Status, "Initial transaction should be QUEUED")
+
+	// Store the original transaction ID
+	originalTxnID := queuedTxn.TransactionID
+
+	queueCopy := createQueueCopy(queuedTxn, queuedTxn.Reference)
+	blnk.RecordTransaction(ctx, queueCopy)
+
+	ref := fmt.Sprintf("%s_%s", txnRef, "q")
+	// Verify the processed transaction
+	appliedTxn, err := ds.GetTransactionByRef(ctx, ref)
+	require.NoError(t, err, "Failed to get processed transactions")
+	require.NotEmpty(t, appliedTxn, "Should have processed transactions")
+
+	// Verify the applied transaction
+	require.NotNil(t, appliedTxn, "Should have an APPLIED transaction")
+	require.Equal(t, originalTxnID, appliedTxn.ParentTransaction, "Applied transaction should reference original transaction")
+	require.Equal(t, txn.Amount, appliedTxn.Amount, "Amount should match")
+
+	// Verify final balance states
+	updatedSource, err := ds.GetBalanceByIDLite(sourceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+
+	updatedDest, err := ds.GetBalanceByIDLite(destID)
+	require.NoError(t, err, "Failed to get updated destination balance")
+
+	fmt.Println("Updated Source Balance: ", updatedSource.Balance)
+	fmt.Println("Updated Destination Balance: ", updatedDest.Balance)
+
+	require.Equal(t, 0, updatedSource.Balance.Cmp(updatedSource.Balance),
+		"Source balance should be reduced by transaction amount")
+	require.Equal(t, 0, updatedDest.Balance.Cmp(updatedDest.Balance),
+		"Destination balance should be increased by transaction amount")
+
 }

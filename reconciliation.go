@@ -926,14 +926,12 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 		func(ctx context.Context, txns <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ float64) {
 			defer wg.Done()
 			for txn := range txns {
-				// Process each transaction.
 				if err := processor.process(ctx, txn); err != nil {
 					log.Printf("Error processing transaction %s: %v", txn.TransactionID, err)
 					results <- BatchJobResult{Error: err}
 					return
 				}
 				processedCount++
-				// Log progress every 10 transactions.
 				if processedCount%10 == 0 {
 					log.Printf("Processed %d transactions", processedCount)
 				}
@@ -962,11 +960,9 @@ func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.
 
 	log.Printf("Finalizing reconciliation. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 
-	// If not a dry run, perform post-reconciliation actions (e.g., indexing).
 	if !reconciliation.IsDryRun {
 		s.postReconciliationActions(ctx, reconciliation)
 	} else {
-		// Log the results of the dry run.
 		log.Printf("Dry run completed. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 	}
 
@@ -1056,7 +1052,6 @@ func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*mode
 		log.Printf("Error in one-to-many reconciliation: %v", err)
 	}
 
-	// Close channels after processing.
 	go func() {
 		wg.Wait()
 		close(matchChan)
@@ -1310,7 +1305,6 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 
 	matchFound := false
 
-	// Process transactions in batches, applying the matching rules.
 	_, err = s.ProcessTransactionInBatches(
 		ctx,
 		externalTxn.TransactionID,
@@ -1441,10 +1435,10 @@ func (s *Blnk) matchesGroup(externalTxn *model.Transaction, group []*model.Trans
 func (s *Blnk) dominantCurrency(currencies map[string]bool) string {
 	if len(currencies) == 1 {
 		for currency := range currencies {
-			return currency // Return the only currency if there's exactly one.
+			return currency
 		}
 	}
-	return "MIXED" // Return "MIXED" if there are multiple currencies.
+	return "MIXED"
 }
 
 // CreateMatchingRule creates a new matching rule after validating it.
@@ -1713,7 +1707,7 @@ func (s *Blnk) partialMatch(str1, str2 string, allowableDrift float64) bool {
 // Returns true if the currencies match, otherwise false.
 func (s *Blnk) matchesCurrency(externalValue, internalValue string, criteria model.MatchingCriteria) bool {
 	if internalValue == "MIXED" {
-		// Handle the special case where the internal value is "MIXED" (multiple currencies in a group).
+		// TODO: Handle the special case where the internal value is "MIXED" (multiple currencies in a group).
 		return true
 	}
 	return s.matchesString(externalValue, internalValue, criteria)

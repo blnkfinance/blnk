@@ -101,6 +101,7 @@ func sendHeartbeat(client posthog.Client, heartbeatID string) {
 			if err := client.Enqueue(posthog.Capture{
 				DistinctId: heartbeatID,
 				Event:      "server_heartbeat",
+				Timestamp:  time.Now().UTC(),
 				Properties: map[string]interface{}{
 					"timestamp": time.Now().UTC(),
 				},

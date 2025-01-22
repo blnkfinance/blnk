@@ -217,7 +217,7 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 
 	// Query the transaction by reference
 	row := d.Conn.QueryRowContext(ctx, `
-		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
 		FROM blnk.transactions
 		WHERE reference = $1
 	`, reference)
@@ -225,7 +225,7 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 	// Initialize the transaction object and scan the query result into it
 	txn := model.Transaction{}
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			span.RecordError(err)
