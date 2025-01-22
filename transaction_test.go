@@ -426,7 +426,8 @@ func TestQueueTransactionFlow(t *testing.T) {
 	originalTxnID := queuedTxn.TransactionID
 
 	queueCopy := createQueueCopy(queuedTxn, queuedTxn.Reference)
-	blnk.RecordTransaction(ctx, queueCopy)
+	_, err = blnk.RecordTransaction(ctx, queueCopy)
+	assert.NoError(t, err)
 
 	ref := fmt.Sprintf("%s_%s", txnRef, "q")
 	// Verify the processed transaction
