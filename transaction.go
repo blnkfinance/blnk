@@ -1073,6 +1073,7 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	// Update the transaction status to committed and generate new identifiers
 	transaction.Status = StatusCommit
 	transaction.ParentTransaction = transaction.TransactionID
+	transaction.CreatedAt = time.Now()
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
@@ -1233,6 +1234,7 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	transaction.Status = StatusVoid
 	transaction.Amount = float64(amountLeft) / transaction.Precision
 	transaction.PreciseAmount = amountLeft
+	transaction.CreatedAt = time.Now()
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
