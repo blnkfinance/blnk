@@ -71,6 +71,7 @@ func TestRecordTransaction(t *testing.T) {
 		Reference:      gofakeit.UUID(),
 		Source:         source,
 		Destination:    destination,
+		Rate:           1,
 		Amount:         10,
 		AllowOverdraft: false,
 		Precision:      100,
@@ -221,42 +222,44 @@ func TestRecordTransactionWithRate(t *testing.T) {
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(destination).WillReturnRows(destinationBalanceRows)
 	mock.ExpectBegin()
 
+	// Updated mock expectation with correct number of arguments
 	mock.ExpectExec(regexp.QuoteMeta(`
-	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $12
-	`)).WithArgs(
-		source,
-		big.NewInt(-100000000).String(),
-		big.NewInt(0).String(),
-		big.NewInt(100000000).String(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		"USD",
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		0,
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
+        WHERE balance_id = $1 AND version = $12
+    `)).WithArgs(
+		source,                          // $1
+		big.NewInt(-100000000).String(), // $2
+		big.NewInt(0).String(),          // $3
+		big.NewInt(100000000).String(),  // $4
+		big.NewInt(0).String(),          // $5
+		big.NewInt(0).String(),          // $6
+		big.NewInt(0).String(),          // $7
+		"USD",                           // $8
+		float64(1),                      // $9
+		"ledger-id-source",              // $10
+		sqlmock.AnyArg(),                // $11
+		0,                               // $12
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
+	// Updated mock expectation with correct number of arguments
 	mock.ExpectExec(regexp.QuoteMeta(`
-	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $12
-	`)).WithArgs(
-		destination,
-		big.NewInt(130000000000).String(),
-		big.NewInt(130000000000).String(),
-		big.NewInt(0).String(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		"NGN",
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		0,
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
+        WHERE balance_id = $1 AND version = $12
+    `)).WithArgs(
+		destination,                       // $1
+		big.NewInt(130000000000).String(), // $2
+		big.NewInt(130000000000).String(), // $3
+		big.NewInt(0).String(),            // $4
+		big.NewInt(0).String(),            // $5
+		big.NewInt(0).String(),            // $6
+		big.NewInt(0).String(),            // $7
+		"NGN",                             // $8
+		float64(1),                        // $9
+		"ledger-id-destination",           // $10
+		sqlmock.AnyArg(),                  // $11
+		0,                                 // $12
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -562,4 +565,103 @@ func TestRecordTransaction_Concurrency(t *testing.T) {
 	logrus.Info("Final Source Balance: ", finalSource.Balance, finalDest.Balance, expectedDebit)
 	require.Equal(t, 0, finalSource.Balance.Cmp(big.NewInt(0).Neg(expectedDebit)))
 	require.Equal(t, 0, finalDest.Balance.Cmp(expectedDebit))
+}
+
+func TestQueueTransactionFlowWithSkipQueue(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping queue flow test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test")
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err, "Failed to create destination balance")
+
+	// Create transaction with skip_queue set to true
+	txn := &model.Transaction{
+		Reference:      txnRef,
+		Source:         source.BalanceID,
+		Destination:    dest.BalanceID,
+		Amount:         500,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": true},
+		SkipQueue:      true, // Enable skip queue
+	}
+
+	// Queue the transaction
+	queuedTxn, err := blnk.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue transaction")
+
+	// Verify that the transaction was processed immediately
+	require.Equal(t, StatusApplied, queuedTxn.Status, "Transaction should be APPLIED immediately when skip_queue is true")
+
+	// Verify balances were updated immediately
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+
+	updatedDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance")
+
+	// Calculate expected balance changes
+	expectedDebit := big.NewInt(int64(-500) * 100) // Amount * precision
+	expectedCredit := big.NewInt(int64(500) * 100)
+
+	// Verify balance changes
+	require.Equal(t, 0, updatedSource.Balance.Cmp(expectedDebit),
+		"Source balance should be immediately reduced by transaction amount")
+	require.Equal(t, 0, updatedDest.Balance.Cmp(expectedCredit),
+		"Destination balance should be immediately increased by transaction amount")
+
+	// Verify no queued entry exists
+	queuedEntry, err := ds.GetTransactionByRef(ctx, txnRef)
+	require.NoError(t, err, "Failed to get queued transaction entry")
+	require.Equal(t, StatusApplied, queuedEntry.Status, "Should have an APPLIED transaction entry")
 }

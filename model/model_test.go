@@ -166,13 +166,38 @@ func TestApplyPrecision(t *testing.T) {
 }
 
 func TestApplyRate(t *testing.T) {
-	txn := &Transaction{
-		Amount: 100.0,
-		Rate:   1.2,
+	tests := []struct {
+		name          string
+		preciseAmount int64
+		rate          float64
+		expected      int64
+	}{
+		{
+			name:          "regular rate",
+			preciseAmount: 1000,
+			rate:          1.5,
+			expected:      1500,
+		},
+		{
+			name:          "zero rate defaults to 1",
+			preciseAmount: 1000,
+			rate:          0,
+			expected:      1000,
+		},
+		{
+			name:          "rate less than 1",
+			preciseAmount: 1000,
+			rate:          0.5,
+			expected:      500,
+		},
 	}
-	adjustedAmount := ApplyRate(txn)
-	expected := 120.0
-	assert.Equal(t, expected, adjustedAmount)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ApplyRate(tt.preciseAmount, tt.rate)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestTransaction_Validate(t *testing.T) {
@@ -206,6 +231,30 @@ func TestUpdateBalances(t *testing.T) {
 	assert.Equal(t, big.NewInt(-200), sourceBalance.Balance)
 	// Destination balance should increase
 	assert.Equal(t, big.NewInt(200), destinationBalance.Balance)
+}
+
+func TestUpdateBalances_WithRate(t *testing.T) {
+	sourceBalance := &Balance{
+		Balance: big.NewInt(0),
+	}
+	destinationBalance := &Balance{
+		Balance: big.NewInt(0),
+	}
+
+	txn := &Transaction{
+		Amount:         100.0,
+		AllowOverdraft: true,
+		Precision:      100, // Will make precise amount 10000
+		Rate:           1.5, // Should make destination receive 15000
+	}
+
+	err := UpdateBalances(txn, sourceBalance, destinationBalance)
+	assert.NoError(t, err)
+
+	// Source balance should decrease by precise amount
+	assert.Equal(t, big.NewInt(-10000), sourceBalance.Balance)
+	// Destination balance should increase by rate-adjusted amount
+	assert.Equal(t, big.NewInt(15000), destinationBalance.Balance)
 }
 
 func TestBalanceMonitor_CheckCondition(t *testing.T) {

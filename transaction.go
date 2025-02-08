@@ -792,8 +792,8 @@ func (l *Blnk) executeWithLock(ctx context.Context, transaction *model.Transacti
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
-	defer l.releaseLock(ctx, locker)
 
+	defer l.releaseLock(ctx, locker)
 	// Execute the provided function with the lock
 	return fn(ctx)
 }
@@ -1294,6 +1294,12 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	setTransactionStatus(transaction)
 	originalTxnID := transaction.TransactionID
 
+	// Check if we should skip queueing
+	if transaction.SkipQueue {
+		span.AddEvent("Skipping queue, directly recording transaction")
+		return l.RecordTransaction(ctx, transaction)
+	}
+
 	// Handle split transactions if needed
 	transactions, err := l.handleSplitTransactions(ctx, transaction)
 	if err != nil {
@@ -1452,6 +1458,9 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	transaction.PreciseAmount = int64(transaction.Amount * transaction.Precision)
 	if transaction.TransactionID == "" {
 		transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
+	}
+	if transaction.Rate == 0 {
+		transaction.Rate = 1
 	}
 }
 

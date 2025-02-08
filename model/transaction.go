@@ -55,6 +55,7 @@ type Transaction struct {
 	AllowOverdraft     bool                   `json:"allow_overdraft"`
 	Inflight           bool                   `json:"inflight"`
 	SkipBalanceUpdate  bool                   `json:"-"`
+	SkipQueue          bool                   `json:"skip_queue"`
 	GroupIds           []string               `json:"-"`
 	Sources            []Distribution         `json:"sources,omitempty"`
 	Destinations       []Distribution         `json:"destinations,omitempty"`
