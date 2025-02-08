@@ -71,6 +71,7 @@ func TestRecordTransaction(t *testing.T) {
 		Reference:      gofakeit.UUID(),
 		Source:         source,
 		Destination:    destination,
+		Rate:           1,
 		Amount:         10,
 		AllowOverdraft: false,
 		Precision:      100,
@@ -221,43 +222,44 @@ func TestRecordTransactionWithRate(t *testing.T) {
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(destination).WillReturnRows(destinationBalanceRows)
 	mock.ExpectBegin()
 
+	// Updated mock expectation with correct number of arguments
 	mock.ExpectExec(regexp.QuoteMeta(`
-	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $12
-	`)).WithArgs(
-		source,
-		big.NewInt(-100000000).String(),
-		big.NewInt(0).String(),
-		big.NewInt(100000000).String(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		"USD",
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		0,
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
+        WHERE balance_id = $1 AND version = $12
+    `)).WithArgs(
+		source,                          // $1
+		big.NewInt(-100000000).String(), // $2
+		big.NewInt(0).String(),          // $3
+		big.NewInt(100000000).String(),  // $4
+		big.NewInt(0).String(),          // $5
+		big.NewInt(0).String(),          // $6
+		big.NewInt(0).String(),          // $7
+		"USD",                           // $8
+		float64(1),                      // $9
+		"ledger-id-source",              // $10
+		sqlmock.AnyArg(),                // $11
+		0,                               // $12
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
+	// Updated mock expectation with correct number of arguments
 	mock.ExpectExec(regexp.QuoteMeta(`
-	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-	  WHERE balance_id = $1 AND version = $12
-	`)).WithArgs(
-		destination,
-		big.NewInt(130000000000).String(),
-		big.NewInt(130000000000).String(),
-		big.NewInt(0).String(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		"NGN",
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		0,
+        UPDATE blnk.balances
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
+        WHERE balance_id = $1 AND version = $12
+    `)).WithArgs(
+		destination,                       // $1
+		big.NewInt(130000000000).String(), // $2
+		big.NewInt(130000000000).String(), // $3
+		big.NewInt(0).String(),            // $4
+		big.NewInt(0).String(),            // $5
+		big.NewInt(0).String(),            // $6
+		big.NewInt(0).String(),            // $7
+		"NGN",                             // $8
+		float64(1),                        // $9
+		"ledger-id-destination",           // $10
+		sqlmock.AnyArg(),                  // $11
+		0,                                 // $12
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 

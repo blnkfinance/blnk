@@ -189,13 +189,14 @@ func ApplyPrecision(transaction *Transaction) int64 {
 	return int64(transaction.Amount * transaction.Precision)
 }
 
-// ApplyRate applies the exchange rate to the transaction amount.
-// If no rate is provided, it defaults to 1.
-func ApplyRate(transaction *Transaction) float64 {
-	if transaction.Rate == 0 {
-		transaction.Rate = 1
+// ApplyRate applies the exchange rate to the precise amount and returns an int64.
+// The rate is applied after precision to maintain accuracy.
+func ApplyRate(preciseAmount int64, rate float64) int64 {
+	if rate == 0 {
+		rate = 1
 	}
-	return transaction.Amount * transaction.Rate
+	// Convert to float64 for rate calculation, then back to int64
+	return int64(float64(preciseAmount) * rate)
 }
 
 // validate checks if the transaction is valid (e.g., ensuring positive amount).
@@ -209,14 +210,14 @@ func (transaction *Transaction) validate() error {
 // UpdateBalances updates the balances for both the source and destination based on the transaction details.
 // It ensures precision is applied and checks for overdraft before updating.
 func UpdateBalances(transaction *Transaction, source, destination *Balance) error {
+	// Apply precision to get precise amount
 	transaction.PreciseAmount = ApplyPrecision(transaction)
-	originalAmount := transaction.Amount
 	err := transaction.validate()
 	if err != nil {
 		return err
 	}
 
-	// Ensure the source balance has sufficient funds.
+	// Check if source has sufficient funds
 	err = canProcessTransaction(transaction, source)
 	if err != nil {
 		return err
@@ -225,19 +226,17 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	source.InitializeBalanceFields()
 	destination.InitializeBalanceFields()
 
-	// Compute the source balance after debiting.
+	// Update source balance with original precise amount
 	source.addDebit(transaction.PreciseAmount, transaction.Inflight)
 	source.computeBalance(transaction.Inflight)
 
-	// Apply exchange rate to the destination if needed.
-	transaction.Amount = ApplyRate(transaction)
-	transaction.PreciseAmount = ApplyPrecision(transaction)
-	destination.addCredit(transaction.PreciseAmount, transaction.Inflight)
+	// Calculate destination amount with rate
+	destinationAmount := ApplyRate(transaction.PreciseAmount, transaction.Rate)
+
+	// Update destination balance with rate-adjusted amount
+	destination.addCredit(destinationAmount, transaction.Inflight)
 	destination.computeBalance(transaction.Inflight)
 
-	// Revert the transaction amount to its original state.
-	transaction.Amount = originalAmount
-	transaction.PreciseAmount = ApplyPrecision(transaction)
 	return nil
 }
 

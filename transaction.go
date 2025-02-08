@@ -790,7 +790,6 @@ func (l *Blnk) executeWithLock(ctx context.Context, transaction *model.Transacti
 	locker, err := l.acquireLock(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
-		l.releaseLock(ctx, locker) // Ensure the lock is released in case of an errorß
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
 
@@ -1459,6 +1458,9 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	transaction.PreciseAmount = int64(transaction.Amount * transaction.Precision)
 	if transaction.TransactionID == "" {
 		transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
+	}
+	if transaction.Rate == 0 {
+		transaction.Rate = 1
 	}
 }
 

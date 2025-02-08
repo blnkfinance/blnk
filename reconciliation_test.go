@@ -34,6 +34,9 @@ func TestOneToOneReconciliation(t *testing.T) {
 			BatchSize:  100000,
 			MaxWorkers: 1,
 		},
+		Queue: config.QueueConfig{
+			TransactionQueue: "transaction_queue",
+		},
 	}
 	config.ConfigStore.Store(cnf)
 	mockDS := new(mocks.MockDataSource)
