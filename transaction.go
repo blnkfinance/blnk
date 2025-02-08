@@ -790,10 +790,11 @@ func (l *Blnk) executeWithLock(ctx context.Context, transaction *model.Transacti
 	locker, err := l.acquireLock(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
+		l.releaseLock(ctx, locker) // Ensure the lock is released in case of an errorß
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
-	defer l.releaseLock(ctx, locker)
 
+	defer l.releaseLock(ctx, locker)
 	// Execute the provided function with the lock
 	return fn(ctx)
 }
@@ -1293,6 +1294,12 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	setTransactionMetadata(transaction)
 	setTransactionStatus(transaction)
 	originalTxnID := transaction.TransactionID
+
+	// Check if we should skip queueing
+	if transaction.SkipQueue {
+		span.AddEvent("Skipping queue, directly recording transaction")
+		return l.RecordTransaction(ctx, transaction)
+	}
 
 	// Handle split transactions if needed
 	transactions, err := l.handleSplitTransactions(ctx, transaction)

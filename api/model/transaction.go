@@ -25,6 +25,7 @@ type RecordTransaction struct {
 	Precision          float64                `json:"precision"`
 	AllowOverDraft     bool                   `json:"allow_overdraft"`
 	Inflight           bool                   `json:"inflight"`
+	SkipQueue          bool                   `json:"skip_queue"`
 	Source             string                 `json:"source"`
 	Reference          string                 `json:"reference"`
 	Destination        string                 `json:"destination"`

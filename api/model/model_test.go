@@ -208,6 +208,7 @@ func TestValidateRecordTransaction(t *testing.T) {
 				Description: "Test transaction",
 				Source:      "source1",
 				Destination: "dest1",
+				SkipQueue:   true,
 			},
 			wantErr: false,
 		},
@@ -228,6 +229,7 @@ func TestValidateRecordTransaction(t *testing.T) {
 				Source:       "source1",
 				Destination:  "dest1",
 				ScheduledFor: "invalid-date",
+				SkipQueue:    true,
 			},
 			wantErr: true,
 		},
@@ -318,6 +320,7 @@ func TestToTransaction(t *testing.T) {
 		Precision:          2,
 		InflightExpiryDate: inflightExpiryDate.Format(time.RFC3339),
 		Rate:               1.5,
+		SkipQueue:          true,
 	}
 
 	transaction := recordTransaction.ToTransaction()
@@ -335,4 +338,5 @@ func TestToTransaction(t *testing.T) {
 	assert.Equal(t, recordTransaction.Inflight, transaction.Inflight)
 	assert.Equal(t, recordTransaction.Precision, transaction.Precision)
 	assert.Equal(t, recordTransaction.Rate, transaction.Rate)
+	assert.Equal(t, recordTransaction.SkipQueue, transaction.SkipQueue)
 }
