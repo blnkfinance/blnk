@@ -280,12 +280,6 @@ func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool)
 		}
 	}
 
-	// Commit the transaction
-	err = tx.Commit()
-	if err != nil {
-		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
-	}
-
 	// Get queued amounts only if requested
 	if withQueued {
 		queuedDebit, queuedCredit, err := d.GetQueuedAmounts(context.Background(), id)
@@ -294,6 +288,12 @@ func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool)
 		}
 		balance.QueuedDebitBalance = queuedDebit
 		balance.QueuedCreditBalance = queuedCredit
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
 	}
 
 	return balance, nil

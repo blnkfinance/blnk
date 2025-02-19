@@ -429,3 +429,176 @@ func TestUpdateBalances_CommitError(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
 }
+
+func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectBegin() // Start transaction
+
+	balance := model.Balance{
+		BalanceID:          "bln1",
+		Balance:            big.NewInt(0),
+		CreditBalance:      big.NewInt(500),
+		DebitBalance:       big.NewInt(500),
+		Currency:           "USD",
+		Indicator:          gofakeit.Name(),
+		CurrencyMultiplier: 100,
+		LedgerID:           "ldg1",
+		MetaData: map[string]interface{}{
+			"key": "value",
+		},
+	}
+
+	metaDataJSON, err := json.Marshal(balance.MetaData)
+	assert.NoError(t, err)
+
+	// First, expect the balance query
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator
+        FROM ( SELECT * FROM blnk.balances WHERE balance_id = $1 ) AS b
+    `)).WithArgs("bln1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"balance_id", "balance", "credit_balance", "debit_balance", "currency",
+			"currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
+			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
+			"version", "indicator",
+		}).AddRow(
+			balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(),
+			balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier,
+			balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(),
+			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator,
+		))
+
+	// Then expect the queued transactions query with the correct SQL
+	queuedTxnQuery := `
+        SELECT t.precise_amount, t.source, t.destination 
+        FROM blnk.transactions t 
+        WHERE (t.source = $1 OR t.destination = $1) 
+        AND t.status = 'QUEUED' 
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM blnk.transactions child 
+            WHERE child.parent_transaction = t.transaction_id 
+            AND child.status = 'APPLIED'
+        )
+    `
+
+	queuedTxn := model.Transaction{
+		TransactionID: "txn1",
+		Source:        "bln1",
+		Destination:   "bln2",
+		Amount:        490,
+		PreciseAmount: 49000,
+		Precision:     100,
+		Currency:      "USD",
+		Status:        "QUEUED",
+		Reference:     "ref1",
+		Description:   "Test queued transaction",
+		CreatedAt:     time.Now(),
+		MetaData:      map[string]interface{}{"key": "value"},
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(queuedTxnQuery)).
+		WithArgs("bln1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"precise_amount", "source", "destination",
+		}).AddRow(
+			queuedTxn.PreciseAmount, queuedTxn.Source, queuedTxn.Destination,
+		))
+
+	// Finally, expect the commit
+	mock.ExpectCommit()
+
+	// Execute the function
+	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{}, true)
+	assert.NoError(t, err)
+	assert.Equal(t, balance.BalanceID, retrievedBalance.BalanceID)
+
+	// Verify queued transaction impact
+	expectedQueuedDebit := big.NewInt(49000)
+	if queuedTxn.Source == "bln1" {
+		assert.Equal(t, expectedQueuedDebit.String(), retrievedBalance.QueuedDebitBalance.String())
+		assert.Equal(t, "0", retrievedBalance.QueuedCreditBalance.String())
+	} else {
+		assert.Equal(t, expectedQueuedDebit.String(), retrievedBalance.QueuedCreditBalance.String())
+		assert.Equal(t, "0", retrievedBalance.QueuedDebitBalance.String())
+	}
+
+	// Verify all expectations were met
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetBalanceByID_WithoutQueuedTransactions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectBegin()
+
+	balance := model.Balance{
+		BalanceID:          "bln1",
+		Balance:            big.NewInt(1000),
+		CreditBalance:      big.NewInt(500),
+		DebitBalance:       big.NewInt(500),
+		Currency:           "USD",
+		Indicator:          gofakeit.Name(),
+		CurrencyMultiplier: 100,
+		LedgerID:           "ldg1",
+		MetaData: map[string]interface{}{
+			"key": "value",
+		},
+		// Initialize queued balances
+		QueuedDebitBalance:  big.NewInt(0),
+		QueuedCreditBalance: big.NewInt(0),
+	}
+
+	metaDataJSON, err := json.Marshal(balance.MetaData)
+	assert.NoError(t, err)
+
+	// Only expect the balance query, not the queued transactions query
+	mock.ExpectQuery(regexp.QuoteMeta(`
+        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator
+        FROM ( SELECT * FROM blnk.balances WHERE balance_id = $1 ) AS b
+    `)).WithArgs("bln1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"balance_id", "balance", "credit_balance", "debit_balance", "currency",
+			"currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
+			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
+			"version", "indicator",
+		}).AddRow(
+			balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(),
+			balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier,
+			balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(),
+			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator,
+		))
+
+	mock.ExpectCommit()
+
+	// Execute GetBalanceByID with withQueued=false
+	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{}, false)
+	assert.NoError(t, err)
+	assert.Equal(t, balance.BalanceID, retrievedBalance.BalanceID)
+
+	// Initialize queued balances if they're nil
+	if retrievedBalance.QueuedDebitBalance == nil {
+		retrievedBalance.QueuedDebitBalance = big.NewInt(0)
+	}
+	if retrievedBalance.QueuedCreditBalance == nil {
+		retrievedBalance.QueuedCreditBalance = big.NewInt(0)
+	}
+
+	// Verify no queued transactions were processed
+	assert.Equal(t, "0", retrievedBalance.QueuedDebitBalance.String())
+	assert.Equal(t, "0", retrievedBalance.QueuedCreditBalance.String())
+
+	// Ensure all expectations were met
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
