@@ -134,8 +134,8 @@ func (m *MockDataSource) CreateBalance(balance model.Balance) (model.Balance, er
 	return args.Get(0).(model.Balance), args.Error(1)
 }
 
-func (m *MockDataSource) GetBalanceByID(id string, include []string) (*model.Balance, error) {
-	args := m.Called(id, include)
+func (m *MockDataSource) GetBalanceByID(id string, include []string, withQueued bool) (*model.Balance, error) {
+	args := m.Called(id, include, withQueued)
 	return args.Get(0).(*model.Balance), args.Error(1)
 }
 

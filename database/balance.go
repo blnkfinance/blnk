@@ -247,11 +247,12 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 // Parameters:
 // - id: The unique ID of the balance to retrieve.
 // - include: A slice of strings that specifies which related data to include in the result. Possible values include "identity" and "ledger".
+// - withQueued: A boolean that specifies whether to include queued amounts in the result.
 //
 // Returns:
 // - *model.Balance: A pointer to the retrieved Balance object.
 // - error: Returns an APIError in case of errors such as database failures or if the balance is not found.
-func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance, error) {
+func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool) (*model.Balance, error) {
 	// Set a context with a 1-minute timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
@@ -283,6 +284,16 @@ func (d Datasource) GetBalanceByID(id string, include []string) (*model.Balance,
 	err = tx.Commit()
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
+	}
+
+	// Get queued amounts only if requested
+	if withQueued {
+		queuedDebit, queuedCredit, err := d.GetQueuedAmounts(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		balance.QueuedDebitBalance = queuedDebit
+		balance.QueuedCreditBalance = queuedCredit
 	}
 
 	return balance, nil

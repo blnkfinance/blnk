@@ -138,7 +138,7 @@ func TestUpdateMetadata(t *testing.T) {
 		existingMetadata := map[string]interface{}{"existing": "value"}
 		balance := &model.Balance{MetaData: existingMetadata}
 
-		mockDS.On("GetBalanceByID", "bln_123", mock.Anything).Return(balance, nil)
+		mockDS.On("GetBalanceByID", "bln_123", mock.Anything, false).Return(balance, nil)
 		mockDS.On("UpdateBalanceMetadata", mock.Anything, "bln_123", mock.Anything).Return(nil)
 
 		newMetadata := map[string]interface{}{"new": "value"}

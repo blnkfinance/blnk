@@ -71,16 +71,18 @@ func (a Api) CreateBalance(c *gin.Context) {
 // - 200 OK: If the balance is successfully retrieved.
 func (a Api) GetBalance(c *gin.Context) {
 	id, passed := c.Params.Get("id")
-
 	if !passed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
 	}
 
-	// Extracting 'include' parameter from the query
+	// Extract 'include' parameter from the query
 	includes := c.QueryArray("include")
 
-	resp, err := a.blnk.GetBalanceByID(c.Request.Context(), id, includes)
+	// Extract 'with_queued' parameter from the query, default to false
+	withQueued := c.DefaultQuery("with_queued", "false") == "true"
+
+	resp, err := a.blnk.GetBalanceByID(c.Request.Context(), id, includes, withQueued)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

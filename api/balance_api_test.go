@@ -97,7 +97,7 @@ func TestCreateBalance(t *testing.T) {
 
 			if tt.expectedCode == http.StatusCreated {
 				// Verify that the balance is actually created in the database
-				balanceFromDB, err := b.GetBalanceByID(context.Background(), response.BalanceID, nil)
+				balanceFromDB, err := b.GetBalanceByID(context.Background(), response.BalanceID, nil, false)
 				if err != nil {
 					t.Errorf("Failed to retrieve balance by ID: %v", err)
 				} else {

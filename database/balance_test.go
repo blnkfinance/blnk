@@ -142,7 +142,7 @@ func TestGetBalanceByID_Success(t *testing.T) {
 	// Mock the transaction commit call
 	mock.ExpectCommit()
 
-	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{})
+	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{}, false)
 	assert.NoError(t, err)
 	assert.Equal(t, balance.BalanceID, retrievedBalance.BalanceID)
 
@@ -164,7 +164,7 @@ func TestGetBalanceByID_NotFound(t *testing.T) {
 		WithArgs("bln1").
 		WillReturnError(sql.ErrNoRows)
 
-	_, err = ds.GetBalanceByID("bln1", []string{})
+	_, err = ds.GetBalanceByID("bln1", []string{}, false)
 	assert.Error(t, err)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
