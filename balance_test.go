@@ -206,7 +206,7 @@ func TestGetBalanceByID(t *testing.T) {
 
 	mock.ExpectCommit()
 
-	result, err := d.GetBalanceByID(context.Background(), balanceID, nil)
+	result, err := d.GetBalanceByID(context.Background(), balanceID, nil, false)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, balanceID, result.BalanceID)

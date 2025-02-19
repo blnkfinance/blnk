@@ -184,11 +184,11 @@ func (l *Blnk) CreateBalance(ctx context.Context, balance model.Balance) (model.
 // Returns:
 // - *model.Balance: A pointer to the Balance model if found.
 // - error: An error if the balance could not be retrieved.
-func (l *Blnk) GetBalanceByID(ctx context.Context, id string, include []string) (*model.Balance, error) {
+func (l *Blnk) GetBalanceByID(ctx context.Context, id string, include []string, withQueued bool) (*model.Balance, error) {
 	_, span := balanceTracer.Start(ctx, "GetBalanceByID")
 	defer span.End()
 
-	balance, err := l.datasource.GetBalanceByID(id, include)
+	balance, err := l.datasource.GetBalanceByID(id, include, withQueued)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err

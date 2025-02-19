@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -777,4 +778,50 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 		attribute.Int("transaction.count", len(transactions)),
 	))
 	return transactions, nil
+}
+
+// GetQueuedAmounts retrieves the total queued debit and credit amounts for a given balance ID.
+// It returns the total debit and credit amounts as big.Int values, or an error if the retrieval fails.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - balanceID: The ID of the balance to retrieve queued amounts for.
+// Returns:
+// - The total debit and credit amounts as big.Int values, or an error if the retrieval fails.
+func (d Datasource) GetQueuedAmounts(ctx context.Context, balanceID string) (debit, credit *big.Int, err error) {
+	debit = big.NewInt(0)
+	credit = big.NewInt(0)
+
+	rows, err := d.Conn.QueryContext(ctx, `
+        SELECT t.precise_amount, t.source, t.destination 
+        FROM blnk.transactions t
+        WHERE (t.source = $1 OR t.destination = $1) 
+        AND t.status = 'QUEUED'
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM blnk.transactions child 
+            WHERE child.parent_transaction = t.transaction_id 
+            AND child.status = 'APPLIED'
+        )`, balanceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var preciseAmount int64
+		var source, destination string
+		if err := rows.Scan(&preciseAmount, &source, &destination); err != nil {
+			return nil, nil, err
+		}
+
+		// If balanceID is the source, it's a debit
+		// If balanceID is the destination, it's a credit
+		if source == balanceID {
+			debit.Add(debit, big.NewInt(preciseAmount))
+		} else {
+			credit.Add(credit, big.NewInt(preciseAmount))
+		}
+	}
+
+	return debit, credit, nil
 }

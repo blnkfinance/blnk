@@ -67,7 +67,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		currentMetadata = txn.MetaData
 
 	case "balances":
-		balance, err := l.GetBalanceByID(ctx, entityID, nil)
+		balance, err := l.GetBalanceByID(ctx, entityID, nil, false)
 		if err != nil {
 			return nil, errors.New("entity not found")
 		}

@@ -63,7 +63,7 @@ type ledger interface {
 // balance defines methods for handling balances.
 type balance interface {
 	CreateBalance(balance model.Balance) (model.Balance, error)                                 // Creates a new balance
-	GetBalanceByID(id string, include []string) (*model.Balance, error)                         // Retrieves a balance by ID with additional data
+	GetBalanceByID(id string, include []string, withQueued bool) (*model.Balance, error)        // Retrieves a balance by ID with additional data and queued status
 	GetBalanceByIDLite(id string) (*model.Balance, error)                                       // Retrieves a balance by ID with minimal data
 	GetAllBalances(limit, offset int) ([]model.Balance, error)                                  // Retrieves all balances
 	UpdateBalance(balance *model.Balance) error                                                 // Updates a balance
