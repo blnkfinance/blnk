@@ -46,40 +46,52 @@ type indexData struct {
 // If a transaction fails due to "insufficient funds", it is rejected, and a webhook is sent.
 // Otherwise, it retries the transaction in case of other failures.
 func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) error {
-	// Start an OpenTelemetry span for tracing the transaction processing.
 	ctx, span := otel.Tracer("blnk.transactions.worker").Start(ctx, "Process Transaction From Redis Queue")
 	defer span.End()
 
 	var txn model.Transaction
-	// Unmarshal the transaction data from the Redis task payload.
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
 		logrus.Error(err)
 		return err
 	}
 
-	// Attempt to record the transaction.
 	_, err := b.blnk.RecordTransaction(ctx, &txn)
 	if err != nil {
-		// Check for "insufficient funds" error and handle rejection.
 		if strings.Contains(strings.ToLower(err.Error()), "insufficient funds") {
-			_, rejectErr := b.blnk.RejectTransaction(ctx, &txn, err.Error())
-			if rejectErr != nil {
-				return rejectErr
+			cfg, _ := config.Fetch()
+			if !cfg.Queue.InsufficientFundRetries {
+				return handleTransactionRejection(ctx, b, &txn, err)
 			}
-			// Send a webhook for the rejected transaction.
-			webhookErr := blnk.SendWebhook(blnk.NewWebhook{
-				Event:   "transaction.rejected",
-				Payload: txn,
-			})
-			return webhookErr
+
+			retryCount, _ := asynq.GetRetryCount(ctx)
+			if retryCount >= cfg.Queue.MaxRetryAttempts {
+				return handleTransactionRejection(ctx, b, &txn, fmt.Errorf("max retry attempts reached after insufficient funds"))
+			}
+
+			logrus.Infof("Insufficient funds for transaction %s, retry attempt %d/%d",
+				txn.TransactionID, retryCount, cfg.Queue.MaxRetryAttempts)
+			return err // This will trigger a retry
 		}
-		// Log the retry attempt for other errors.
+
 		logrus.Infof("Transaction %s pushed back for retry due to error: %v", txn.TransactionID, err)
 		return err
 	}
 
 	log.Println(" [*] Transaction Processed", txn.TransactionID)
 	return nil
+}
+
+func handleTransactionRejection(ctx context.Context, b *blnkInstance, txn *model.Transaction, err error) error {
+	_, rejectErr := b.blnk.RejectTransaction(ctx, txn, err.Error())
+	if rejectErr != nil {
+		return rejectErr
+	}
+
+	webhookErr := blnk.SendWebhook(blnk.NewWebhook{
+		Event:   "transaction.rejected",
+		Payload: *txn,
+	})
+	return webhookErr
 }
 
 // indexData indexes data into TypeSense for searchability.

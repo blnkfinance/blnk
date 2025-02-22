@@ -134,11 +134,13 @@ type ReconciliationConfig struct {
 }
 
 type QueueConfig struct {
-	TransactionQueue    string `json:"transaction_queue" envconfig:"BLNK_QUEUE_TRANSACTION"`
-	WebhookQueue        string `json:"webhook_queue" envconfig:"BLNK_QUEUE_WEBHOOK"`
-	IndexQueue          string `json:"index_queue" envconfig:"BLNK_QUEUE_INDEX"`
-	InflightExpiryQueue string `json:"inflight_expiry_queue" envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
-	NumberOfQueues      int    `json:"number_of_queues" envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
+	TransactionQueue        string `json:"transaction_queue" envconfig:"BLNK_QUEUE_TRANSACTION"`
+	WebhookQueue            string `json:"webhook_queue" envconfig:"BLNK_QUEUE_WEBHOOK"`
+	IndexQueue              string `json:"index_queue" envconfig:"BLNK_QUEUE_INDEX"`
+	InflightExpiryQueue     string `json:"inflight_expiry_queue" envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
+	NumberOfQueues          int    `json:"number_of_queues" envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
+	InsufficientFundRetries bool   `json:"insufficient_fund_retries"`
+	MaxRetryAttempts        int    `json:"max_retry_attempts"`
 }
 
 type Configuration struct {
