@@ -665,3 +665,99 @@ func TestQueueTransactionFlowWithSkipQueue(t *testing.T) {
 	require.NoError(t, err, "Failed to get queued transaction entry")
 	require.Equal(t, StatusApplied, queuedEntry.Status, "Should have an APPLIED transaction entry")
 }
+
+func TestQueueTransactionStatus(t *testing.T) {
+	// Setup basic configuration
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	// Create datasource and blnk instance
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err)
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err)
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err)
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		skipQueue  bool
+		inflight   bool
+		wantStatus string
+	}{
+		{
+			name:       "Skip Queue True - Should be APPLIED",
+			skipQueue:  true,
+			inflight:   false,
+			wantStatus: StatusApplied,
+		},
+		{
+			name:       "Skip Queue False - Should be QUEUED",
+			skipQueue:  false,
+			inflight:   false,
+			wantStatus: StatusQueued,
+		},
+		{
+			name:       "Skip Queue True with Inflight - Should be INFLIGHT",
+			skipQueue:  true,
+			inflight:   true,
+			wantStatus: StatusInflight,
+		},
+		{
+			name:       "Skip Queue False with Inflight - Should be QUEUED",
+			skipQueue:  false,
+			inflight:   true,
+			wantStatus: StatusQueued,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			txn := &model.Transaction{
+				Reference:      "txn_" + model.GenerateUUIDWithSuffix("test"),
+				Source:         source.BalanceID,
+				Destination:    dest.BalanceID,
+				Amount:         100,
+				Currency:       "USD",
+				Precision:      100,
+				AllowOverdraft: true,
+				SkipQueue:      tt.skipQueue,
+				Inflight:       tt.inflight,
+			}
+
+			result, err := blnk.QueueTransaction(context.Background(), txn)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantStatus, result.Status,
+				"Status mismatch for skipQueue=%v, inflight=%v", tt.skipQueue, tt.inflight)
+		})
+	}
+}

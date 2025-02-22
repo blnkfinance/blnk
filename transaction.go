@@ -1294,12 +1294,6 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	setTransactionStatus(transaction)
 	originalTxnID := transaction.TransactionID
 
-	// Check if we should skip queueing
-	if transaction.SkipQueue {
-		span.AddEvent("Skipping queue, directly recording transaction")
-		return l.RecordTransaction(ctx, transaction)
-	}
-
 	// Handle split transactions if needed
 	transactions, err := l.handleSplitTransactions(ctx, transaction)
 	if err != nil {
@@ -1307,17 +1301,25 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		return nil, err
 	}
 
-	// Process transactions based on whether they were split
 	queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
 
-	// Enqueue all transactions to process running balances
-	if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
-		span.RecordError(err)
-		return nil, err
+	if !transaction.SkipQueue {
+		if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+	}
+
+	if transaction.SkipQueue && len(queueTransactions) > 0 {
+		if transaction.Inflight {
+			transaction.Status = StatusInflight
+		} else {
+			transaction.Status = StatusApplied
+		}
 	}
 
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
@@ -1362,6 +1364,25 @@ func (l *Blnk) handleSplitTransactions(ctx context.Context, transaction *model.T
 // - []*model.Transaction: A slice of processed transactions ready for queueing.
 // - error: An error if the processing fails.
 func (l *Blnk) processTxns(ctx context.Context, originalTxn *model.Transaction, splitTxns []*model.Transaction, originalTxnID, originalRef string) ([]*model.Transaction, error) {
+	if originalTxn.SkipQueue {
+		if len(splitTxns) == 0 {
+			recorded, err := l.RecordTransaction(ctx, originalTxn)
+			if err != nil {
+				return nil, err
+			}
+			return []*model.Transaction{recorded}, nil
+		} else {
+			result := make([]*model.Transaction, len(splitTxns))
+			for i, txn := range splitTxns {
+				recorded, err := l.RecordTransaction(ctx, txn)
+				if err != nil {
+					return nil, fmt.Errorf("failed to record split transaction %d: %w", i, err)
+				}
+				result[i] = recorded
+			}
+			return result, nil
+		}
+	}
 	if len(splitTxns) == 0 {
 		return l.processSingleTransaction(ctx, originalTxn, originalRef)
 	}
