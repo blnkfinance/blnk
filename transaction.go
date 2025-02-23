@@ -743,6 +743,12 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	defer span.End()
 
 	return l.executeWithLock(ctx, transaction, func(ctx context.Context) (*model.Transaction, error) {
+		// Execute pre-transaction hooks
+		if err := l.Hooks.ExecutePreHooks(ctx, transaction.TransactionID, transaction); err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+
 		// Validate and prepare the transaction, including retrieving source and destination balances
 		transaction, sourceBalance, destinationBalance, err := l.validateAndPrepareTransaction(ctx, transaction)
 		if err != nil {
@@ -761,6 +767,13 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 		if err != nil {
 			span.RecordError(err)
 			return nil, err
+		}
+
+		// Execute post-transaction hooks
+		if err := l.Hooks.ExecutePostHooks(ctx, transaction.TransactionID, transaction); err != nil {
+			span.RecordError(err)
+			// Don't fail the transaction if post-hooks fail, just log the error
+			logrus.Errorf("post-transaction hooks failed: %v", err)
 		}
 
 		// Perform post-transaction actions such as indexing and sending webhooks

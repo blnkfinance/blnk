@@ -95,6 +95,13 @@ func (a Api) Router() *gin.Engine {
 	// Metadata routes
 	router.POST("/:entity-id/metadata", a.UpdateMetadata)
 
+	// Hook management routes
+	router.POST("/hooks", a.RegisterHook)
+	router.PUT("/hooks/:id", a.UpdateHook)
+	router.GET("/hooks/:id", a.GetHook)
+	router.GET("/hooks", a.ListHooks)
+	router.DELETE("/hooks/:id", a.DeleteHook)
+
 	return a.router
 }
 
