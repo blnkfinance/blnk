@@ -24,6 +24,7 @@ import (
 
 	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/database"
+	"github.com/jerry-enebeli/blnk/internal/hooks"
 	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/redis/go-redis/v9"
@@ -36,6 +37,7 @@ type Blnk struct {
 	redis      redis.UniversalClient
 	datasource database.IDataSource
 	bt         *model.BalanceTracker
+	Hooks      hooks.HookManager
 }
 
 const (
@@ -65,9 +67,17 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	}
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
-
 	newSearch := NewTypesenseClient("blnk-api-key", []string{configuration.TypeSense.Dns})
-	newBlnk := &Blnk{datasource: db, bt: bt, queue: newQueue, redis: redisClient.Client(), search: newSearch}
+	hookManager := hooks.NewHookManager(redisClient.Client())
+
+	newBlnk := &Blnk{
+		datasource: db,
+		bt:         bt,
+		queue:      newQueue,
+		redis:      redisClient.Client(),
+		search:     newSearch,
+		Hooks:      hookManager,
+	}
 	return newBlnk, nil
 }
 
