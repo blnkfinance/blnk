@@ -126,7 +126,9 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 
 	err := row.Scan(scanArgs...)
 	if err != nil {
-		_ = tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return nil, fmt.Errorf("scanRow: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+		}
 		return nil, err
 	}
 
@@ -148,7 +150,9 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 	// Unmarshal metadata JSON
 	err = json.Unmarshal(metaDataJSON, &balance.MetaData)
 	if err != nil {
-		_ = tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return nil, fmt.Errorf("scanRow: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+		}
 		return nil, err
 	}
 
@@ -262,6 +266,13 @@ func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
 	}
+	defer func() {
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				err = fmt.Errorf("GetBalanceByID: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+			}
+		}
+	}()
 
 	// Prepare and execute the query
 	var queryBuilder strings.Builder
@@ -1047,7 +1058,11 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to start transaction", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			err = fmt.Errorf("GetBalanceAtTime: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+		}
+	}()
 
 	// Get most recent snapshot
 	var snapshot struct {
