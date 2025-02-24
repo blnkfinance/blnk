@@ -18,6 +18,7 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
 )
@@ -70,6 +71,8 @@ type balance interface {
 	GetBalanceByIndicator(indicator, currency string) (*model.Balance, error)                   // Retrieves a balance by indicator and currency
 	UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error // Updates multiple balances
 	GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error)              // Retrieves balances between source and destination
+	TakeBalanceSnapshots(ctx context.Context, batchSize int) (int, error)                       // Takes balance snapshots
+	GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time) (*model.Balance, error)
 }
 
 // account defines methods for handling accounts.

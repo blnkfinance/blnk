@@ -18,6 +18,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	model2 "github.com/jerry-enebeli/blnk/api/model"
 
@@ -288,4 +289,82 @@ func (a Api) DeleteBalanceMonitor(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "BalanceMonitor deleted successfully"})
+}
+
+// TakeBalanceSnapshots creates daily snapshots of balances in batches.
+// It accepts an optional 'batch_size' query parameter to control the batch processing size.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in the batch size parameter or during snapshot creation.
+// - 200 OK: If the snapshots are successfully created, returns the total number of snapshots created.
+func (a Api) TakeBalanceSnapshots(c *gin.Context) {
+	// Get batch size from query parameter, default to 1000 if not specified
+	batchSize, err := strconv.Atoi(c.DefaultQuery("batch_size", "1000"))
+	if err != nil || batchSize <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batch_size value"})
+		return
+	}
+
+	// Call the service to take snapshots
+	a.blnk.TakeBalanceSnapshots(c.Request.Context(), batchSize)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Snapshotting in progress. should be completed shortly",
+	})
+}
+
+// GetBalanceAtTime retrieves a balance's state at a specific point in time.
+// It extracts the balance ID from the route parameters and the timestamp from query parameters.
+// The timestamp should be provided in ISO 8601 format (e.g., "2024-01-01T15:04:05Z").
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the balance ID is missing, timestamp is invalid, or there's an error retrieving the balance.
+// - 200 OK: If the historical balance state is successfully retrieved.
+func (a Api) GetBalanceAtTime(c *gin.Context) {
+	balanceID, exists := c.Params.Get("id")
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "balance ID is required"})
+		return
+	}
+
+	var timestamp time.Time
+	timestampStr := c.Query("timestamp")
+	if timestampStr == "" {
+		// Use current time if no timestamp is provided
+		timestamp = time.Now().UTC()
+	} else {
+		var err error
+		timestamp, err = time.Parse(time.RFC3339, timestampStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid timestamp format. Please use ISO 8601 format (e.g., 2024-01-01T15:04:05Z)",
+			})
+			return
+		}
+	}
+
+	balance, err := a.blnk.GetBalanceAtTime(c.Request.Context(), balanceID, timestamp)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	balanceResult := map[string]interface{}{
+		"balance":        balance.Balance,
+		"debit_balance":  balance.DebitBalance,
+		"credit_balance": balance.CreditBalance,
+		"currency":       balance.Currency,
+		"balance_id":     balance.BalanceID,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"balance":   balanceResult,
+		"timestamp": timestamp.Format(time.RFC3339),
+	})
 }
