@@ -19,6 +19,7 @@ package blnk
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"github.com/jerry-enebeli/blnk/model"
@@ -356,4 +357,73 @@ func (l *Blnk) DeleteMonitor(ctx context.Context, id string) error {
 	}
 	span.AddEvent("Monitor deleted", trace.WithAttributes(attribute.String("monitor.id", id)))
 	return nil
+}
+
+// TakeBalanceSnapshots creates daily snapshots of balances in batches.
+// It accepts a batch size parameter to control the number of balances processed at once,
+// helping to manage memory usage for large datasets.
+//
+// Parameters:
+// - ctx context.Context: The context for managing the operation's lifecycle and cancellation
+// - batchSize int: The number of balances to process in each batch
+//
+// Returns:
+// - int: The total number of snapshots created
+// - error: An error if the snapshot creation fails
+func (l *Blnk) TakeBalanceSnapshots(ctx context.Context, batchSize int) {
+	go func() {
+		_, span := balanceTracer.Start(ctx, "TakeBalanceSnapshots")
+		defer span.End()
+
+		// Call the datasource method to create snapshots
+		total, err := l.datasource.TakeBalanceSnapshots(ctx, batchSize)
+		if err != nil {
+			span.RecordError(err)
+			return
+		}
+
+		span.AddEvent("Balance snapshots created", trace.WithAttributes(
+			attribute.Int("total_snapshots", total),
+			attribute.Int("batch_size", batchSize),
+		))
+	}()
+}
+
+// GetBalanceAtTime retrieves a balance's state at a specific point in time.
+// It uses balance snapshots to determine the balance state at the given time.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balanceID string: The ID of the balance to retrieve.
+// - targetTime time.Time: The point in time for which to retrieve the balance state.
+//
+// Returns:
+// - *model.Balance: A pointer to the Balance model representing the state at the given time.
+// - error: An error if the historical balance state could not be retrieved.
+func (l *Blnk) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time) (*model.Balance, error) {
+	_, span := balanceTracer.Start(ctx, "GetBalanceAtTime")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("balance.id", balanceID),
+		attribute.String("target.time", targetTime.String()),
+	)
+
+	balance, err := l.datasource.GetBalanceAtTime(ctx, balanceID, targetTime)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to get balance snapshot: %w", err)
+	}
+
+	if balance == nil {
+		span.AddEvent("No snapshot found for the specified time")
+		return nil, fmt.Errorf("no balance snapshot found for time: %v", targetTime)
+	}
+
+	span.AddEvent("Historical balance state retrieved", trace.WithAttributes(
+		attribute.String("balance.id", balance.BalanceID),
+		attribute.String("snapshot.time", targetTime.String()),
+	))
+
+	return balance, nil
 }

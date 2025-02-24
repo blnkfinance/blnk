@@ -17,6 +17,7 @@ package mocks
 
 import (
 	"context"
+	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/stretchr/testify/mock"
@@ -167,6 +168,11 @@ func (m *MockDataSource) UpdateBalances(ctx context.Context, sourceBalance, dest
 func (m *MockDataSource) GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error) {
 	args := m.Called(sourceId, destinationId)
 	return args.Get(0).([]*model.Balance), args.Error(1)
+}
+
+func (m *MockDataSource) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time) (*model.Balance, error) {
+	args := m.Called(ctx, balanceID, targetTime)
+	return args.Get(0).(*model.Balance), args.Error(1)
 }
 
 // Account methods
@@ -350,4 +356,9 @@ func (m *MockDataSource) LoadReconciliationProgress(ctx context.Context, reconci
 func (m *MockDataSource) FetchAndGroupExternalTransactions(ctx context.Context, uploadID string, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
 	args := m.Called(ctx, uploadID, groupCriteria, batchSize, offset)
 	return args.Get(0).(map[string][]*model.Transaction), args.Error(1)
+}
+
+func (m *MockDataSource) TakeBalanceSnapshots(ctx context.Context, batchSize int) (int, error) {
+	args := m.Called(ctx, batchSize)
+	return args.Get(0).(int), args.Error(1)
 }

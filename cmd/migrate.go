@@ -76,6 +76,7 @@ func migrateUpCommands() *cobra.Command {
 
 			// Apply the migrations.
 			n, err := migrate.Exec(db, "postgres", migrations, migrate.Up)
+			fmt.Println(n, err)
 			if err != nil {
 				log.Printf("Error migrating up: %v", err)
 			} else {
