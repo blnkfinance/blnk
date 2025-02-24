@@ -35,6 +35,7 @@ const (
 	DEFAULT_PORT          = "5001"
 	DEFAULT_TYPESENSE_URL = "http://typesense:8108"
 	DEFAULT_CLEANUP_SEC   = 10800 // 3 hours in seconds
+	DEFAULT_TYPESENSE_KEY = "blnk-api-key"
 )
 
 // Default values for different configurations
@@ -251,6 +252,9 @@ func (cnf *Configuration) setDefaultValues() {
 	// TypeSense defaults
 	if cnf.TypeSense.Dns == "" {
 		cnf.TypeSense.Dns = DEFAULT_TYPESENSE_URL
+	}
+	if cnf.TypeSenseKey == "" {
+		cnf.TypeSenseKey = DEFAULT_TYPESENSE_KEY
 	}
 
 	// Set module defaults

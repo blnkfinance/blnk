@@ -125,7 +125,7 @@ func initializeTracing(ctx context.Context) (func(context.Context) error, error)
 }
 
 func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*blnk.TypesenseClient, error) {
-	newSearch := blnk.NewTypesenseClient("blnk-api-key", []string{cfg.TypeSense.Dns})
+	newSearch := blnk.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns})
 	if err := newSearch.EnsureCollectionsExist(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ensure collections exist: %v", err)
 	}
