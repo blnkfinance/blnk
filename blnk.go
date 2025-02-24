@@ -67,7 +67,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	}
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
-	newSearch := NewTypesenseClient("blnk-api-key", []string{configuration.TypeSense.Dns})
+	newSearch := NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
 	hookManager := hooks.NewHookManager(redisClient.Client())
 
 	newBlnk := &Blnk{
