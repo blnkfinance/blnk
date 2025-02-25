@@ -106,12 +106,12 @@ type RateLimitConfig struct {
 }
 
 type SlackWebhook struct {
-	WebhookUrl string `json:"webhook_url"`
+	WebhookUrl string `json:"webhook_url" envconfig:"BLNK_SLACK_WEBHOOK_URL"`
 }
 
 type WebhookConfig struct {
-	Url     string            `json:"url"`
-	Headers map[string]string `json:"headers"`
+	Url     string            `json:"url" envconfig:"BLNK_WEBHOOK_URL"`
+	Headers map[string]string `json:"headers" envconfig:"BLNK_WEBHOOK_HEADERS"`
 }
 
 type Notification struct {
@@ -140,23 +140,23 @@ type QueueConfig struct {
 	IndexQueue              string `json:"index_queue" envconfig:"BLNK_QUEUE_INDEX"`
 	InflightExpiryQueue     string `json:"inflight_expiry_queue" envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
 	NumberOfQueues          int    `json:"number_of_queues" envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
-	InsufficientFundRetries bool   `json:"insufficient_fund_retries"`
-	MaxRetryAttempts        int    `json:"max_retry_attempts"`
+	InsufficientFundRetries bool   `json:"insufficient_fund_retries" envconfig:"BLNK_QUEUE_INSUFFICIENT_FUND_RETRIES"`
+	MaxRetryAttempts        int    `json:"max_retry_attempts" envconfig:"BLNK_QUEUE_MAX_RETRY_ATTEMPTS"`
 }
 
 type Configuration struct {
 	ProjectName             string                        `json:"project_name" envconfig:"BLNK_PROJECT_NAME"`
 	BackupDir               string                        `json:"backup_dir" envconfig:"BLNK_BACKUP_DIR"`
-	AwsAccessKeyId          string                        `json:"aws_access_key_id"`
-	S3Endpoint              string                        `json:"s3_endpoint"`
-	AwsSecretAccessKey      string                        `json:"aws_secret_access_key"`
-	S3BucketName            string                        `json:"s3_bucket_name"`
-	S3Region                string                        `json:"s3_region"`
+	AwsAccessKeyId          string                        `json:"aws_access_key_id" envconfig:"BLNK_AWS_ACCESS_KEY_ID"`
+	S3Endpoint              string                        `json:"s3_endpoint" envconfig:"BLNK_S3_ENDPOINT"`
+	AwsSecretAccessKey      string                        `json:"aws_secret_access_key" envconfig:"BLNK_AWS_SECRET_ACCESS_KEY"`
+	S3BucketName            string                        `json:"s3_bucket_name" envconfig:"BLNK_S3_BUCKET_NAME"`
+	S3Region                string                        `json:"s3_region" envconfig:"BLNK_S3_REGION"`
 	Server                  ServerConfig                  `json:"server"`
 	DataSource              DataSourceConfig              `json:"data_source"`
 	Redis                   RedisConfig                   `json:"redis"`
 	TypeSense               TypeSenseConfig               `json:"typesense"`
-	TypeSenseKey            string                        `json:"type_sense_key"`
+	TypeSenseKey            string                        `json:"type_sense_key" envconfig:"BLNK_TYPESENSE_KEY"`
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
