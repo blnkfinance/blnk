@@ -23,6 +23,7 @@ import (
 
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"github.com/jerry-enebeli/blnk/model"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -372,19 +373,55 @@ func (l *Blnk) DeleteMonitor(ctx context.Context, id string) error {
 // - error: An error if the snapshot creation fails
 func (l *Blnk) TakeBalanceSnapshots(ctx context.Context, batchSize int) {
 	go func() {
+		startTime := time.Now()
+
+		// Log the start of snapshot operation
+		logrus.WithFields(logrus.Fields{
+			"batch_size": batchSize,
+			"operation":  "balance_snapshots",
+			"status":     "started",
+			"timestamp":  startTime.Format(time.RFC3339),
+		}).Info("Balance snapshot operation starting")
+
 		_, span := balanceTracer.Start(ctx, "TakeBalanceSnapshots")
 		defer span.End()
 
 		// Call the datasource method to create snapshots
-		total, err := l.datasource.TakeBalanceSnapshots(ctx, batchSize)
+		total, err := l.datasource.TakeBalanceSnapshots(context.Background(), batchSize)
+
+		// Calculate duration
+		duration := time.Since(startTime)
+
 		if err != nil {
+			// Log error with details
+			logrus.WithFields(logrus.Fields{
+				"batch_size":  batchSize,
+				"operation":   "balance_snapshots",
+				"status":      "failed",
+				"duration_ms": duration.Milliseconds(),
+				"error":       err.Error(),
+			}).Error("Balance snapshot operation failed")
+
 			span.RecordError(err)
 			return
 		}
 
+		// Log successful completion with metrics
+		logrus.WithFields(logrus.Fields{
+			"batch_size":           batchSize,
+			"operation":            "balance_snapshots",
+			"status":               "completed",
+			"total_snapshots":      total,
+			"duration_ms":          duration.Milliseconds(),
+			"snapshots_per_second": float64(total) / duration.Seconds(),
+			"timestamp":            time.Now().Format(time.RFC3339),
+		}).Info("Balance snapshot operation completed successfully")
+
 		span.AddEvent("Balance snapshots created", trace.WithAttributes(
 			attribute.Int("total_snapshots", total),
 			attribute.Int("batch_size", batchSize),
+			attribute.Int64("duration_ms", duration.Milliseconds()),
+			attribute.Float64("snapshots_per_second", float64(total)/duration.Seconds()),
 		))
 	}()
 }

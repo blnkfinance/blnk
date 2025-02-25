@@ -1072,7 +1072,7 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 		InflightBalance       string
 		InflightCreditBalance string
 		InflightDebitBalance  string
-		LastTxID              string
+		LastTxID              sql.NullString // Changed to sql.NullString to handle NULL values
 		SnapshotTime          time.Time
 		Currency              string
 		CurrencyMultiplier    int64
