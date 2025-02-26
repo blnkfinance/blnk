@@ -194,7 +194,12 @@ func TestUpdateIdentity(t *testing.T) {
 		MetaData:         map[string]interface{}{"key": "value"},
 	}
 
-	mock.ExpectExec(`UPDATE blnk\.identity SET identity_type = \$1, first_name = \$2, last_name = \$3, other_names = \$4, gender = \$5, dob = \$6, email_address = \$7, phone_number = \$8, nationality = \$9, organization_name = \$10, category = \$11, street = \$12, country = \$13, state = \$14, post_code = \$15, city = \$16 WHERE identity_id = \$17`).
+	// Marshal the metadata to JSON for the SQL parameter
+	metaDataJSON, err := json.Marshal(identity.MetaData)
+	assert.NoError(t, err)
+
+	// Update the SQL pattern to include meta_data field
+	mock.ExpectExec(`UPDATE blnk\.identity SET identity_type = \$1, first_name = \$2, last_name = \$3, other_names = \$4, gender = \$5, dob = \$6, email_address = \$7, phone_number = \$8, nationality = \$9, organization_name = \$10, category = \$11, street = \$12, country = \$13, state = \$14, post_code = \$15, city = \$16, meta_data = \$17 WHERE identity_id = \$18`).
 		WithArgs(
 			identity.IdentityType,
 			identity.FirstName,
@@ -212,7 +217,8 @@ func TestUpdateIdentity(t *testing.T) {
 			identity.State,
 			identity.PostCode,
 			identity.City,
-			identity.IdentityID,
+			metaDataJSON,        // Add the meta_data parameter
+			identity.IdentityID, // Update parameter index to $18
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
