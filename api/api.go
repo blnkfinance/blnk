@@ -72,6 +72,11 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/identities/:id", a.GetIdentity)
 	router.PUT("/identities/:id", a.UpdateIdentity)
 	router.GET("/identities", a.GetAllIdentities)
+	router.GET("/identities/:id/tokenized-fields", a.GetTokenizedFields)
+	router.POST("/identities/:id/tokenize/:field", a.TokenizeIdentityField)
+	router.GET("/identities/:id/detokenize/:field", a.DetokenizeIdentityField)
+	router.POST("/identities/:id/tokenize", a.TokenizeIdentity)
+	router.POST("/identities/:id/detokenize", a.DetokenizeIdentity)
 
 	// Account routes
 	router.POST("/accounts", a.CreateAccount)

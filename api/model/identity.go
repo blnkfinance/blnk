@@ -37,3 +37,11 @@ type CreateIdentity struct {
 	CreatedAt        time.Time              `json:"created_at"`
 	MetaData         map[string]interface{} `json:"meta_data"`
 }
+
+type TokenizeRequest struct {
+	Fields []string `json:"fields" binding:"required"`
+}
+
+type DetokenizeRequest struct {
+	Fields []string `json:"fields" binding:"required"`
+}
