@@ -245,11 +245,18 @@ func TestUpdateIdentity_Success(t *testing.T) {
 		FirstName:    "John",
 		LastName:     "Doe",
 		EmailAddress: "john.doe@example.com",
+		MetaData: map[string]interface{}{
+			"key": "value",
+		},
 	}
 
-	// Use a more flexible regexp pattern that matches the dynamic query building
-	mock.ExpectExec("UPDATE blnk\\.identity SET (.+) WHERE identity_id = \\$[0-9]+").
-		WithArgs(identity.FirstName, identity.LastName, identity.EmailAddress, identity.IdentityID).
+	// Marshal the metadata since it needs to be passed as an argument
+	metaDataJSON, err := json.Marshal(identity.MetaData)
+	assert.NoError(t, err)
+
+	// Match the exact column names and include meta_data
+	mock.ExpectExec("UPDATE blnk\\.identity SET").
+		WithArgs(identity.FirstName, identity.LastName, identity.EmailAddress, metaDataJSON, identity.IdentityID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = ds.UpdateIdentity(identity)
@@ -283,11 +290,18 @@ func TestUpdateIdentity_PartialUpdate(t *testing.T) {
 		IdentityID:   "idt1",
 		EmailAddress: "new.email@example.com",
 		PhoneNumber:  "987654321",
+		MetaData: map[string]interface{}{
+			"key2": "value2",
+		},
 	}
 
-	// Use a more flexible regexp pattern
-	mock.ExpectExec("UPDATE blnk\\.identity SET (.+) WHERE identity_id = \\$[0-9]+").
-		WithArgs(identity.EmailAddress, identity.PhoneNumber, identity.IdentityID).
+	// Marshal the metadata
+	metaDataJSON, err := json.Marshal(identity.MetaData)
+	assert.NoError(t, err)
+
+	// Use a more flexible pattern but account for meta_data
+	mock.ExpectExec("UPDATE blnk\\.identity SET").
+		WithArgs(identity.EmailAddress, identity.PhoneNumber, metaDataJSON, identity.IdentityID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = ds.UpdateIdentity(identity)
