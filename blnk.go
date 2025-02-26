@@ -26,6 +26,8 @@ import (
 	"github.com/jerry-enebeli/blnk/database"
 	"github.com/jerry-enebeli/blnk/internal/hooks"
 	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
+	"github.com/jerry-enebeli/blnk/internal/tokenization"
+
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/redis/go-redis/v9"
 )
@@ -37,6 +39,7 @@ type Blnk struct {
 	redis      redis.UniversalClient
 	datasource database.IDataSource
 	bt         *model.BalanceTracker
+	tokenizer  *tokenization.TokenizationService
 	Hooks      hooks.HookManager
 }
 
@@ -70,12 +73,21 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	newSearch := NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
 	hookManager := hooks.NewHookManager(redisClient.Client())
 
+	// Use the tokenization secret from configuration
+	tokenizationKey := []byte(configuration.TokenizationSecret)
+	if len(tokenizationKey) != 32 {
+		// Ensure the key is exactly 32 bytes for AES-256
+		tokenizationKey = make([]byte, 32)
+		copy(tokenizationKey, configuration.TokenizationSecret)
+	}
+
 	newBlnk := &Blnk{
 		datasource: db,
 		bt:         bt,
 		queue:      newQueue,
 		redis:      redisClient.Client(),
 		search:     newSearch,
+		tokenizer:  tokenization.NewTokenizationService(tokenizationKey),
 		Hooks:      hookManager,
 	}
 	return newBlnk, nil

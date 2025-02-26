@@ -227,6 +227,17 @@ func (d Datasource) UpdateIdentity(identity *model.Identity) error {
 	addField(identity.PostCode, "post_code")
 	addField(identity.City, "city")
 
+	// Always update metadata if it exists
+	if identity.MetaData != nil {
+		metaDataJSON, err := json.Marshal(identity.MetaData)
+		if err != nil {
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
+		}
+		setFields = append(setFields, fmt.Sprintf("meta_data = $%d", argPosition))
+		args = append(args, metaDataJSON)
+		argPosition++
+	}
+
 	// If no fields to update, return early
 	if len(setFields) == 0 {
 		return apierror.NewAPIError(apierror.ErrBadRequest, "No fields provided for update", nil)

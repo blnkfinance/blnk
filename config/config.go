@@ -157,6 +157,7 @@ type Configuration struct {
 	Redis                   RedisConfig                   `json:"redis"`
 	TypeSense               TypeSenseConfig               `json:"typesense"`
 	TypeSenseKey            string                        `json:"type_sense_key" envconfig:"BLNK_TYPESENSE_KEY"`
+	TokenizationSecret      string                        `json:"tokenization_secret" envconfig:"BLNK_TOKENIZATION_SECRET"`
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
@@ -221,6 +222,11 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	cnf.trimWhitespace()
 	cnf.setupRateLimiting()
 
+	// Validate tokenization secret length (AES-256 requires 32 bytes)
+	if len(cnf.TokenizationSecret) > 0 && len(cnf.TokenizationSecret) != 32 {
+		log.Println("Warning: Tokenization secret should be 32 bytes for AES-256 encryption")
+	}
+
 	return nil
 }
 
@@ -255,6 +261,12 @@ func (cnf *Configuration) setDefaultValues() {
 	}
 	if cnf.TypeSenseKey == "" {
 		cnf.TypeSenseKey = DEFAULT_TYPESENSE_KEY
+	}
+
+	// Tokenization defaults
+	if cnf.TokenizationSecret == "" {
+		cnf.TokenizationSecret = "blnk-default-tokenization-key!!!!"
+		log.Println("Warning: No tokenization secret provided. Using default key. This is NOT recommended for production.")
 	}
 
 	// Set module defaults

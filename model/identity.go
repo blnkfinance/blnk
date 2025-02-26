@@ -15,7 +15,10 @@ limitations under the License.
 */
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Identity struct {
 	IdentityID       string                 `json:"identity_id" form:"identity_id"`
@@ -37,4 +40,78 @@ type Identity struct {
 	DOB              time.Time              `json:"dob" form:"dob"`
 	CreatedAt        time.Time              `json:"created_at" form:"createdAt"`
 	MetaData         map[string]interface{} `json:"meta_data" form:"metaData"`
+}
+
+// convertToStructFieldName ensures consistent field name format by returning
+// the Go struct field name (typically capitalized) for the given input
+func convertToStructFieldName(fieldName string) string {
+
+	if len(fieldName) > 0 {
+		return strings.ToUpper(fieldName[0:1]) + fieldName[1:]
+	}
+	return fieldName
+}
+
+func (i *Identity) IsFieldTokenized(fieldName string) bool {
+	if i.MetaData == nil {
+		return false
+	}
+
+	structFieldName := convertToStructFieldName(fieldName)
+
+	tokenizedFieldsRaw, exists := i.MetaData["tokenized_fields"]
+	if !exists {
+		return false
+	}
+
+	if tokenizedFields, ok := tokenizedFieldsRaw.(map[string]bool); ok {
+		return tokenizedFields[structFieldName] || tokenizedFields[fieldName]
+	}
+
+	// Try map[string]interface{} with boolean values
+	if tokenizedFields, ok := tokenizedFieldsRaw.(map[string]interface{}); ok {
+		// Check both with and without conversion
+		if val, exists := tokenizedFields[structFieldName]; exists {
+			if boolVal, ok := val.(bool); ok {
+				return boolVal
+			}
+		}
+		if val, exists := tokenizedFields[fieldName]; exists {
+			if boolVal, ok := val.(bool); ok {
+				return boolVal
+			}
+		}
+	}
+
+	return false
+}
+
+func (i *Identity) MarkFieldAsTokenized(fieldName string) {
+	if i.MetaData == nil {
+		i.MetaData = make(map[string]interface{})
+	}
+
+	structFieldName := convertToStructFieldName(fieldName)
+
+	existingTokenizedFields := make(map[string]bool)
+
+	// First check if tokenized_fields exists and what type it is
+	if tokenizedFieldsRaw, exists := i.MetaData["tokenized_fields"]; exists {
+		// Try to cast to map[string]bool
+		if tokenizedMap, ok := tokenizedFieldsRaw.(map[string]bool); ok {
+			for field, isTokenized := range tokenizedMap {
+				existingTokenizedFields[field] = isTokenized
+			}
+		} else if tokenizedMap, ok := tokenizedFieldsRaw.(map[string]interface{}); ok {
+			// Handle map[string]interface{} case (common when unmarshalled from JSON)
+			for field, val := range tokenizedMap {
+				if boolVal, ok := val.(bool); ok {
+					existingTokenizedFields[field] = boolVal
+				}
+			}
+		}
+	}
+
+	existingTokenizedFields[structFieldName] = true
+	i.MetaData["tokenized_fields"] = existingTokenizedFields
 }
