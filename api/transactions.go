@@ -310,7 +310,9 @@ func (a Api) processBulkTransactions(ctx context.Context, transactions []*model.
 
 		// Queue the transaction
 		if _, err := a.blnk.QueueTransaction(ctx, txn); err != nil {
-			return fmt.Errorf("failed to queue transaction %d: %w", i, err)
+			// Create a more descriptive error that includes transaction reference details
+			return fmt.Errorf("failed to queue transaction %d (Reference: %s, Source: %s, Destination: %s, Amount: %.2f): %w",
+				i+1, txn.Reference, txn.Source, txn.Destination, txn.Amount, err)
 		}
 	}
 	return nil
@@ -322,50 +324,79 @@ func (a Api) handleBulkTransactionFailure(c *gin.Context, err error, batchID str
 	logrus.Errorf("Bulk transaction error for batch %s: %s", batchID, err.Error())
 
 	if isAtomic {
-		var rollbackErr error
-		var action string
+		action, rollbackErr := a.rollbackBatchTransactions(c.Request.Context(), batchID, isInflight)
 
-		if isInflight {
-			// Void all inflight transactions in this batch
-			_, rollbackErr = a.blnk.ProcessTransactionInBatches(
-				context.Background(),
-				batchID,
-				0,
-				1,
-				false,
-				a.blnk.GetInflightTransactionsByParentID,
-				a.blnk.VoidWorker,
-			)
-			action = "voided"
-		} else {
-			// Refund all non-inflight transactions in this batch
-			_, rollbackErr = a.blnk.ProcessTransactionInBatches(
-				context.Background(),
-				batchID,
-				0,
-				1,
-				false,
-				a.blnk.GetRefundableTransactionsByParentID,
-				a.blnk.RefundWorker,
-			)
-			action = "refunded"
-		}
-
+		var message string
 		if rollbackErr != nil {
-			logrus.Errorf("Failed to rollback batch transactions for %s: %s", batchID, rollbackErr.Error())
+			message = fmt.Sprintf("%s. Failed to roll back all transactions: %s", err.Error(), rollbackErr.Error())
 		} else {
-			logrus.Infof("Successfully rolled back atomic batch %s (%s)", batchID, action)
+			message = fmt.Sprintf("%s. All transactions in this batch have been %s.", err.Error(), action)
 		}
 
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":    fmt.Sprintf("%s. All transactions in this batch have been %s.", err.Error(), action),
-			"batch_id": batchID,
-		})
+		a.respondWithBatchError(c, message, batchID)
 	} else {
 		// If not atomic, just return the error without rollback
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":    fmt.Sprintf("%s. Previous transactions were not rolled back.", err.Error()),
-			"batch_id": batchID,
-		})
+		a.respondWithBatchError(c, fmt.Sprintf("%s. Previous transactions were not rolled back.", err.Error()), batchID)
 	}
+}
+
+// rollbackBatchTransactions performs a rollback of transactions in a batch
+// Returns the action performed (voided/refunded) and any error that occurred
+func (a Api) rollbackBatchTransactions(ctx context.Context, batchID string, isInflight bool) (string, error) {
+	var action string
+	var rollbackErr error
+
+	if isInflight {
+		action, rollbackErr = a.voidInflightBatchTransactions(ctx, batchID)
+	} else {
+		action, rollbackErr = a.refundNonInflightBatchTransactions(ctx, batchID)
+	}
+
+	a.logRollbackResult(batchID, action, rollbackErr)
+	return action, rollbackErr
+}
+
+// voidInflightBatchTransactions voids all inflight transactions in a batch
+func (a Api) voidInflightBatchTransactions(ctx context.Context, batchID string) (string, error) {
+	_, err := a.blnk.ProcessTransactionInBatches(
+		ctx,
+		batchID,
+		0,
+		1,
+		false,
+		a.blnk.GetInflightTransactionsByParentID,
+		a.blnk.VoidWorker,
+	)
+	return "voided", err
+}
+
+// refundNonInflightBatchTransactions refunds all non-inflight transactions in a batch
+func (a Api) refundNonInflightBatchTransactions(ctx context.Context, batchID string) (string, error) {
+	_, err := a.blnk.ProcessTransactionInBatches(
+		ctx,
+		batchID,
+		0,
+		1,
+		false,
+		a.blnk.GetRefundableTransactionsByParentID,
+		a.blnk.RefundWorker,
+	)
+	return "refunded", err
+}
+
+// logRollbackResult logs the outcome of a rollback operation
+func (a Api) logRollbackResult(batchID string, action string, err error) {
+	if err != nil {
+		logrus.Errorf("Failed to rollback batch transactions for %s: %s", batchID, err.Error())
+	} else {
+		logrus.Infof("Successfully rolled back atomic batch %s (%s)", batchID, action)
+	}
+}
+
+// respondWithBatchError sends a consistent error response for batch operations
+func (a Api) respondWithBatchError(c *gin.Context, message string, batchID string) {
+	c.JSON(http.StatusBadRequest, gin.H{
+		"error":    message,
+		"batch_id": batchID,
+	})
 }
