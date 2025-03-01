@@ -280,7 +280,6 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 		return
 	}
 
-	// Determine status based on transaction type (Go doesn't have ternary operators)
 	var status string
 	if req.Inflight {
 		status = "inflight"
@@ -288,7 +287,6 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 		status = "applied"
 	}
 
-	// Success response
 	c.JSON(http.StatusCreated, gin.H{
 		"batch_id":          batchID,
 		"status":            status,
