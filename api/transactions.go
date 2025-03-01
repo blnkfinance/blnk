@@ -244,19 +244,33 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 }
 
 // CreateBulkTransactions handles the creation of multiple transactions in a batch.
-// It binds the incoming JSON request containing a list of transactions, assigns a batch ID,
-// and processes each transaction as inflight.
-//
 // If atomic is true: Any failure will cause all transactions to be rolled back
 // If atomic is false: Failures will be reported but previous transactions remain unaffected
-//
-// Parameters:
-// - c: The Gin context containing the request and response.
-//
-// Responses:
-// - 400 Bad Request: If there's an error in binding JSON or queuing any transaction.
-// - 201 Created: If all transactions are successfully queued in the batch.
 func (a Api) CreateBulkTransactions(c *gin.Context) {
+	// Parse the request
+	req, err := a.parseBulkTransactionRequest(c)
+	if err != nil {
+		return // Error response already sent in parseBulkTransactionRequest
+	}
+
+	// Prepare and process the batch
+	batchID, err := a.processBulkTransactionBatch(c.Request.Context(), req)
+	if err != nil {
+		// Handle failure based on atomicity setting and transaction type
+		a.handleBulkTransactionFailure(c, err, batchID, req.Atomic, req.Inflight)
+		return
+	}
+
+	// Send success response
+	a.respondWithBulkTransactionSuccess(c, batchID, req)
+}
+
+// parseBulkTransactionRequest parses and validates the bulk transaction request body
+func (a Api) parseBulkTransactionRequest(c *gin.Context) (*struct {
+	Transactions []*model.Transaction `json:"transactions"`
+	Inflight     bool                 `json:"inflight"`
+	Atomic       bool                 `json:"atomic"`
+}, error) {
 	var req struct {
 		Transactions []*model.Transaction `json:"transactions"`
 		Inflight     bool                 `json:"inflight"`
@@ -265,21 +279,40 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return nil, err
 	}
 
+	// Could add additional validation here if needed
+
+	return &req, nil
+}
+
+// processBulkTransactionBatch prepares and processes all transactions in a batch
+func (a Api) processBulkTransactionBatch(ctx context.Context, req *struct {
+	Transactions []*model.Transaction `json:"transactions"`
+	Inflight     bool                 `json:"inflight"`
+	Atomic       bool                 `json:"atomic"`
+}) (string, error) {
 	// Generate batch ID (parent transaction ID)
 	batchID := model.GenerateUUIDWithSuffix("bulk")
+
 	logrus.Infof("Creating bulk transaction batch %s with %d transactions (atomic: %v, inflight: %v)",
 		batchID, len(req.Transactions), req.Atomic, req.Inflight)
 
 	// Process transactions in batch
-	if err := a.processBulkTransactions(c.Request.Context(), req.Transactions, batchID, req.Inflight); err != nil {
-		// Handle failure based on atomicity setting and transaction type
-		a.handleBulkTransactionFailure(c, err, batchID, req.Atomic, req.Inflight)
-		return
+	if err := a.processBulkTransactions(ctx, req.Transactions, batchID, req.Inflight); err != nil {
+		return batchID, err
 	}
 
+	return batchID, nil
+}
+
+// respondWithBulkTransactionSuccess sends a success response for bulk transactions
+func (a Api) respondWithBulkTransactionSuccess(c *gin.Context, batchID string, req *struct {
+	Transactions []*model.Transaction `json:"transactions"`
+	Inflight     bool                 `json:"inflight"`
+	Atomic       bool                 `json:"atomic"`
+}) {
 	var status string
 	if req.Inflight {
 		status = "inflight"
