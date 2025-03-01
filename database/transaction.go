@@ -630,7 +630,8 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 }
 
 // GetInflightTransactionsByParentID retrieves all inflight transactions associated with a given parent transaction ID.
-// It supports pagination via batchSize and offset. Only transactions with status 'INFLIGHT' are fetched.
+// It supports pagination via batchSize and offset. Transactions with status 'INFLIGHT' are fetched.
+// If no INFLIGHT transactions exist, then transactions with status 'QUEUED' and meta_data.inflight=true are considered.
 // Parameters:
 // - ctx: Context for managing request and tracing.
 // - parentTransactionID: The ID of the parent transaction to filter by.
@@ -642,13 +643,40 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetInflightTransactionsByParentID")
 	defer span.End()
 
+	// This query first checks if there are any INFLIGHT transactions for this parentTransactionID
+	// If there are, it returns only those. If not, it falls back to QUEUED with inflight=true
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-		FROM blnk.transactions
-		WHERE (transaction_id = $1 OR parent_transaction = $1) AND status = 'INFLIGHT'
+		WITH inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1) 
+			AND status = 'INFLIGHT'
+		), 
+		queued_inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1) 
+			AND status = 'QUEUED' AND meta_data->>'inflight' = 'true'
+			-- Don't include parent transactions that have children with INFLIGHT status
+			AND NOT EXISTS (
+				SELECT 1 
+				FROM blnk.transactions child
+				WHERE child.parent_transaction = transaction_id AND child.status = 'INFLIGHT'
+			)
+		)
+		
+		SELECT * FROM inflight_transactions
+		UNION ALL
+		-- Only include queued_inflight if there are no inflight transactions
+		SELECT * FROM queued_inflight_transactions 
+		WHERE NOT EXISTS (SELECT 1 FROM inflight_transactions)
+		
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
+
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve inflight transactions", err)
@@ -693,7 +721,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 		transactions = append(transactions, &transaction)
 	}
 
-	// Handle errors that may occur while iterating over the rows
+	// Handle any errors that occurred while iterating over the rows
 	if err = rows.Err(); err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
