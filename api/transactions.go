@@ -332,7 +332,7 @@ func (a Api) processBulkTransactions(ctx context.Context, transactions []*model.
 	for i, txn := range transactions {
 		// Set transaction properties
 		txn.Inflight = inflight
-		txn.SkipQueue = true
+		txn.SkipQueue = false
 		txn.ParentTransaction = batchID
 
 		// Add sequence number to metadata
