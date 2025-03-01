@@ -664,6 +664,23 @@ func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction,
 	}
 }
 
+// IsInflightTransaction checks whether a transaction is considered "inflight" based on its status and metadata.
+// A transaction is considered inflight if:
+// 1. It has a status of StatusInflight, OR
+// 2. It has a status of StatusQueued AND has the inflight flag set to true in its metadata
+//
+// Parameters:
+// - transaction *model.Transaction: The transaction to check
+//
+// Returns:
+// - bool: true if the transaction is considered inflight, false otherwise
+func IsInflightTransaction(transaction *model.Transaction) bool {
+	return transaction.Status == StatusInflight ||
+		(transaction.Status == StatusQueued &&
+			transaction.MetaData != nil &&
+			transaction.MetaData["inflight"] == true)
+}
+
 // CommitWorker processes commit transactions from the jobs channel and sends the results to the results channel.
 // It starts a tracing span, processes each transaction, and records relevant events and errors.
 //
@@ -679,7 +696,8 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 
 	defer wg.Done()
 	for originalTxn := range jobs {
-		if originalTxn.Status != StatusInflight {
+		// Check inflight status using the helper function
+		if !IsInflightTransaction(originalTxn) {
 			err := fmt.Errorf("transaction is not in inflight status")
 			results <- BatchJobResult{Error: err}
 			span.RecordError(err)
@@ -711,7 +729,8 @@ func (l *Blnk) VoidWorker(ctx context.Context, jobs <-chan *model.Transaction, r
 
 	defer wg.Done()
 	for originalTxn := range jobs {
-		if originalTxn.Status != StatusInflight {
+		// Check inflight status using the helper function
+		if !IsInflightTransaction(originalTxn) {
 			err := fmt.Errorf("transaction is not in inflight status")
 			results <- BatchJobResult{Error: err}
 			span.RecordError(err)
@@ -1176,8 +1195,8 @@ func (l *Blnk) fetchAndValidateInflightTransaction(ctx context.Context, transact
 		return &model.Transaction{}, err
 	}
 
-	// Validate the transaction status
-	if transaction.Status != StatusInflight {
+	// Validate the transaction status using the helper function
+	if !IsInflightTransaction(transaction) {
 		err := fmt.Errorf("transaction is not in inflight status")
 		span.RecordError(err)
 		return nil, l.logAndRecordError(span, "invalid transaction status", err)
@@ -1495,6 +1514,16 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	}
 	if transaction.Rate == 0 {
 		transaction.Rate = 1
+	}
+
+	// Initialize metadata if it doesn't exist
+	if transaction.MetaData == nil {
+		transaction.MetaData = make(map[string]interface{})
+	}
+
+	// Set inflight flag in metadata if the transaction is inflight
+	if transaction.Inflight {
+		transaction.MetaData["inflight"] = true
 	}
 }
 
