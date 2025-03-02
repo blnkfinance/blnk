@@ -329,10 +329,13 @@ func (a Api) sendBulkTransactionWebhook(batchID, status, errorMsg string, transa
 		payload["error"] = errorMsg
 	}
 
-	blnk.SendWebhook(blnk.NewWebhook{
+	err := blnk.SendWebhook(blnk.NewWebhook{
 		Event:   "bulk_transaction." + status,
 		Payload: payload,
 	})
+	if err != nil {
+		logrus.Errorf("Failed to send webhook notification for batch %s: %s", batchID, err.Error())
+	}
 }
 
 // handleAsyncBulkTransactionFailure handles failures in asynchronous processing
