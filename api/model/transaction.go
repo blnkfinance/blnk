@@ -16,6 +16,8 @@ limitations under the License.
 package model
 
 import (
+	"time"
+
 	"github.com/jerry-enebeli/blnk/model"
 )
 
@@ -37,6 +39,7 @@ type RecordTransaction struct {
 	Sources            []model.Distribution   `json:"sources"`
 	Destinations       []model.Distribution   `json:"destinations"`
 	MetaData           map[string]interface{} `json:"meta_data"`
+	EffectiveDate      *time.Time             `json:"effective_date,omitempty"`
 }
 
 type InflightUpdate struct {

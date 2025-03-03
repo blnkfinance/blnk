@@ -1094,17 +1094,19 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 }
 
 // fetchTransactions retrieves transactions for a balance within a specific time range
+// using effective_date if available, otherwise falling back to created_at
 func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime, targetTime time.Time) (*sql.Rows, error) {
 	logrus.Debugf("Querying transactions from %v to %v for balance %s", startTime, targetTime, balanceID)
 	rows, err := tx.QueryContext(ctx, `
-		SELECT precise_amount, source, destination, created_at
-		FROM blnk.transactions
-		WHERE (source = $1 OR destination = $1)
-		AND created_at > $2
-		AND created_at <= $3
-		AND status = 'APPLIED'
-		ORDER BY created_at ASC
-	`, balanceID, startTime, targetTime)
+        SELECT precise_amount, source, destination, created_at, 
+               COALESCE(effective_date, created_at) as effective_date
+        FROM blnk.transactions
+        WHERE (source = $1 OR destination = $1)
+        AND COALESCE(effective_date, created_at) > $2
+        AND COALESCE(effective_date, created_at) <= $3
+        AND status = 'APPLIED'
+        ORDER BY COALESCE(effective_date, created_at) ASC
+    `, balanceID, startTime, targetTime)
 
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get transactions", err)
@@ -1119,12 +1121,14 @@ func applyTransaction(txn struct {
 	Source        string
 	Destination   string
 	CreatedAt     time.Time
+	EffectiveDate time.Time
 }, balanceID string, creditBalance, debitBalance *big.Int) (*big.Int, *big.Int, error) {
 	txAmount, ok := new(big.Int).SetString(txn.PreciseAmount, 10)
 	if !ok {
 		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Invalid transaction amount", nil)
 	}
 
+	// Use the transaction amount to update the appropriate balance
 	if txn.Source == balanceID {
 		debitBalance = new(big.Int).Add(debitBalance, txAmount)
 	}
@@ -1157,9 +1161,10 @@ func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sq
 			Source        string
 			Destination   string
 			CreatedAt     time.Time
+			EffectiveDate time.Time
 		}
 
-		if err := rows.Scan(&txn.PreciseAmount, &txn.Source, &txn.Destination, &txn.CreatedAt); err != nil {
+		if err := rows.Scan(&txn.PreciseAmount, &txn.Source, &txn.Destination, &txn.CreatedAt, &txn.EffectiveDate); err != nil {
 			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction", err)
 		}
 

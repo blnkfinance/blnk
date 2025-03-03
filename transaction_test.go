@@ -140,7 +140,7 @@ func TestRecordTransaction(t *testing.T) {
     FROM blnk.balance_monitors WHERE balance_id = $1
 `)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
@@ -152,6 +152,7 @@ func TestRecordTransaction(t *testing.T) {
 		float64(1),
 		txn.Currency,
 		txn.Destination,
+		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
@@ -268,7 +269,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
     FROM blnk.balance_monitors WHERE balance_id = $1
 `)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
@@ -280,6 +281,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		float64(1300),
 		txn.Currency,
 		txn.Destination,
+		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),
 		sqlmock.AnyArg(),

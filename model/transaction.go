@@ -60,6 +60,7 @@ type Transaction struct {
 	Sources            []Distribution         `json:"sources,omitempty"`
 	Destinations       []Distribution         `json:"destinations,omitempty"`
 	CreatedAt          time.Time              `json:"created_at"`
+	EffectiveDate      *time.Time             `json:"effective_date,omitempty"`
 	ScheduledFor       time.Time              `json:"scheduled_for,omitempty"`
 	InflightExpiryDate time.Time              `json:"inflight_expiry_date,omitempty"`
 	MetaData           map[string]interface{} `json:"meta_data,omitempty"`
@@ -346,4 +347,11 @@ func CalculateDistributions(ctx context.Context, totalAmount float64, distributi
 	))
 
 	return resultDistributions, nil
+}
+
+func (t *Transaction) GetEffectiveDate() time.Time {
+	if t.EffectiveDate != nil {
+		return *t.EffectiveDate
+	}
+	return t.CreatedAt // Fall back to CreatedAt for old records
 }
