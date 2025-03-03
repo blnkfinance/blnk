@@ -1024,6 +1024,163 @@ func (d Datasource) TakeBalanceSnapshots(ctx context.Context, batchSize int) (in
 	return totalProcessed, nil
 }
 
+// validateBalanceTimeParams validates the input parameters for GetBalanceAtTime
+func validateBalanceTimeParams(balanceID string, targetTime time.Time) error {
+	if balanceID == "" {
+		return apierror.NewAPIError(apierror.ErrBadRequest, "Balance ID cannot be empty", nil)
+	}
+
+	if targetTime.IsZero() {
+		return apierror.NewAPIError(apierror.ErrBadRequest, "Target time cannot be zero", nil)
+	}
+
+	return nil
+}
+
+// getBalanceInfo retrieves basic information about a balance
+func (d Datasource) getBalanceInfo(ctx context.Context, tx *sql.Tx, balanceID string) (currency string, createdAt time.Time, err error) {
+	err = tx.QueryRowContext(ctx, `
+		SELECT currency, created_at FROM blnk.balances WHERE balance_id = $1
+	`, balanceID).Scan(&currency, &createdAt)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", time.Time{}, apierror.NewAPIError(
+				apierror.ErrNotFound,
+				fmt.Sprintf("Balance '%s' not found", balanceID),
+				err,
+			)
+		}
+		return "", time.Time{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get balance information", err)
+	}
+
+	return currency, createdAt, nil
+}
+
+// getMostRecentSnapshot finds the most recent balance snapshot before the target time
+func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balanceID string, targetTime time.Time) (creditBalance, debitBalance *big.Int, snapshotTime time.Time, err error) {
+	snapshot := tx.QueryRowContext(ctx, `
+		SELECT 
+			balance,
+			credit_balance,
+			debit_balance,
+			snapshot_time
+		FROM blnk.balance_snapshots
+		WHERE balance_id = $1
+		AND snapshot_time <= $2
+		ORDER BY snapshot_time DESC
+		LIMIT 1
+	`, balanceID, targetTime)
+
+	var snapshotBalance, snapshotCredit, snapshotDebit string
+
+	err = snapshot.Scan(&snapshotBalance, &snapshotCredit, &snapshotDebit, &snapshotTime)
+
+	if err == nil {
+		// Snapshot found, use it as starting point
+		creditBalance, _ = new(big.Int).SetString(snapshotCredit, 10)
+		debitBalance, _ = new(big.Int).SetString(snapshotDebit, 10)
+		logrus.Debugf("Found snapshot for balance %s at %v with credit=%s, debit=%s",
+			balanceID, snapshotTime, snapshotCredit, snapshotDebit)
+		return creditBalance, debitBalance, snapshotTime, nil
+	} else if err == sql.ErrNoRows {
+		// No snapshot found, calculate from genesis (all transactions)
+		logrus.Debugf("No snapshot found for balance %s, calculating from genesis", balanceID)
+		return new(big.Int).SetInt64(0), new(big.Int).SetInt64(0), time.Time{}, nil
+	}
+
+	// Other error occurred
+	return nil, nil, time.Time{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get balance snapshot", err)
+}
+
+// fetchTransactions retrieves transactions for a balance within a specific time range
+func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime, targetTime time.Time) (*sql.Rows, error) {
+	logrus.Debugf("Querying transactions from %v to %v for balance %s", startTime, targetTime, balanceID)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT precise_amount, source, destination, created_at
+		FROM blnk.transactions
+		WHERE (source = $1 OR destination = $1)
+		AND created_at > $2
+		AND created_at <= $3
+		AND status = 'APPLIED'
+		ORDER BY created_at ASC
+	`, balanceID, startTime, targetTime)
+
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get transactions", err)
+	}
+
+	return rows, nil
+}
+
+// applyTransaction applies a single transaction to update balance totals
+func applyTransaction(txn struct {
+	PreciseAmount string
+	Source        string
+	Destination   string
+	CreatedAt     time.Time
+}, balanceID string, creditBalance, debitBalance *big.Int) (*big.Int, *big.Int, error) {
+	txAmount, ok := new(big.Int).SetString(txn.PreciseAmount, 10)
+	if !ok {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Invalid transaction amount", nil)
+	}
+
+	if txn.Source == balanceID {
+		debitBalance = new(big.Int).Add(debitBalance, txAmount)
+	}
+	if txn.Destination == balanceID {
+		creditBalance = new(big.Int).Add(creditBalance, txAmount)
+	}
+
+	return creditBalance, debitBalance, nil
+}
+
+// calculateBalanceFromTransactions applies transactions to calculate the balance at a specific time
+func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime time.Time, targetTime time.Time, initialCredit, initialDebit *big.Int) (creditBalance, debitBalance *big.Int, err error) {
+	creditBalance = new(big.Int).Set(initialCredit)
+	debitBalance = new(big.Int).Set(initialDebit)
+
+	// Fetch relevant transactions
+	rows, err := fetchTransactions(ctx, tx, balanceID, startTime, targetTime)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	// Count of processed transactions for debugging
+	transactionCount := 0
+
+	// Apply transactions
+	for rows.Next() {
+		var txn struct {
+			PreciseAmount string
+			Source        string
+			Destination   string
+			CreatedAt     time.Time
+		}
+
+		if err := rows.Scan(&txn.PreciseAmount, &txn.Source, &txn.Destination, &txn.CreatedAt); err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction", err)
+		}
+
+		// Apply this transaction to update balances
+		creditBalance, debitBalance, err = applyTransaction(txn, balanceID, creditBalance, debitBalance)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		transactionCount++
+	}
+
+	logrus.Debugf("Processed %d transactions for balance %s", transactionCount, balanceID)
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error processing transactions", err)
+	}
+
+	return creditBalance, debitBalance, nil
+}
+
 // GetBalanceAtTime retrieves the balance state at a specific point in time.
 // It finds the most recent snapshot before the target time and applies any subsequent
 // transactions to calculate the exact balance state.
@@ -1042,12 +1199,8 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	defer cancel()
 
 	// Validate inputs
-	if balanceID == "" {
-		return nil, apierror.NewAPIError(apierror.ErrBadRequest, "Balance ID cannot be empty", nil)
-	}
-
-	if targetTime.IsZero() {
-		return nil, apierror.NewAPIError(apierror.ErrBadRequest, "Target time cannot be zero", nil)
+	if err := validateBalanceTimeParams(balanceID, targetTime); err != nil {
+		return nil, err
 	}
 
 	// Start transaction
@@ -1059,117 +1212,37 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to start transaction", err)
 	}
 	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			err = fmt.Errorf("GetBalanceAtTime: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logrus.Errorf("GetBalanceAtTime: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+			}
 		}
 	}()
 
-	// Get most recent snapshot
-	var snapshot struct {
-		Balance               string
-		CreditBalance         string
-		DebitBalance          string
-		InflightBalance       string
-		InflightCreditBalance string
-		InflightDebitBalance  string
-		LastTxID              sql.NullString // Changed to sql.NullString to handle NULL values
-		SnapshotTime          time.Time
-		Currency              string
-		CurrencyMultiplier    int64
-	}
-
-	err = tx.QueryRowContext(ctx, `
-        SELECT 
-            balance,
-            credit_balance,
-            debit_balance,
-            inflight_balance,
-            inflight_credit_balance,
-            inflight_debit_balance,
-            last_tx_id,
-            snapshot_time,
-            currency
-        FROM blnk.balance_snapshots
-        WHERE balance_id = $1
-        AND snapshot_time <= $2
-        ORDER BY snapshot_time DESC
-        LIMIT 1
-    `, balanceID, targetTime).Scan(
-		&snapshot.Balance,
-		&snapshot.CreditBalance,
-		&snapshot.DebitBalance,
-		&snapshot.InflightBalance,
-		&snapshot.InflightCreditBalance,
-		&snapshot.InflightDebitBalance,
-		&snapshot.LastTxID,
-		&snapshot.SnapshotTime,
-		&snapshot.Currency,
-	)
-
+	// Get basic balance information
+	currency, balanceCreatedAt, err := d.getBalanceInfo(ctx, tx, balanceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, apierror.NewAPIError(
-				apierror.ErrNotFound,
-				fmt.Sprintf("No snapshot found for balance '%s' before %v", balanceID, targetTime),
-				err,
-			)
-		}
-		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get balance snapshot", err)
+		return nil, err
 	}
 
-	// Convert string values to big.Int
-	balance, _ := new(big.Int).SetString(snapshot.Balance, 10)
-	creditBalance, _ := new(big.Int).SetString(snapshot.CreditBalance, 10)
-	debitBalance, _ := new(big.Int).SetString(snapshot.DebitBalance, 10)
-
-	// Get transactions since snapshot with status "APPLIED"
-	rows, err := tx.QueryContext(ctx, `
-        SELECT precise_amount, source, destination, created_at
-        FROM blnk.transactions
-        WHERE (source = $1 OR destination = $1)
-        AND created_at > $2
-        AND created_at <= $3
-        AND status = 'APPLIED'
-        ORDER BY created_at ASC
-    `, balanceID, snapshot.SnapshotTime, targetTime)
+	// Try to find the most recent snapshot
+	creditBalance, debitBalance, startTime, err := d.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
 	if err != nil {
-		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get transactions", err)
-	}
-	defer rows.Close()
-
-	// Apply transactions
-	for rows.Next() {
-		var tx struct {
-			PreciseAmount string
-			Source        string
-			Destination   string
-			CreatedAt     time.Time
-		}
-
-		if err := rows.Scan(&tx.PreciseAmount, &tx.Source, &tx.Destination, &tx.CreatedAt); err != nil {
-			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction", err)
-		}
-
-		// Convert transaction amount to big.Int
-		txAmount, ok := new(big.Int).SetString(tx.PreciseAmount, 10)
-		if !ok {
-			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Invalid transaction amount", nil)
-		}
-
-		// Update balances based on transaction
-		if tx.Source == balanceID {
-			balance = new(big.Int).Sub(balance, txAmount)
-			debitBalance = new(big.Int).Add(debitBalance, txAmount)
-		}
-		if tx.Destination == balanceID {
-			balance = new(big.Int).Add(balance, txAmount)
-			creditBalance = new(big.Int).Add(creditBalance, txAmount)
-		}
+		return nil, err
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error processing transactions", err)
+	// Calculate the balance by applying transactions since the snapshot
+	creditBalance, debitBalance, err = d.calculateBalanceFromTransactions(
+		ctx, tx, balanceID, startTime, targetTime, creditBalance, debitBalance)
+	if err != nil {
+		return nil, err
 	}
+
+	// Calculate final balance
+	balance := new(big.Int).Sub(creditBalance, debitBalance)
+
+	logrus.Debugf("Final calculated balance for %s at %v: credit=%s, debit=%s, balance=%s",
+		balanceID, targetTime, creditBalance.String(), debitBalance.String(), balance.String())
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
@@ -1182,7 +1255,8 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 		Balance:       balance,
 		CreditBalance: creditBalance,
 		DebitBalance:  debitBalance,
-		Currency:      snapshot.Currency,
+		Currency:      currency,
+		CreatedAt:     balanceCreatedAt,
 	}
 
 	return result, nil
