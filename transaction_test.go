@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
@@ -512,16 +513,22 @@ func TestRecordTransaction_Concurrency(t *testing.T) {
 	destination, err := datasource.CreateBalance(*destBalance)
 	require.NoError(t, err)
 
-	wg := &sync.WaitGroup{}
+	// Use a channel to track successful transactions
 	numGoroutines := 10
 	txnAmount := float64(1000)
-	errs := make([]error, numGoroutines)
-	var mu sync.Mutex
+	resultChan := make(chan error, numGoroutines)
+
+	// Use a WaitGroup to ensure we wait for all goroutines to complete
+	wg := &sync.WaitGroup{}
+	wg.Add(numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+
+			// Small random delay to reduce chance of exact simultaneous execution
+			time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
+
 			txn := &model.Transaction{
 				TransactionID:  gofakeit.UUID(),
 				Reference:      gofakeit.UUID(),
@@ -533,28 +540,32 @@ func TestRecordTransaction_Concurrency(t *testing.T) {
 				AllowOverdraft: true,
 			}
 			_, err := d.RecordTransaction(ctx, txn)
-			mu.Lock()
-			errs[idx] = err
-			mu.Unlock()
+			resultChan <- err
 		}(i)
 	}
 
+	// Wait for all goroutines to complete
 	wg.Wait()
+	close(resultChan)
 
-	// Expect exactly one success and the rest to fail with lock error
+	// Process results
 	var successCount int
 	var lockFailures int
 	expectedLockErr := "failed to acquire lock: lock for key bln_"
 
-	for _, e := range errs {
-		if e == nil {
+	for err := range resultChan {
+		if err == nil {
 			successCount++
-		} else if strings.Contains(e.Error(), expectedLockErr) {
+		} else if strings.Contains(err.Error(), expectedLockErr) {
 			lockFailures++
+		} else {
+			t.Logf("Unexpected error: %v", err)
 		}
 	}
-	require.Equal(t, 1, successCount)
-	require.Equal(t, numGoroutines-1, lockFailures)
+
+	// Verify exactly one success and the rest being lock failures
+	require.Equal(t, 1, successCount, "Expected exactly one successful transaction")
+	require.Equal(t, numGoroutines-1, lockFailures, "Expected the rest to fail with lock errors")
 
 	// Check final balances
 	finalSource, err := datasource.GetBalanceByIDLite(source.BalanceID)
