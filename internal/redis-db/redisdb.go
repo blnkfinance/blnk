@@ -46,7 +46,14 @@ func ParseRedisURL(rawURL string) (*redis.Options, error) {
 	if strings.HasPrefix(rawURL, "redis://") && strings.Contains(rawURL, "@") {
 		parts := strings.Split(strings.TrimPrefix(rawURL, "redis://"), "@")
 		if len(parts) == 2 {
-			rawURL = fmt.Sprintf("redis://:%s@%s", parts[0], parts[1])
+			authParts := strings.Split(parts[0], ":")
+			if len(authParts) == 1 {
+				// No username, just password - keep original logic
+				rawURL = fmt.Sprintf("redis://:%s@%s", parts[0], parts[1])
+			} else if len(authParts) == 2 {
+				// Has username and password - pass through unchanged
+				// The format is already correct for redis.ParseURL
+			}
 		}
 	}
 
