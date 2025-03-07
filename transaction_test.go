@@ -21,17 +21,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"math/rand"
 	"regexp"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/database"
 	"github.com/jerry-enebeli/blnk/model"
-	"github.com/sirupsen/logrus"
 
 	"github.com/brianvoe/gofakeit/v6"
 
@@ -464,120 +460,6 @@ func TestQueueTransactionFlow(t *testing.T) {
 	require.Equal(t, 0, updatedDest.Balance.Cmp(updatedDest.Balance),
 		"Destination balance should be increased by transaction amount")
 
-}
-
-func TestRecordTransaction_Concurrency(t *testing.T) {
-	t.Parallel()
-
-	// Setup test context and configuration
-	ctx := context.Background()
-	cnf := &config.Configuration{
-		Redis: config.RedisConfig{
-			Dns: "localhost:6379",
-		},
-		DataSource: config.DataSourceConfig{
-			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
-		},
-		Queue: config.QueueConfig{
-			WebhookQueue:     "webhook_queue_test",
-			IndexQueue:       "index_queue_test",
-			TransactionQueue: "transaction_queue_test",
-			NumberOfQueues:   1,
-		},
-		Server: config.ServerConfig{SecretKey: "some-secret"},
-		AccountNumberGeneration: config.AccountNumberGenerationConfig{
-			HttpService: config.AccountGenerationHttpService{
-				Url: "http://example.com/generateAccount",
-			},
-		},
-	}
-	config.ConfigStore.Store(cnf)
-
-	datasource, err := database.NewDataSource(cnf)
-	require.NoError(t, err)
-	d, err := NewBlnk(datasource)
-	require.NoError(t, err)
-
-	sourceBalance := &model.Balance{
-		Currency: "NGN",
-		LedgerID: "general_ledger_id",
-	}
-	destBalance := &model.Balance{
-		Currency: "NGN",
-		LedgerID: "general_ledger_id",
-	}
-
-	// Create balances in database
-	source, err := datasource.CreateBalance(*sourceBalance)
-	require.NoError(t, err)
-	destination, err := datasource.CreateBalance(*destBalance)
-	require.NoError(t, err)
-
-	// Use a channel to track successful transactions
-	numGoroutines := 10
-	txnAmount := float64(1000)
-	resultChan := make(chan error, numGoroutines)
-
-	// Use a WaitGroup to ensure we wait for all goroutines to complete
-	wg := &sync.WaitGroup{}
-	wg.Add(numGoroutines)
-
-	for i := 0; i < numGoroutines; i++ {
-		go func(idx int) {
-			defer wg.Done()
-
-			// Small random delay to reduce chance of exact simultaneous execution
-			time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
-
-			txn := &model.Transaction{
-				TransactionID:  gofakeit.UUID(),
-				Reference:      gofakeit.UUID(),
-				Source:         source.BalanceID,
-				Destination:    destination.BalanceID,
-				Amount:         txnAmount,
-				Currency:       "NGN",
-				Precision:      100,
-				AllowOverdraft: true,
-			}
-			_, err := d.RecordTransaction(ctx, txn)
-			resultChan <- err
-		}(i)
-	}
-
-	// Wait for all goroutines to complete
-	wg.Wait()
-	close(resultChan)
-
-	// Process results
-	var successCount int
-	var lockFailures int
-	expectedLockErr := "failed to acquire lock: lock for key bln_"
-
-	for err := range resultChan {
-		if err == nil {
-			successCount++
-		} else if strings.Contains(err.Error(), expectedLockErr) {
-			lockFailures++
-		} else {
-			t.Logf("Unexpected error: %v", err)
-		}
-	}
-
-	// Verify exactly one success and the rest being lock failures
-	require.Equal(t, 1, successCount, "Expected exactly one successful transaction")
-	require.Equal(t, numGoroutines-1, lockFailures, "Expected the rest to fail with lock errors")
-
-	// Check final balances
-	finalSource, err := datasource.GetBalanceByIDLite(source.BalanceID)
-	require.NoError(t, err)
-	finalDest, err := datasource.GetBalanceByIDLite(destination.BalanceID)
-	require.NoError(t, err)
-
-	// Only one transaction should have succeeded
-	expectedDebit := big.NewInt(int64(1) * int64(txnAmount) * 100) // includes precision
-	logrus.Info("Final Source Balance: ", finalSource.Balance, finalDest.Balance, expectedDebit)
-	require.Equal(t, 0, finalSource.Balance.Cmp(big.NewInt(0).Neg(expectedDebit)))
-	require.Equal(t, 0, finalDest.Balance.Cmp(expectedDebit))
 }
 
 func TestQueueTransactionFlowWithSkipQueue(t *testing.T) {

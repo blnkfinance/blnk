@@ -24,13 +24,6 @@ services:
     environment:
       TZ: ${TZ:-Etc/UTC}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
-      BLNK_PROJECT_NAME: "Blnk"
-      BLNK_DATA_SOURCE_DNS: "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
-      BLNK_REDIS_DNS: "redis:6379"
-      BLNK_SERVER_PORT: "5001"
-      BLNK_SERVER_SSL: "false"
-      BLNK_TYPESENSE_DNS: "http://typesense:8108"
-      BLNK_TYPESENSE_KEY: "blnk-api-key"
     ports:
       - "5001:5001"
       - "80:80"
@@ -39,7 +32,8 @@ services:
       - redis
       - postgres
       - jaeger
-      - typesense
+    volumes:
+      - ./blnk.json:/blnk.json
 
   worker:
     image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.9.1}
@@ -48,16 +42,12 @@ services:
     entrypoint: ["blnk", "workers"]
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
-      BLNK_PROJECT_NAME: "Blnk"
-      BLNK_DATA_SOURCE_DNS: "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
-      BLNK_REDIS_DNS: "redis:6379"
-      BLNK_TYPESENSE_DNS: "http://typesense:8108"
-      BLNK_TYPESENSE_KEY: "blnk-api-key"
     depends_on:
       - redis
       - postgres
       - jaeger
-      - typesense
+    volumes:
+      - ./blnk.json:/blnk.json
 
   redis:
     image: redis:7.2.4
