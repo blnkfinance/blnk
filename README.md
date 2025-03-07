@@ -50,6 +50,33 @@ To get started with Blnk, first clone the repository into your machine:
 ```
 git clone https://github.com/blnkledger/Blnk && cd Blnk
 ```
+and create a configuration file, `blnk.json`:
+```
+touch blnk.json
+```
+then copy and save the following configuration:
+```json
+{
+  "project_name": "Blnk",
+  "data_source": {
+    "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
+  },
+  "redis": {
+    "dns": "redis:6379"
+  },
+  "server": {
+    "domain": "blnk.io",
+    "ssl": false,
+    "ssl_email": "jerryenebeli@gmail.com",
+    "port": "5001"
+  },
+  "notification": {
+    "slack": {
+      "webhook_url": "https://hooks.slack.com"
+    }
+  }
+}
+```
 then start your Blnk server with Docker Compose:
 ```
 docker compose up
