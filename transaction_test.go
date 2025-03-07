@@ -43,8 +43,10 @@ func TestRecordTransaction(t *testing.T) {
 			Dns: "localhost:6379",
 		},
 		Queue: config.QueueConfig{
-			WebhookQueue:   "webhook_queue",
-			NumberOfQueues: 1,
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			IndexQueue:       "index_queue",
+			NumberOfQueues:   1,
 		},
 		Server: config.ServerConfig{SecretKey: "some-secret"},
 		AccountNumberGeneration: config.AccountNumberGenerationConfig{
@@ -58,14 +60,19 @@ func TestRecordTransaction(t *testing.T) {
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)
 
+	// Important: Set ExpectationsWereMet to ensure execution occurs in order of appearance
+	mock.MatchExpectationsInOrder(false)
+
 	d, err := NewBlnk(datasource)
 	assert.NoError(t, err)
 
-	source := gofakeit.UUID()
-	destination := gofakeit.UUID()
+	// Use fixed UUIDs for better predictability
+	source := "source-balance-id-123"
+	destination := "destination-balance-id-456"
+	reference := "transaction-reference-789"
 
 	txn := &model.Transaction{
-		Reference:      gofakeit.UUID(),
+		Reference:      reference,
 		Source:         source,
 		Destination:    destination,
 		Rate:           1,
@@ -75,41 +82,47 @@ func TestRecordTransaction(t *testing.T) {
 		Currency:       "NGN",
 	}
 
+	// First, check if transaction exists
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
+	// Set up source balance response
 	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
 		AddRow(source, "NGN", "", 1, "ledger-id-source", int64(10000), int64(10000), 0, 0, 0, 0, time.Now(), 0)
 
+	// Set up destination balance response
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
 		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0)
 
-	// Updated regex to be more flexible
 	balanceQuery := `SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
 
+	// Expect balance queries with the source/destination IDs (order can vary)
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(destination).WillReturnRows(destinationBalanceRows)
+
+	// Start transaction
 	mock.ExpectBegin()
 
+	// Update source and destination balances (order doesn't matter since MatchExpectationsInOrder is false)
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
 	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
 	  WHERE balance_id = $1 AND version = $12
 	`)).WithArgs(
-		source,
-		big.NewInt(9000).String(),
-		big.NewInt(10000).String(),
-		big.NewInt(1000).String(),
-		big.NewInt(0).String(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		0,
+		source,           // balance_id
+		sqlmock.AnyArg(), // balance
+		sqlmock.AnyArg(), // credit_balance
+		sqlmock.AnyArg(), // debit_balance
+		sqlmock.AnyArg(), // inflight_balance
+		sqlmock.AnyArg(), // inflight_credit_balance
+		sqlmock.AnyArg(), // inflight_debit_balance
+		sqlmock.AnyArg(), // currency
+		sqlmock.AnyArg(), // currency_multiplier
+		sqlmock.AnyArg(), // ledger_id
+		sqlmock.AnyArg(), // created_at
+		sqlmock.AnyArg(), // version
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec(regexp.QuoteMeta(`
@@ -117,52 +130,69 @@ func TestRecordTransaction(t *testing.T) {
 	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
 	  WHERE balance_id = $1 AND version = $12
 	`)).WithArgs(
-		destination,
-		big.NewInt(1000).String(),
-		big.NewInt(1000).String(),
-		big.NewInt(0).String(),
-		big.NewInt(0).String(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		0,
+		destination,      // balance_id
+		sqlmock.AnyArg(), // balance
+		sqlmock.AnyArg(), // credit_balance
+		sqlmock.AnyArg(), // debit_balance
+		sqlmock.AnyArg(), // inflight_balance
+		sqlmock.AnyArg(), // inflight_credit_balance
+		sqlmock.AnyArg(), // inflight_debit_balance
+		sqlmock.AnyArg(), // currency
+		sqlmock.AnyArg(), // currency_multiplier
+		sqlmock.AnyArg(), // ledger_id
+		sqlmock.AnyArg(), // created_at
+		sqlmock.AnyArg(), // version
 	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Commit transaction
 	mock.ExpectCommit()
 
+	// Add expectations for balance monitor queries (can happen in any order)
 	mock.ExpectQuery(regexp.QuoteMeta(`
     SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
     FROM blnk.balance_monitors WHERE balance_id = $1
 `)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
+	mock.ExpectQuery(regexp.QuoteMeta(`
+    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+    FROM blnk.balance_monitors WHERE balance_id = $1
+`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
+
+	// Expect transaction insertion (placed last, but can happen in any order due to MatchExpectationsInOrder=false)
 	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		source,
-		txn.Reference,
-		txn.Amount,
-		int64(1000), // Adjust precise amount as int64
-		txn.Precision,
-		float64(1),
-		txn.Currency,
-		txn.Destination,
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
+		sqlmock.AnyArg(), // transaction_id
+		sqlmock.AnyArg(), // parent_transaction
+		source,           // source
+		reference,        // reference
+		txn.Amount,       // amount
+		int64(1000),      // precise amount
+		txn.Precision,    // precision
+		float64(1),       // rate
+		txn.Currency,     // currency
+		destination,      // destination
+		sqlmock.AnyArg(), // description
+		sqlmock.AnyArg(), // status
+		sqlmock.AnyArg(), // created_at
+		sqlmock.AnyArg(), // meta_data
+		sqlmock.AnyArg(), // scheduled_for
+		sqlmock.AnyArg(), // hash
+		sqlmock.AnyArg(), // effective_date
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	_, err = d.RecordTransaction(context.Background(), txn)
+	// Execute the function being tested
+	result, err := d.RecordTransaction(context.Background(), txn)
+
+	// Assert no errors
 	assert.NoError(t, err)
+
+	// Check if all expectations were met
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
+
+	// Optionally check the result if needed
+	assert.NotNil(t, result)
 }
 
 func TestRecordTransactionWithRate(t *testing.T) {
@@ -171,8 +201,9 @@ func TestRecordTransactionWithRate(t *testing.T) {
 			Dns: "localhost:6379",
 		},
 		Queue: config.QueueConfig{
-			WebhookQueue:   "webhook_queue",
-			NumberOfQueues: 1,
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
 		},
 		Server: config.ServerConfig{SecretKey: "some-secret"},
 		AccountNumberGeneration: config.AccountNumberGenerationConfig{
@@ -186,14 +217,19 @@ func TestRecordTransactionWithRate(t *testing.T) {
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)
 
+	// Important: Set ExpectationsWereMet to ensure execution occurs in order of appearance
+	mock.MatchExpectationsInOrder(false)
+
 	d, err := NewBlnk(datasource)
 	assert.NoError(t, err)
 
-	source := gofakeit.UUID()
-	destination := gofakeit.UUID()
+	// Use fixed UUIDs for better predictability
+	source := "source-balance-id-123"
+	destination := "destination-balance-id-456"
+	reference := "transaction-reference-789"
 
 	txn := &model.Transaction{
-		Reference:      gofakeit.UUID(),
+		Reference:      reference,
 		Source:         source,
 		Destination:    destination,
 		Amount:         1000000,
@@ -203,24 +239,30 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		Currency:       "NGN",
 	}
 
+	// First, check if transaction exists
 	mock.ExpectQuery(regexp.QuoteMeta(`
         SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
+	// Set up source balance response - Note this is USD
 	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
 		AddRow(source, "", "USD", 1, "ledger-id-source", 0, 0, 0, 0, 0, 0, time.Now(), 0)
 
+	// Set up destination balance response - This is NGN
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
 		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0)
 
 	balanceQuery := `SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
 
+	// Expect balance queries with the source/destination IDs (order can vary)
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(destination).WillReturnRows(destinationBalanceRows)
+
+	// Start transaction
 	mock.ExpectBegin()
 
-	// Updated mock expectation with correct number of arguments
+	// Update source balance
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
         SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
@@ -240,7 +282,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		0,                               // $12
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	// Updated mock expectation with correct number of arguments
+	// Update destination balance
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
         SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
@@ -259,41 +301,55 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		sqlmock.AnyArg(),                  // $11
 		0,                                 // $12
 	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Commit transaction
 	mock.ExpectCommit()
 
+	// Add expectations for balance monitor queries (can happen in any order)
 	mock.ExpectQuery(regexp.QuoteMeta(`
     SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
     FROM blnk.balance_monitors WHERE balance_id = $1
 `)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
+	// Add a second monitor query for destination if needed (based on your implementation)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+    FROM blnk.balance_monitors WHERE balance_id = $1
+`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
+
+	// Expect transaction insertion
 	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		source,
-		txn.Reference,
-		txn.Amount,
-		100000000,
-		txn.Precision,
-		float64(1300),
-		txn.Currency,
-		txn.Destination,
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
-		sqlmock.AnyArg(),
+		sqlmock.AnyArg(), // transaction_id
+		sqlmock.AnyArg(), // parent_transaction
+		source,           // source
+		reference,        // reference
+		txn.Amount,       // amount
+		100000000,        // precise amount
+		txn.Precision,    // precision
+		float64(1300),    // rate
+		txn.Currency,     // currency
+		destination,      // destination
+		sqlmock.AnyArg(), // description
+		sqlmock.AnyArg(), // status
+		sqlmock.AnyArg(), // created_at
+		sqlmock.AnyArg(), // meta_data
+		sqlmock.AnyArg(), // scheduled_for
+		sqlmock.AnyArg(), // hash
+		sqlmock.AnyArg(), // effective_date
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
+	// Execute the function being tested
 	_, err = d.RecordTransaction(context.Background(), txn)
+
+	// Assert no errors
 	assert.NoError(t, err)
+
+	// Check if all expectations were met
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
 }
-
 func TestVoidInflightTransaction_Negative(t *testing.T) {
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)

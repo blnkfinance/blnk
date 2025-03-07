@@ -1199,7 +1199,7 @@ func (l *Blnk) fetchAndValidateInflightTransaction(ctx context.Context, transact
 	if !IsInflightTransaction(transaction) {
 		err := fmt.Errorf("transaction is not in inflight status")
 		span.RecordError(err)
-		return nil, l.logAndRecordError(span, "invalid transaction status", err)
+		return nil, err
 	}
 
 	// Check if the parent transaction has been voided
@@ -1212,7 +1212,7 @@ func (l *Blnk) fetchAndValidateInflightTransaction(ctx context.Context, transact
 	if parentVoided {
 		err := fmt.Errorf("transaction has already been voided")
 		span.RecordError(err)
-		return nil, l.logAndRecordError(span, "Error voiding transaction", err)
+		return nil, err
 	}
 
 	span.AddEvent("Inflight transaction validated", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))

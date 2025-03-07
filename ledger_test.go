@@ -41,8 +41,10 @@ func newTestDataSource() (database.IDataSource, sqlmock.Sqlmock, error) {
 			Dns: "localhost:6379",
 		},
 		Queue: config.QueueConfig{
-			WebhookQueue:   "webhook_queue",
-			NumberOfQueues: 1,
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			IndexQueue:       "index_queue",
+			NumberOfQueues:   1,
 		},
 		Server: config.ServerConfig{SecretKey: "some-secret"},
 		AccountNumberGeneration: config.AccountNumberGenerationConfig{
