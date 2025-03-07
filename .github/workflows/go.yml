@@ -23,19 +23,10 @@ jobs:
 
       - name: Build
         run: go build ./cmd/*.go
-        
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: go-build
-          path: |
-            ./blnk
-            ./go.mod
-            ./go.sum
 
   test:
-    needs: build
     runs-on: ubuntu-latest
+    needs: build
 
     services:
       postgres:
@@ -64,16 +55,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
           go-version: 1.21.7
-          
-      - name: Download build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: go-build
+
+      - name: Tidy
+        run: go mod tidy
 
       - name: Migrate Database
         run: go run ./cmd/*.go migrate up
@@ -83,6 +72,3 @@ jobs:
 
       - name: Test
         run: go test -v ./
-        env:
-          BLNK_DATA_SOURCE_DNS: postgres://postgres@localhost:5432/blnk?sslmode=disable
-          BLNK_REDIS_DNS: localhost:6379
