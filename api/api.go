@@ -110,6 +110,11 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/hooks", a.ListHooks)
 	router.DELETE("/hooks/:id", a.DeleteHook)
 
+	// API Key routes
+	router.POST("/api-keys", a.CreateAPIKey)
+	router.GET("/api-keys", a.ListAPIKeys)
+	router.DELETE("/api-keys/:id", a.RevokeAPIKey)
+
 	return a.router
 }
 
@@ -127,9 +132,8 @@ func NewAPI(b *blnk.Blnk) *Api {
 		return nil
 	}
 	r := gin.Default()
-	if conf.Server.Secure {
-		r.Use(middleware.SecretKeyAuthMiddleware())
-	}
+	authMiddleware := middleware.NewAuthMiddleware(b)
+	r.Use(authMiddleware.Authenticate())
 	r.Use(middleware.RateLimitMiddleware(conf))
 	r.Use(otelgin.Middleware("BLNK"))
 

@@ -362,3 +362,28 @@ func (m *MockDataSource) TakeBalanceSnapshots(ctx context.Context, batchSize int
 	args := m.Called(ctx, batchSize)
 	return args.Get(0).(int), args.Error(1)
 }
+
+func (m *MockDataSource) CreateAPIKey(ctx context.Context, name, ownerID string, scopes []string, expiresAt time.Time) (*model.APIKey, error) {
+	args := m.Called(ctx, name, ownerID, scopes, expiresAt)
+	return args.Get(0).(*model.APIKey), args.Error(1)
+}
+
+func (m *MockDataSource) ListAPIKeys(ctx context.Context, ownerID string) ([]*model.APIKey, error) {
+	args := m.Called(ctx, ownerID)
+	return args.Get(0).([]*model.APIKey), args.Error(1)
+}
+
+func (m *MockDataSource) RevokeAPIKey(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) GetAPIKey(ctx context.Context, id string) (*model.APIKey, error) {
+	args := m.Called(ctx, id)
+	return args.Get(0).(*model.APIKey), args.Error(1)
+}
+
+func (m *MockDataSource) UpdateLastUsed(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
