@@ -72,7 +72,7 @@ func (s *Datasource) GetAPIKey(ctx context.Context, key string) (*model.APIKey, 
 	apiKey.Scopes = []string(scopes)
 
 	if err == sql.ErrNoRows {
-		fmt.Println("API key not found")
+		fmt.Println("API key not found", key)
 		return nil, ErrAPIKeyNotFound
 	}
 	if err != nil {
@@ -88,7 +88,7 @@ func (s *Datasource) RevokeAPIKey(ctx context.Context, id string) error {
 	query := `
 		UPDATE blnk.api_keys
 		SET is_revoked = true, revoked_at = $1
-		WHERE id = $2
+		WHERE api_key_id = $2
 	`
 
 	result, err := s.Conn.ExecContext(ctx, query, time.Now(), id)
