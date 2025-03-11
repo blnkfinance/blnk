@@ -33,6 +33,7 @@ import (
 type Api struct {
 	blnk   *blnk.Blnk
 	router *gin.Engine
+	auth   *middleware.AuthMiddleware
 }
 
 // Router sets up the routes for the API and returns the router instance.
@@ -41,6 +42,9 @@ type Api struct {
 // - 200 OK: When the router is successfully set up.
 func (a Api) Router() *gin.Engine {
 	router := a.router
+
+	// Apply auth middleware to all routes
+	router.Use(a.auth.Authenticate())
 
 	// Ledger routes
 	router.POST("/ledgers", a.CreateLedger)
@@ -110,6 +114,11 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/hooks", a.ListHooks)
 	router.DELETE("/hooks/:id", a.DeleteHook)
 
+	// API Key routes
+	router.POST("/api-keys", a.CreateAPIKey)
+	router.GET("/api-keys", a.ListAPIKeys)
+	router.DELETE("/api-keys/:id", a.RevokeAPIKey)
+
 	return a.router
 }
 
@@ -127,9 +136,7 @@ func NewAPI(b *blnk.Blnk) *Api {
 		return nil
 	}
 	r := gin.Default()
-	if conf.Server.Secure {
-		r.Use(middleware.SecretKeyAuthMiddleware())
-	}
+	auth := middleware.NewAuthMiddleware(b)
 	r.Use(middleware.RateLimitMiddleware(conf))
 	r.Use(otelgin.Middleware("BLNK"))
 
@@ -148,7 +155,7 @@ func NewAPI(b *blnk.Blnk) *Api {
 		c.JSON(200, "webhook received")
 	})
 
-	return &Api{blnk: b, router: r}
+	return &Api{blnk: b, router: r, auth: auth}
 }
 
 // Search performs a search query on a specified collection.

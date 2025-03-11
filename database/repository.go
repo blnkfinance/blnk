@@ -32,6 +32,7 @@ type IDataSource interface {
 	balanceMonitor // Interface for balance monitoring operations
 	account        // Interface for account-related operations
 	reconciliation // Interface for reconciliation-related operations
+	apikey         // Interface for API key operations
 }
 
 // transaction defines methods for handling transactions.
@@ -124,4 +125,12 @@ type reconciliation interface {
 	RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error                                                                            // Records matches for a reconciliation
 	RecordUnmatched(ctx context.Context, reconciliationID string, results []string) error                                                                               // Records unmatched results for a reconciliation
 	FetchAndGroupExternalTransactions(ctx context.Context, uploadID string, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) // Fetches and groups external transactions based on criteria
+}
+
+type apikey interface {
+	CreateAPIKey(ctx context.Context, name, ownerID string, scopes []string, expiresAt time.Time) (*model.APIKey, error) // Creates a new API key
+	GetAPIKey(ctx context.Context, key string) (*model.APIKey, error)                                                    // Retrieves an API key by its key string
+	RevokeAPIKey(ctx context.Context, id string) error                                                                   // Revokes an API key
+	ListAPIKeys(ctx context.Context, ownerID string) ([]*model.APIKey, error)                                            // Lists all API keys for a specific owner
+	UpdateLastUsed(ctx context.Context, id string) error                                                                 // Updates the last_used_at timestamp for an API key
 }
