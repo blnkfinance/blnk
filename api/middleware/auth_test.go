@@ -42,6 +42,9 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 	validKey, err := blnkService.CreateAPIKey(context.Background(), "valid-key", "test-owner", []string{"ledgers:read"}, time.Now().Add(24*time.Hour))
 	assert.NoError(t, err)
 
+	insufficientKey, err := blnkService.CreateAPIKey(context.Background(), "insufficient-key", "test-owner", []string{"ledgers:read"}, time.Now().Add(24*time.Hour))
+	assert.NoError(t, err)
+
 	expiredKey, err := blnkService.CreateAPIKey(context.Background(), "expired-key", "test-owner", []string{"ledgers:read"}, time.Now().Add(-24*time.Hour))
 	assert.NoError(t, err)
 
@@ -92,6 +95,61 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 				}
 			},
 			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Root path",
+			path:   "/",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Insufficient permissions",
+			path:   "/ledgers",
+			method: "POST",
+			apiKey: insufficientKey.Key,
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for ledgers:write",
+		},
+		{
+			name:   "Secure mode disabled",
+			path:   "/ledgers",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: false,
+					},
+				}
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Unknown resource type",
+			path:   "/fake-resouce/dd",
+			method: "POST",
+			apiKey: validKey.Key,
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode: http.StatusForbidden,
 		},
 		{
 			name:   "Valid API key with read permission",
