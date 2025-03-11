@@ -324,6 +324,20 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			expectedCode: http.StatusOK,
 		},
 		{
+			name:   "Comprehensive key for POST /refund-transaction",
+			path:   "/refund-transaction/:id",
+			method: "POST",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
 			name:   "Comprehensive key for GET /identities",
 			path:   "/identities",
 			method: "GET",
@@ -410,6 +424,20 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 		{
 			name:   "Comprehensive key for GET /search",
 			path:   "/search",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /multi-search",
+			path:   "/multi-search",
 			method: "GET",
 			setupConfig: func() *config.Configuration {
 				return &config.Configuration{

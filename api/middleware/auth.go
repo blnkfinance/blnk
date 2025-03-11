@@ -81,6 +81,15 @@ func getResourceFromPath(path string) Resource {
 		return ResourceAccounts
 	}
 
+	// Special case for multi-search
+	if parts[0] == "multi-search" {
+		return ResourceSearch
+	}
+
+	if parts[0] == "refund-transaction" {
+		return ResourceTransactions
+	}
+
 	// Check if the path segment maps to a known resource
 	if resource, ok := pathToResource[parts[0]]; ok {
 		return resource
