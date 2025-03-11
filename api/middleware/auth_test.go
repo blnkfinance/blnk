@@ -30,6 +30,7 @@ func setupBlnk() (*blnk.Blnk, error) {
 
 	return blnk.NewBlnk(db)
 }
+
 func TestAuthMiddleware_Authenticate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -50,7 +51,22 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 	err = blnkService.RevokeAPIKey(context.Background(), revokedKey.APIKeyID, revokedKey.OwnerID)
 	assert.NoError(t, err)
 
-	testKey, err := blnkService.CreateAPIKey(context.Background(), "test-key", "test-owner", []string{"ledgers:read", "ledgers:write"}, time.Now().Add(24*time.Hour))
+	allPermissionsScopes := []string{
+		"ledgers:read", "ledgers:write", "ledgers:delete",
+		"balances:read", "balances:write", "balances:delete",
+		"accounts:read", "accounts:write", "accounts:delete",
+		"identities:read", "identities:write", "identities:delete",
+		"transactions:read", "transactions:write", "transactions:delete",
+		"balance-monitors:read", "balance-monitors:write", "balance-monitors:delete",
+		"hooks:read", "hooks:write", "hooks:delete",
+		"api-keys:read", "api-keys:write", "api-keys:delete",
+		"search:read", "search:write", "search:delete",
+		"reconciliation:read", "reconciliation:write", "reconciliation:delete",
+		"metadata:read", "metadata:write", "metadata:delete",
+		"backup:read", "backup:write", "backup:delete",
+	}
+
+	comprehensiveKey, err := blnkService.CreateAPIKey(context.Background(), "comprehensive-key", "test-owner", allPermissionsScopes, time.Now().Add(24*time.Hour))
 	assert.NoError(t, err)
 
 	tests := []struct {
@@ -114,8 +130,7 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			setupConfig: func() *config.Configuration {
 				return &config.Configuration{
 					Server: config.ServerConfig{
-						Secure:    true,
-						SecretKey: "master-key",
+						Secure: true,
 					},
 				}
 			},
@@ -130,8 +145,7 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			setupConfig: func() *config.Configuration {
 				return &config.Configuration{
 					Server: config.ServerConfig{
-						Secure:    true,
-						SecretKey: "master-key",
+						Secure: true,
 					},
 				}
 			},
@@ -146,8 +160,7 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			setupConfig: func() *config.Configuration {
 				return &config.Configuration{
 					Server: config.ServerConfig{
-						Secure:    true,
-						SecretKey: "master-key",
+						Secure: true,
 					},
 				}
 			},
@@ -155,7 +168,7 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			expectedError: "Authentication required. Use X-Blnk-Key header",
 		},
 		{
-			name:   "Valid API key with correct permissions",
+			name:   "Comprehensive key for GET /ledgers",
 			path:   "/ledgers",
 			method: "GET",
 			setupConfig: func() *config.Configuration {
@@ -165,7 +178,245 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 					},
 				}
 			},
-			apiKey:       testKey.Key,
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for POST /ledgers",
+			path:   "/ledgers",
+			method: "POST",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for DELETE /ledgers",
+			path:   "/ledgers",
+			method: "DELETE",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /accounts",
+			path:   "/accounts",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for POST /accounts",
+			path:   "/accounts",
+			method: "POST",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /transactions",
+			path:   "/transactions",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for POST /transactions",
+			path:   "/transactions",
+			method: "POST",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /identities",
+			path:   "/identities",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for POST /identities",
+			path:   "/identities",
+			method: "POST",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /balances",
+			path:   "/balances",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /balance-monitors",
+			path:   "/balance-monitors",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for POST /hooks",
+			path:   "/hooks",
+			method: "POST",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /api-keys",
+			path:   "/api-keys",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /search",
+			path:   "/search",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /reconciliation",
+			path:   "/reconciliation",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /metadata",
+			path:   "/metadata",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for PATCH /metadata",
+			path:   "/metadata",
+			method: "PATCH",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Comprehensive key for GET /backup",
+			path:   "/backup",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			apiKey:       comprehensiveKey.Key,
 			expectedCode: http.StatusOK,
 		},
 	}
@@ -206,7 +457,6 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			if tt.expectedError != "" {
 				assert.Contains(t, w.Body.String(), tt.expectedError)
 			}
-
 		})
 	}
 }
@@ -231,6 +481,56 @@ func TestGetResourceFromPath(t *testing.T) {
 			name:     "Valid mocked account path",
 			path:     "/mocked-account",
 			expected: ResourceAccounts,
+		},
+		{
+			name:     "Valid transactions path",
+			path:     "/transactions",
+			expected: ResourceTransactions,
+		},
+		{
+			name:     "Valid identities path with ID",
+			path:     "/identities/xyz",
+			expected: ResourceIdentities,
+		},
+		{
+			name:     "Valid balances path",
+			path:     "/balances",
+			expected: ResourceBalances,
+		},
+		{
+			name:     "Valid balance-monitors path",
+			path:     "/balance-monitors",
+			expected: ResourceBalanceMonitors,
+		},
+		{
+			name:     "Valid hooks path",
+			path:     "/hooks",
+			expected: ResourceHooks,
+		},
+		{
+			name:     "Valid api-keys path",
+			path:     "/api-keys",
+			expected: ResourceAPIKeys,
+		},
+		{
+			name:     "Valid search path",
+			path:     "/search",
+			expected: ResourceSearch,
+		},
+		{
+			name:     "Valid reconciliation path",
+			path:     "/reconciliation",
+			expected: ResourceReconciliation,
+		},
+		{
+			name:     "Valid metadata path",
+			path:     "/metadata",
+			expected: ResourceMetadata,
+		},
+		{
+			name:     "Valid backup path",
+			path:     "/backup",
+			expected: ResourceBackup,
 		},
 		{
 			name:     "Unknown resource",
@@ -284,6 +584,66 @@ func TestExtractKey(t *testing.T) {
 			}
 
 			result := extractKey(c)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHasPermission(t *testing.T) {
+	tests := []struct {
+		name     string
+		scopes   []string
+		resource Resource
+		method   string
+		expected bool
+	}{
+		{
+			name:     "Exact resource and action match",
+			scopes:   []string{"ledgers:read"},
+			resource: ResourceLedgers,
+			method:   "GET",
+			expected: true,
+		},
+		{
+			name:     "Exact resource but wrong action",
+			scopes:   []string{"ledgers:read"},
+			resource: ResourceLedgers,
+			method:   "POST",
+			expected: false,
+		},
+		{
+			name:     "Multiple explicit permissions - one matches",
+			scopes:   []string{"ledgers:read", "accounts:write", "transactions:delete"},
+			resource: ResourceLedgers,
+			method:   "GET",
+			expected: true,
+		},
+		{
+			name:     "Multiple explicit permissions - none match",
+			scopes:   []string{"ledgers:write", "accounts:write", "transactions:read"},
+			resource: ResourceLedgers,
+			method:   "GET",
+			expected: false,
+		},
+		{
+			name:     "Multiple explicit permissions - method match",
+			scopes:   []string{"ledgers:write", "accounts:write", "transactions:read"},
+			resource: ResourceLedgers,
+			method:   "POST",
+			expected: true,
+		},
+		{
+			name:     "Unsupported HTTP method",
+			scopes:   []string{"ledgers:read", "ledgers:write", "ledgers:delete"},
+			resource: ResourceLedgers,
+			method:   "CUSTOM",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HasPermission(tt.scopes, tt.resource, tt.method)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
