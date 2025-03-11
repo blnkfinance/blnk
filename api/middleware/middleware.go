@@ -63,5 +63,3 @@ func RateLimitMiddleware(conf *config.Configuration) gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-
