@@ -116,20 +116,40 @@ func (balance *Balance) computeBalance(inflight bool) {
 // canProcessTransaction checks if a transaction can be processed given the source balance.
 // It returns an error if the balance is insufficient and overdraft is not allowed.
 func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
-	if transaction.AllowOverdraft {
-		// Overdraft allowed, skip balance check.
+	if transaction.AllowOverdraft && transaction.OverdraftLimit == 0 {
+		// If unconditional overdraft is allowed, skip all balance checks
 		return nil
 	}
 
 	// Convert transaction.PreciseAmount to *big.Int for comparison.
 	transactionAmount := new(big.Int).SetInt64(transaction.PreciseAmount)
 
-	if sourceBalance.Balance.Cmp(transactionAmount) < 0 {
-		// Insufficient funds.
-		return fmt.Errorf("insufficient funds in source balance")
+	if sourceBalance.Balance.Cmp(transactionAmount) >= 0 {
+		// Sufficient funds
+		return nil
 	}
 
-	return nil
+	// Insufficient funds, check if within overdraft limit
+	if transaction.OverdraftLimit > 0 {
+		// Calculate the resulting balance after transaction
+		resultingBalance := new(big.Int).Sub(sourceBalance.Balance, transactionAmount)
+
+		// Convert overdraft limit to big.Int with precision applied
+		overdraftLimitPrecise := int64(transaction.OverdraftLimit * transaction.Precision)
+		overdraftLimitBigInt := new(big.Int).SetInt64(overdraftLimitPrecise)
+
+		// Negative of overdraft limit (as balance will be negative)
+		negativeOverdraftLimit := new(big.Int).Neg(overdraftLimitBigInt)
+
+		// Check if resulting balance is within overdraft limit
+		if resultingBalance.Cmp(negativeOverdraftLimit) >= 0 {
+			return nil
+		}
+		return fmt.Errorf("transaction exceeds overdraft limit")
+	}
+
+	// Insufficient funds and no overdraft allowed
+	return fmt.Errorf("insufficient funds in source balance")
 }
 
 // CommitInflightDebit commits a debit from the inflight balance and adds it to the debit balance.
