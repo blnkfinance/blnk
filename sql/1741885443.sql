@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- +migrate Up
-ALTER TABLE blnk.transactions ALTER COLUMN amount TYPE NUMERIC(78,18) USING amount::NUMERIC;
+ALTER TABLE blnk.transactions ALTER COLUMN amount TYPE NUMERIC USING amount::NUMERIC;
 ALTER TABLE blnk.transactions ALTER COLUMN precise_amount TYPE NUMERIC USING precise_amount::NUMERIC;
 
 ALTER TABLE blnk.balances ALTER COLUMN balance TYPE NUMERIC;

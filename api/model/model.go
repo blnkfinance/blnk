@@ -17,6 +17,8 @@ package model
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -92,7 +94,36 @@ func (c *MonitorCondition) ValidateMonitorCondition() error {
 
 func (t *RecordTransaction) ValidateRecordTransaction() error {
 	return validation.ValidateStruct(t,
-		validation.Field(&t.Amount, validation.Required),
+		validation.Field(&t.Amount, validation.By(func(value interface{}) error {
+			if t.Amount != 0 && t.PreciseAmount != nil {
+				return errors.New("either amount or precise_amount should be provided, not both")
+			}
+			if t.Amount == 0 && t.PreciseAmount == nil {
+				return errors.New("either amount or precise_amount is required")
+			}
+
+			// Check for high precision amounts that might lead to rounding errors
+			if t.Amount != 0 {
+				// Convert to string to check significant digits
+				amountStr := strconv.FormatFloat(t.Amount, 'f', -1, 64)
+
+				// Remove decimal point for counting significant digits
+				amountStr = strings.Replace(amountStr, ".", "", 1)
+
+				// Remove leading zeros which aren't significant
+				amountStr = strings.TrimLeft(amountStr, "0")
+
+				// Count significant digits
+				significantDigits := len(amountStr)
+
+				// If more than 15 significant digits, warn about potential rounding errors
+				if significantDigits > 15 {
+					return errors.New("amount has more than 15 significant digits which may cause rounding errors; use precise_amount instead")
+				}
+			}
+
+			return nil
+		})),
 		validation.Field(&t.Currency, validation.Required),
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.Description, validation.Required),
@@ -116,7 +147,6 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		),
 	)
 }
-
 func (a *CreateAccount) ValidateCreateAccount() error {
 	return validation.ValidateStruct(a,
 		validation.Field(&a.LedgerId, validation.When(a.BalanceId == "", validation.Required.Error("Ledger ID is required when Balance ID is not provided"))),
@@ -182,5 +212,5 @@ func (t *RecordTransaction) ToTransaction() *model.Transaction {
 
 	}
 
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: inflightExpiryDate, Rate: t.Rate, SkipQueue: t.SkipQueue, EffectiveDate: t.EffectiveDate, OverdraftLimit: t.OverdraftLimit}
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: inflightExpiryDate, Rate: t.Rate, SkipQueue: t.SkipQueue, EffectiveDate: t.EffectiveDate, OverdraftLimit: t.OverdraftLimit, PreciseAmount: t.PreciseAmount}
 }

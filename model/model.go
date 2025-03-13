@@ -202,12 +202,47 @@ func (balance *Balance) RollbackInflightDebit(amount *big.Int) {
 	}
 }
 
-// ApplyPrecision applies precision to the transaction amount by multiplying it by the transaction precision value.
+// ApplyPrecision handles both operations involving precision:
+// 1. If PreciseAmount exists: converts it to a decimal Amount
+// 2. If Amount exists: converts it to a PreciseAmount
 func ApplyPrecision(transaction *Transaction) *big.Int {
 	if transaction.Precision == 0 {
 		transaction.Precision = 1
 	}
 
+	if transaction.PreciseAmount != nil {
+		convertPreciseToDecimal(transaction)
+		return transaction.PreciseAmount
+	}
+
+	transaction.PreciseAmount = convertDecimalToPrecise(transaction)
+	return transaction.PreciseAmount
+}
+
+// convertPreciseToDecimal converts the precise integer amount to a decimal value
+// by dividing by precision, storing the exact string representation
+func convertPreciseToDecimal(transaction *Transaction) {
+	// Use the decimal package for exact decimal arithmetic
+	preciseAmountStr := transaction.PreciseAmount.String()
+	preciseAmountDec, _ := decimal.NewFromString(preciseAmountStr)
+
+	// Create decimal for precision
+	precisionDec := decimal.NewFromFloat(transaction.Precision)
+
+	// Perform division with exact decimal arithmetic
+	resultDec := preciseAmountDec.Div(precisionDec)
+
+	// Store the exact string representation
+	transaction.AmountString = resultDec.String()
+
+	// Also store the float64 for backward compatibility
+	// This may still have precision issues but is kept for existing code
+	transaction.Amount, _ = resultDec.Float64()
+}
+
+// convertDecimalToPrecise converts a decimal amount to precise integer
+// by multiplying by precision
+func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 	// We should avoid float multiplication due to precision loss
 	// Convert the components to strings first and use the decimal package
 
@@ -252,7 +287,7 @@ func ApplyRate(preciseAmount *big.Int, rate float64) *big.Int {
 
 // validate checks if the transaction is valid (e.g., ensuring positive amount).
 func (transaction *Transaction) validate() error {
-	if transaction.Amount <= 0 {
+	if transaction.Amount <= 0 && transaction.PreciseAmount == nil {
 		return errors.New("transaction amount must be positive")
 	}
 	return nil

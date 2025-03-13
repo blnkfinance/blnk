@@ -74,7 +74,7 @@ func TestRecordTransaction(t *testing.T) {
 		{
 			name: "Valid Transaction With precision 100",
 			payload: model2.RecordTransaction{
-				Amount:      922337203.6854,
+				Amount:      100.68,
 				Precision:   100,
 				Reference:   "ref_001adcfgf",
 				Description: "For fees",

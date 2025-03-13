@@ -60,7 +60,7 @@ func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transactio
 	_, err = d.Conn.ExecContext(ctx,
 		`INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) 
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.Amount, txn.PreciseAmount.String(), txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash, txn.EffectiveDate,
+		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.AmountString, txn.PreciseAmount.String(), txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash, txn.EffectiveDate,
 	)
 
 	// Handle errors that may occur during the execution of the query

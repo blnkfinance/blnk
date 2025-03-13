@@ -16,6 +16,7 @@ limitations under the License.
 package model
 
 import (
+	"math/big"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
@@ -26,6 +27,7 @@ type RecordTransaction struct {
 	Rate               float64                `json:"rate"`
 	Precision          float64                `json:"precision"`
 	OverdraftLimit     float64                `json:"overdraft_limit"`
+	PreciseAmount      *big.Int               `json:"precise_amount"`
 	AllowOverDraft     bool                   `json:"allow_overdraft"`
 	Inflight           bool                   `json:"inflight"`
 	SkipQueue          bool                   `json:"skip_queue"`

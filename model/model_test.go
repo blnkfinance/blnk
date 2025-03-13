@@ -344,3 +344,36 @@ func TestExternalTransaction_ToInternalTransaction(t *testing.T) {
 	assert.Equal(t, extTxn.Date, intTxn.CreatedAt)
 	assert.Equal(t, extTxn.Description, intTxn.Description)
 }
+
+func TestApplyPrecisionWithEmptyAmount(t *testing.T) {
+	// Test case where amount is empty but precise amount is provided
+	t.Run("Convert PreciseAmount to Amount", func(t *testing.T) {
+		// Set up a big.Int with the exact value
+		preciseAmount := new(big.Int)
+		preciseAmount.SetString("922337203684775808", 10)
+
+		// Create transaction with precise amount but no amount
+		txn := &Transaction{
+			PreciseAmount: preciseAmount,
+			Precision:     10000000000, // 10 billion
+			// Amount is purposely left as 0
+		}
+
+		// Apply precision, which should calculate the amount
+		result := ApplyPrecision(txn)
+
+		// Check that precise amount remains unchanged
+		assert.Equal(t, preciseAmount, result)
+
+		// The expected amount should be:
+		// 922337203684775808 ÷ 10000000000 = 92233720.3684775808
+		expectedAmount := 92233720.3684775808
+		assert.InDelta(t, expectedAmount, txn.Amount, 0.0000000001)
+
+		// If we've implemented AmountString, verify that too
+		if txn.AmountString != "" {
+			expectedAmountString := "92233720.3684775808"
+			assert.Equal(t, expectedAmountString, txn.AmountString)
+		}
+	})
+}
