@@ -387,3 +387,8 @@ func (m *MockDataSource) UpdateLastUsed(ctx context.Context, id string) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
 }
+
+func (m *MockDataSource) TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error) {
+	args := m.Called(ctx, id)
+	return args.Bool(0), args.Error(1)
+}

@@ -29,12 +29,14 @@ func (d *Datasource) UpdateLedgerMetadata(id string, metadata map[string]interfa
 }
 
 // UpdateTransactionMetadata updates the metadata for a specific transaction in the database.
-// It marshals the metadata map to JSON before storing it.
+// It merges the provided metadata with existing metadata for each matching transaction.
+// The update applies to both the transaction with the provided ID and any transactions
+// where this ID is set as the parent_transaction.
 //
 // Parameters:
 // - ctx: The context for the database operation.
 // - id: The ID of the transaction to update.
-// - metadata: The new metadata to store.
+// - metadata: The new metadata to merge with existing metadata.
 //
 // Returns:
 // - error: An error if the update operation fails.
@@ -44,10 +46,11 @@ func (d *Datasource) UpdateTransactionMetadata(ctx context.Context, id string, m
 		return err
 	}
 
+	// Use jsonb_set or similar postgres function to merge the metadata rather than replacing it
 	_, err = d.Conn.ExecContext(ctx, `
 		UPDATE blnk.transactions 
-		SET meta_data = $1
-		WHERE transaction_id = $2
+		SET meta_data = meta_data || $1::jsonb
+		WHERE transaction_id = $2 OR parent_transaction = $2
 	`, metadataJSON, id)
 	return err
 }

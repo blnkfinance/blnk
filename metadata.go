@@ -49,49 +49,69 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		return nil, err
 	}
 
-	var currentMetadata map[string]interface{}
-
+	// Check if entity exists first
 	switch entityType {
 	case "ledgers":
 		ledger, err := l.GetLedgerByID(entityID)
 		if err != nil {
 			return nil, errors.New("entity not found")
 		}
-		currentMetadata = ledger.MetaData
+		currentMetadata := ledger.MetaData
+		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
+		err = l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update metadata: %w", err)
+		}
+		return mergedMetadata, nil
 
 	case "transactions":
-		txn, err := l.GetTransaction(ctx, entityID)
+		// Check if transaction exists either by direct ID or as parent ID
+		exists, err := l.datasource.TransactionExistsByIDOrParentID(ctx, entityID)
 		if err != nil {
+			return nil, err
+		}
+		if !exists {
 			return nil, errors.New("entity not found")
 		}
-		currentMetadata = txn.MetaData
+
+		// Apply metadata updates directly without trying to get current metadata
+		// This preserves existing metadata in child transactions
+		err = l.updateEntityMetadata(ctx, entityType, entityID, newMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update metadata: %w", err)
+		}
+
+		return newMetadata, nil
 
 	case "balances":
 		balance, err := l.GetBalanceByID(ctx, entityID, nil, false)
 		if err != nil {
 			return nil, errors.New("entity not found")
 		}
-		currentMetadata = balance.MetaData
+		currentMetadata := balance.MetaData
+		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
+		err = l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update metadata: %w", err)
+		}
+		return mergedMetadata, nil
 
 	case "identities":
 		identity, err := l.GetIdentity(entityID)
 		if err != nil {
 			return nil, errors.New("entity not found")
 		}
-		currentMetadata = identity.MetaData
+		currentMetadata := identity.MetaData
+		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
+		err = l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update metadata: %w", err)
+		}
+		return mergedMetadata, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported entity type: %s", entityType)
 	}
-
-	mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
-
-	err = l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update metadata: %w", err)
-	}
-
-	return mergedMetadata, nil
 }
 
 // mergeMetadata merges new metadata with existing metadata.

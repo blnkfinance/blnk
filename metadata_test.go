@@ -10,67 +10,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockDatasource implements a mock database for testing
-type MockDatasource struct {
-	mock.Mock
-}
-
-func (m *MockDatasource) UpdateLedgerMetadata(id string, metadata map[string]interface{}) error {
-	args := m.Called(id, metadata)
-	return args.Error(0)
-}
-
-func (m *MockDatasource) UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error {
-	args := m.Called(ctx, id, metadata)
-	return args.Error(0)
-}
-
-func (m *MockDatasource) UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error {
-	args := m.Called(ctx, id, metadata)
-	return args.Error(0)
-}
-
-func (m *MockDatasource) UpdateIdentityMetadata(id string, metadata map[string]interface{}) error {
-	args := m.Called(id, metadata)
-	return args.Error(0)
-}
-
-func (m *MockDatasource) GetLedgerByID(id string) (*model.Ledger, error) {
-	args := m.Called(id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	// Safe type assertion
-	if ledger, ok := args.Get(0).(*model.Ledger); ok {
-		return ledger, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *MockDatasource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*model.Transaction), args.Error(1)
-}
-
-func (m *MockDatasource) GetBalanceByID(ctx context.Context, id string) (*model.Balance, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*model.Balance), args.Error(1)
-}
-
-func (m *MockDatasource) GetIdentity(id string) (*model.Identity, error) {
-	args := m.Called(id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*model.Identity), args.Error(1)
-}
-
 func TestGetEntityTypeFromID(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -120,18 +59,18 @@ func TestUpdateMetadata(t *testing.T) {
 	})
 
 	t.Run("Update Transaction Metadata", func(t *testing.T) {
-		existingMetadata := map[string]interface{}{"existing": "value"}
-		txn := &model.Transaction{MetaData: existingMetadata}
+		// Set up expectations for transaction exists check
+		mockDS.On("TransactionExistsByIDOrParentID", ctx, "txn_123").Return(true, nil)
 
-		mockDS.On("GetTransaction", mock.Anything, "txn_123").Return(txn, nil)
-		mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_123", mock.Anything).Return(nil)
-
+		// Set up expectation for metadata update
 		newMetadata := map[string]interface{}{"new": "value"}
+		mockDS.On("UpdateTransactionMetadata", ctx, "txn_123", newMetadata).Return(nil)
+
 		result, err := blnk.UpdateMetadata(ctx, "txn_123", newMetadata)
 
 		assert.NoError(t, err)
-		assert.Contains(t, result, "existing")
-		assert.Contains(t, result, "new")
+		assert.Equal(t, newMetadata, result) // Should return just the new metadata
+		mockDS.AssertExpectations(t)
 	})
 
 	t.Run("Update Balance Metadata", func(t *testing.T) {
