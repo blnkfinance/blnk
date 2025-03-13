@@ -73,6 +73,10 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 			return err // This will trigger a retry
 		}
 
+		if strings.Contains(strings.ToLower(err.Error()), "transaction exceeds overdraft limit") {
+			return handleTransactionRejection(ctx, b, &txn, err)
+		}
+
 		logrus.Infof("Transaction %s pushed back for retry due to error: %v", txn.TransactionID, err)
 		return err
 	}

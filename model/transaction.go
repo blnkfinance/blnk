@@ -43,6 +43,7 @@ type Transaction struct {
 	Amount             float64                `json:"amount"`
 	Rate               float64                `json:"rate"`
 	Precision          float64                `json:"precision"`
+	OverdraftLimit     float64                `json:"overdraft_limit"`
 	TransactionID      string                 `json:"transaction_id"`
 	ParentTransaction  string                 `json:"parent_transaction"`
 	Source             string                 `json:"source,omitempty"`

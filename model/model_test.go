@@ -83,19 +83,68 @@ func TestBalance_ComputeBalance(t *testing.T) {
 }
 
 func TestCanProcessTransaction(t *testing.T) {
-	sourceBalance := &Balance{
-		Balance: big.NewInt(500),
-	}
-	txn := &Transaction{
-		PreciseAmount: 400,
-	}
-	err := canProcessTransaction(txn, sourceBalance)
-	assert.NoError(t, err)
+	t.Run("Sufficient funds", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance: big.NewInt(500),
+		}
+		txn := &Transaction{
+			PreciseAmount: 400,
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.NoError(t, err)
+	})
 
-	txn.PreciseAmount = 600
-	err = canProcessTransaction(txn, sourceBalance)
-	assert.Error(t, err)
-	assert.EqualError(t, err, "insufficient funds in source balance")
+	t.Run("Insufficient funds, no overdraft", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance: big.NewInt(500),
+		}
+		txn := &Transaction{
+			PreciseAmount: 600,
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "insufficient funds in source balance")
+	})
+
+	t.Run("Unconditional overdraft", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance: big.NewInt(200),
+		}
+		txn := &Transaction{
+			PreciseAmount:  1000,
+			AllowOverdraft: true,
+			OverdraftLimit: 0,
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Overdraft within limit", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance: big.NewInt(500),
+		}
+		txn := &Transaction{
+			PreciseAmount:  1000, // This would result in -500 balance
+			Precision:      1,
+			OverdraftLimit: 600, // Limit allows up to -600
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Overdraft exceeding limit", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance: big.NewInt(500),
+		}
+		txn := &Transaction{
+			PreciseAmount:  1200, // This would result in -700 balance
+			Precision:      1,
+			OverdraftLimit: 600, // Limit only allows up to -600
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "transaction exceeds overdraft limit")
+	})
 }
 
 func TestBalance_CommitInflightDebit(t *testing.T) {

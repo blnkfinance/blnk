@@ -25,6 +25,7 @@ type RecordTransaction struct {
 	Amount             float64                `json:"amount"`
 	Rate               float64                `json:"rate"`
 	Precision          float64                `json:"precision"`
+	OverdraftLimit     float64                `json:"overdraft_limit"`
 	AllowOverDraft     bool                   `json:"allow_overdraft"`
 	Inflight           bool                   `json:"inflight"`
 	SkipQueue          bool                   `json:"skip_queue"`
