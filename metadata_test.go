@@ -19,6 +19,7 @@ func TestGetEntityTypeFromID(t *testing.T) {
 		errorMsg string
 	}{
 		{"Transaction ID", "txn_123", "transactions", false, ""},
+		{"Bulk Transaction ID", "bulk_123", "transactions", false, ""},
 		{"Ledger ID", "ldg_123", "ledgers", false, ""},
 		{"Balance ID", "bln_123", "balances", false, ""},
 		{"Identity ID", "idt_123", "identities", false, ""},

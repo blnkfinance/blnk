@@ -20,6 +20,8 @@ func getEntityTypeFromID(id string) (string, error) {
 	switch {
 	case strings.HasPrefix(id, "txn_"):
 		return "transactions", nil
+	case strings.HasPrefix(id, "bulk_"):
+		return "transactions", nil
 	case strings.HasPrefix(id, "ldg_"):
 		return "ledgers", nil
 	case strings.HasPrefix(id, "bln_"):
