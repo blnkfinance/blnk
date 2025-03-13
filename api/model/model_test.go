@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -194,6 +195,10 @@ func TestValidateCreateAccount(t *testing.T) {
 }
 
 func TestValidateRecordTransaction(t *testing.T) {
+	amount, err := decimal.NewFromString("100")
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name        string
 		transaction RecordTransaction
@@ -202,7 +207,7 @@ func TestValidateRecordTransaction(t *testing.T) {
 		{
 			name: "Valid Transaction",
 			transaction: RecordTransaction{
-				Amount:      100,
+				Amount:      amount,
 				Currency:    "USD",
 				Reference:   "ref1",
 				Description: "Test transaction",
@@ -215,14 +220,14 @@ func TestValidateRecordTransaction(t *testing.T) {
 		{
 			name: "Invalid Transaction - Missing Required Fields",
 			transaction: RecordTransaction{
-				Amount: 100,
+				Amount: amount,
 			},
 			wantErr: true,
 		},
 		{
 			name: "Invalid Transaction - Invalid ScheduledFor",
 			transaction: RecordTransaction{
-				Amount:       100,
+				Amount:       amount,
 				Currency:     "USD",
 				Reference:    "ref1",
 				Description:  "Test transaction",
@@ -303,7 +308,10 @@ func TestToTransaction(t *testing.T) {
 	now := time.Now()
 	scheduledFor := now.Add(24 * time.Hour)
 	inflightExpiryDate := now.Add(48 * time.Hour)
-
+	amount, err := decimal.NewFromString("100")
+	if err != nil {
+		t.Fatal(err)
+	}
 	recordTransaction := RecordTransaction{
 		Currency:           "USD",
 		Source:             "source1",
@@ -311,7 +319,7 @@ func TestToTransaction(t *testing.T) {
 		Reference:          "ref1",
 		ScheduledFor:       scheduledFor.Format(time.RFC3339),
 		Destination:        "dest1",
-		Amount:             100,
+		Amount:             amount,
 		AllowOverDraft:     true,
 		MetaData:           map[string]interface{}{"key": "value"},
 		Sources:            []model.Distribution{{Identifier: "source1", Distribution: "100"}},

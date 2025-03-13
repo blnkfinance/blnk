@@ -19,10 +19,11 @@ import (
 	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
+	"github.com/shopspring/decimal"
 )
 
 type RecordTransaction struct {
-	Amount             float64                `json:"amount"`
+	Amount             decimal.Decimal        `json:"amount"`
 	Rate               float64                `json:"rate"`
 	Precision          float64                `json:"precision"`
 	OverdraftLimit     float64                `json:"overdraft_limit"`

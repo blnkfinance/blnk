@@ -321,17 +321,19 @@ func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool)
 // - error: Returns an APIError in case of errors such as database failures or if the balance is not found.
 func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	var balance model.Balance
-	var balanceValue, creditBalanceValue, debitBalanceValue, inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue int64
+	// Use string variables instead of int64 to handle any size
+	var balanceValue, creditBalanceValue, debitBalanceValue string
+	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
 	var indicator sql.NullString
 
 	// Execute the query
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
-	   FROM blnk.balances
-	   WHERE balance_id = $1
-	`, id)
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       FROM blnk.balances
+       WHERE balance_id = $1
+    `, id)
 
-	// Scan the result into a Balance object
+	// Scan the result into variables
 	err := row.Scan(
 		&balance.BalanceID,
 		&indicator,
@@ -364,13 +366,21 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 		}
 	}
 
-	// Convert balance fields from int64 to big.Int
-	balance.Balance = big.NewInt(balanceValue)
-	balance.CreditBalance = big.NewInt(creditBalanceValue)
-	balance.DebitBalance = big.NewInt(debitBalanceValue)
-	balance.InflightBalance = big.NewInt(inflightBalanceValue)
-	balance.InflightCreditBalance = big.NewInt(inflightCreditBalanceValue)
-	balance.InflightDebitBalance = big.NewInt(inflightDebitBalanceValue)
+	// Initialize big.Int values
+	balance.Balance = new(big.Int)
+	balance.CreditBalance = new(big.Int)
+	balance.DebitBalance = new(big.Int)
+	balance.InflightBalance = new(big.Int)
+	balance.InflightCreditBalance = new(big.Int)
+	balance.InflightDebitBalance = new(big.Int)
+
+	// Parse string values to big.Int
+	balance.Balance.SetString(balanceValue, 10)
+	balance.CreditBalance.SetString(creditBalanceValue, 10)
+	balance.DebitBalance.SetString(debitBalanceValue, 10)
+	balance.InflightBalance.SetString(inflightBalanceValue, 10)
+	balance.InflightCreditBalance.SetString(inflightCreditBalanceValue, 10)
+	balance.InflightDebitBalance.SetString(inflightDebitBalanceValue, 10)
 
 	return &balance, nil
 }
@@ -388,14 +398,16 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 // - error: An error if any issues occur during the query execution or data retrieval.
 func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Balance, error) {
 	var balance model.Balance
-	var balanceValue, creditBalanceValue, debitBalanceValue, inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue int64
+	// Change to string variables to handle large numbers
+	var balanceValue, creditBalanceValue, debitBalanceValue string
+	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
 
 	// Execute query to find the balance with the given indicator and currency
 	row := d.Conn.QueryRow(`
-	   SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
-	   FROM blnk.balances
-	   WHERE indicator = $1 AND currency = $2
-	`, indicator, currency)
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       FROM blnk.balances
+       WHERE indicator = $1 AND currency = $2
+    `, indicator, currency)
 
 	// Scan the result into the Balance object
 	err := row.Scan(
@@ -422,13 +434,21 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 		return nil, err
 	}
 
-	// Convert the scanned int64 values into big.Int for precision in financial calculations
-	balance.Balance = big.NewInt(balanceValue)
-	balance.CreditBalance = big.NewInt(creditBalanceValue)
-	balance.DebitBalance = big.NewInt(debitBalanceValue)
-	balance.InflightBalance = big.NewInt(inflightBalanceValue)
-	balance.InflightCreditBalance = big.NewInt(inflightCreditBalanceValue)
-	balance.InflightDebitBalance = big.NewInt(inflightDebitBalanceValue)
+	// Initialize big.Int values
+	balance.Balance = new(big.Int)
+	balance.CreditBalance = new(big.Int)
+	balance.DebitBalance = new(big.Int)
+	balance.InflightBalance = new(big.Int)
+	balance.InflightCreditBalance = new(big.Int)
+	balance.InflightDebitBalance = new(big.Int)
+
+	// Parse string values to big.Int
+	balance.Balance.SetString(balanceValue, 10)
+	balance.CreditBalance.SetString(creditBalanceValue, 10)
+	balance.DebitBalance.SetString(debitBalanceValue, 10)
+	balance.InflightBalance.SetString(inflightBalanceValue, 10)
+	balance.InflightCreditBalance.SetString(inflightCreditBalanceValue, 10)
+	balance.InflightDebitBalance.SetString(inflightDebitBalanceValue, 10)
 
 	// Return the populated Balance object
 	return &balance, nil
@@ -449,11 +469,11 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 	var indicator sql.NullString
 	// Execute SQL query to select all balances with a limit of 20 records
 	rows, err := d.Conn.Query(`
-		SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
-		FROM blnk.balances
-		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+        SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+        FROM blnk.balances
+        ORDER BY created_at DESC
+        LIMIT $1 OFFSET $2
+    `, limit, offset)
 	if err != nil {
 		return nil, err // Return error if the query fails
 	}
@@ -466,7 +486,7 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 
 	// Slice to store the retrieved balances
 	var balances []model.Balance
-	var balanceValue, creditBalanceValue, debitBalanceValue, inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue int64
+	var balanceValue, creditBalanceValue, debitBalanceValue string
 
 	// Iterate through the rows and scan each balance into the Balance object
 	for rows.Next() {
@@ -498,13 +518,14 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 			balance.Indicator = ""
 		}
 
-		// Convert the scanned int64 values into big.Int for accurate balance calculations
-		balance.Balance = big.NewInt(balanceValue)
-		balance.CreditBalance = big.NewInt(creditBalanceValue)
-		balance.DebitBalance = big.NewInt(debitBalanceValue)
-		balance.InflightBalance = big.NewInt(inflightBalanceValue)
-		balance.InflightCreditBalance = big.NewInt(inflightCreditBalanceValue)
-		balance.InflightDebitBalance = big.NewInt(inflightDebitBalanceValue)
+		// Initialize and convert string values to big.Int
+		balance.Balance = new(big.Int)
+		balance.CreditBalance = new(big.Int)
+		balance.DebitBalance = new(big.Int)
+
+		balance.Balance.SetString(balanceValue, 10)
+		balance.CreditBalance.SetString(creditBalanceValue, 10)
+		balance.DebitBalance.SetString(debitBalanceValue, 10)
 
 		// Parse the metadata JSON into the MetaData map field
 		err = json.Unmarshal(metaDataJSON, &balance.MetaData)

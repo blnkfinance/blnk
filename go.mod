@@ -40,6 +40,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/posthog/posthog-go v1.2.24 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.28.0 // indirect
 	go.opentelemetry.io/otel/metric v1.28.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect

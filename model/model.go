@@ -80,9 +80,9 @@ func (balance *Balance) InitializeBalanceFields() {
 
 // addCredit adds the specified amount to the credit balances (either inflight or regular).
 // inflight indicates whether the credit is inflight or not.
-func (balance *Balance) addCredit(amount int64, inflight bool) {
-	balance.InitializeBalanceFields()     // Ensure balance fields are initialized.
-	amountBigInt := Int64ToBigInt(amount) // Convert the amount to *big.Int.
+func (balance *Balance) addCredit(amountBigInt *big.Int, inflight bool) {
+	balance.InitializeBalanceFields() // Ensure balance fields are initialized.
+
 	if inflight {
 		balance.InflightCreditBalance.Add(balance.InflightCreditBalance, amountBigInt)
 	} else {
@@ -92,9 +92,8 @@ func (balance *Balance) addCredit(amount int64, inflight bool) {
 
 // addDebit adds the specified amount to the debit balances (either inflight or regular).
 // inflight indicates whether the debit is inflight or not.
-func (balance *Balance) addDebit(amount int64, inflight bool) {
+func (balance *Balance) addDebit(amountBigInt *big.Int, inflight bool) {
 	balance.InitializeBalanceFields()
-	amountBigInt := Int64ToBigInt(amount)
 	if inflight {
 		balance.InflightDebitBalance.Add(balance.InflightDebitBalance, amountBigInt)
 	} else {
@@ -122,7 +121,7 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 	}
 
 	// Convert transaction.PreciseAmount to *big.Int for comparison.
-	transactionAmount := new(big.Int).SetInt64(transaction.PreciseAmount)
+	transactionAmount := transaction.PreciseAmount
 
 	if sourceBalance.Balance.Cmp(transactionAmount) >= 0 {
 		// Sufficient funds
@@ -156,8 +155,8 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 // This is part of the finalization process for inflight transactions.
 func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
 	balance.InitializeBalanceFields()
-	preciseAmount := ApplyPrecision(transaction)              // Apply precision to the transaction amount.
-	transactionAmount := new(big.Int).SetInt64(preciseAmount) // Convert to *big.Int.
+	preciseAmount := ApplyPrecision(transaction) // Apply precision to the transaction amount.
+	transactionAmount := preciseAmount           // Convert to *big.Int.
 
 	if balance.InflightDebitBalance.Cmp(transactionAmount) >= 0 {
 		// Deduct from inflight and add to regular debit balance.
@@ -172,7 +171,7 @@ func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
 func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
 	balance.InitializeBalanceFields()
 	preciseAmount := ApplyPrecision(transaction)
-	transactionAmount := new(big.Int).SetInt64(preciseAmount)
+	transactionAmount := preciseAmount
 
 	if balance.InflightCreditBalance.Cmp(transactionAmount) >= 0 {
 		// Deduct from inflight and add to regular credit balance.
@@ -202,21 +201,38 @@ func (balance *Balance) RollbackInflightDebit(amount *big.Int) {
 }
 
 // ApplyPrecision applies precision to the transaction amount by multiplying it by the transaction precision value.
-func ApplyPrecision(transaction *Transaction) int64 {
+func ApplyPrecision(transaction *Transaction) *big.Int {
 	if transaction.Precision == 0 {
 		transaction.Precision = 1
 	}
-	return int64(transaction.Amount * transaction.Precision)
+	// Convert float amount to big.Int with precision
+	amountStr := fmt.Sprintf("%.0f", transaction.Amount*transaction.Precision)
+	result := new(big.Int)
+	result.SetString(amountStr, 10)
+	return result
 }
 
-// ApplyRate applies the exchange rate to the precise amount and returns an int64.
+// ApplyRate applies the exchange rate to the precise amount and returns a *big.Int.
 // The rate is applied after precision to maintain accuracy.
-func ApplyRate(preciseAmount int64, rate float64) int64 {
+func ApplyRate(preciseAmount *big.Int, rate float64) *big.Int {
 	if rate == 0 {
 		rate = 1
 	}
-	// Convert to float64 for rate calculation, then back to int64
-	return int64(float64(preciseAmount) * rate)
+
+	// Create a new big.Float from the precise amount
+	preciseAmountFloat := new(big.Float).SetInt(preciseAmount)
+
+	// Create a big.Float for the rate
+	rateFloat := new(big.Float).SetFloat64(rate)
+
+	// Multiply the amount by the rate
+	result := new(big.Float).Mul(preciseAmountFloat, rateFloat)
+
+	// Convert back to big.Int (rounding if necessary)
+	resultBigInt := new(big.Int)
+	result.Int(resultBigInt)
+
+	return resultBigInt
 }
 
 // validate checks if the transaction is valid (e.g., ensuring positive amount).

@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -39,8 +41,8 @@ type Distribution struct {
 
 type Transaction struct {
 	ID                 int64                  `json:"-"`
-	PreciseAmount      int64                  `json:"precise_amount,omitempty"`
-	Amount             float64                `json:"amount"`
+	PreciseAmount      *big.Int               `json:"precise_amount,omitempty"`
+	Amount             decimal.Decimal        `json:"amount"`
 	Rate               float64                `json:"rate"`
 	Precision          float64                `json:"precision"`
 	OverdraftLimit     float64                `json:"overdraft_limit"`

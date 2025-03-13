@@ -492,7 +492,7 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 		Source:        "bln1",
 		Destination:   "bln2",
 		Amount:        490,
-		PreciseAmount: 49000,
+		PreciseAmount: model.Int64ToBigInt(49000),
 		Precision:     100,
 		Currency:      "USD",
 		Status:        "QUEUED",
