@@ -152,7 +152,7 @@ func SendWebhook(newWebhook NewWebhook) error {
 	if err != nil {
 		log.Fatalf("Error parsing Redis URL: %v", err)
 	}
-	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB}
+	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig}
 	client := asynq.NewClient(queueOptions)
 
 	payload, err := json.Marshal(newWebhook)
