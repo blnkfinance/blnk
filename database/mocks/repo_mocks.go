@@ -17,6 +17,7 @@ package mocks
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/jerry-enebeli/blnk/model"
@@ -65,9 +66,9 @@ func (m *MockDataSource) GetAllTransactions(ctx context.Context, limit, offset i
 	return args.Get(0).([]model.Transaction), args.Error(1)
 }
 
-func (m *MockDataSource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (int64, error) {
+func (m *MockDataSource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (*big.Int, error) {
 	args := m.Called(ctx, parentID)
-	return args.Get(0).(int64), args.Error(1)
+	return args.Get(0).(*big.Int), args.Error(1)
 }
 
 func (m *MockDataSource) GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error) {

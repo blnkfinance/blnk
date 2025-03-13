@@ -100,7 +100,8 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 	// Initialize a Transaction model and scan the result into it
 	txn := &model.Transaction{}
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
+	var preciseAmountStr string
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
 
 	// Handle errors, including no rows found
 	if err != nil {
@@ -118,6 +119,8 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
+
+	txn.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
 
 	// Log the successful transaction retrieval as an event in the tracing span
 	span.AddEvent("Transaction retrieved", trace.WithAttributes(
@@ -226,7 +229,8 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 	// Initialize the transaction object and scan the query result into it
 	txn := model.Transaction{}
 	var metaDataJSON []byte
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &txn.PreciseAmount, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction)
+	var preciseAmountStr string
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			span.RecordError(err)
@@ -242,6 +246,8 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 		span.RecordError(err)
 		return model.Transaction{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
+
+	txn.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
 
 	// Log the successful transaction retrieval in the tracing span
 	span.AddEvent("Transaction retrieved by reference", trace.WithAttributes(
@@ -384,8 +390,8 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 // - ctx: Context for managing the request and tracing.
 // - parentID: The ID of the parent transaction to retrieve totals for.
 // Returns:
-// - The total committed amount as int64, or 0 if no transactions are found, along with an error if the retrieval fails.
-func (d Datasource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (int64, error) {
+// - The total committed amount as *big.Int, or 0 if no transactions are found, along with an error if the retrieval fails.
+func (d Datasource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (*big.Int, error) {
 	// Start a new tracing span for the operation
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetTotalCommittedTransactions")
 	defer span.End()
@@ -399,28 +405,33 @@ func (d Datasource) GetTotalCommittedTransactions(ctx context.Context, parentID 
 	`
 
 	// Initialize the variable to store the total amount
-	var totalAmount int64
+	var totalAmountStr string
 
 	// Execute the query and scan the result into totalAmount
-	err := d.Conn.QueryRowContext(ctx, query, parentID).Scan(&totalAmount)
+	err := d.Conn.QueryRowContext(ctx, query, parentID).Scan(&totalAmountStr)
 	if err != nil {
 		// If no rows are found, return 0 without error
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
+			return new(big.Int), nil
 		}
 		// Record the error in the tracing span and return the error
 		span.RecordError(err)
-		return 0, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get total committed transactions", err)
+		return big.NewInt(0), apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get total committed transactions", err)
+	}
+
+	total, ok := new(big.Int).SetString(totalAmountStr, 10)
+	if !ok {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to parse precise amount", nil)
 	}
 
 	// Log the successful retrieval of the total amount
 	span.AddEvent("Total committed transactions retrieved", trace.WithAttributes(
 		attribute.String("parent_transaction.id", parentID),
-		attribute.Int64("total_amount", totalAmount),
+		attribute.String("total_amount", total.String()),
 	))
 
 	// Return the total amount
-	return totalAmount, nil
+	return total, nil
 }
 
 // GetTransactionsPaginated retrieves a batch of transactions from the database with pagination support and caches the result.
@@ -465,15 +476,16 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 
 	// Scan the rows into transactions
 	for rows.Next() {
-		transaction := model.Transaction{}
+		transaction := &model.Transaction{}
 		var metaDataJSON []byte
+		var preciseAmountStr string
 		err = rows.Scan(
 			&transaction.TransactionID,
 			&transaction.ParentTransaction,
 			&transaction.Source,
 			&transaction.Reference,
 			&transaction.Amount,
-			&transaction.PreciseAmount,
+			&preciseAmountStr,
 			&transaction.Precision,
 			&transaction.Rate,
 			&transaction.Currency,
@@ -496,7 +508,9 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transactions = append(transactions, &transaction)
+		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+
+		transactions = append(transactions, transaction)
 	}
 
 	// Handle any errors that occurred while iterating over the rows
@@ -580,6 +594,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 		var groupKey string
 		transaction := &model.Transaction{}
 		var metaDataJSON []byte
+		var preciseAmountStr string
 		err = rows.Scan(
 			&groupKey,
 			&transaction.TransactionID,
@@ -587,7 +602,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			&transaction.Source,
 			&transaction.Reference,
 			&transaction.Amount,
-			&transaction.PreciseAmount,
+			&preciseAmountStr,
 			&transaction.Precision,
 			&transaction.Rate,
 			&transaction.Currency,
@@ -608,6 +623,9 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
+
+		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+
 		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], transaction)
 	}
 
@@ -689,13 +707,14 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	for rows.Next() {
 		transaction := model.Transaction{}
 		var metaDataJSON []byte
+		var preciseAmountStr string
 		err = rows.Scan(
 			&transaction.TransactionID,
 			&transaction.ParentTransaction,
 			&transaction.Source,
 			&transaction.Reference,
 			&transaction.Amount,
-			&transaction.PreciseAmount,
+			&preciseAmountStr,
 			&transaction.Precision,
 			&transaction.Rate,
 			&transaction.Currency,
@@ -717,6 +736,8 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
+
+		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
 
 		transactions = append(transactions, &transaction)
 	}
@@ -765,13 +786,14 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 	for rows.Next() {
 		transaction := model.Transaction{}
 		var metaDataJSON []byte
+		var preciseAmountStr string
 		err = rows.Scan(
 			&transaction.TransactionID,
 			&transaction.ParentTransaction,
 			&transaction.Source,
 			&transaction.Reference,
 			&transaction.Amount,
-			&transaction.PreciseAmount,
+			&preciseAmountStr,
 			&transaction.Precision,
 			&transaction.Rate,
 			&transaction.Currency,
@@ -793,6 +815,8 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
+
+		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
 
 		transactions = append(transactions, &transaction)
 	}
@@ -836,18 +860,23 @@ func (d Datasource) GetQueuedAmounts(ctx context.Context, balanceID string) (deb
 	defer rows.Close()
 
 	for rows.Next() {
-		var preciseAmount int64
+		var preciseAmountStr string
 		var source, destination string
-		if err := rows.Scan(&preciseAmount, &source, &destination); err != nil {
+		if err := rows.Scan(&preciseAmountStr, &source, &destination); err != nil {
 			return nil, nil, err
+		}
+
+		preciseAmount, ok := new(big.Int).SetString(preciseAmountStr, 10)
+		if !ok {
+			return nil, nil, fmt.Errorf("failed to parse precise amount: %s", preciseAmountStr)
 		}
 
 		// If balanceID is the source, it's a debit
 		// If balanceID is the destination, it's a credit
 		if source == balanceID {
-			debit.Add(debit, big.NewInt(preciseAmount))
+			debit.Add(debit, preciseAmount)
 		} else {
-			credit.Add(credit, big.NewInt(preciseAmount))
+			credit.Add(credit, preciseAmount)
 		}
 	}
 

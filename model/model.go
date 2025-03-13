@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // GenerateUUIDWithSuffix generates a UUID with a given module name as a suffix.
@@ -205,10 +207,23 @@ func ApplyPrecision(transaction *Transaction) *big.Int {
 	if transaction.Precision == 0 {
 		transaction.Precision = 1
 	}
-	// Convert float amount to big.Int with precision
-	amountStr := fmt.Sprintf("%.0f", transaction.Amount*transaction.Precision)
+
+	// We should avoid float multiplication due to precision loss
+	// Convert the components to strings first and use the decimal package
+
+	// Using decimal package approach
+	amountStr := strconv.FormatFloat(transaction.Amount, 'f', -1, 64)
+	precisionStr := strconv.FormatFloat(transaction.Precision, 'f', 0, 64)
+
+	amountDec, _ := decimal.NewFromString(amountStr)
+	precisionDec, _ := decimal.NewFromString(precisionStr)
+
+	preciseAmount := amountDec.Mul(precisionDec)
+
+	// Convert to big.Int
 	result := new(big.Int)
-	result.SetString(amountStr, 10)
+	result.SetString(preciseAmount.String(), 10)
+
 	return result
 }
 

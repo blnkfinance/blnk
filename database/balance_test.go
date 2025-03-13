@@ -507,7 +507,7 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"precise_amount", "source", "destination",
 		}).AddRow(
-			queuedTxn.PreciseAmount, queuedTxn.Source, queuedTxn.Destination,
+			queuedTxn.PreciseAmount.String(), queuedTxn.Source, queuedTxn.Destination,
 		))
 
 	// Finally, expect the commit

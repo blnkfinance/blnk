@@ -166,7 +166,7 @@ func TestRecordTransaction(t *testing.T) {
 		source,           // source
 		reference,        // reference
 		txn.Amount,       // amount
-		int64(1000),      // precise amount
+		"1000",           // precise amount
 		txn.Precision,    // precision
 		float64(1),       // rate
 		txn.Currency,     // currency
@@ -325,7 +325,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		source,           // source
 		reference,        // reference
 		txn.Amount,       // amount
-		100000000,        // precise amount
+		"100000000",      // precise amount
 		txn.Precision,    // precision
 		float64(1300),    // rate
 		txn.Currency,     // currency

@@ -60,7 +60,21 @@ func TestRecordTransaction(t *testing.T) {
 		{
 			name: "Valid Transaction",
 			payload: model2.RecordTransaction{
-				Amount:      750,
+				Amount:      922337203.6854,
+				Precision:   10000000000,
+				Reference:   "ref_001adcfgf",
+				Description: "For fees",
+				Currency:    "NGN",
+				Source:      newSourceBalance.BalanceID,
+				Destination: newDestinationBalance.BalanceID,
+			},
+			expectedCode: http.StatusCreated,
+			wantErr:      false,
+		},
+		{
+			name: "Valid Transaction With precision 100",
+			payload: model2.RecordTransaction{
+				Amount:      922337203.6854,
 				Precision:   100,
 				Reference:   "ref_001adcfgf",
 				Description: "For fees",
@@ -154,7 +168,10 @@ func TestRecordTransaction(t *testing.T) {
 
 			if !tt.wantErr && tt.expectedCode == http.StatusCreated {
 				assert.Equal(t, tt.payload.Amount, response.Amount)
-				assert.Equal(t, int64(tt.payload.Precision*tt.payload.Amount), response.PreciseAmount)
+				assert.Equal(t, model.ApplyPrecision(&model.Transaction{
+					Amount:    tt.payload.Amount,
+					Precision: tt.payload.Precision,
+				}).String(), response.PreciseAmount.String())
 				assert.Equal(t, tt.payload.Reference, response.Reference)
 				assert.Equal(t, tt.payload.Description, response.Description)
 				assert.Equal(t, tt.payload.Currency, response.Currency)

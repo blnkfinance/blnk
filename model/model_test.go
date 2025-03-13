@@ -212,7 +212,7 @@ func TestApplyPrecision(t *testing.T) {
 		Precision: 100,
 	}
 	preciseAmount := ApplyPrecision(txn)
-	expected := int64(12345)
+	expected := big.NewInt(12345)
 	assert.Equal(t, expected, preciseAmount)
 }
 
@@ -221,25 +221,25 @@ func TestApplyRate(t *testing.T) {
 		name          string
 		preciseAmount *big.Int
 		rate          float64
-		expected      int64
+		expected      *big.Int
 	}{
 		{
 			name:          "regular rate",
 			preciseAmount: Int64ToBigInt(1000),
 			rate:          1.5,
-			expected:      1500,
+			expected:      big.NewInt(1500),
 		},
 		{
 			name:          "zero rate defaults to 1",
 			preciseAmount: Int64ToBigInt(1000),
 			rate:          0,
-			expected:      1000,
+			expected:      big.NewInt(1000),
 		},
 		{
 			name:          "rate less than 1",
 			preciseAmount: Int64ToBigInt(1000),
 			rate:          0.5,
-			expected:      500,
+			expected:      big.NewInt(500),
 		},
 	}
 
