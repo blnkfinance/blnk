@@ -179,9 +179,10 @@ func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (
 
 	return asynq.NewServer(
 		asynq.RedisClientOpt{
-			Addr:     redisOption.Addr,
-			Password: redisOption.Password,
-			DB:       redisOption.DB,
+			Addr:      redisOption.Addr,
+			Password:  redisOption.Password,
+			DB:        redisOption.DB,
+			TLSConfig: redisOption.TLSConfig,
 		},
 		asynq.Config{
 			Concurrency: 1,

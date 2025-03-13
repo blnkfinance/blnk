@@ -54,7 +54,7 @@ func NewQueue(conf *config.Configuration) *Queue {
 	if err != nil {
 		log.Fatalf("Error parsing Redis URL: %v", err)
 	}
-	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB}
+	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig}
 	client := asynq.NewClient(queueOptions)
 	inspector := asynq.NewInspector(queueOptions)
 	return &Queue{
@@ -125,7 +125,7 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 	task := asynq.NewTask(cfg.Queue.IndexQueue, IPayload, taskOptions...)
 	info, err := q.Client.Enqueue(task)
 	if err != nil {
-		log.Println(err, info)
+		log.Println("here", err, info)
 		return err
 	}
 	log.Printf(" [*] Successfully enqueued index data: %+v", id)
