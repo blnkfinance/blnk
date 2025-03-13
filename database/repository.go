@@ -53,6 +53,7 @@ type transaction interface {
 	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	UpdateIdentityMetadata(id string, metadata map[string]interface{}) error
+	TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error)
 }
 
 // ledger defines methods for handling ledgers.

@@ -853,3 +853,35 @@ func (d Datasource) GetQueuedAmounts(ctx context.Context, balanceID string) (deb
 
 	return debit, credit, nil
 }
+
+// TransactionExistsByIDOrParentID checks if a transaction exists either by its direct ID
+// or as a parent transaction ID for other transactions.
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - id: The ID to search for in both transaction_id and parent_transaction fields.
+// Returns:
+// - A boolean indicating whether the transaction exists in either capacity, and an error if the check fails.
+func (d Datasource) TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "TransactionExistsByIDOrParentID")
+	defer span.End()
+
+	var exists bool
+	err := d.Conn.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM blnk.transactions 
+			WHERE transaction_id = $1 OR parent_transaction = $1
+		)
+	`, id).Scan(&exists)
+
+	if err != nil {
+		span.RecordError(err)
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check if transaction exists", err)
+	}
+
+	span.AddEvent("Transaction existence check", trace.WithAttributes(
+		attribute.String("transaction.id", id),
+		attribute.Bool("transaction.exists", exists),
+	))
+
+	return exists, nil
+}
