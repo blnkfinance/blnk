@@ -210,7 +210,7 @@ func ApplyPrecision(transaction *Transaction) *big.Int {
 		transaction.Precision = 1
 	}
 
-	if transaction.PreciseAmount != nil {
+	if transaction.PreciseAmount != nil && transaction.PreciseAmount.Cmp(big.NewInt(0)) > 0 {
 		convertPreciseToDecimal(transaction)
 		return transaction.PreciseAmount
 	}

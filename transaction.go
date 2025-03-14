@@ -527,7 +527,7 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 				log.Printf("Error during processing: %v", err)
 				span.RecordError(err)
 			}
-			return allTxns, fmt.Errorf("multiple errors occurred during processing: %v", allErrors)
+			return allTxns, fmt.Errorf("error occurred during processing: %v", allErrors)
 		}
 
 		span.AddEvent("Processed all transactions in batches")
@@ -1068,10 +1068,11 @@ func (l *Blnk) validateAndUpdateAmount(ctx context.Context, transaction *model.T
 		precisionBigInt := new(big.Float).SetFloat64(transaction.Precision)
 		result := new(big.Float).Quo(new(big.Float).SetInt(amountLeft), precisionBigInt)
 		transaction.Amount, _ = result.Float64()
+		transaction.PreciseAmount = amountLeft
 	}
 
 	// Validate the remaining amount
-	if amountLeft.Cmp(model.ApplyPrecision(transaction)) < 0 {
+	if amountLeft.Cmp(transaction.PreciseAmount) < 0 {
 		precisionBigInt := new(big.Float).SetFloat64(transaction.Precision)
 		result := new(big.Float).Quo(new(big.Float).SetInt(amountLeft), precisionBigInt)
 		amountFloat, _ := result.Float64()
@@ -1079,10 +1080,8 @@ func (l *Blnk) validateAndUpdateAmount(ctx context.Context, transaction *model.T
 			transaction.Currency, amount, transaction.Currency, amountFloat)
 		span.RecordError(err)
 		return err
-	} else if amountLeft == big.NewInt(0) {
-		err := errors.New("cannot commit %s %.2f. Transaction already committed")
-		// err := fmt.Errorf("cannot commit %s %.2f. Transaction already committed with amount of - %s%.2f",
-		// 	transaction.Currency, amount, transaction.Currency, float64(committedAmount)/transaction.Precision) //TODO fix
+	} else if amountLeft.Cmp(big.NewInt(0)) == 0 {
+		err := errors.New("cannot commit. Transaction already committed")
 		span.RecordError(err)
 		return err
 	}
@@ -1114,7 +1113,6 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
-	transaction.PreciseAmount = model.ApplyPrecision(transaction)
 
 	// Queue the transaction for further processing
 	transaction, err := l.RecordTransaction(ctx, transaction)
@@ -1270,15 +1268,13 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 
 	// Update the transaction status to void and set the remaining amount
 	transaction.Status = StatusVoid
-	precisionBigInt := new(big.Float).SetFloat64(transaction.Precision)
-	result := new(big.Float).Quo(new(big.Float).SetInt(amountLeft), precisionBigInt)
-	transaction.Amount, _ = result.Float64()
 	transaction.PreciseAmount = amountLeft
 	transaction.CreatedAt = time.Now()
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
+	model.ApplyPrecision(transaction)
 
 	// Queue the transaction for further processing
 	transaction, err := l.RecordTransaction(ctx, transaction)
