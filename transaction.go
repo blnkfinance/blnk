@@ -199,6 +199,7 @@ func (l *Blnk) updateTransactionDetails(ctx context.Context, transaction *model.
 	// Update the status based on the current status and inflight flag
 	applicableStatus := map[string]string{
 		StatusQueued:    StatusApplied,
+		StatusApplied:   StatusApplied,
 		StatusScheduled: StatusApplied,
 		StatusCommit:    StatusApplied,
 		StatusVoid:      StatusVoid,
@@ -1337,20 +1338,7 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		return nil, err
 	}
 
-	queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	if !transaction.SkipQueue {
-		if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
-			span.RecordError(err)
-			return nil, err
-		}
-	}
-
-	if transaction.SkipQueue && len(queueTransactions) > 0 {
+	if transaction.SkipQueue {
 		if transaction.Inflight {
 			transaction.Status = StatusInflight
 		} else {
@@ -1358,11 +1346,34 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		}
 	}
 
+	// Process the transactions asynchronously
+	processTransactionAsync(context.Background(), l, transaction, originalRef, originalTxnID, transactions)
+
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
 		attribute.String("transaction.id", transaction.TransactionID),
 	))
 
 	return transaction, nil
+}
+
+func processTransactionAsync(ctx context.Context, l *Blnk, transaction *model.Transaction, originalRef string, originalTxnID string, transactions []*model.Transaction) {
+	go func() {
+		ctx, span := tracer.Start(ctx, "ProcessTransactionAsync")
+		defer span.End()
+
+		queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
+		if err != nil {
+			span.RecordError(err)
+			// return nil, err
+		}
+
+		if !transaction.SkipQueue {
+			if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
+				span.RecordError(err)
+				// return nil, err
+			}
+		}
+	}()
 }
 
 // handleSplitTransactions attempts to split a transaction into multiple transactions if needed.
