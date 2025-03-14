@@ -111,7 +111,9 @@ func (transaction *Transaction) SplitTransaction(ctx context.Context) ([]*Transa
 		newTransaction := *transaction                               // Create a copy of the original transaction
 		newTransaction.TransactionID = GenerateUUIDWithSuffix("txn") // Set the transaction ID
 		newTransaction.Hash = newTransaction.HashTxn()               // Set the transaction hash
-		newTransaction.Amount = amount                               // Set the amount based on the distribution
+		newTransaction.Amount = amount
+		newTransaction.PreciseAmount = big.NewInt(0)
+		ApplyPrecision(&newTransaction)                              // Set the amount based on the distribution
 		newTransaction.Sources = nil                                 // Clear the Sources slice since we're dealing with individual sources now
 		newTransaction.Destinations = nil                            // Clear the Destinations slice since we're dealing with individual sources now
 		newTransaction.ParentTransaction = transaction.TransactionID // Set the parent transaction ID
