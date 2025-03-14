@@ -1354,7 +1354,7 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		}
 	} else {
 		// For normal queue mode, process asynchronously
-		processTransactionAsync(ctx, l, transaction, originalRef, originalTxnID, transactions)
+		processTransactionAsync(context.Background(), l, transaction, originalRef, originalTxnID, transactions)
 	}
 
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
