@@ -1338,16 +1338,24 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		return nil, err
 	}
 
+	// If SkipQueue is true, process synchronously
 	if transaction.SkipQueue {
+		_, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+
+		// Update transaction status based on inflight flag
 		if transaction.Inflight {
 			transaction.Status = StatusInflight
 		} else {
 			transaction.Status = StatusApplied
 		}
+	} else {
+		// For normal queue mode, process asynchronously
+		processTransactionAsync(ctx, l, transaction, originalRef, originalTxnID, transactions)
 	}
-
-	// Process the transactions asynchronously
-	processTransactionAsync(context.Background(), l, transaction, originalRef, originalTxnID, transactions)
 
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
 		attribute.String("transaction.id", transaction.TransactionID),
