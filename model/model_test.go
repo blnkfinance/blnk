@@ -55,9 +55,11 @@ func TestBalance_AddCredit(t *testing.T) {
 	balance := &Balance{
 		CreditBalance: big.NewInt(0),
 	}
-	amount := int64(500)
+	amount := new(big.Int)
+	amount.SetString("922337203685477580800", 10)
 	balance.addCredit(amount, false)
-	expected := big.NewInt(500)
+	expected := new(big.Int)
+	expected.SetString("922337203685477580800", 10)
 	assert.Equal(t, expected, balance.CreditBalance)
 }
 
@@ -65,7 +67,7 @@ func TestBalance_AddDebit(t *testing.T) {
 	balance := &Balance{
 		DebitBalance: big.NewInt(0),
 	}
-	amount := int64(300)
+	amount := Int64ToBigInt(300)
 	balance.addDebit(amount, false)
 	expected := big.NewInt(300)
 	assert.Equal(t, expected, balance.DebitBalance)
@@ -88,7 +90,7 @@ func TestCanProcessTransaction(t *testing.T) {
 			Balance: big.NewInt(500),
 		}
 		txn := &Transaction{
-			PreciseAmount: 400,
+			PreciseAmount: Int64ToBigInt(400),
 		}
 		err := canProcessTransaction(txn, sourceBalance)
 		assert.NoError(t, err)
@@ -99,7 +101,7 @@ func TestCanProcessTransaction(t *testing.T) {
 			Balance: big.NewInt(500),
 		}
 		txn := &Transaction{
-			PreciseAmount: 600,
+			PreciseAmount: Int64ToBigInt(600),
 		}
 		err := canProcessTransaction(txn, sourceBalance)
 		assert.Error(t, err)
@@ -111,7 +113,7 @@ func TestCanProcessTransaction(t *testing.T) {
 			Balance: big.NewInt(200),
 		}
 		txn := &Transaction{
-			PreciseAmount:  1000,
+			PreciseAmount:  Int64ToBigInt(1000),
 			AllowOverdraft: true,
 			OverdraftLimit: 0,
 		}
@@ -124,7 +126,7 @@ func TestCanProcessTransaction(t *testing.T) {
 			Balance: big.NewInt(500),
 		}
 		txn := &Transaction{
-			PreciseAmount:  1000, // This would result in -500 balance
+			PreciseAmount:  Int64ToBigInt(1000), // This would result in -500 balance
 			Precision:      1,
 			OverdraftLimit: 600, // Limit allows up to -600
 		}
@@ -137,7 +139,7 @@ func TestCanProcessTransaction(t *testing.T) {
 			Balance: big.NewInt(500),
 		}
 		txn := &Transaction{
-			PreciseAmount:  1200, // This would result in -700 balance
+			PreciseAmount:  Int64ToBigInt(1200), // This would result in -700 balance
 			Precision:      1,
 			OverdraftLimit: 600, // Limit only allows up to -600
 		}
@@ -210,34 +212,34 @@ func TestApplyPrecision(t *testing.T) {
 		Precision: 100,
 	}
 	preciseAmount := ApplyPrecision(txn)
-	expected := int64(12345)
+	expected := big.NewInt(12345)
 	assert.Equal(t, expected, preciseAmount)
 }
 
 func TestApplyRate(t *testing.T) {
 	tests := []struct {
 		name          string
-		preciseAmount int64
+		preciseAmount *big.Int
 		rate          float64
-		expected      int64
+		expected      *big.Int
 	}{
 		{
 			name:          "regular rate",
-			preciseAmount: 1000,
+			preciseAmount: Int64ToBigInt(1000),
 			rate:          1.5,
-			expected:      1500,
+			expected:      big.NewInt(1500),
 		},
 		{
 			name:          "zero rate defaults to 1",
-			preciseAmount: 1000,
+			preciseAmount: Int64ToBigInt(1000),
 			rate:          0,
-			expected:      1000,
+			expected:      big.NewInt(1000),
 		},
 		{
 			name:          "rate less than 1",
-			preciseAmount: 1000,
+			preciseAmount: Int64ToBigInt(1000),
 			rate:          0.5,
-			expected:      500,
+			expected:      big.NewInt(500),
 		},
 	}
 
@@ -341,4 +343,37 @@ func TestExternalTransaction_ToInternalTransaction(t *testing.T) {
 	assert.Equal(t, extTxn.Currency, intTxn.Currency)
 	assert.Equal(t, extTxn.Date, intTxn.CreatedAt)
 	assert.Equal(t, extTxn.Description, intTxn.Description)
+}
+
+func TestApplyPrecisionWithEmptyAmount(t *testing.T) {
+	// Test case where amount is empty but precise amount is provided
+	t.Run("Convert PreciseAmount to Amount", func(t *testing.T) {
+		// Set up a big.Int with the exact value
+		preciseAmount := new(big.Int)
+		preciseAmount.SetString("922337203684775808", 10)
+
+		// Create transaction with precise amount but no amount
+		txn := &Transaction{
+			PreciseAmount: preciseAmount,
+			Precision:     10000000000, // 10 billion
+			// Amount is purposely left as 0
+		}
+
+		// Apply precision, which should calculate the amount
+		result := ApplyPrecision(txn)
+
+		// Check that precise amount remains unchanged
+		assert.Equal(t, preciseAmount, result)
+
+		// The expected amount should be:
+		// 922337203684775808 ÷ 10000000000 = 92233720.3684775808
+		expectedAmount := 92233720.3684775808
+		assert.InDelta(t, expectedAmount, txn.Amount, 0.0000000001)
+
+		// If we've implemented AmountString, verify that too
+		if txn.AmountString != "" {
+			expectedAmountString := "92233720.3684775808"
+			assert.Equal(t, expectedAmountString, txn.AmountString)
+		}
+	})
 }

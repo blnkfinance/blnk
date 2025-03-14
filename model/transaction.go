@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"time"
 
@@ -39,8 +40,9 @@ type Distribution struct {
 
 type Transaction struct {
 	ID                 int64                  `json:"-"`
-	PreciseAmount      int64                  `json:"precise_amount,omitempty"`
+	PreciseAmount      *big.Int               `json:"precise_amount,omitempty"`
 	Amount             float64                `json:"amount"`
+	AmountString       string                 `json:"amount_string,omitempty"`
 	Rate               float64                `json:"rate"`
 	Precision          float64                `json:"precision"`
 	OverdraftLimit     float64                `json:"overdraft_limit"`

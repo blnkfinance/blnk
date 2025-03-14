@@ -19,6 +19,7 @@ package blnk
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -198,6 +199,7 @@ func (l *Blnk) updateTransactionDetails(ctx context.Context, transaction *model.
 	// Update the status based on the current status and inflight flag
 	applicableStatus := map[string]string{
 		StatusQueued:    StatusApplied,
+		StatusApplied:   StatusApplied,
 		StatusScheduled: StatusApplied,
 		StatusCommit:    StatusApplied,
 		StatusVoid:      StatusVoid,
@@ -379,7 +381,7 @@ func (l *Blnk) applyTransactionToBalances(ctx context.Context, balances []*model
 		return nil
 	}
 
-	transactionAmount := new(big.Int).SetInt64(transaction.PreciseAmount)
+	transactionAmount := transaction.PreciseAmount
 
 	// Handle voided transactions
 	if transaction.Status == StatusVoid {
@@ -526,7 +528,7 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 				log.Printf("Error during processing: %v", err)
 				span.RecordError(err)
 			}
-			return allTxns, fmt.Errorf("multiple errors occurred during processing: %v", allErrors)
+			return allTxns, fmt.Errorf("error occurred during processing: %v", allErrors)
 		}
 
 		span.AddEvent("Processed all transactions in batches")
@@ -1053,38 +1055,41 @@ func (l *Blnk) validateAndUpdateAmount(ctx context.Context, transaction *model.T
 	ctx, span := tracer.Start(ctx, "ValidateAndUpdateAmount")
 	defer span.End()
 
-	// Fetch the total committed amount for the transaction
-	committedAmount, err := l.datasource.GetTotalCommittedTransactions(ctx, transaction.TransactionID)
+	amountLeft, err := l.calculateRemainingAmount(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
-		return l.logAndRecordError(span, "error fetching committed amount", err)
+		return err
 	}
-
-	originalAmount := transaction.PreciseAmount
-	amountLeft := originalAmount - committedAmount
 
 	// Update the transaction amount based on the provided amount
 	if amount != 0 {
 		transaction.Amount = amount
-		transaction.PreciseAmount = 0
+		transaction.PreciseAmount = big.NewInt(0)
 	} else {
-		transaction.Amount = float64(amountLeft) / transaction.Precision
+		precisionBigInt := new(big.Float).SetFloat64(transaction.Precision)
+		result := new(big.Float).Quo(new(big.Float).SetInt(amountLeft), precisionBigInt)
+		transaction.Amount, _ = result.Float64()
+		transaction.PreciseAmount = amountLeft
 	}
 
 	// Validate the remaining amount
-	if amountLeft < model.ApplyPrecision(transaction) {
+	if amountLeft.Cmp(transaction.PreciseAmount) < 0 {
+		precisionBigInt := new(big.Float).SetFloat64(transaction.Precision)
+		result := new(big.Float).Quo(new(big.Float).SetInt(amountLeft), precisionBigInt)
+		amountFloat, _ := result.Float64()
 		err := fmt.Errorf("cannot commit %s %.2f. You can only commit an amount between 1.00 - %s%.2f",
-			transaction.Currency, amount, transaction.Currency, float64(amountLeft)/transaction.Precision)
+			transaction.Currency, amount, transaction.Currency, amountFloat)
 		span.RecordError(err)
 		return err
-	} else if amountLeft == 0 {
-		err := fmt.Errorf("cannot commit %s %.2f. Transaction already committed with amount of - %s%.2f",
-			transaction.Currency, amount, transaction.Currency, float64(committedAmount)/transaction.Precision)
+	} else if amountLeft.Cmp(big.NewInt(0)) == 0 {
+		err := errors.New("cannot commit. Transaction already committed")
 		span.RecordError(err)
 		return err
 	}
 
-	span.AddEvent("Amount validated and updated", trace.WithAttributes(attribute.Float64("amount.left", float64(amountLeft)/transaction.Precision)))
+	amountFloat := new(big.Float).SetInt(amountLeft)
+	result, _ := new(big.Float).Quo(amountFloat, new(big.Float).SetFloat64(transaction.Precision)).Float64()
+	span.AddEvent("Amount validated and updated", trace.WithAttributes(attribute.Float64("amount.left", result)))
 	return nil
 }
 
@@ -1109,7 +1114,6 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
-	transaction.PreciseAmount = model.ApplyPrecision(transaction)
 
 	// Queue the transaction for further processing
 	transaction, err := l.RecordTransaction(ctx, transaction)
@@ -1229,7 +1233,7 @@ func (l *Blnk) fetchAndValidateInflightTransaction(ctx context.Context, transact
 // Returns:
 // - int64: The remaining amount for the transaction.
 // - error: An error if the committed amount could not be fetched.
-func (l *Blnk) calculateRemainingAmount(ctx context.Context, transaction *model.Transaction) (int64, error) {
+func (l *Blnk) calculateRemainingAmount(ctx context.Context, transaction *model.Transaction) (*big.Int, error) {
 	ctx, span := tracer.Start(ctx, "CalculateRemainingAmount")
 	defer span.End()
 
@@ -1237,13 +1241,14 @@ func (l *Blnk) calculateRemainingAmount(ctx context.Context, transaction *model.
 	committedAmount, err := l.datasource.GetTotalCommittedTransactions(ctx, transaction.TransactionID)
 	if err != nil {
 		span.RecordError(err)
-		return 0, l.logAndRecordError(span, "error fetching committed amount", err)
+		return big.NewInt(0), l.logAndRecordError(span, "error fetching committed amount", err)
 	}
 
 	// Calculate the remaining amount
-	remainingAmount := transaction.PreciseAmount - committedAmount
+	committedBigInt := committedAmount
+	remainingAmount := new(big.Int).Sub(transaction.PreciseAmount, committedBigInt)
 
-	span.AddEvent("Remaining amount calculated", trace.WithAttributes(attribute.Int64("amount.remaining", remainingAmount)))
+	span.AddEvent("Remaining amount calculated", trace.WithAttributes(attribute.Int64("amount.remaining", remainingAmount.Int64())))
 	return remainingAmount, nil
 }
 
@@ -1258,19 +1263,19 @@ func (l *Blnk) calculateRemainingAmount(ctx context.Context, transaction *model.
 // Returns:
 // - *model.Transaction: A pointer to the voided Transaction model.
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.Transaction, amountLeft int64) (*model.Transaction, error) {
+func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.Transaction, amountLeft *big.Int) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "FinalizeVoidTransaction")
 	defer span.End()
 
 	// Update the transaction status to void and set the remaining amount
 	transaction.Status = StatusVoid
-	transaction.Amount = float64(amountLeft) / transaction.Precision
 	transaction.PreciseAmount = amountLeft
 	transaction.CreatedAt = time.Now()
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
+	model.ApplyPrecision(transaction)
 
 	// Queue the transaction for further processing
 	transaction, err := l.RecordTransaction(ctx, transaction)
@@ -1333,25 +1338,23 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		return nil, err
 	}
 
-	queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	if !transaction.SkipQueue {
-		if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
+	// If SkipQueue is true, process synchronously
+	if transaction.SkipQueue {
+		_, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
+		if err != nil {
 			span.RecordError(err)
 			return nil, err
 		}
-	}
 
-	if transaction.SkipQueue && len(queueTransactions) > 0 {
+		// Update transaction status based on inflight flag
 		if transaction.Inflight {
 			transaction.Status = StatusInflight
 		} else {
 			transaction.Status = StatusApplied
 		}
+	} else {
+		// For normal queue mode, process asynchronously
+		processTransactionAsync(ctx, l, transaction, originalRef, originalTxnID, transactions)
 	}
 
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
@@ -1359,6 +1362,26 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	))
 
 	return transaction, nil
+}
+
+func processTransactionAsync(ctx context.Context, l *Blnk, transaction *model.Transaction, originalRef string, originalTxnID string, transactions []*model.Transaction) {
+	go func() {
+		ctx, span := tracer.Start(ctx, "ProcessTransactionAsync")
+		defer span.End()
+
+		queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
+		if err != nil {
+			span.RecordError(err)
+			// return nil, err
+		}
+
+		if !transaction.SkipQueue {
+			if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
+				span.RecordError(err)
+				// return nil, err
+			}
+		}
+	}()
 }
 
 // handleSplitTransactions attempts to split a transaction into multiple transactions if needed.
@@ -1508,7 +1531,7 @@ func setTransactionStatus(transaction *model.Transaction) {
 func setTransactionMetadata(transaction *model.Transaction) {
 	transaction.CreatedAt = time.Now()
 	transaction.Hash = transaction.HashTxn()
-	transaction.PreciseAmount = int64(transaction.Amount * transaction.Precision)
+	transaction.PreciseAmount = model.ApplyPrecision(transaction)
 	if transaction.TransactionID == "" {
 		transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	}

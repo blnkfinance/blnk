@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"testing"
 	"time"
 
@@ -47,6 +48,7 @@ func TestRecordTransaction_Success(t *testing.T) {
 		Source:            "src1",
 		Reference:         "ref123",
 		Amount:            1000,
+		AmountString:      "1000",
 		Currency:          "USD",
 		Destination:       "dest1",
 		Description:       "Test Transaction",
@@ -55,7 +57,7 @@ func TestRecordTransaction_Success(t *testing.T) {
 		MetaData:          map[string]interface{}{"key": "value"},
 		ScheduledFor:      time.Now(),
 		Hash:              "hash123",
-		PreciseAmount:     1000,
+		PreciseAmount:     model.Int64ToBigInt(1000),
 		Precision:         2,
 		Rate:              1,
 		ParentTransaction: "parent123",
@@ -66,7 +68,7 @@ func TestRecordTransaction_Success(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount, transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := ds.RecordTransaction(ctx, transaction)
@@ -98,7 +100,7 @@ func TestRecordTransaction_Failure(t *testing.T) {
 		MetaData:          map[string]interface{}{"key": "value"},
 		ScheduledFor:      time.Now(),
 		Hash:              "hash123",
-		PreciseAmount:     1000,
+		PreciseAmount:     model.Int64ToBigInt(1000),
 		Precision:         2,
 		Rate:              1,
 		ParentTransaction: "parent123",
@@ -109,7 +111,7 @@ func TestRecordTransaction_Failure(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount, transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
 		WillReturnError(errors.New("db error"))
 
 	_, err = ds.RecordTransaction(ctx, transaction)
@@ -307,11 +309,11 @@ func TestGetTotalCommittedTransactions_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	parentID := "parent123"
-	expectedTotal := int64(2000)
+	expectedTotal := big.NewInt(2000)
 
 	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 AND status = 'APPLIED' GROUP BY parent_transaction").
 		WithArgs(parentID).
-		WillReturnRows(sqlmock.NewRows([]string{"total_amount"}).AddRow(expectedTotal))
+		WillReturnRows(sqlmock.NewRows([]string{"total_amount"}).AddRow(expectedTotal.String()))
 
 	total, err := ds.GetTotalCommittedTransactions(ctx, parentID)
 	assert.NoError(t, err)
@@ -337,7 +339,7 @@ func TestGetTotalCommittedTransactions_NoRows(t *testing.T) {
 
 	total, err := ds.GetTotalCommittedTransactions(ctx, parentID)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(0), total)
+	assert.Equal(t, big.NewInt(0), total)
 }
 
 func TestGetTotalCommittedTransactions_Error(t *testing.T) {
@@ -359,7 +361,7 @@ func TestGetTotalCommittedTransactions_Error(t *testing.T) {
 
 	total, err := ds.GetTotalCommittedTransactions(ctx, parentID)
 	assert.Error(t, err)
-	assert.Equal(t, int64(0), total)
+	assert.Equal(t, big.NewInt(0), total)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
 	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)

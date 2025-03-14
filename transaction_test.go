@@ -165,8 +165,8 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(), // parent_transaction
 		source,           // source
 		reference,        // reference
-		txn.Amount,       // amount
-		int64(1000),      // precise amount
+		txn.AmountString, // amount
+		"1000",           // precise amount
 		txn.Precision,    // precision
 		float64(1),       // rate
 		txn.Currency,     // currency
@@ -324,8 +324,8 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		sqlmock.AnyArg(), // parent_transaction
 		source,           // source
 		reference,        // reference
-		txn.Amount,       // amount
-		100000000,        // precise amount
+		txn.AmountString, // amount
+		"100000000",      // precise amount
 		txn.Precision,    // precision
 		float64(1300),    // rate
 		txn.Currency,     // currency
