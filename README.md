@@ -20,7 +20,7 @@ Building fintech starts off simple, and gets quickly difficult & complex the mor
 
 Every fintech product is made up of transactions — happening concurrently, moving all the time from one place to another. Sometimes, they will interact with parties outside of your application like cards, deposits, bank accounts, etc; sometimes, they happen within your application between user balances or to/fro your organization accounts.
 
-With Blnk, you get a full-service starting point for building, managing and operating money movement and store of value in a reliable, secure and scaleable way. Here are some use-cases of the Blnk Ledger:
+With Blnk, you get a full-service starting point for building, managing and operating money movement and store of value in a reliable, secure and scalable way. Here are some use-cases of the Blnk Ledger:
 
 - [Multi-currency wallets](https://docs.blnkfinance.com/ledger/examples/multicurrency-wallets)
 - [Virtual card issuance](https://docs.blnkfinance.com/ledger/examples/virtual-cards-issuance)

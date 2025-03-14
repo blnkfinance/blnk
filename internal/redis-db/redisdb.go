@@ -32,7 +32,7 @@ type Redis struct {
 	client    redis.UniversalClient // Redis universal client (works for both single and clustered Redis)
 }
 
-// parseRedisURL parses a Redis URL into Redis options, handling various URL formats
+// ParseRedisURL parses a Redis URL into Redis options, handling various URL formats
 // including Azure Redis Cache URLs with special characters in passwords.
 func ParseRedisURL(rawURL string) (*redis.Options, error) {
 	// Don't modify docker-style addresses (e.g. redis:6379)
