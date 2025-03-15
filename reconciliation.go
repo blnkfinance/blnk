@@ -71,6 +71,7 @@ type transactionProcessor struct {
 	unmatched         int
 	datasource        database.IDataSource
 	progressSaveCount int
+	blnk              *Blnk
 }
 
 // reconciler defines the function type for reconciling a batch of transactions.
@@ -660,6 +661,87 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 	return reconciliationID, nil
 }
 
+// StartInstantReconciliation initiates a reconciliation process directly with provided transactions
+// instead of loading them from an uploaded file.
+// Parameters:
+// - ctx: The context controlling the reconciliation process.
+// - externalTransactions: The array of external transactions to reconcile.
+// - strategy: The reconciliation strategy to be used (e.g., "one_to_one").
+// - groupCriteria: Criteria to group transactions (optional).
+// - matchingRuleIDs: The IDs of the rules used for matching transactions.
+// - isDryRun: If true, the reconciliation will not commit changes (useful for testing).
+// Returns:
+// - string: The ID of the reconciliation process.
+// - error: If the reconciliation fails to start.
+func (s *Blnk) StartInstantReconciliation(ctx context.Context, externalTransactions []model.ExternalTransaction,
+	strategy string, groupCriteria string, matchingRuleIDs []string, isDryRun bool) (string, error) {
+
+	// Generate a unique ID for the reconciliation
+	reconciliationID := model.GenerateUUIDWithSuffix("recon")
+
+	// Use a temporary ID for the transactions
+	tempID := model.GenerateUUIDWithSuffix("instant")
+
+	// Initialize a new reconciliation object with the provided parameters
+	reconciliation := model.Reconciliation{
+		ReconciliationID: reconciliationID,
+		UploadID:         tempID,
+		Status:           StatusStarted,
+		StartedAt:        time.Now(),
+		IsDryRun:         isDryRun,
+	}
+
+	// Record the reconciliation in the data source
+	if err := s.datasource.RecordReconciliation(ctx, &reconciliation); err != nil {
+		return "", err
+	}
+
+	// Store the provided transactions in the database with the temporary ID
+	for _, txn := range externalTransactions {
+		if err := s.storeExternalTransaction(ctx, tempID, txn); err != nil {
+			// Log error and update reconciliation status
+			log.Printf("Error storing transaction: %v", err)
+			s.datasource.UpdateReconciliationStatus(ctx, reconciliationID, StatusFailed, 0, 0)
+			return "", fmt.Errorf("failed to store external transaction: %w", err)
+		}
+	}
+
+	// Detach the context to allow the reconciliation process to run in the background
+	detachedCtx := context.Background()
+	ctxWithTrace := trace.ContextWithSpan(detachedCtx, trace.SpanFromContext(ctx))
+
+	// Start the reconciliation process asynchronously
+	go func() {
+		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs)
+		if err != nil {
+			// If an error occurs during the reconciliation, log it and update the reconciliation status to "failed"
+			log.Printf("Error in instant reconciliation process: %v", err)
+			err := s.datasource.UpdateReconciliationStatus(ctxWithTrace, reconciliationID, StatusFailed, 0, 0)
+			if err != nil {
+				log.Printf("Error updating reconciliation status: %v", err)
+			}
+		}
+	}()
+
+	return reconciliationID, nil
+}
+
+// GetReconciliation retrieves a reconciliation by its ID.
+// Parameters:
+// - ctx: The context controlling the request.
+// - reconciliationID: The ID of the reconciliation to retrieve.
+// Returns:
+// - *model.Reconciliation: The retrieved reconciliation object.
+// - error: If the reconciliation cannot be found or if retrieval fails.
+func (s *Blnk) GetReconciliation(ctx context.Context, reconciliationID string) (*model.Reconciliation, error) {
+	reconciliation, err := s.datasource.GetReconciliation(ctx, reconciliationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve reconciliation: %w", err)
+	}
+
+	return reconciliation, nil
+}
+
 // matchesRules checks whether an external transaction matches a group transaction based on specified matching rules.
 // It iterates through the rules and criteria, evaluating whether the transactions meet the conditions for a match.
 // Parameters:
@@ -669,23 +751,28 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 // Returns:
 // - bool: True if the transactions match based on the rules, otherwise false.
 func (s *Blnk) matchesRules(externalTxn *model.Transaction, groupTxn model.Transaction, rules []model.MatchingRule) bool {
+	fmt.Println(rules[0].Criteria)
 	for _, rule := range rules {
 		allCriteriaMet := true
 		// Iterate through each rule's criteria to check if all conditions are satisfied.
 		for _, criteria := range rule.Criteria {
+			fmt.Println("Criteria: ", criteria)
 			var criterionMet bool
 			// Check each field specified in the criteria.
 			switch criteria.Field {
 			case "amount":
+				fmt.Println("Amount reached", externalTxn.Amount, groupTxn.Amount)
 				// Compare amounts between the external and group transactions.
 				criterionMet = s.matchesGroupAmount(externalTxn.Amount, groupTxn.Amount, criteria)
 			case "date":
+				fmt.Println("Date reached")
 				// Compare the dates of the transactions.
 				criterionMet = s.matchesGroupDate(externalTxn.CreatedAt, groupTxn.CreatedAt, criteria)
 			case "description":
 				// Compare the description fields for a match.
 				criterionMet = s.matchesString(externalTxn.Description, groupTxn.Description, criteria)
 			case "reference":
+				fmt.Println("Reference reached")
 				// Compare the transaction references for a match.
 				criterionMet = s.matchesString(externalTxn.Reference, groupTxn.Reference, criteria)
 			case "currency":
@@ -837,10 +924,12 @@ func (s *Blnk) createTransactionProcessor(reconciliation model.Reconciliation, p
 		reconciler:        reconciler,
 		datasource:        s.datasource,
 		progressSaveCount: conf.Reconciliation.ProgressInterval,
+		blnk:              s,
 	}
 }
 
 // process handles individual transaction processing, applying the reconciliation logic and recording results.
+// It also updates internal transaction metadata asynchronously when matches are found.
 // Parameters:
 // - ctx: The context controlling the request.
 // - txn: The transaction to process.
@@ -861,6 +950,9 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 			if err := tp.datasource.RecordMatches(ctx, tp.reconciliation.ReconciliationID, batchMatches); err != nil {
 				return err
 			}
+
+			// Asynchronously update the metadata for each matched internal transaction
+			go tp.updateMatchedTransactionsMetadata(context.Background(), batchMatches)
 		}
 
 		if len(batchUnmatched) > 0 {
@@ -883,6 +975,30 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 	}
 
 	return nil
+}
+
+// updateMatchedTransactionsMetadata updates the metadata for internal transactions that were matched.
+// This function adds reconciliation information to the internal transaction's metadata.
+// Parameters:
+// - ctx: The context controlling the operation.
+// - matches: The list of matches to process.
+func (tp *transactionProcessor) updateMatchedTransactionsMetadata(ctx context.Context, matches []model.Match) {
+	for _, match := range matches {
+		// Prepare metadata with reconciliation information
+		metadata := map[string]interface{}{
+			"reconciled":            true,
+			"reconciliation_id":     tp.reconciliation.ReconciliationID,
+			"reconciled_at":         time.Now().Format(time.RFC3339),
+			"external_txn_id":       match.ExternalTransactionID,
+			"reconciliation_amount": match.Amount,
+		}
+
+		// Update the internal transaction's metadata
+		err := tp.blnk.updateEntityMetadata(ctx, "transactions", match.InternalTransactionID, metadata)
+		if err != nil {
+			log.Printf("Error updating metadata for transaction %s: %v", match.InternalTransactionID, err)
+		}
+	}
 }
 
 // getResults returns the total counts of matched and unmatched transactions processed during reconciliation.
@@ -1653,6 +1769,8 @@ func (s *Blnk) getMatchingRules(ctx context.Context, matchingRuleIDs []string) (
 // - criteria: The matching criteria, including operator and allowable drift.
 // Returns true if the values match according to the criteria, otherwise false.
 func (s *Blnk) matchesString(externalValue, internalValue string, criteria model.MatchingCriteria) bool {
+	fmt.Println("externalValue", externalValue)
+	fmt.Println("internalValue", internalValue)
 	switch criteria.Operator {
 	case "equals":
 		// Check if any part of the internal value matches the external value exactly.
