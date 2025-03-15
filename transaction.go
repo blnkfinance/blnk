@@ -655,7 +655,7 @@ func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction,
 
 	defer wg.Done()
 	for originalTxn := range jobs {
-		queuedRefundTxn, err := l.RefundTransaction(ctx, originalTxn.TransactionID)
+		queuedRefundTxn, err := l.RefundTransaction(ctx, originalTxn.TransactionID, originalTxn.SkipQueue)
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 			span.RecordError(err)
@@ -1716,7 +1716,7 @@ func (l *Blnk) UpdateTransactionStatus(ctx context.Context, id string, status st
 // Returns:
 // - *model.Transaction: A pointer to the refunded Transaction model.
 // - error: An error if the transaction could not be refunded.
-func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string) (*model.Transaction, error) {
+func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string, skipQueue bool) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "RefundTransaction")
 	defer span.End()
 
@@ -1766,6 +1766,7 @@ func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string) (*mo
 	newTransaction.Source = originalTxn.Destination
 	newTransaction.Destination = originalTxn.Source
 	newTransaction.AllowOverdraft = true
+	newTransaction.SkipQueue = skipQueue
 
 	// Queue the refund transaction
 	refundTxn, err := l.QueueTransaction(ctx, &newTransaction)

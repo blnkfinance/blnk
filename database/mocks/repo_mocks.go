@@ -91,6 +91,11 @@ func (m *MockDataSource) GroupTransactions(ctx context.Context, groupCriteria st
 	return args.Get(0).(map[string][]*model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) GetTransactionsByParent(ctx context.Context, parentID string, limit int, offset int64) ([]*model.Transaction, error) {
+	args := m.Called(ctx, parentID, limit, offset)
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
 // Ledger methods
 
 func (m *MockDataSource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {

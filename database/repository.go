@@ -55,6 +55,7 @@ type transaction interface {
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	UpdateIdentityMetadata(id string, metadata map[string]interface{}) error
 	TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error)
+	GetTransactionsByParent(ctx context.Context, parentID string, limit int, offset int64) ([]*model.Transaction, error) // Retrieves transactions by parent ID with pagination
 }
 
 // ledger defines methods for handling ledgers.
