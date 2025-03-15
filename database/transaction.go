@@ -914,3 +914,104 @@ func (d Datasource) TransactionExistsByIDOrParentID(ctx context.Context, id stri
 
 	return exists, nil
 }
+
+// GetTransactionsByParent retrieves all transactions associated with a given parent transaction ID.
+// It supports pagination via limit and offset parameters.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - parentID: The ID of the parent transaction to filter by.
+// - limit: Maximum number of transactions to retrieve.
+// - offset: Number of transactions to skip before retrieving the batch.
+// Returns:
+// - A slice of transactions or an error if retrieval fails.
+func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string, limit int, offset int64) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetTransactionsByParent")
+	defer span.End()
+
+	// Create a cache key based on the parameters
+	cacheKey := fmt.Sprintf("transactions:parent:%s:%d:%d", parentID, limit, offset)
+
+	var transactions []*model.Transaction
+	// Attempt to retrieve from cache first
+	err := d.Cache.Get(ctx, cacheKey, &transactions)
+	if err == nil && len(transactions) > 0 {
+		span.AddEvent("Transactions retrieved from cache", trace.WithAttributes(
+			attribute.Int("transaction.count", len(transactions)),
+		))
+		return transactions, nil
+	}
+
+	// If not in cache, query the database
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		WHERE parent_transaction = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`, parentID, limit, offset)
+
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions by parent", err)
+	}
+	defer rows.Close()
+
+	transactions = []*model.Transaction{}
+
+	// Iterate over the result set
+	for rows.Next() {
+		transaction := &model.Transaction{}
+		var metaDataJSON []byte
+		var preciseAmountStr string
+		err = rows.Scan(
+			&transaction.TransactionID,
+			&transaction.ParentTransaction,
+			&transaction.Source,
+			&transaction.Reference,
+			&transaction.Amount,
+			&preciseAmountStr,
+			&transaction.Precision,
+			&transaction.Rate,
+			&transaction.Currency,
+			&transaction.Destination,
+			&transaction.Description,
+			&transaction.Status,
+			&transaction.CreatedAt,
+			&metaDataJSON,
+			&transaction.ScheduledFor,
+			&transaction.Hash,
+		)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transactions = append(transactions, transaction)
+	}
+
+	if err = rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
+	}
+
+	// Cache the results if there are any
+	if len(transactions) > 0 {
+		if err := d.Cache.Set(ctx, cacheKey, transactions, 5*time.Minute); err != nil {
+			log.Printf("Failed to cache transactions by parent: %v", err)
+		}
+	}
+
+	span.AddEvent("Transactions by parent retrieved", trace.WithAttributes(
+		attribute.String("parent_transaction.id", parentID),
+		attribute.Int("transaction.count", len(transactions)),
+	))
+	return transactions, nil
+}
