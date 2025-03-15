@@ -17,6 +17,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jerry-enebeli/blnk/model"
@@ -87,6 +88,83 @@ func (a Api) StartReconciliation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"reconciliation_id": reconciliationID})
+}
+
+// InstantReconciliation initiates a reconciliation process with externally provided transactions
+// without requiring a prior file upload. It processes the transactions directly and returns
+// the reconciliation ID.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the request body is invalid or required fields are missing.
+// - 500 Internal Server Error: If there is an error starting the reconciliation process.
+// - 200 OK: If the reconciliation process is successfully started.
+func (a Api) InstantReconciliation(c *gin.Context) {
+	var req struct {
+		ExternalTransactions []model.ExternalTransaction `json:"external_transactions" binding:"required"`
+		Strategy             string                      `json:"strategy" binding:"required"`
+		GroupingCriteria     string                      `json:"grouping_criteria"`
+		DryRun               bool                        `json:"dry_run"`
+		MatchingRuleIDs      []string                    `json:"matching_rule_ids" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	reconciliationID, err := a.blnk.StartInstantReconciliation(
+		c.Request.Context(),
+		req.ExternalTransactions,
+		req.Strategy,
+		req.GroupingCriteria,
+		req.MatchingRuleIDs,
+		req.DryRun,
+	)
+
+	if err != nil {
+		logrus.Error(err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start instant reconciliation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"reconciliation_id": reconciliationID})
+}
+
+// GetReconciliation retrieves details about a specific reconciliation by its ID.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the reconciliation ID is missing.
+// - 404 Not Found: If the reconciliation cannot be found.
+// - 500 Internal Server Error: If there is an error retrieving the reconciliation.
+// - 200 OK: If the reconciliation is successfully retrieved.
+func (a Api) GetReconciliation(c *gin.Context) {
+	reconciliationID := c.Param("id")
+	if reconciliationID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Reconciliation ID is required"})
+		return
+	}
+
+	reconciliation, err := a.blnk.GetReconciliation(c.Request.Context(), reconciliationID)
+	if err != nil {
+		logrus.Error(err)
+
+		// Check if it's a not found error and return appropriate status code
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Reconciliation not found"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve reconciliation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, reconciliation)
 }
 
 // CreateMatchingRule creates a new matching rule based on the provided rule details.
