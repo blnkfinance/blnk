@@ -701,7 +701,11 @@ func (s *Blnk) StartInstantReconciliation(ctx context.Context, externalTransacti
 		if err := s.storeExternalTransaction(ctx, tempID, txn); err != nil {
 			// Log error and update reconciliation status
 			log.Printf("Error storing transaction: %v", err)
-			s.datasource.UpdateReconciliationStatus(ctx, reconciliationID, StatusFailed, 0, 0)
+			err := s.datasource.UpdateReconciliationStatus(ctx, reconciliationID, StatusFailed, 0, 0)
+			if err != nil {
+				log.Printf("Error updating reconciliation status: %v", err)
+				return "", fmt.Errorf("failed to store external transaction: %w", err)
+			}
 			return "", fmt.Errorf("failed to store external transaction: %w", err)
 		}
 	}
