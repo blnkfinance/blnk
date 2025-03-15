@@ -751,28 +751,23 @@ func (s *Blnk) GetReconciliation(ctx context.Context, reconciliationID string) (
 // Returns:
 // - bool: True if the transactions match based on the rules, otherwise false.
 func (s *Blnk) matchesRules(externalTxn *model.Transaction, groupTxn model.Transaction, rules []model.MatchingRule) bool {
-	fmt.Println(rules[0].Criteria)
 	for _, rule := range rules {
 		allCriteriaMet := true
 		// Iterate through each rule's criteria to check if all conditions are satisfied.
 		for _, criteria := range rule.Criteria {
-			fmt.Println("Criteria: ", criteria)
 			var criterionMet bool
 			// Check each field specified in the criteria.
 			switch criteria.Field {
 			case "amount":
-				fmt.Println("Amount reached", externalTxn.Amount, groupTxn.Amount)
 				// Compare amounts between the external and group transactions.
 				criterionMet = s.matchesGroupAmount(externalTxn.Amount, groupTxn.Amount, criteria)
 			case "date":
-				fmt.Println("Date reached")
 				// Compare the dates of the transactions.
 				criterionMet = s.matchesGroupDate(externalTxn.CreatedAt, groupTxn.CreatedAt, criteria)
 			case "description":
 				// Compare the description fields for a match.
 				criterionMet = s.matchesString(externalTxn.Description, groupTxn.Description, criteria)
 			case "reference":
-				fmt.Println("Reference reached")
 				// Compare the transaction references for a match.
 				criterionMet = s.matchesString(externalTxn.Reference, groupTxn.Reference, criteria)
 			case "currency":
@@ -1769,8 +1764,6 @@ func (s *Blnk) getMatchingRules(ctx context.Context, matchingRuleIDs []string) (
 // - criteria: The matching criteria, including operator and allowable drift.
 // Returns true if the values match according to the criteria, otherwise false.
 func (s *Blnk) matchesString(externalValue, internalValue string, criteria model.MatchingCriteria) bool {
-	fmt.Println("externalValue", externalValue)
-	fmt.Println("internalValue", internalValue)
 	switch criteria.Operator {
 	case "equals":
 		// Check if any part of the internal value matches the external value exactly.
