@@ -67,16 +67,16 @@ type ledger interface {
 
 // balance defines methods for handling balances.
 type balance interface {
-	CreateBalance(balance model.Balance) (model.Balance, error)                                 // Creates a new balance
-	GetBalanceByID(id string, include []string, withQueued bool) (*model.Balance, error)        // Retrieves a balance by ID with additional data and queued status
-	GetBalanceByIDLite(id string) (*model.Balance, error)                                       // Retrieves a balance by ID with minimal data
-	GetAllBalances(limit, offset int) ([]model.Balance, error)                                  // Retrieves all balances
-	UpdateBalance(balance *model.Balance) error                                                 // Updates a balance
-	GetBalanceByIndicator(indicator, currency string) (*model.Balance, error)                   // Retrieves a balance by indicator and currency
-	UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error // Updates multiple balances
-	GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error)              // Retrieves balances between source and destination
-	TakeBalanceSnapshots(ctx context.Context, batchSize int) (int, error)                       // Takes balance snapshots
-	GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time) (*model.Balance, error)
+	CreateBalance(balance model.Balance) (model.Balance, error)                                                            // Creates a new balance
+	GetBalanceByID(id string, include []string, withQueued bool) (*model.Balance, error)                                   // Retrieves a balance by ID with additional data and queued status
+	GetBalanceByIDLite(id string) (*model.Balance, error)                                                                  // Retrieves a balance by ID with minimal data
+	GetAllBalances(limit, offset int) ([]model.Balance, error)                                                             // Retrieves all balances
+	UpdateBalance(balance *model.Balance) error                                                                            // Updates a balance
+	GetBalanceByIndicator(indicator, currency string) (*model.Balance, error)                                              // Retrieves a balance by indicator and currency
+	UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error                            // Updates multiple balances
+	GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error)                                         // Retrieves balances between source and destination
+	TakeBalanceSnapshots(ctx context.Context, batchSize int) (int, error)                                                  // Takes balance snapshots
+	GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time, fromSource bool) (*model.Balance, error) // Retrieves a balance at a specific time
 }
 
 // account defines methods for handling accounts.

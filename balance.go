@@ -427,39 +427,54 @@ func (l *Blnk) TakeBalanceSnapshots(ctx context.Context, batchSize int) {
 }
 
 // GetBalanceAtTime retrieves a balance's state at a specific point in time.
-// It uses balance snapshots to determine the balance state at the given time.
+// It can either use balance snapshots for efficiency or calculate from all source transactions
+// based on the fromSource parameter.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
 // - balanceID string: The ID of the balance to retrieve.
 // - targetTime time.Time: The point in time for which to retrieve the balance state.
+// - fromSource bool: If true, calculates balance from all transactions instead of using snapshots.
 //
 // Returns:
 // - *model.Balance: A pointer to the Balance model representing the state at the given time.
 // - error: An error if the historical balance state could not be retrieved.
-func (l *Blnk) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time) (*model.Balance, error) {
+func (l *Blnk) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time, fromSource bool) (*model.Balance, error) {
 	_, span := balanceTracer.Start(ctx, "GetBalanceAtTime")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("balance.id", balanceID),
 		attribute.String("target.time", targetTime.String()),
+		attribute.Bool("from.source", fromSource),
 	)
 
-	balance, err := l.datasource.GetBalanceAtTime(ctx, balanceID, targetTime)
+	if fromSource {
+		span.AddEvent("Calculating balance from source transactions")
+	} else {
+		span.AddEvent("Using snapshots to calculate balance")
+	}
+
+	balance, err := l.datasource.GetBalanceAtTime(ctx, balanceID, targetTime, fromSource)
 	if err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("failed to get balance snapshot: %w", err)
+		return nil, fmt.Errorf("failed to get balance at time: %w", err)
 	}
 
 	if balance == nil {
-		span.AddEvent("No snapshot found for the specified time")
-		return nil, fmt.Errorf("no balance snapshot found for time: %v", targetTime)
+		span.AddEvent("No balance data found for the specified time")
+		return nil, fmt.Errorf("no balance data found for time: %v", targetTime)
+	}
+
+	calculationMethod := "snapshot-based"
+	if fromSource {
+		calculationMethod = "transaction-based"
 	}
 
 	span.AddEvent("Historical balance state retrieved", trace.WithAttributes(
 		attribute.String("balance.id", balance.BalanceID),
 		attribute.String("snapshot.time", targetTime.String()),
+		attribute.String("calculation.method", calculationMethod),
 	))
 
 	return balance, nil
