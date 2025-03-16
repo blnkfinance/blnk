@@ -176,8 +176,8 @@ func (m *MockDataSource) GetSourceDestination(sourceId, destinationId string) ([
 	return args.Get(0).([]*model.Balance), args.Error(1)
 }
 
-func (m *MockDataSource) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time) (*model.Balance, error) {
-	args := m.Called(ctx, balanceID, targetTime)
+func (m *MockDataSource) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time, fromSource bool) (*model.Balance, error) {
+	args := m.Called(ctx, balanceID, targetTime, fromSource)
 	return args.Get(0).(*model.Balance), args.Error(1)
 }
 

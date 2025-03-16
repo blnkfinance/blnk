@@ -1209,17 +1209,19 @@ func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sq
 
 // GetBalanceAtTime retrieves the balance state at a specific point in time.
 // It finds the most recent snapshot before the target time and applies any subsequent
-// transactions to calculate the exact balance state.
+// transactions to calculate the exact balance state. If fromSource is true, it skips
+// using snapshots and calculates directly from all transactions.
 //
 // Parameters:
 // - ctx: Context for the database operations
 // - balanceID: The ID of the balance to query
 // - targetTime: The point in time for which to get the balance state
+// - fromSource: If true, calculation is done from all transactions rather than using snapshots
 //
 // Returns:
 // - *Balance: The calculated balance state at the target time
 // - error: An APIError if any issues occur during the operation
-func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time) (*model.Balance, error) {
+func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time, fromSource bool) (*model.Balance, error) {
 	// Add context timeout
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -1251,13 +1253,24 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 		return nil, err
 	}
 
-	// Try to find the most recent snapshot
-	creditBalance, debitBalance, startTime, err := d.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
-	if err != nil {
-		return nil, err
+	var creditBalance, debitBalance *big.Int
+	var startTime time.Time
+
+	if fromSource {
+		// Skip snapshots and start from zero
+		logrus.Debugf("Skipping snapshots for balance %s as requested, calculating from genesis", balanceID)
+		creditBalance = new(big.Int).SetInt64(0)
+		debitBalance = new(big.Int).SetInt64(0)
+		startTime = time.Time{} // Use zero time to get all transactions
+	} else {
+		// Try to find the most recent snapshot
+		creditBalance, debitBalance, startTime, err = d.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Calculate the balance by applying transactions since the snapshot
+	// Calculate the balance by applying transactions since the snapshot (or from genesis)
 	creditBalance, debitBalance, err = d.calculateBalanceFromTransactions(
 		ctx, tx, balanceID, startTime, targetTime, creditBalance, debitBalance)
 	if err != nil {

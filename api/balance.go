@@ -319,6 +319,7 @@ func (a Api) TakeBalanceSnapshots(c *gin.Context) {
 // GetBalanceAtTime retrieves a balance's state at a specific point in time.
 // It extracts the balance ID from the route parameters and the timestamp from query parameters.
 // The timestamp should be provided in ISO 8601 format (e.g., "2024-01-01T15:04:05Z").
+// Optionally accepts a "from_source" query parameter to calculate balance from all transactions.
 //
 // Parameters:
 // - c: The Gin context containing the request and response.
@@ -349,7 +350,11 @@ func (a Api) GetBalanceAtTime(c *gin.Context) {
 		}
 	}
 
-	balance, err := a.blnk.GetBalanceAtTime(c.Request.Context(), balanceID, timestamp)
+	// Check if the request specifies to calculate from source transactions
+	fromSourceStr := c.Query("from_source")
+	fromSource := fromSourceStr == "true" || fromSourceStr == "1"
+
+	balance, err := a.blnk.GetBalanceAtTime(c.Request.Context(), balanceID, timestamp, fromSource)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -364,7 +369,8 @@ func (a Api) GetBalanceAtTime(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"balance":   balanceResult,
-		"timestamp": timestamp.Format(time.RFC3339),
+		"balance":     balanceResult,
+		"timestamp":   timestamp.Format(time.RFC3339),
+		"from_source": fromSource,
 	})
 }
