@@ -254,15 +254,11 @@ func CalculateDistributionsPrecise(ctx context.Context, totalPreciseAmount *big.
 
 	// Combine all amounts and convert to big.Int
 	for id, amountDec := range fixedAmounts {
-		bigIntAmount := new(big.Int)
-		bigIntAmount = amountDec.BigInt()
-		resultDistributions[id] = bigIntAmount
+		resultDistributions[id] = amountDec.BigInt()
 	}
 
 	for id, amountDec := range percentageAmounts {
-		bigIntAmount := new(big.Int)
-		bigIntAmount = amountDec.BigInt()
-		resultDistributions[id] = bigIntAmount
+		resultDistributions[id] = amountDec.BigInt()
 		amountLeftDec = amountLeftDec.Sub(amountDec)
 	}
 
@@ -275,9 +271,7 @@ func CalculateDistributionsPrecise(ctx context.Context, totalPreciseAmount *big.
 				return nil, err
 			}
 
-			bigIntAmountLeft := new(big.Int)
-			bigIntAmountLeft = amountLeftDec.BigInt()
-			resultDistributions[dist.Identifier] = bigIntAmountLeft
+			resultDistributions[dist.Identifier] = amountLeftDec.BigInt()
 			break
 		}
 	}
@@ -301,11 +295,10 @@ func CalculateDistributionsPrecise(ctx context.Context, totalPreciseAmount *big.
 
 		if largestKey != "" {
 			diffDec := totalAmountDec.Sub(sumDec)
-			diffBigInt := new(big.Int)
-			diffBigInt = diffDec.BigInt()
-
-			// Adjust the largest amount
-			resultDistributions[largestKey] = new(big.Int).Add(resultDistributions[largestKey], diffBigInt)
+			resultDistributions[largestKey] = new(big.Int).Add(
+				resultDistributions[largestKey],
+				diffDec.BigInt(),
+			)
 		}
 	}
 
