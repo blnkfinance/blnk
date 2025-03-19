@@ -1063,6 +1063,14 @@ func (l *Blnk) validateAndUpdateAmount(ctx context.Context, transaction *model.T
 
 	// Update the transaction amount based on the provided amount
 	if amount != 0 {
+		requestedAmount := big.NewInt(int64(amount * transaction.Precision))
+		// Check if requested amount exceeds original transaction amount
+		if requestedAmount.Cmp(transaction.PreciseAmount) > 0 {
+			err := fmt.Errorf("cannot commit more than the original transaction amount. Original: %s%.2f, Requested: %s%.2f",
+				transaction.Currency, transaction.Amount, transaction.Currency, amount)
+			span.RecordError(err)
+			return err
+		}
 		transaction.Amount = amount
 		transaction.PreciseAmount = big.NewInt(0)
 	} else {
@@ -1154,6 +1162,11 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 		return nil, err
 	}
 
+	if amountLeft.Cmp(big.NewInt(0)) == 0 {
+		err := errors.New("cannot void. Transaction already committed")
+		span.RecordError(err)
+		return transaction, err
+	}
 	span.AddEvent("Inflight transaction voided", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
 	// Finalize the void transaction
@@ -1398,7 +1411,7 @@ func (l *Blnk) handleSplitTransactions(ctx context.Context, transaction *model.T
 	ctx, span := tracer.Start(ctx, "HandleSplitTransactions")
 	defer span.End()
 
-	transactions, err := transaction.SplitTransaction(ctx)
+	transactions, err := transaction.SplitTransactionPrecise(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to split transaction: %w", err)
 	}
