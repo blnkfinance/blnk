@@ -49,9 +49,7 @@ func floatToBigInt(value float64, precision int64) *big.Int {
 	decPrecision := decimal.NewFromInt(precision)
 	preciseValue := decValue.Mul(decPrecision)
 
-	bigIntValue := new(big.Int)
-	bigIntValue = preciseValue.BigInt()
-	return bigIntValue
+	return preciseValue.BigInt()
 }
 
 // Helper to convert map of float64 to map of *big.Int with precision applied
