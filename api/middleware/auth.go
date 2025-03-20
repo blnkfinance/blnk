@@ -25,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/config"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -237,8 +238,7 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		// For POST requests, inject the API key ID into the metadata
 		if c.Request.Method == "POST" {
 			if err := injectAPIKeyToMetadata(c, apiKey.APIKeyID); err != nil {
-				// Log the error but continue with the request
-				// You may want to add proper logging here
+				logrus.Error("Failed to inject API key ID into metadata:", err)
 			}
 		}
 
