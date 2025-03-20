@@ -1042,7 +1042,7 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 }
 
 // validateAndUpdateAmount validates the amount to be committed for a transaction and updates the transaction's amount.
-// It starts a tracing span, fetches the total committed amount, calculates the remaining amount, and updates the transaction.
+// It orchestrates the validation and update process by calling more specialized functions.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -1055,50 +1055,112 @@ func (l *Blnk) validateAndUpdateAmount(ctx context.Context, transaction *model.T
 	ctx, span := tracer.Start(ctx, "ValidateAndUpdateAmount")
 	defer span.End()
 
+	// Get the remaining amount that can be committed
 	amountLeft, err := l.calculateRemainingAmount(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
 		return err
 	}
 
-	// Update the transaction amount based on the provided amount
+	// Check if transaction is already fully committed
+	if err := l.checkTransactionCommitStatus(amountLeft); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Validate the requested amount against limits
+	if err := l.validateRequestedAmount(transaction, amount, amountLeft); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Update the transaction with the appropriate amount
+	l.updateTransactionAmount(transaction, amount, amountLeft)
+
+	// Log the successful validation and update
+	amountLeftValue := l.convertPreciseToFloat(amountLeft, transaction.Precision)
+	span.AddEvent("Amount validated and updated", trace.WithAttributes(attribute.Float64("amount.left", amountLeftValue)))
+	return nil
+}
+
+// checkTransactionCommitStatus checks if a transaction can be committed based on its remaining amount.
+//
+// Parameters:
+// - amountLeft *big.Int: The remaining amount that can be committed.
+//
+// Returns:
+// - error: An error if the transaction is already fully committed.
+func (l *Blnk) checkTransactionCommitStatus(amountLeft *big.Int) error {
+	if amountLeft.Cmp(big.NewInt(0)) == 0 {
+		return errors.New("cannot commit. Transaction already committed")
+	}
+	return nil
+}
+
+// validateRequestedAmount validates that the requested amount is within allowed limits.
+//
+// Parameters:
+// - transaction *model.Transaction: The transaction being validated.
+// - amount float64: The requested amount to commit.
+// - amountLeft *big.Int: The remaining amount that can be committed.
+//
+// Returns:
+// - error: An error if the requested amount exceeds allowed limits.
+func (l *Blnk) validateRequestedAmount(transaction *model.Transaction, amount float64, amountLeft *big.Int) error {
+	// Skip validation for full commit (amount = 0)
+	if amount == 0 {
+		return nil
+	}
+
+	requestedAmount := big.NewInt(int64(amount * transaction.Precision))
+
+	// Check if requested amount exceeds original transaction amount
+	if requestedAmount.Cmp(transaction.PreciseAmount) > 0 {
+		return fmt.Errorf("cannot commit more than the original transaction amount. Original: %s%.2f, Requested: %s%.2f",
+			transaction.Currency, transaction.Amount, transaction.Currency, amount)
+	}
+
+	// Check if requested amount exceeds remaining amount
+	if requestedAmount.Cmp(amountLeft) > 0 {
+		amountLeftValue := l.convertPreciseToFloat(amountLeft, transaction.Precision)
+		return fmt.Errorf("cannot commit more than the remaining amount. Available: %s%.2f, Requested: %s%.2f",
+			transaction.Currency, amountLeftValue, transaction.Currency, amount)
+	}
+
+	return nil
+}
+
+// updateTransactionAmount updates the transaction with the specified amount or the full remaining amount.
+//
+// Parameters:
+// - transaction *model.Transaction: The transaction to update.
+// - amount float64: The amount to commit (0 means commit the full remaining amount).
+// - amountLeft *big.Int: The remaining amount that can be committed.
+func (l *Blnk) updateTransactionAmount(transaction *model.Transaction, amount float64, amountLeft *big.Int) {
 	if amount != 0 {
-		requestedAmount := big.NewInt(int64(amount * transaction.Precision))
-		// Check if requested amount exceeds original transaction amount
-		if requestedAmount.Cmp(transaction.PreciseAmount) > 0 {
-			err := fmt.Errorf("cannot commit more than the original transaction amount. Original: %s%.2f, Requested: %s%.2f",
-				transaction.Currency, transaction.Amount, transaction.Currency, amount)
-			span.RecordError(err)
-			return err
-		}
+		// Update with specific amount
 		transaction.Amount = amount
-		transaction.PreciseAmount = big.NewInt(0)
+		transaction.PreciseAmount = big.NewInt(int64(amount * transaction.Precision))
 	} else {
-		precisionBigInt := new(big.Float).SetFloat64(transaction.Precision)
-		result := new(big.Float).Quo(new(big.Float).SetInt(amountLeft), precisionBigInt)
-		transaction.Amount, _ = result.Float64()
+		// Update with full remaining amount
+		transaction.Amount = l.convertPreciseToFloat(amountLeft, transaction.Precision)
 		transaction.PreciseAmount = amountLeft
 	}
+}
 
-	// Validate the remaining amount
-	if amountLeft.Cmp(transaction.PreciseAmount) < 0 {
-		precisionBigInt := new(big.Float).SetFloat64(transaction.Precision)
-		result := new(big.Float).Quo(new(big.Float).SetInt(amountLeft), precisionBigInt)
-		amountFloat, _ := result.Float64()
-		err := fmt.Errorf("cannot commit %s %.2f. You can only commit an amount between 1.00 - %s%.2f",
-			transaction.Currency, amount, transaction.Currency, amountFloat)
-		span.RecordError(err)
-		return err
-	} else if amountLeft.Cmp(big.NewInt(0)) == 0 {
-		err := errors.New("cannot commit. Transaction already committed")
-		span.RecordError(err)
-		return err
-	}
-
-	amountFloat := new(big.Float).SetInt(amountLeft)
-	result, _ := new(big.Float).Quo(amountFloat, new(big.Float).SetFloat64(transaction.Precision)).Float64()
-	span.AddEvent("Amount validated and updated", trace.WithAttributes(attribute.Float64("amount.left", result)))
-	return nil
+// convertPreciseToFloat converts a precise amount (big.Int) to a floating-point representation.
+//
+// Parameters:
+// - preciseAmount *big.Int: The precise amount to convert.
+// - precision float64: The precision factor (e.g., 100 for 2 decimal places).
+//
+// Returns:
+// - float64: The floating-point representation of the precise amount.
+func (l *Blnk) convertPreciseToFloat(preciseAmount *big.Int, precision float64) float64 {
+	precisionBigInt := new(big.Float).SetFloat64(precision)
+	amountFloat := new(big.Float).SetInt(preciseAmount)
+	result, _ := new(big.Float).Quo(amountFloat, precisionBigInt).Float64()
+	return result
 }
 
 // finalizeCommitment finalizes the commitment of a transaction by updating its status and generating new identifiers.

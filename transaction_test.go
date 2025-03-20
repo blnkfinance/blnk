@@ -1722,6 +1722,280 @@ func TestInflightTransactionWithOvercommitValidation(t *testing.T) {
 	}
 }
 
+func TestInflightTransactionWithPartialOvercommitValidation(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping queue flow test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Create source and destination balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err, "Failed to create destination balance")
+
+	// Create an initial transaction to transfer from source to destination
+	initialBalance := 1000.0
+	depositTxnRef := "transfer_" + model.GenerateUUIDWithSuffix("test")
+	depositTxn := &model.Transaction{
+		Reference:      depositTxnRef,
+		Source:         source.BalanceID,
+		Destination:    dest.BalanceID,
+		Amount:         initialBalance,
+		Currency:       "USD",
+		Precision:      100,
+		AllowOverdraft: true,
+		MetaData:       map[string]interface{}{"test": "initial_transfer"},
+		SkipQueue:      true,
+	}
+
+	// Process the initial transaction
+	depositResult, err := blnk.QueueTransaction(ctx, depositTxn)
+	require.NoError(t, err, "Failed to process initial transaction")
+	require.Equal(t, StatusApplied, depositResult.Status, "Initial transaction should be APPLIED")
+
+	// Verify balances after initial transfer
+	sourceAfterTransfer, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after transfer")
+
+	destAfterTransfer, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get destination balance after transfer")
+
+	// Source should be -1000, destination should be 1000
+	expectedSourceBalance := big.NewInt(int64(-initialBalance * 100))
+	expectedDestBalance := big.NewInt(int64(initialBalance * 100))
+
+	require.Equal(t, 0, sourceAfterTransfer.Balance.Cmp(expectedSourceBalance),
+		"Source balance should be -1000 after initial transfer")
+	require.Equal(t, 0, destAfterTransfer.Balance.Cmp(expectedDestBalance),
+		"Destination balance should be 1000 after initial transfer")
+
+	// Step 1: Create an inflight transaction
+	inflightAmount := 100.0
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test")
+	txn := &model.Transaction{
+		Reference:      txnRef,
+		Source:         source.BalanceID,
+		Destination:    dest.BalanceID,
+		Amount:         inflightAmount,
+		Inflight:       true,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": "partial_overcommit_test"},
+		SkipQueue:      true,
+	}
+
+	// Queue the transaction
+	queuedTxn, err := blnk.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue transaction")
+	require.Equal(t, StatusInflight, queuedTxn.Status, "Transaction should be INFLIGHT")
+
+	// Verify inflight balance is updated correctly
+	afterInflightSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after inflight")
+
+	expectedInflightBalance := big.NewInt(int64(-inflightAmount * 100))
+	require.Equal(t, 0, afterInflightSource.InflightBalance.Cmp(expectedInflightBalance),
+		"Source inflight balance should be -100 after inflight transaction")
+
+	// Get the inflight entry
+	inflightEntry, err := ds.GetTransactionByRef(ctx, txnRef)
+	require.NoError(t, err, "Failed to get inflight transaction")
+	require.Equal(t, StatusInflight, inflightEntry.Status, "Transaction should be INFLIGHT")
+
+	// Step 2: Do a partial commit (50 of the 100)
+	partialAmount := 50.0
+	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialAmount)
+	require.NoError(t, err, "Partial commit should succeed")
+	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
+
+	// Verify balances after partial commit
+	afterPartialCommitSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after partial commit")
+
+	afterPartialCommitDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get destination balance after partial commit")
+
+	// Source balance should be -1000 - 50 = -1050
+	expectedSourceBalanceAfterPartial := big.NewInt(int64((-initialBalance - partialAmount) * 100))
+	require.Equal(t, 0, afterPartialCommitSource.Balance.Cmp(expectedSourceBalanceAfterPartial),
+		"Source balance should be -1050 after partial commit")
+
+	// Destination balance should be 1000 + 50 = 1050
+	expectedDestBalanceAfterPartial := big.NewInt(int64((initialBalance + partialAmount) * 100))
+	require.Equal(t, 0, afterPartialCommitDest.Balance.Cmp(expectedDestBalanceAfterPartial),
+		"Destination balance should be 1050 after partial commit")
+
+	// Source inflight balance should be -100 + 50 = -50
+	expectedSourceInflightAfterPartial := big.NewInt(int64(-(inflightAmount - partialAmount) * 100))
+	require.Equal(t, 0, afterPartialCommitSource.InflightBalance.Cmp(expectedSourceInflightAfterPartial),
+		"Source inflight balance should be -50 after partial commit")
+
+	// Destination inflight balance should be 100 - 50 = 50
+	expectedDestInflightAfterPartial := big.NewInt(int64((inflightAmount - partialAmount) * 100))
+	require.Equal(t, 0, afterPartialCommitDest.InflightBalance.Cmp(expectedDestInflightAfterPartial),
+		"Destination inflight balance should be 50 after partial commit")
+
+	// Step 3: Attempt to overcommit the REMAINING balance (should fail)
+	// Try to commit 60 when only 50 remains
+	overCommitAmount := 60.0
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, overCommitAmount)
+
+	// Now verify partial overcommit is prevented
+	require.Error(t, err, "Partial overcommit should fail with an error")
+	require.Contains(t, err.Error(), "cannot commit more than the remaining amount",
+		"Error should mention that overcommit of the remaining amount is not allowed")
+
+	// Verify balances remain unchanged after failed partial overcommit
+	afterFailedOvercommitSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after failed partial overcommit")
+
+	afterFailedOvercommitDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get destination balance after failed partial overcommit")
+
+	// Source balance should still be -1050
+	require.Equal(t, 0, afterFailedOvercommitSource.Balance.Cmp(expectedSourceBalanceAfterPartial),
+		"Source balance should remain -1050 after failed partial overcommit")
+
+	// Destination balance should still be 1050
+	require.Equal(t, 0, afterFailedOvercommitDest.Balance.Cmp(expectedDestBalanceAfterPartial),
+		"Destination balance should remain 1050 after failed partial overcommit")
+
+	// Inflight balance should remain unchanged at -50 for source
+	require.Equal(t, 0, afterFailedOvercommitSource.InflightBalance.Cmp(expectedSourceInflightAfterPartial),
+		"Source inflight balance should remain -50 after failed partial overcommit")
+
+	// Inflight balance should remain unchanged at 50 for destination
+	require.Equal(t, 0, afterFailedOvercommitDest.InflightBalance.Cmp(expectedDestInflightAfterPartial),
+		"Destination inflight balance should remain 50 after failed partial overcommit")
+
+	// Step 4: Full commit (remaining 50)
+	fullCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	require.NoError(t, err, "Full commit should succeed")
+	require.Equal(t, StatusApplied, fullCommitTxn.Status, "Full commit transaction should have APPLIED status")
+
+	// Verify balances after full commit
+	afterFullCommitSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after full commit")
+
+	afterFullCommitDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get destination balance after full commit")
+
+	// Source balance should be -1050 - 50 = -1100
+	expectedSourceBalanceAfterFull := big.NewInt(int64((-initialBalance - inflightAmount) * 100))
+	require.Equal(t, 0, afterFullCommitSource.Balance.Cmp(expectedSourceBalanceAfterFull),
+		"Source balance should be -1100 after full commit")
+
+	// Destination balance should be 1050 + 50 = 1100
+	expectedDestBalanceAfterFull := big.NewInt(int64((initialBalance + inflightAmount) * 100))
+	require.Equal(t, 0, afterFullCommitDest.Balance.Cmp(expectedDestBalanceAfterFull),
+		"Destination balance should be 1100 after full commit")
+
+	// Both inflight balances should be 0
+	require.Equal(t, 0, afterFullCommitSource.InflightBalance.Cmp(big.NewInt(0)),
+		"Source inflight balance should be zero after full commit")
+	require.Equal(t, 0, afterFullCommitDest.InflightBalance.Cmp(big.NewInt(0)),
+		"Destination inflight balance should be zero after full commit")
+
+	// Step 5: Attempt another commit (should fail)
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	require.Error(t, err, "Second full commit should fail")
+	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
+		"Error should mention that transaction is already committed")
+
+	// Verify balances remain unchanged after failed second commit
+	afterFailedSecondCommitSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after failed second commit")
+
+	afterFailedSecondCommitDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get destination balance after failed second commit")
+
+	require.Equal(t, 0, afterFailedSecondCommitSource.Balance.Cmp(expectedSourceBalanceAfterFull),
+		"Source balance should remain -1100 after failed second commit")
+	require.Equal(t, 0, afterFailedSecondCommitDest.Balance.Cmp(expectedDestBalanceAfterFull),
+		"Destination balance should remain 1100 after failed second commit")
+	require.Equal(t, 0, afterFailedSecondCommitSource.InflightBalance.Cmp(big.NewInt(0)),
+		"Source inflight balance should remain zero after failed second commit")
+	require.Equal(t, 0, afterFailedSecondCommitDest.InflightBalance.Cmp(big.NewInt(0)),
+		"Destination inflight balance should remain zero after failed second commit")
+
+	// Step 6: Attempt to void a fully committed transaction (should fail)
+	_, err = blnk.VoidInflightTransaction(ctx, inflightEntry.TransactionID)
+	require.Error(t, err, "Voiding a fully committed transaction should fail")
+	require.Contains(t, err.Error(), "cannot void. Transaction already committed",
+		"Error should mention that transaction is already committed")
+
+	// Verify balances remain unchanged after failed void
+	afterFailedVoidSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after failed void")
+
+	afterFailedVoidDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get destination balance after failed void")
+
+	require.Equal(t, 0, afterFailedVoidSource.Balance.Cmp(expectedSourceBalanceAfterFull),
+		"Source balance should remain -1100 after failed void")
+	require.Equal(t, 0, afterFailedVoidDest.Balance.Cmp(expectedDestBalanceAfterFull),
+		"Destination balance should remain 1100 after failed void")
+	require.Equal(t, 0, afterFailedVoidSource.InflightBalance.Cmp(big.NewInt(0)),
+		"Source inflight balance should remain zero after failed void")
+	require.Equal(t, 0, afterFailedVoidDest.InflightBalance.Cmp(big.NewInt(0)),
+		"Destination inflight balance should remain zero after failed void")
+
+	// Verify transaction history
+	txnHistory, err := ds.GetTransactionsByParent(ctx, inflightEntry.TransactionID, 10, 0)
+	require.NoError(t, err, "Failed to get transaction history")
+	require.Equal(t, 2, len(txnHistory), "Should have exactly two transactions: partial commit and full commit")
+
+	// Check transaction history details
+	for _, historyTxn := range txnHistory {
+		require.Equal(t, StatusApplied, historyTxn.Status, "All history transactions should be APPLIED")
+		require.Equal(t, "USD", historyTxn.Currency, "All history transactions should be in USD")
+	}
+}
+
 func TestInflightTransactionFlowWithSkipQueueThenVoid(t *testing.T) {
 	// Skip in short mode
 	if testing.Short() {
