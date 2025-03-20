@@ -17,11 +17,15 @@ limitations under the License.
 package middleware
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/config"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -98,9 +102,69 @@ func getResourceFromPath(path string) Resource {
 	return ""
 }
 
+// injectAPIKeyToMetadata modifies the request body to include the API key ID in the meta_data.
+// This function reads the request body, adds or updates the meta_data field, and sets the modified
+// body back to the request.
+//
+// Parameters:
+// - c: The Gin context containing the request.
+// - apiKeyID: The API key ID to inject into the metadata.
+//
+// Returns:
+// - error: An error if the body processing fails.
+func injectAPIKeyToMetadata(c *gin.Context, apiKeyID string) error {
+	// Only proceed if this is a POST request
+	if c.Request.Method != "POST" {
+		return nil
+	}
+
+	// Read the request body
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	_ = c.Request.Body.Close()
+
+	// Parse the request body as JSON
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &bodyMap); err != nil {
+		// If not valid JSON, restore the original body and continue
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		return err
+	}
+
+	// Check if meta_data field exists
+	metaData, ok := bodyMap["meta_data"].(map[string]interface{})
+	if !ok {
+		// If meta_data doesn't exist or is not an object, create it
+		metaData = make(map[string]interface{})
+	}
+
+	// Add the API key ID to meta_data
+	metaData["BLNK_GENERATED_BY"] = apiKeyID
+
+	// Update the meta_data in the body
+	bodyMap["meta_data"] = metaData
+
+	// Convert back to JSON
+	modifiedBody, err := json.Marshal(bodyMap)
+	if err != nil {
+		// If marshaling fails, restore the original body and continue
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		return err
+	}
+
+	// Set the modified body back to the request
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(modifiedBody))
+	c.Request.ContentLength = int64(len(modifiedBody))
+
+	return nil
+}
+
 // Authenticate returns a middleware function that handles authentication and authorization for all routes.
 // It checks for the X-Blnk-Key header and validates it against either the master key or API keys.
 // For API keys, it verifies the key's validity and checks permissions based on the resource and HTTP method.
+// For POST requests with API keys, it injects the API key ID into the metadata of the request body.
 //
 // Returns:
 // - gin.HandlerFunc: A middleware function that performs the authentication.
@@ -169,6 +233,13 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 			c.JSON(403, gin.H{"error": "Insufficient permissions for " + string(resource) + ":" + string(action)})
 			c.Abort()
 			return
+		}
+
+		// For POST requests, inject the API key ID into the metadata
+		if c.Request.Method == "POST" {
+			if err := injectAPIKeyToMetadata(c, apiKey.APIKeyID); err != nil {
+				logrus.Error("Failed to inject API key ID into metadata:", err)
+			}
 		}
 
 		// Update last used timestamp in background
