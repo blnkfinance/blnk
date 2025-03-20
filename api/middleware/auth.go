@@ -118,6 +118,11 @@ func injectAPIKeyToMetadata(c *gin.Context, apiKeyID string) error {
 		return nil
 	}
 
+	// Check if the request body is nil
+	if c.Request.Body == nil {
+		return nil
+	}
+
 	// Read the request body
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -236,7 +241,7 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 
 		// For POST requests, inject the API key ID into the metadata
-		if c.Request.Method == "POST" {
+		if c.Request.Method == "POST" && c.Request.Body != nil {
 			if err := injectAPIKeyToMetadata(c, apiKey.APIKeyID); err != nil {
 				logrus.Error("Failed to inject API key ID into metadata:", err)
 			}
