@@ -181,14 +181,14 @@ func injectAPIKeyToMetadata(c *gin.Context, apiKeyID string) error {
 func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip auth for root path
-		if c.Request.URL.Path == "/" {
+		if c.Request != nil && c.Request.URL != nil && c.Request.URL.Path == "/" {
 			c.Next()
 			return
 		}
 
 		// Check if secure mode is enabled
 		conf, err := config.Fetch()
-		if err == nil && !conf.Server.Secure {
+		if err == nil && conf != nil && !conf.Server.Secure {
 			// Skip authentication when secure mode is disabled
 			c.Next()
 			return
@@ -202,7 +202,7 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 
 		// First check if it's the master key
-		if err == nil && conf.Server.SecretKey == key {
+		if err == nil && conf != nil && conf.Server.SecretKey == key {
 			// Master key has all permissions
 			c.Set("isMasterKey", true)
 			c.Next()
@@ -224,6 +224,12 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 
 		// Determine required resource from path
+		if c.Request == nil || c.Request.URL == nil {
+			c.JSON(500, gin.H{"error": "Invalid request"})
+			c.Abort()
+			return
+		}
+
 		resource := getResourceFromPath(c.Request.URL.Path)
 		if resource == "" {
 			c.JSON(403, gin.H{"error": "Unknown resource type"})
