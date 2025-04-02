@@ -35,7 +35,7 @@ Here are some fintech use cases for Blnk:
 
 ### Love what we're building?
 
-* Star our repo to help more developers discover Blnk → [Give us a star](https://github.com/blnkfinance/blnk)
+* Star our repo to help more developers discover Blnk 🌟
 * Join our community on Discord → [Accept Discord invite](https://discord.gg/7WNv94zPpx)
 * Check out Blnk Cloud → [Visit website](https://www.blnkfinance.com)
 
