@@ -71,6 +71,7 @@ require (
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/libdns/libdns v0.2.3 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-sqlite3 v1.14.27 // indirect
 	github.com/mholt/acmez/v3 v3.1.0 // indirect
 	github.com/miekg/dns v1.1.63 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
