@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 	"github.com/jerry-enebeli/blnk/api"
 	"github.com/jerry-enebeli/blnk/config"
 	trace "github.com/jerry-enebeli/blnk/internal/traces"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/posthog/posthog-go"
 	"github.com/spf13/cobra"
 )
@@ -92,6 +94,35 @@ func migrateTypeSenseSchema(ctx context.Context, t *blnk.TypesenseClient) error 
 	}
 	return nil
 }
+func getOrCreateHeartbeatID() string {
+	db, err := sql.Open("sqlite3", "./heartbeat.db")
+	if err != nil {
+		log.Printf("Failed to open SQLite DB: %v", err)
+		return uuid.New().String() // fallback to temp UUID
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)`)
+	if err != nil {
+		log.Printf("Failed to create config table: %v", err)
+		return uuid.New().String()
+	}
+
+	var heartbeatID string
+	err = db.QueryRow(`SELECT value FROM config WHERE key = 'heartbeat_id'`).Scan(&heartbeatID)
+	if err == sql.ErrNoRows {
+		heartbeatID = uuid.New().String()
+		_, err = db.Exec(`INSERT INTO config (key, value) VALUES (?, ?)`, "heartbeat_id", heartbeatID)
+		if err != nil {
+			log.Printf("Failed to insert heartbeat_id: %v", err)
+		}
+	} else if err != nil {
+		log.Printf("Failed to read heartbeat_id: %v", err)
+		return uuid.New().String()
+	}
+
+	return heartbeatID
+}
 
 // sendHeartbeat initializes and maintains a periodic heartbeat to PostHog
 func sendHeartbeat(client posthog.Client, heartbeatID string) {
@@ -138,7 +169,7 @@ func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*blnk.
 func initializePostHog() (posthog.Client, string) {
 	client, _ := posthog.NewWithConfig("phc_XbsHF5iBSnPiTA96gl7xygazrwBa0r2Ut4vEHoBHNiG",
 		posthog.Config{Endpoint: "https://us.i.posthog.com"})
-	heartbeatID := uuid.New().String()
+	heartbeatID := getOrCreateHeartbeatID()
 	sendHeartbeat(client, heartbeatID)
 	return client, heartbeatID
 }
