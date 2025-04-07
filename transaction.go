@@ -1428,6 +1428,9 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 			transaction.Status = StatusApplied
 		}
 	} else {
+		if transaction.MetaData != nil && !transaction.SkipQueue {
+			transaction.MetaData["QUEUED_PARENT_TRANSACTION"] = originalTxnID
+		}
 		// For normal queue mode, process asynchronously
 		processTransactionAsync(context.Background(), l, transaction, originalRef, originalTxnID, transactions)
 	}
