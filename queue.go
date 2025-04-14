@@ -155,10 +155,23 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	}
 	log.Printf(" [*] Successfully enqueued transaction: %+v", transaction.Reference)
 
+	return nil
+}
+
+// QueueInflightExpiry handles queuing a transaction for inflight expiration.
+// This method is separate from the main Enqueue to ensure expiration is handled
+// regardless of whether the transaction is queued or processed immediately.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - transaction *model.Transaction: The transaction to queue for expiration.
+//
+// Returns:
+// - error: An error if the expiration could not be queued.
+func (q *Queue) QueueInflightExpiry(ctx context.Context, transaction *model.Transaction) error {
 	if !transaction.InflightExpiryDate.IsZero() {
 		return q.queueInflightExpiry(transaction.TransactionID, transaction.InflightExpiryDate)
 	}
-
 	return nil
 }
 
