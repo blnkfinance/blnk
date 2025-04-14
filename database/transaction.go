@@ -1015,3 +1015,40 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 	))
 	return transactions, nil
 }
+
+// IsTransactionRefunded checks if a transaction has already been refunded by looking for
+// a transaction that has the inverse source/destination and references the original
+// transaction as its parent.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - transaction: The original transaction to check for refunds.
+// Returns:
+// - bool: true if the transaction has been refunded, false otherwise
+// - error: an error if the check fails
+func (d Datasource) IsTransactionRefunded(ctx context.Context, transaction *model.Transaction) (bool, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "IsTransactionRefunded")
+	defer span.End()
+
+	var exists bool
+	err := d.Conn.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 
+			FROM blnk.transactions 
+			WHERE parent_transaction = $1 
+			AND source = $2 
+			AND destination = $3
+		)
+	`, transaction.TransactionID, transaction.Destination, transaction.Source).Scan(&exists)
+
+	if err != nil {
+		span.RecordError(err)
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check refund status", err)
+	}
+
+	span.AddEvent("Refund status checked", trace.WithAttributes(
+		attribute.String("transaction.id", transaction.TransactionID),
+		attribute.Bool("is_refunded", exists),
+	))
+
+	return exists, nil
+}

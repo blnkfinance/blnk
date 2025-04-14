@@ -398,3 +398,8 @@ func (m *MockDataSource) TransactionExistsByIDOrParentID(ctx context.Context, id
 	args := m.Called(ctx, id)
 	return args.Bool(0), args.Error(1)
 }
+
+func (m *MockDataSource) IsTransactionRefunded(ctx context.Context, transaction *model.Transaction) (bool, error) {
+	args := m.Called(ctx, transaction)
+	return args.Bool(0), args.Error(1)
+}

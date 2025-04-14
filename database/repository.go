@@ -56,6 +56,7 @@ type transaction interface {
 	UpdateIdentityMetadata(id string, metadata map[string]interface{}) error
 	TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error)
 	GetTransactionsByParent(ctx context.Context, parentID string, limit int, offset int64) ([]*model.Transaction, error) // Retrieves transactions by parent ID with pagination
+	IsTransactionRefunded(ctx context.Context, transaction *model.Transaction) (bool, error)                             // Checks if a transaction has already been refunded
 }
 
 // ledger defines methods for handling ledgers.
