@@ -1439,6 +1439,12 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		attribute.String("transaction.id", transaction.TransactionID),
 	))
 
+	err = l.queue.QueueInflightExpiry(ctx, transaction)
+	if err != nil {
+		span.RecordError(err)
+		return nil, l.logAndRecordError(span, "failed to queue inflight expiry", err)
+	}
+
 	return transaction, nil
 }
 
