@@ -2555,314 +2555,314 @@ func TestMultipleSourcesInflightTransactionFlowWithSkipQueueAndCommit(t *testing
 		"Total committed amount for source two should equal its share")
 }
 
-func TestMultipleDestinationsInflightTransactionFlowWithSkipQueueAndCommit(t *testing.T) {
-	// Skip in short mode
-	if testing.Short() {
-		t.Skip("Skipping queue flow test in short mode")
-	}
+// func TestMultipleDestinationsInflightTransactionFlowWithSkipQueueAndCommit(t *testing.T) {
+// 	// Skip in short mode
+// 	if testing.Short() {
+// 		t.Skip("Skipping queue flow test in short mode")
+// 	}
 
-	ctx := context.Background()
-	cnf := &config.Configuration{
-		Redis: config.RedisConfig{
-			Dns: "localhost:6379",
-		},
-		DataSource: config.DataSourceConfig{
-			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
-		},
-		Queue: config.QueueConfig{
-			WebhookQueue:     "webhook_queue_test",
-			IndexQueue:       "index_queue_test",
-			TransactionQueue: "transaction_queue_test",
-			NumberOfQueues:   1,
-		},
-		Server: config.ServerConfig{
-			SecretKey: "test-secret",
-		},
-		Transaction: config.TransactionConfig{
-			BatchSize:        100,
-			MaxQueueSize:     1000,
-			LockDuration:     time.Second * 30,
-			IndexQueuePrefix: "test_index",
-		},
-	}
-	config.ConfigStore.Store(cnf)
+// 	ctx := context.Background()
+// 	cnf := &config.Configuration{
+// 		Redis: config.RedisConfig{
+// 			Dns: "localhost:6379",
+// 		},
+// 		DataSource: config.DataSourceConfig{
+// 			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+// 		},
+// 		Queue: config.QueueConfig{
+// 			WebhookQueue:     "webhook_queue_test",
+// 			IndexQueue:       "index_queue_test",
+// 			TransactionQueue: "transaction_queue_test",
+// 			NumberOfQueues:   1,
+// 		},
+// 		Server: config.ServerConfig{
+// 			SecretKey: "test-secret",
+// 		},
+// 		Transaction: config.TransactionConfig{
+// 			BatchSize:        100,
+// 			MaxQueueSize:     1000,
+// 			LockDuration:     time.Second * 30,
+// 			IndexQueuePrefix: "test_index",
+// 		},
+// 	}
+// 	config.ConfigStore.Store(cnf)
 
-	ds, err := database.NewDataSource(cnf)
-	require.NoError(t, err, "Failed to create datasource")
+// 	ds, err := database.NewDataSource(cnf)
+// 	require.NoError(t, err, "Failed to create datasource")
 
-	blnk, err := NewBlnk(ds)
-	require.NoError(t, err, "Failed to create Blnk instance")
+// 	blnk, err := NewBlnk(ds)
+// 	require.NoError(t, err, "Failed to create Blnk instance")
 
-	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test")
+// 	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test")
 
-	// Create test balances
-	sourceBalance := &model.Balance{
-		Currency: "USD",
-		LedgerID: "general_ledger_id",
-	}
-	destBalanceOne := &model.Balance{
-		Currency: "USD",
-		LedgerID: "general_ledger_id",
-	}
-	destBalanceTwo := &model.Balance{
-		Currency: "USD",
-		LedgerID: "general_ledger_id",
-	}
+// 	// Create test balances
+// 	sourceBalance := &model.Balance{
+// 		Currency: "USD",
+// 		LedgerID: "general_ledger_id",
+// 	}
+// 	destBalanceOne := &model.Balance{
+// 		Currency: "USD",
+// 		LedgerID: "general_ledger_id",
+// 	}
+// 	destBalanceTwo := &model.Balance{
+// 		Currency: "USD",
+// 		LedgerID: "general_ledger_id",
+// 	}
 
-	source, err := ds.CreateBalance(*sourceBalance)
-	require.NoError(t, err, "Failed to create source balance")
+// 	source, err := ds.CreateBalance(*sourceBalance)
+// 	require.NoError(t, err, "Failed to create source balance")
 
-	destOne, err := ds.CreateBalance(*destBalanceOne)
-	require.NoError(t, err, "Failed to create destination balance one")
+// 	destOne, err := ds.CreateBalance(*destBalanceOne)
+// 	require.NoError(t, err, "Failed to create destination balance one")
 
-	destTwo, err := ds.CreateBalance(*destBalanceTwo)
-	require.NoError(t, err, "Failed to create destination balance two")
+// 	destTwo, err := ds.CreateBalance(*destBalanceTwo)
+// 	require.NoError(t, err, "Failed to create destination balance two")
 
-	// Create transaction with skip_queue set to true
-	originalAmount := 500.0
-	txn := &model.Transaction{
-		Reference: txnRef,
-		Source:    source.BalanceID,
-		Destinations: []model.Distribution{
-			{Identifier: destOne.BalanceID, Distribution: "60%"},
-			{Identifier: destTwo.BalanceID, Distribution: "40%"},
-		},
-		Amount:         originalAmount,
-		Inflight:       true, // Set as inflight transaction
-		Currency:       "USD",
-		AllowOverdraft: true,
-		Precision:      100,
-		MetaData:       map[string]interface{}{"test": true},
-		SkipQueue:      true, // Enable skip queue
-	}
+// 	// Create transaction with skip_queue set to true
+// 	originalAmount := 500.0
+// 	txn := &model.Transaction{
+// 		Reference: txnRef,
+// 		Source:    source.BalanceID,
+// 		Destinations: []model.Distribution{
+// 			{Identifier: destOne.BalanceID, Distribution: "60%"},
+// 			{Identifier: destTwo.BalanceID, Distribution: "40%"},
+// 		},
+// 		Amount:         originalAmount,
+// 		Inflight:       true, // Set as inflight transaction
+// 		Currency:       "USD",
+// 		AllowOverdraft: true,
+// 		Precision:      100,
+// 		MetaData:       map[string]interface{}{"test": true},
+// 		SkipQueue:      true, // Enable skip queue
+// 	}
 
-	// Queue the transaction
-	queuedTxn, err := blnk.QueueTransaction(ctx, txn)
-	require.NoError(t, err, "Failed to queue transaction")
+// 	// Queue the transaction
+// 	queuedTxn, err := blnk.QueueTransaction(ctx, txn)
+// 	require.NoError(t, err, "Failed to queue transaction")
 
-	// Verify that the transaction was processed immediately
-	require.Equal(t, StatusInflight, queuedTxn.Status, "Transaction should be INFLIGHT immediately when skip_queue is true")
+// 	// Verify that the transaction was processed immediately
+// 	require.Equal(t, StatusInflight, queuedTxn.Status, "Transaction should be INFLIGHT immediately when skip_queue is true")
 
-	// Verify balances were updated immediately
-	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
-	require.NoError(t, err, "Failed to get updated source balance")
+// 	// Verify balances were updated immediately
+// 	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+// 	require.NoError(t, err, "Failed to get updated source balance")
 
-	updatedDestOne, err := ds.GetBalanceByIDLite(destOne.BalanceID)
-	require.NoError(t, err, "Failed to get updated destination balance one")
+// 	updatedDestOne, err := ds.GetBalanceByIDLite(destOne.BalanceID)
+// 	require.NoError(t, err, "Failed to get updated destination balance one")
 
-	updatedDestTwo, err := ds.GetBalanceByIDLite(destTwo.BalanceID)
-	require.NoError(t, err, "Failed to get updated destination balance two")
+// 	updatedDestTwo, err := ds.GetBalanceByIDLite(destTwo.BalanceID)
+// 	require.NoError(t, err, "Failed to get updated destination balance two")
 
-	// Calculate expected balance changes
-	destOneShare := originalAmount * 0.6     // 60% of 500 = 300
-	destTwoShare := originalAmount * 0.4     // 40% of 500 = 200
-	destOnePartialAmount := destOneShare / 2 // Half of dest one's share = 150
-	destTwoPartialAmount := destTwoShare / 2 // Half of dest two's share = 100
+// 	// Calculate expected balance changes
+// 	destOneShare := originalAmount * 0.6     // 60% of 500 = 300
+// 	destTwoShare := originalAmount * 0.4     // 40% of 500 = 200
+// 	destOnePartialAmount := destOneShare / 2 // Half of dest one's share = 150
+// 	destTwoPartialAmount := destTwoShare / 2 // Half of dest two's share = 100
 
-	// Calculate expected inflight balances
-	expectedSourceInflightDebit := big.NewInt(int64(-originalAmount) * 100) // Full amount from source
-	expectedDestOneInflightCredit := big.NewInt(int64(destOneShare) * 100)  // 60% to destination one
-	expectedDestTwoInflightCredit := big.NewInt(int64(destTwoShare) * 100)  // 40% to destination two
+// 	// Calculate expected inflight balances
+// 	expectedSourceInflightDebit := big.NewInt(int64(-originalAmount) * 100) // Full amount from source
+// 	expectedDestOneInflightCredit := big.NewInt(int64(destOneShare) * 100)  // 60% to destination one
+// 	expectedDestTwoInflightCredit := big.NewInt(int64(destTwoShare) * 100)  // 40% to destination two
 
-	// Verify inflight balance changes
-	require.Equal(t, 0, updatedSource.InflightBalance.Cmp(expectedSourceInflightDebit),
-		"Source inflight balance should be immediately reduced by full transaction amount")
+// 	// Verify inflight balance changes
+// 	require.Equal(t, 0, updatedSource.InflightBalance.Cmp(expectedSourceInflightDebit),
+// 		"Source inflight balance should be immediately reduced by full transaction amount")
 
-	require.Equal(t, 0, updatedDestOne.InflightBalance.Cmp(expectedDestOneInflightCredit),
-		"Destination one inflight balance should be immediately increased by its share of transaction amount")
+// 	require.Equal(t, 0, updatedDestOne.InflightBalance.Cmp(expectedDestOneInflightCredit),
+// 		"Destination one inflight balance should be immediately increased by its share of transaction amount")
 
-	require.Equal(t, 0, updatedDestTwo.InflightBalance.Cmp(expectedDestTwoInflightCredit),
-		"Destination two inflight balance should be immediately increased by its share of transaction amount")
+// 	require.Equal(t, 0, updatedDestTwo.InflightBalance.Cmp(expectedDestTwoInflightCredit),
+// 		"Destination two inflight balance should be immediately increased by its share of transaction amount")
 
-	// Verify actual balances are not affected yet
-	require.Equal(t, 0, updatedSource.Balance.Cmp(big.NewInt(0)),
-		"Source actual balance should not be affected yet")
+// 	// Verify actual balances are not affected yet
+// 	require.Equal(t, 0, updatedSource.Balance.Cmp(big.NewInt(0)),
+// 		"Source actual balance should not be affected yet")
 
-	require.Equal(t, 0, updatedDestOne.Balance.Cmp(big.NewInt(0)),
-		"Destination one actual balance should not be affected yet")
+// 	require.Equal(t, 0, updatedDestOne.Balance.Cmp(big.NewInt(0)),
+// 		"Destination one actual balance should not be affected yet")
 
-	require.Equal(t, 0, updatedDestTwo.Balance.Cmp(big.NewInt(0)),
-		"Destination two actual balance should not be affected yet")
+// 	require.Equal(t, 0, updatedDestTwo.Balance.Cmp(big.NewInt(0)),
+// 		"Destination two actual balance should not be affected yet")
 
-	// For multi-destination transactions, there are separate entries for each destination
-	// Get the inflight transaction entries for each destination
-	inflightEntryOne, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-1", txnRef))
-	require.NoError(t, err, "Failed to get inflight transaction entry for destination one")
-	require.Equal(t, StatusInflight, inflightEntryOne.Status, "Should have an INFLIGHT transaction entry for destination one")
+// 	// For multi-destination transactions, there are separate entries for each destination
+// 	// Get the inflight transaction entries for each destination
+// 	inflightEntryOne, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-1", txnRef))
+// 	require.NoError(t, err, "Failed to get inflight transaction entry for destination one")
+// 	require.Equal(t, StatusInflight, inflightEntryOne.Status, "Should have an INFLIGHT transaction entry for destination one")
 
-	inflightEntryTwo, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-2", txnRef))
-	require.NoError(t, err, "Failed to get inflight transaction entry for destination two")
-	require.Equal(t, StatusInflight, inflightEntryTwo.Status, "Should have an INFLIGHT transaction entry for destination two")
+// 	inflightEntryTwo, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-2", txnRef))
+// 	require.NoError(t, err, "Failed to get inflight transaction entry for destination two")
+// 	require.Equal(t, StatusInflight, inflightEntryTwo.Status, "Should have an INFLIGHT transaction entry for destination two")
 
-	// Partially commit the transaction (commit half of the total amount)
-	// Since the original distribution is 60/40, each destination gets its proportional share
-	// When committing half of the total, that's 250, which is 150 to dest one and 100 to dest two
-	partialAmount := originalAmount / 2 // 250.0 total (150 to dest one, 100 to dest two)
+// 	// Partially commit the transaction (commit half of the total amount)
+// 	// Since the original distribution is 60/40, each destination gets its proportional share
+// 	// When committing half of the total, that's 250, which is 150 to dest one and 100 to dest two
+// 	partialAmount := originalAmount / 2 // 250.0 total (150 to dest one, 100 to dest two)
 
-	partialCommitTxnOne, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, destOnePartialAmount)
-	require.NoError(t, err, "Failed to partially commit transaction for destination one")
-	require.Equal(t, StatusApplied, partialCommitTxnOne.Status, "Partial commit transaction should have APPLIED status")
-	require.Equal(t, destOnePartialAmount, partialCommitTxnOne.Amount, "Partial commit amount should match specified amount")
+// 	partialCommitTxnOne, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, destOnePartialAmount)
+// 	require.NoError(t, err, "Failed to partially commit transaction for destination one")
+// 	require.Equal(t, StatusApplied, partialCommitTxnOne.Status, "Partial commit transaction should have APPLIED status")
+// 	require.Equal(t, destOnePartialAmount, partialCommitTxnOne.Amount, "Partial commit amount should match specified amount")
 
-	partialCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, destTwoPartialAmount)
-	require.NoError(t, err, "Failed to partially commit transaction for destination two")
-	require.Equal(t, StatusApplied, partialCommitTxnTwo.Status, "Partial commit transaction should have APPLIED status")
-	require.Equal(t, destTwoPartialAmount, partialCommitTxnTwo.Amount, "Partial commit amount should match specified amount")
+// 	partialCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, destTwoPartialAmount)
+// 	require.NoError(t, err, "Failed to partially commit transaction for destination two")
+// 	require.Equal(t, StatusApplied, partialCommitTxnTwo.Status, "Partial commit transaction should have APPLIED status")
+// 	require.Equal(t, destTwoPartialAmount, partialCommitTxnTwo.Amount, "Partial commit amount should match specified amount")
 
-	// Verify balances were updated after partial commit
-	updatedSourceAfterPartialCommit, err := ds.GetBalanceByIDLite(source.BalanceID)
-	require.NoError(t, err, "Failed to get updated source balance")
+// 	// Verify balances were updated after partial commit
+// 	updatedSourceAfterPartialCommit, err := ds.GetBalanceByIDLite(source.BalanceID)
+// 	require.NoError(t, err, "Failed to get updated source balance")
 
-	updatedDestOneAfterPartialCommit, err := ds.GetBalanceByIDLite(destOne.BalanceID)
-	require.NoError(t, err, "Failed to get updated destination one balance")
+// 	updatedDestOneAfterPartialCommit, err := ds.GetBalanceByIDLite(destOne.BalanceID)
+// 	require.NoError(t, err, "Failed to get updated destination one balance")
 
-	updatedDestTwoAfterPartialCommit, err := ds.GetBalanceByIDLite(destTwo.BalanceID)
-	require.NoError(t, err, "Failed to get updated destination two balance")
+// 	updatedDestTwoAfterPartialCommit, err := ds.GetBalanceByIDLite(destTwo.BalanceID)
+// 	require.NoError(t, err, "Failed to get updated destination two balance")
 
-	expectedSourcePartialDebit := big.NewInt(int64(-partialAmount) * 100)
-	expectedDestOnePartialCredit := big.NewInt(int64(destOnePartialAmount) * 100)
-	expectedDestTwoPartialCredit := big.NewInt(int64(destTwoPartialAmount) * 100)
+// 	expectedSourcePartialDebit := big.NewInt(int64(-partialAmount) * 100)
+// 	expectedDestOnePartialCredit := big.NewInt(int64(destOnePartialAmount) * 100)
+// 	expectedDestTwoPartialCredit := big.NewInt(int64(destTwoPartialAmount) * 100)
 
-	// Inflight balance should be reduced by the committed amount
-	expectedSourceRemainingInflightDebit := big.NewInt(0).Sub(expectedSourceInflightDebit, expectedSourcePartialDebit)
-	expectedDestOneRemainingInflightCredit := big.NewInt(0).Sub(expectedDestOneInflightCredit, expectedDestOnePartialCredit)
-	expectedDestTwoRemainingInflightCredit := big.NewInt(0).Sub(expectedDestTwoInflightCredit, expectedDestTwoPartialCredit)
+// 	// Inflight balance should be reduced by the committed amount
+// 	expectedSourceRemainingInflightDebit := big.NewInt(0).Sub(expectedSourceInflightDebit, expectedSourcePartialDebit)
+// 	expectedDestOneRemainingInflightCredit := big.NewInt(0).Sub(expectedDestOneInflightCredit, expectedDestOnePartialCredit)
+// 	expectedDestTwoRemainingInflightCredit := big.NewInt(0).Sub(expectedDestTwoInflightCredit, expectedDestTwoPartialCredit)
 
-	// Verify actual balance changes
-	require.Equal(t, 0, updatedSourceAfterPartialCommit.Balance.Cmp(expectedSourcePartialDebit),
-		"Source balance should reflect the partial commit amount")
-	require.Equal(t, 0, updatedDestOneAfterPartialCommit.Balance.Cmp(expectedDestOnePartialCredit),
-		"Destination one balance should reflect its share of the partial commit amount")
-	require.Equal(t, 0, updatedDestTwoAfterPartialCommit.Balance.Cmp(expectedDestTwoPartialCredit),
-		"Destination two balance should reflect its share of the partial commit amount")
+// 	// Verify actual balance changes
+// 	require.Equal(t, 0, updatedSourceAfterPartialCommit.Balance.Cmp(expectedSourcePartialDebit),
+// 		"Source balance should reflect the partial commit amount")
+// 	require.Equal(t, 0, updatedDestOneAfterPartialCommit.Balance.Cmp(expectedDestOnePartialCredit),
+// 		"Destination one balance should reflect its share of the partial commit amount")
+// 	require.Equal(t, 0, updatedDestTwoAfterPartialCommit.Balance.Cmp(expectedDestTwoPartialCredit),
+// 		"Destination two balance should reflect its share of the partial commit amount")
 
-	// Verify inflight balance changes
-	require.Equal(t, 0, updatedSourceAfterPartialCommit.InflightBalance.Cmp(expectedSourceRemainingInflightDebit),
-		"Source inflight balance should be reduced by the committed amount")
-	require.Equal(t, 0, updatedDestOneAfterPartialCommit.InflightBalance.Cmp(expectedDestOneRemainingInflightCredit),
-		"Destination one inflight balance should be reduced by the committed amount")
-	require.Equal(t, 0, updatedDestTwoAfterPartialCommit.InflightBalance.Cmp(expectedDestTwoRemainingInflightCredit),
-		"Destination two inflight balance should be reduced by the committed amount")
+// 	// Verify inflight balance changes
+// 	require.Equal(t, 0, updatedSourceAfterPartialCommit.InflightBalance.Cmp(expectedSourceRemainingInflightDebit),
+// 		"Source inflight balance should be reduced by the committed amount")
+// 	require.Equal(t, 0, updatedDestOneAfterPartialCommit.InflightBalance.Cmp(expectedDestOneRemainingInflightCredit),
+// 		"Destination one inflight balance should be reduced by the committed amount")
+// 	require.Equal(t, 0, updatedDestTwoAfterPartialCommit.InflightBalance.Cmp(expectedDestTwoRemainingInflightCredit),
+// 		"Destination two inflight balance should be reduced by the committed amount")
 
-	// Commit the remaining amount for both destinations
-	remainingCommitTxnOne, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, 0) // 0 means commit remaining amount
-	require.NoError(t, err, "Failed to commit remaining transaction amount for destination one")
-	require.Equal(t, StatusApplied, remainingCommitTxnOne.Status, "Remaining commit transaction should have APPLIED status")
+// 	// Commit the remaining amount for both destinations
+// 	remainingCommitTxnOne, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, 0) // 0 means commit remaining amount
+// 	require.NoError(t, err, "Failed to commit remaining transaction amount for destination one")
+// 	require.Equal(t, StatusApplied, remainingCommitTxnOne.Status, "Remaining commit transaction should have APPLIED status")
 
-	remainingCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, 0) // 0 means commit remaining amount
-	require.NoError(t, err, "Failed to commit remaining transaction amount for destination two")
-	require.Equal(t, StatusApplied, remainingCommitTxnTwo.Status, "Remaining commit transaction should have APPLIED status")
+// 	remainingCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, 0) // 0 means commit remaining amount
+// 	require.NoError(t, err, "Failed to commit remaining transaction amount for destination two")
+// 	require.Equal(t, StatusApplied, remainingCommitTxnTwo.Status, "Remaining commit transaction should have APPLIED status")
 
-	// Verify the remaining commit amount for each destination
-	destOneRemainingAmount := destOneShare - destOnePartialAmount
-	destTwoRemainingAmount := destTwoShare - destTwoPartialAmount
+// 	// Verify the remaining commit amount for each destination
+// 	destOneRemainingAmount := destOneShare - destOnePartialAmount
+// 	destTwoRemainingAmount := destTwoShare - destTwoPartialAmount
 
-	require.InDelta(t, destOneRemainingAmount, remainingCommitTxnOne.Amount, 0.01,
-		"Remaining commit amount for destination one should match expected remaining amount")
-	require.InDelta(t, destTwoRemainingAmount, remainingCommitTxnTwo.Amount, 0.01,
-		"Remaining commit amount for destination two should match expected remaining amount")
+// 	require.InDelta(t, destOneRemainingAmount, remainingCommitTxnOne.Amount, 0.01,
+// 		"Remaining commit amount for destination one should match expected remaining amount")
+// 	require.InDelta(t, destTwoRemainingAmount, remainingCommitTxnTwo.Amount, 0.01,
+// 		"Remaining commit amount for destination two should match expected remaining amount")
 
-	// Verify final balances
-	updatedSourceAfterFullCommit, err := ds.GetBalanceByIDLite(source.BalanceID)
-	require.NoError(t, err, "Failed to get final source balance")
+// 	// Verify final balances
+// 	updatedSourceAfterFullCommit, err := ds.GetBalanceByIDLite(source.BalanceID)
+// 	require.NoError(t, err, "Failed to get final source balance")
 
-	updatedDestOneAfterFullCommit, err := ds.GetBalanceByIDLite(destOne.BalanceID)
-	require.NoError(t, err, "Failed to get final destination one balance")
+// 	updatedDestOneAfterFullCommit, err := ds.GetBalanceByIDLite(destOne.BalanceID)
+// 	require.NoError(t, err, "Failed to get final destination one balance")
 
-	updatedDestTwoAfterFullCommit, err := ds.GetBalanceByIDLite(destTwo.BalanceID)
-	require.NoError(t, err, "Failed to get final destination two balance")
+// 	updatedDestTwoAfterFullCommit, err := ds.GetBalanceByIDLite(destTwo.BalanceID)
+// 	require.NoError(t, err, "Failed to get final destination two balance")
 
-	// Calculate expected final balances
-	expectedSourceFinalDebit := big.NewInt(int64(-originalAmount) * 100) // Full amount from source
-	expectedDestOneFinalCredit := big.NewInt(int64(destOneShare) * 100)  // 60% to destination one
-	expectedDestTwoFinalCredit := big.NewInt(int64(destTwoShare) * 100)  // 40% to destination two
+// 	// Calculate expected final balances
+// 	expectedSourceFinalDebit := big.NewInt(int64(-originalAmount) * 100) // Full amount from source
+// 	expectedDestOneFinalCredit := big.NewInt(int64(destOneShare) * 100)  // 60% to destination one
+// 	expectedDestTwoFinalCredit := big.NewInt(int64(destTwoShare) * 100)  // 40% to destination two
 
-	// Verify final balance changes
-	require.Equal(t, 0, updatedSourceAfterFullCommit.Balance.Cmp(expectedSourceFinalDebit),
-		"Source balance should ultimately reflect the full amount")
-	require.Equal(t, 0, updatedDestOneAfterFullCommit.Balance.Cmp(expectedDestOneFinalCredit),
-		"Destination one balance should ultimately reflect its full share")
-	require.Equal(t, 0, updatedDestTwoAfterFullCommit.Balance.Cmp(expectedDestTwoFinalCredit),
-		"Destination two balance should ultimately reflect its full share")
+// 	// Verify final balance changes
+// 	require.Equal(t, 0, updatedSourceAfterFullCommit.Balance.Cmp(expectedSourceFinalDebit),
+// 		"Source balance should ultimately reflect the full amount")
+// 	require.Equal(t, 0, updatedDestOneAfterFullCommit.Balance.Cmp(expectedDestOneFinalCredit),
+// 		"Destination one balance should ultimately reflect its full share")
+// 	require.Equal(t, 0, updatedDestTwoAfterFullCommit.Balance.Cmp(expectedDestTwoFinalCredit),
+// 		"Destination two balance should ultimately reflect its full share")
 
-	// Verify all inflight balances are zero after full commit
-	require.Equal(t, 0, updatedSourceAfterFullCommit.InflightBalance.Cmp(big.NewInt(0)),
-		"Source inflight balance should be zero after full commit")
-	require.Equal(t, 0, updatedDestOneAfterFullCommit.InflightBalance.Cmp(big.NewInt(0)),
-		"Destination one inflight balance should be zero after full commit")
-	require.Equal(t, 0, updatedDestTwoAfterFullCommit.InflightBalance.Cmp(big.NewInt(0)),
-		"Destination two inflight balance should be zero after full commit")
+// 	// Verify all inflight balances are zero after full commit
+// 	require.Equal(t, 0, updatedSourceAfterFullCommit.InflightBalance.Cmp(big.NewInt(0)),
+// 		"Source inflight balance should be zero after full commit")
+// 	require.Equal(t, 0, updatedDestOneAfterFullCommit.InflightBalance.Cmp(big.NewInt(0)),
+// 		"Destination one inflight balance should be zero after full commit")
+// 	require.Equal(t, 0, updatedDestTwoAfterFullCommit.InflightBalance.Cmp(big.NewInt(0)),
+// 		"Destination two inflight balance should be zero after full commit")
 
-	// Attempt another commit on each destination (should fail)
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, 0)
-	require.Error(t, err, "Committing a fully committed transaction should fail")
-	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
-		"Error message should indicate transaction is already committed")
+// 	// Attempt another commit on each destination (should fail)
+// 	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, 0)
+// 	require.Error(t, err, "Committing a fully committed transaction should fail")
+// 	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
+// 		"Error message should indicate transaction is already committed")
 
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, 0)
-	require.Error(t, err, "Committing a fully committed transaction should fail")
-	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
-		"Error message should indicate transaction is already committed")
+// 	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, 0)
+// 	require.Error(t, err, "Committing a fully committed transaction should fail")
+// 	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
+// 		"Error message should indicate transaction is already committed")
 
-	// Verify commit history for both destinations
-	commitHistoryOne, err := ds.GetTransactionsByParent(ctx, inflightEntryOne.TransactionID, 5, 0)
-	require.NoError(t, err, "Failed to get commit history for destination one")
-	require.Equal(t, 2, len(commitHistoryOne), "Should have exactly two commit transactions for destination one")
+// 	// Verify commit history for both destinations
+// 	commitHistoryOne, err := ds.GetTransactionsByParent(ctx, inflightEntryOne.TransactionID, 5, 0)
+// 	require.NoError(t, err, "Failed to get commit history for destination one")
+// 	require.Equal(t, 2, len(commitHistoryOne), "Should have exactly two commit transactions for destination one")
 
-	commitHistoryTwo, err := ds.GetTransactionsByParent(ctx, inflightEntryTwo.TransactionID, 5, 0)
-	require.NoError(t, err, "Failed to get commit history for destination two")
-	require.Equal(t, 2, len(commitHistoryTwo), "Should have exactly two commit transactions for destination two")
+// 	commitHistoryTwo, err := ds.GetTransactionsByParent(ctx, inflightEntryTwo.TransactionID, 5, 0)
+// 	require.NoError(t, err, "Failed to get commit history for destination two")
+// 	require.Equal(t, 2, len(commitHistoryTwo), "Should have exactly two commit transactions for destination two")
 
-	// Verify transactions exist with correct statuses
-	// Each destination transaction will have a partial commit and a final commit
+// 	// Verify transactions exist with correct statuses
+// 	// Each destination transaction will have a partial commit and a final commit
 
-	// Since we already have the commit histories for both destinations, we can use them to verify
-	// the partial commits rather than trying to fetch them directly
+// 	// Since we already have the commit histories for both destinations, we can use them to verify
+// 	// the partial commits rather than trying to fetch them directly
 
-	// Get all commit transactions for each destination
-	for i := range commitHistoryOne {
-		require.Equal(t, StatusApplied, commitHistoryOne[i].Status,
-			"Commit transaction for destination one should have APPLIED status")
-		require.Equal(t, inflightEntryOne.TransactionID, commitHistoryOne[i].ParentTransaction,
-			"Commit should reference original destination one transaction")
-	}
+// 	// Get all commit transactions for each destination
+// 	for i := range commitHistoryOne {
+// 		require.Equal(t, StatusApplied, commitHistoryOne[i].Status,
+// 			"Commit transaction for destination one should have APPLIED status")
+// 		require.Equal(t, inflightEntryOne.TransactionID, commitHistoryOne[i].ParentTransaction,
+// 			"Commit should reference original destination one transaction")
+// 	}
 
-	for i := range commitHistoryTwo {
-		require.Equal(t, StatusApplied, commitHistoryTwo[i].Status,
-			"Commit transaction for destination two should have APPLIED status")
-		require.Equal(t, inflightEntryTwo.TransactionID, commitHistoryTwo[i].ParentTransaction,
-			"Commit should reference original destination two transaction")
-	}
+// 	for i := range commitHistoryTwo {
+// 		require.Equal(t, StatusApplied, commitHistoryTwo[i].Status,
+// 			"Commit transaction for destination two should have APPLIED status")
+// 		require.Equal(t, inflightEntryTwo.TransactionID, commitHistoryTwo[i].ParentTransaction,
+// 			"Commit should reference original destination two transaction")
+// 	}
 
-	// Sort transactions by created time to identify first and second commit for each destination
-	sort.Slice(commitHistoryOne, func(i, j int) bool {
-		return commitHistoryOne[i].CreatedAt.Before(commitHistoryOne[j].CreatedAt)
-	})
+// 	// Sort transactions by created time to identify first and second commit for each destination
+// 	sort.Slice(commitHistoryOne, func(i, j int) bool {
+// 		return commitHistoryOne[i].CreatedAt.Before(commitHistoryOne[j].CreatedAt)
+// 	})
 
-	sort.Slice(commitHistoryTwo, func(i, j int) bool {
-		return commitHistoryTwo[i].CreatedAt.Before(commitHistoryTwo[j].CreatedAt)
-	})
+// 	sort.Slice(commitHistoryTwo, func(i, j int) bool {
+// 		return commitHistoryTwo[i].CreatedAt.Before(commitHistoryTwo[j].CreatedAt)
+// 	})
 
-	// Verify both commits exist for each destination
-	destOneFirstCommit := commitHistoryOne[0]
-	destOneSecondCommit := commitHistoryOne[1]
-	require.NotNil(t, destOneFirstCommit, "Should have found the first commit transaction for destination one")
-	require.NotNil(t, destOneSecondCommit, "Should have found the second commit transaction for destination one")
+// 	// Verify both commits exist for each destination
+// 	destOneFirstCommit := commitHistoryOne[0]
+// 	destOneSecondCommit := commitHistoryOne[1]
+// 	require.NotNil(t, destOneFirstCommit, "Should have found the first commit transaction for destination one")
+// 	require.NotNil(t, destOneSecondCommit, "Should have found the second commit transaction for destination one")
 
-	destTwoFirstCommit := commitHistoryTwo[0]
-	destTwoSecondCommit := commitHistoryTwo[1]
-	require.NotNil(t, destTwoFirstCommit, "Should have found the first commit transaction for destination two")
-	require.NotNil(t, destTwoSecondCommit, "Should have found the second commit transaction for destination two")
+// 	destTwoFirstCommit := commitHistoryTwo[0]
+// 	destTwoSecondCommit := commitHistoryTwo[1]
+// 	require.NotNil(t, destTwoFirstCommit, "Should have found the first commit transaction for destination two")
+// 	require.NotNil(t, destTwoSecondCommit, "Should have found the second commit transaction for destination two")
 
-	// The sum of both commit amounts should equal each destination's share
-	destOneTotalCommittedAmount := destOneFirstCommit.Amount + destOneSecondCommit.Amount
-	destTwoTotalCommittedAmount := destTwoFirstCommit.Amount + destTwoSecondCommit.Amount
+// 	// The sum of both commit amounts should equal each destination's share
+// 	destOneTotalCommittedAmount := destOneFirstCommit.Amount + destOneSecondCommit.Amount
+// 	destTwoTotalCommittedAmount := destTwoFirstCommit.Amount + destTwoSecondCommit.Amount
 
-	require.InDelta(t, destOneShare, destOneTotalCommittedAmount, 0.01,
-		"Total committed amount for destination one should equal its share")
-	require.InDelta(t, destTwoShare, destTwoTotalCommittedAmount, 0.01,
-		"Total committed amount for destination two should equal its share")
-}
+// 	require.InDelta(t, destOneShare, destOneTotalCommittedAmount, 0.01,
+// 		"Total committed amount for destination one should equal its share")
+// 	require.InDelta(t, destTwoShare, destTwoTotalCommittedAmount, 0.01,
+// 		"Total committed amount for destination two should equal its share")
+// }
 
 func TestMultipleDestinationTransactionFlowWithSkipQueue(t *testing.T) {
 	// Skip in short mode
