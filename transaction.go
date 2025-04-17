@@ -1916,8 +1916,6 @@ func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string, skip
 	return queuedRefundTxn, nil
 }
 
-// --- Bulk Transaction Logic moved from API Layer ---
-
 // processBulkTransactions prepares and queues all transactions in a batch with the given batch ID
 func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*model.Transaction, batchID string, inflight bool) error {
 	for i, txn := range transactions {
@@ -2048,8 +2046,6 @@ func (l *Blnk) handleAsyncBulkTransactionFailure(ctx context.Context, err error,
 	// Send webhook with the complete error message including rollback status
 	l.sendBulkTransactionWebhook(batchID, "failed", errorMessage, 0) // 0 count for failed batch
 }
-
-// --- End of Bulk Transaction Logic ---
 
 // CreateBulkTransactions handles the creation of multiple transactions in a batch.
 // If atomic is true: Any failure will cause all transactions to be rolled back (or voided if inflight).
