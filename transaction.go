@@ -2120,7 +2120,7 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 			BatchID: batchID,
 			Status:  "failed",
 			Error:   responseError,
-		}, fmt.Errorf(responseError) // Return the error itself as well
+		}, errors.New(responseError) // Return the error itself as well
 	}
 
 	// Synchronous success
