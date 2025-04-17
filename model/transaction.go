@@ -372,3 +372,19 @@ func (transaction *Transaction) SplitTransactionPrecise(ctx context.Context) ([]
 	))
 	return transactions, nil
 }
+
+// BulkTransactionRequest encapsulates the data needed for a bulk transaction request.
+type BulkTransactionRequest struct {
+	Transactions []*Transaction `json:"transactions"`
+	Inflight     bool           `json:"inflight"`
+	Atomic       bool           `json:"atomic"`
+	RunAsync     bool           `json:"run_async"`
+}
+
+// BulkTransactionResult represents the outcome of a bulk transaction operation.
+type BulkTransactionResult struct {
+	BatchID          string `json:"batch_id"`
+	Status           string `json:"status"` // e.g., "processing", "applied", "inflight", "failed"
+	TransactionCount int    `json:"transaction_count,omitempty"`
+	Error            string `json:"error,omitempty"`
+}

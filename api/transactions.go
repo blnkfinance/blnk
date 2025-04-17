@@ -16,15 +16,11 @@ limitations under the License.
 package api
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/jerry-enebeli/blnk"
 	model2 "github.com/jerry-enebeli/blnk/api/model"
 	"github.com/jerry-enebeli/blnk/model"
 
@@ -246,281 +242,44 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 }
 
 // CreateBulkTransactions handles the creation of multiple transactions in a batch.
-// If atomic is true: Any failure will cause all transactions to be rolled back
-// If atomic is false: Failures will be reported but previous transactions remain unaffected
-// If run_async is true: Processing happens in background with webhook notifications
+// It parses the request, calls the Blnk service to handle the core logic,
+// and returns the appropriate HTTP response based on the result.
 func (a Api) CreateBulkTransactions(c *gin.Context) {
-	// Parse the request
-	req, err := a.parseBulkTransactionRequest(c)
-	if err != nil {
-		return // Error response already sent in parseBulkTransactionRequest
-	}
-
-	// Generate batch ID (parent transaction ID)
-	batchID := model.GenerateUUIDWithSuffix("bulk")
-
-	// Check if this should be run asynchronously
-	if req.RunAsync {
-		// Return immediate response with batch ID
-		a.respondWithAsyncAcknowledgement(c, batchID)
-
-		// Process in background
-		go func() {
-			// Create a background context with timeout
-			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-			defer cancel()
-
-			logrus.Infof("Creating bulk transaction batch %s with %d transactions (async, atomic: %v, inflight: %v)",
-				batchID, len(req.Transactions), req.Atomic, req.Inflight)
-
-			// Process transactions in batch
-			err := a.processBulkTransactions(bgCtx, req.Transactions, batchID, req.Inflight)
-
-			if err != nil {
-				// Handle failure based on atomicity setting and transaction type
-				a.handleAsyncBulkTransactionFailure(bgCtx, err, batchID, req.Atomic, req.Inflight)
-
-				// Send webhook notification for failure
-				a.sendBulkTransactionWebhook(batchID, "failed", err.Error(), len(req.Transactions))
-			} else {
-				// Send webhook notification for success
-				status := "inflight"
-				if !req.Inflight {
-					status = "applied"
-				}
-				a.sendBulkTransactionWebhook(batchID, status, "", len(req.Transactions))
-			}
-		}()
-
-		return
-	}
-
-	// Synchronous processing (original flow)
-	logrus.Infof("Creating bulk transaction batch %s with %d transactions (atomic: %v, inflight: %v)",
-		batchID, len(req.Transactions), req.Atomic, req.Inflight)
-
-	// Process transactions in batch
-	if err := a.processBulkTransactions(c.Request.Context(), req.Transactions, batchID, req.Inflight); err != nil {
-		// Handle failure based on atomicity setting and transaction type
-		a.handleBulkTransactionFailure(c, err, batchID, req.Atomic, req.Inflight)
-		return
-	}
-
-	// Send success response
-	a.respondWithBulkTransactionSuccess(c, batchID, req)
-}
-
-// sendBulkTransactionWebhook sends a webhook notification for a bulk transaction result
-func (a Api) sendBulkTransactionWebhook(batchID, status, errorMsg string, transactionCount int) {
-	// Create payload with or without error info depending on status
-	payload := map[string]interface{}{
-		"batch_id":  batchID,
-		"status":    status,
-		"timestamp": time.Now(),
-	}
-
-	// Only include transaction count for success cases
-	if status != "failed" {
-		payload["transaction_count"] = transactionCount
-	}
-
-	// Include error details for failure cases
-	if status == "failed" && errorMsg != "" {
-		payload["error"] = errorMsg
-	}
-
-	err := blnk.SendWebhook(blnk.NewWebhook{
-		Event:   "bulk_transaction." + status,
-		Payload: payload,
-	})
-	if err != nil {
-		logrus.Errorf("Failed to send webhook notification for batch %s: %s", batchID, err.Error())
-	}
-}
-
-// handleAsyncBulkTransactionFailure handles failures in asynchronous processing
-// and builds a detailed error message including rollback status
-func (a Api) handleAsyncBulkTransactionFailure(ctx context.Context, err error, batchID string, isAtomic bool, isInflight bool) {
-	logrus.Errorf("Async bulk transaction error for batch %s: %s", batchID, err.Error())
-
-	var errorMessage string
-
-	if isAtomic {
-		action, rollbackErr := a.rollbackBatchTransactions(ctx, batchID, isInflight)
-
-		if rollbackErr != nil {
-			errorMessage = fmt.Sprintf("%s. Failed to roll back all transactions: %s", err.Error(), rollbackErr.Error())
-			logrus.Errorf("Failed to roll back batch %s: %s", batchID, rollbackErr.Error())
-		} else {
-			errorMessage = fmt.Sprintf("%s. All transactions in this batch have been %s.", err.Error(), action)
-			logrus.Infof("Successfully rolled back async batch %s (%s)", batchID, action)
-		}
-	} else {
-		// If not atomic, just include the original error and note about no rollback
-		errorMessage = fmt.Sprintf("%s. Previous transactions were not rolled back.", err.Error())
-	}
-
-	// Send webhook with the complete error message including rollback status
-	a.sendBulkTransactionWebhook(batchID, "failed", errorMessage, 0)
-}
-
-// respondWithAsyncAcknowledgement sends an immediate acknowledgement for async requests
-func (a Api) respondWithAsyncAcknowledgement(c *gin.Context, batchID string) {
-	c.JSON(http.StatusAccepted, gin.H{
-		"message":  "Bulk transaction processing started",
-		"batch_id": batchID,
-		"status":   "processing",
-	})
-}
-
-// parseBulkTransactionRequest parses and validates the bulk transaction request body
-func (a Api) parseBulkTransactionRequest(c *gin.Context) (*struct {
-	Transactions []*model.Transaction `json:"transactions"`
-	Inflight     bool                 `json:"inflight"`
-	Atomic       bool                 `json:"atomic"`
-	RunAsync     bool                 `json:"run_async"`
-}, error) {
-	var req struct {
-		Transactions []*model.Transaction `json:"transactions"`
-		Inflight     bool                 `json:"inflight"`
-		Atomic       bool                 `json:"atomic"`
-		RunAsync     bool                 `json:"run_async"`
-	}
-
+	// Parse the request into the model struct
+	var req model.BulkTransactionRequest
 	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return nil, err
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
 	}
 
-	// Could add additional validation here if needed
+	// Call the service layer method to handle bulk transaction creation
+	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), &req)
 
-	return &req, nil
-}
-
-// respondWithBulkTransactionSuccess sends a success response for bulk transactions
-func (a Api) respondWithBulkTransactionSuccess(c *gin.Context, batchID string, req *struct {
-	Transactions []*model.Transaction `json:"transactions"`
-	Inflight     bool                 `json:"inflight"`
-	Atomic       bool                 `json:"atomic"`
-	RunAsync     bool                 `json:"run_async"`
-}) {
-	var status string
-	if req.Inflight {
-		status = "inflight"
-	} else {
-		status = "applied"
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"batch_id":          batchID,
-		"status":            status,
-		"transaction_count": len(req.Transactions),
-	})
-}
-
-// processBulkTransactions prepares and queues all transactions in a batch with the given batch ID
-func (a Api) processBulkTransactions(ctx context.Context, transactions []*model.Transaction, batchID string, inflight bool) error {
-	for i, txn := range transactions {
-		// Set transaction properties
-		txn.Inflight = inflight
-		txn.SkipQueue = true
-		txn.ParentTransaction = batchID
-
-		// Add sequence number to metadata
-		if txn.MetaData == nil {
-			txn.MetaData = make(map[string]interface{})
-		}
-		txn.MetaData["sequence"] = i + 1
-
-		// Queue the transaction
-		if _, err := a.blnk.QueueTransaction(ctx, txn); err != nil {
-			// Create a more descriptive error that includes transaction reference details
-			return fmt.Errorf("failed to queue transaction %d (Reference: %s, Source: %s, Destination: %s, Amount: %.2f): %w",
-				i+1, txn.Reference, txn.Source, txn.Destination, txn.Amount, err)
-		}
-	}
-	return nil
-}
-
-// handleBulkTransactionFailure handles failures in bulk transaction processing
-// based on whether the operation was atomic or not, and whether transactions are inflight
-func (a Api) handleBulkTransactionFailure(c *gin.Context, err error, batchID string, isAtomic bool, isInflight bool) {
-	logrus.Errorf("Bulk transaction error for batch %s: %s", batchID, err.Error())
-
-	if isAtomic {
-		action, rollbackErr := a.rollbackBatchTransactions(c.Request.Context(), batchID, isInflight)
-
-		var message string
-		if rollbackErr != nil {
-			message = fmt.Sprintf("%s. Failed to roll back all transactions: %s", err.Error(), rollbackErr.Error())
-		} else {
-			message = fmt.Sprintf("%s. All transactions in this batch have been %s.", err.Error(), action)
-		}
-
-		a.respondWithBatchError(c, message, batchID)
-	} else {
-		// If not atomic, just return the error without rollback
-		a.respondWithBatchError(c, fmt.Sprintf("%s. Previous transactions were not rolled back.", err.Error()), batchID)
-	}
-}
-
-// rollbackBatchTransactions performs a rollback of transactions in a batch
-// Returns the action performed (voided/refunded) and any error that occurred
-func (a Api) rollbackBatchTransactions(ctx context.Context, batchID string, isInflight bool) (string, error) {
-	var action string
-	var rollbackErr error
-
-	if isInflight {
-		action, rollbackErr = a.voidInflightBatchTransactions(ctx, batchID)
-	} else {
-		action, rollbackErr = a.refundNonInflightBatchTransactions(ctx, batchID)
-	}
-
-	a.logRollbackResult(batchID, action, rollbackErr)
-	return action, rollbackErr
-}
-
-// voidInflightBatchTransactions voids all inflight transactions in a batch
-func (a Api) voidInflightBatchTransactions(ctx context.Context, batchID string) (string, error) {
-	_, err := a.blnk.ProcessTransactionInBatches(
-		ctx,
-		batchID,
-		0,
-		1,
-		false,
-		a.blnk.GetInflightTransactionsByParentID,
-		a.blnk.VoidWorker,
-	)
-	return "voided", err
-}
-
-// refundNonInflightBatchTransactions refunds all non-inflight transactions in a batch
-func (a Api) refundNonInflightBatchTransactions(ctx context.Context, batchID string) (string, error) {
-	_, err := a.blnk.ProcessTransactionInBatches(
-		ctx,
-		batchID,
-		0,
-		1,
-		false,
-		a.blnk.GetRefundableTransactionsByParentID,
-		a.blnk.RefundWorker,
-	)
-	return "refunded", err
-}
-
-// logRollbackResult logs the outcome of a rollback operation
-func (a Api) logRollbackResult(batchID string, action string, err error) {
+	// Handle the response based on the result and error from the service layer
 	if err != nil {
-		logrus.Errorf("Failed to rollback batch transactions for %s: %s", batchID, err.Error())
-	} else {
-		logrus.Infof("Successfully rolled back atomic batch %s (%s)", batchID, action)
+		// If there was an error during synchronous processing
+		logrus.Errorf("Bulk transaction API error for batch %s: %v", result.BatchID, err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":    result.Error, // Use the detailed error from the result
+			"batch_id": result.BatchID,
+		})
+		return
 	}
-}
 
-// respondWithBatchError sends a consistent error response for batch operations
-func (a Api) respondWithBatchError(c *gin.Context, message string, batchID string) {
-	c.JSON(http.StatusBadRequest, gin.H{
-		"error":    message,
-		"batch_id": batchID,
-	})
+	// Handle successful responses
+	if req.RunAsync {
+		// Async request acknowledged
+		c.JSON(http.StatusAccepted, gin.H{
+			"message":  "Bulk transaction processing started",
+			"batch_id": result.BatchID,
+			"status":   result.Status, // Should be "processing"
+		})
+	} else {
+		// Synchronous request completed successfully
+		c.JSON(http.StatusCreated, gin.H{
+			"batch_id":          result.BatchID,
+			"status":            result.Status, // Should be "applied" or "inflight"
+			"transaction_count": result.TransactionCount,
+		})
+	}
 }
