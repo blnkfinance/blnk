@@ -1004,6 +1004,14 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 
 	span.AddEvent("Transaction rejected", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
+	if transaction.Atomic {
+		logrus.Info(transaction.ParentTransaction, "parent transaction", transaction.Atomic, "atomic", transaction.Inflight, "inflight")
+		parentTransactionID, ok := transaction.MetaData["QUEUED_PARENT_TRANSACTION"].(string)
+		if !ok {
+			return nil, fmt.Errorf("parent transaction ID not found in meta data")
+		}
+		l.handleAsyncBulkTransactionFailure(ctx, errors.New("transaction rejected"), parentTransactionID, transaction.Atomic, transaction.Inflight)
+	}
 	return transaction, nil
 }
 
@@ -1515,6 +1523,9 @@ func (l *Blnk) processTxns(ctx context.Context, originalTxn *model.Transaction, 
 			for i, txn := range splitTxns {
 				recorded, err := l.RecordTransaction(ctx, txn)
 				if err != nil {
+					if txn.Atomic {
+						l.handleAsyncBulkTransactionFailure(ctx, err, originalTxnID, true, txn.Inflight)
+					}
 					return nil, fmt.Errorf("failed to record split transaction %d: %w", i, err)
 				}
 				result[i] = recorded

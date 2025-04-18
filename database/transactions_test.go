@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"regexp"
 	"testing"
 	"time"
 
@@ -241,7 +242,40 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	)
 
 	// Expect the query with the correct WHERE clause
-	mock.ExpectQuery("SELECT .+ FROM blnk.transactions WHERE \\(transaction_id = \\$1 OR parent_transaction = \\$1\\) AND status = 'INFLIGHT'").
+	// Updated the expected query to match the complex CTE and UNION ALL structure
+	expectedQuery := `
+		WITH inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
+			AND status = 'INFLIGHT'
+		), 
+		queued_inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1) 
+			AND status = 'QUEUED' AND meta_data->>'inflight' = 'true'
+			-- Don't include parent transactions that have children with INFLIGHT status
+			AND NOT EXISTS (
+				SELECT 1 
+				FROM blnk.transactions child
+				WHERE child.parent_transaction = transaction_id AND child.status = 'INFLIGHT'
+			)
+		)
+		
+		SELECT * FROM inflight_transactions
+		UNION ALL
+		-- Only include queued_inflight if there are no inflight transactions
+		SELECT * FROM queued_inflight_transactions 
+		WHERE NOT EXISTS (SELECT 1 FROM inflight_transactions)
+		
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	// Use regexp.QuoteMeta to escape regex special characters for sqlmock
+	mock.ExpectQuery(regexp.QuoteMeta(expectedQuery)).
 		WithArgs(parentID, 10, int64(0)). // Add all three expected arguments
 		WillReturnRows(mockRows)
 
@@ -264,7 +298,40 @@ func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	parentID := "parent123"
-	mock.ExpectQuery("SELECT .+ FROM blnk.transactions WHERE \\(transaction_id = \\$1 OR parent_transaction = \\$1\\) AND status = 'INFLIGHT'").
+	// Updated the expected query to match the complex CTE and UNION ALL structure
+	expectedQuery := `
+		WITH inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
+			AND status = 'INFLIGHT'
+		), 
+		queued_inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1) 
+			AND status = 'QUEUED' AND meta_data->>'inflight' = 'true'
+			-- Don't include parent transactions that have children with INFLIGHT status
+			AND NOT EXISTS (
+				SELECT 1 
+				FROM blnk.transactions child
+				WHERE child.parent_transaction = transaction_id AND child.status = 'INFLIGHT'
+			)
+		)
+		
+		SELECT * FROM inflight_transactions
+		UNION ALL
+		-- Only include queued_inflight if there are no inflight transactions
+		SELECT * FROM queued_inflight_transactions 
+		WHERE NOT EXISTS (SELECT 1 FROM inflight_transactions)
+		
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	// Use regexp.QuoteMeta to escape regex special characters for sqlmock
+	mock.ExpectQuery(regexp.QuoteMeta(expectedQuery)).
 		WithArgs(parentID, 10, int64(0)). // Add all three expected arguments
 		WillReturnRows(sqlmock.NewRows([]string{}))
 
@@ -285,7 +352,40 @@ func TestGetInflightTransactionsByParentID_Error(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	parentID := "parent123"
-	mock.ExpectQuery("SELECT .+ FROM blnk.transactions WHERE \\(transaction_id = \\$1 OR parent_transaction = \\$1\\) AND status = 'INFLIGHT'").
+	// Updated the expected query to match the complex CTE and UNION ALL structure
+	expectedQuery := `
+		WITH inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
+			AND status = 'INFLIGHT'
+		), 
+		queued_inflight_transactions AS (
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			FROM blnk.transactions
+			WHERE (transaction_id = $1 OR parent_transaction = $1) 
+			AND status = 'QUEUED' AND meta_data->>'inflight' = 'true'
+			-- Don't include parent transactions that have children with INFLIGHT status
+			AND NOT EXISTS (
+				SELECT 1 
+				FROM blnk.transactions child
+				WHERE child.parent_transaction = transaction_id AND child.status = 'INFLIGHT'
+			)
+		)
+		
+		SELECT * FROM inflight_transactions
+		UNION ALL
+		-- Only include queued_inflight if there are no inflight transactions
+		SELECT * FROM queued_inflight_transactions 
+		WHERE NOT EXISTS (SELECT 1 FROM inflight_transactions)
+		
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	// Use regexp.QuoteMeta to escape regex special characters for sqlmock
+	mock.ExpectQuery(regexp.QuoteMeta(expectedQuery)).
 		WithArgs(parentID, 10, int64(0)). // Add all three expected arguments
 		WillReturnError(errors.New("database error"))
 
@@ -355,7 +455,8 @@ func TestGetTotalCommittedTransactions_Error(t *testing.T) {
 
 	parentID := "parent123"
 
-	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 GROUP BY parent_transaction").
+	// Updated the regex to match the actual query which includes the status filter
+	mock.ExpectQuery("SELECT SUM\\(precise_amount\\) AS total_amount FROM blnk.transactions WHERE parent_transaction = \\$1 AND status = 'APPLIED' GROUP BY parent_transaction").
 		WithArgs(parentID).
 		WillReturnError(errors.New("database error"))
 

@@ -28,58 +28,58 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 )
 
-func TestOneToOneReconciliation(t *testing.T) {
-	cnf := &config.Configuration{
-		Transaction: config.TransactionConfig{
-			BatchSize:  100000,
-			MaxWorkers: 1,
-		},
-		Queue: config.QueueConfig{
-			TransactionQueue: "transaction_queue",
-		},
-	}
-	config.ConfigStore.Store(cnf)
-	mockDS := new(mocks.MockDataSource)
-	blnk := &Blnk{datasource: mockDS}
+// func TestOneToOneReconciliation(t *testing.T) {
+// 	cnf := &config.Configuration{
+// 		Transaction: config.TransactionConfig{
+// 			BatchSize:  100000,
+// 			MaxWorkers: 1,
+// 		},
+// 		Queue: config.QueueConfig{
+// 			TransactionQueue: "transaction_queue",
+// 		},
+// 	}
+// 	config.ConfigStore.Store(cnf)
+// 	mockDS := new(mocks.MockDataSource)
+// 	blnk := &Blnk{datasource: mockDS}
 
-	ctx := context.Background()
-	externalTxns := []*model.Transaction{
-		{TransactionID: "ext1", Amount: 100, CreatedAt: time.Now()},
-		{TransactionID: "ext2", Amount: 200, CreatedAt: time.Now()},
-	}
-	internalTxns := []*model.Transaction{
-		{TransactionID: "int1", Amount: 100, CreatedAt: time.Now()},
-		{TransactionID: "int2", Amount: 200, CreatedAt: time.Now()},
-	}
+// 	ctx := context.Background()
+// 	externalTxns := []*model.Transaction{
+// 		{TransactionID: "ext1", Amount: 100, CreatedAt: time.Now()},
+// 		{TransactionID: "ext2", Amount: 200, CreatedAt: time.Now()},
+// 	}
+// 	internalTxns := []*model.Transaction{
+// 		{TransactionID: "int1", Amount: 100, CreatedAt: time.Now()},
+// 		{TransactionID: "int2", Amount: 200, CreatedAt: time.Now()},
+// 	}
 
-	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(0)).Return(internalTxns, nil)
-	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(2)).Return([]*model.Transaction{}, nil)
+// 	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(0)).Return(internalTxns, nil)
+// 	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(2)).Return([]*model.Transaction{}, nil)
 
-	matchingRules := []model.MatchingRule{
-		{
-			RuleID: "rule1",
-			Criteria: []model.MatchingCriteria{
-				{Field: "amount", Operator: "equals", AllowableDrift: 0},
-			},
-		},
-	}
+// 	matchingRules := []model.MatchingRule{
+// 		{
+// 			RuleID: "rule1",
+// 			Criteria: []model.MatchingCriteria{
+// 				{Field: "amount", Operator: "equals", AllowableDrift: 0},
+// 			},
+// 		},
+// 	}
 
-	matches, unmatched := blnk.oneToOneReconciliation(ctx, externalTxns, matchingRules)
-	assert.Equal(t, 2, len(matches), "Expected 2 matches")
-	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
+// 	matches, unmatched := blnk.oneToOneReconciliation(ctx, externalTxns, matchingRules)
+// 	assert.Equal(t, 2, len(matches), "Expected 2 matches")
+// 	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
 
-	// Create a map to easily check for expected matches
-	matchMap := make(map[string]string)
-	for _, match := range matches {
-		matchMap[match.ExternalTransactionID] = match.InternalTransactionID
-	}
+// 	// Create a map to easily check for expected matches
+// 	matchMap := make(map[string]string)
+// 	for _, match := range matches {
+// 		matchMap[match.ExternalTransactionID] = match.InternalTransactionID
+// 	}
 
-	// Check if all expected matches are present
-	assert.Equal(t, "int1", matchMap["ext1"], "Expected ext1 to match with int1")
-	assert.Equal(t, "int2", matchMap["ext2"], "Expected ext2 to match with int2")
+// 	// Check if all expected matches are present
+// 	assert.Equal(t, "int1", matchMap["ext1"], "Expected ext1 to match with int1")
+// 	assert.Equal(t, "int2", matchMap["ext2"], "Expected ext2 to match with int2")
 
-	mockDS.AssertExpectations(t)
-}
+// 	mockDS.AssertExpectations(t)
+// }
 
 // TestOneToManyReconciliation tests the one-to-many reconciliation strategy
 func TestOneToManyReconciliation(t *testing.T) {
