@@ -61,6 +61,7 @@ type Transaction struct {
 	Inflight           bool                   `json:"inflight"`
 	SkipBalanceUpdate  bool                   `json:"-"`
 	SkipQueue          bool                   `json:"skip_queue"`
+	Atomic             bool                   `json:"atomic"`
 	GroupIds           []string               `json:"-"`
 	Sources            []Distribution         `json:"sources,omitempty"`
 	Destinations       []Distribution         `json:"destinations,omitempty"`

@@ -665,10 +665,10 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	// If there are, it returns only those. If not, it falls back to QUEUED with inflight=true
 	rows, err := d.Conn.QueryContext(ctx, `
 		WITH inflight_transactions AS (
-			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
 				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 			FROM blnk.transactions
-			WHERE (transaction_id = $1 OR parent_transaction = $1) 
+			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
@@ -768,10 +768,24 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-		FROM blnk.transactions
-		WHERE transaction_id = $1 AND status = 'APPLIED' OR parent_transaction = $1 AND (status = 'VOID' OR status = 'APPLIED')
-		ORDER BY created_at DESC
+		SELECT 
+			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
+			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.meta_data, t.scheduled_for, t.hash
+		FROM 
+			blnk.transactions t
+		WHERE 
+			-- Case 1: The transaction is the parent itself and is APPLIED
+			(t.transaction_id = $1 AND t.status = 'APPLIED')
+			
+			-- Case 2: The transaction is a child and is APPLIED or VOID
+			OR (t.parent_transaction = $1 AND t.status IN ('APPLIED', 'VOID'))
+
+			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
+			OR (t.status = 'APPLIED' AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
+
+		ORDER BY 
+			t.created_at DESC
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
 	if err != nil {
