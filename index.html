@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blnk Console</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: #f0f0f0;
+            padding: 10px;
+            width: 100%;
+            position: fixed;
+            z-index: 100;
+            top: 0;
+        }
+
+        .sidebar {
+            width: 200px;
+            background-color: #eee;
+            padding: 20px;
+            position: fixed;
+            top: 50px;
+            bottom: 0;
+        }
+
+        .main-content {
+            flex-grow: 1;
+            padding: 20px;
+            margin-left: 200px;
+            margin-top: 50px;
+        }
+
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .sidebar li {
+            margin-bottom: 10px;
+        }
+        .dashboard-section {
+            display: none;
+        }
+
+        .ledgers-section {
+            display: none;
+        }
+
+        .accounts-section {
+            display: none;
+        }
+        .balances-section{
+          display: none;
+        }
+        .balance-monitors-section{
+          display: none;
+        }
+        .transactions-section{
+          display: none;
+        }
+        .identities-section{
+          display: none;
+        }
+        .reconciliation-section{
+          display: none;
+        }
+        .search-section{
+          display: none;
+        }
+        .admin-section{
+          display: none;
+        }
+        .backup-section{
+          display: none;
+        }
+        .webhooks-section{
+          display: none;
+        }
+        .active {
+          display: block;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Blnk Console</h1>
+    </header>
+
+    <div class="sidebar">
+        <ul>
+            <li><a href="#" onclick="showSection('dashboard')">Dashboard</a></li>
+            <li><a href="#" onclick="showSection('ledgers')">Ledgers</a></li>
+            <li><a href="#" onclick="showSection('accounts')">Accounts</a></li>
+            <li><a href="#" onclick="showSection('balances')">Balances</a></li>
+            <li><a href="#" onclick="showSection('balance-monitors')">Balance Monitors</a></li>
+            <li><a href="#" onclick="showSection('transactions')">Transactions</a></li>
+            <li><a href="#" onclick="showSection('identities')">Identities</a></li>
+            <li><a href="#" onclick="showSection('reconciliation')">Reconciliation</a></li>
+            <li><a href="#" onclick="showSection('search')">Search</a></li>
+            <li><a href="#" onclick="showSection('backup')">Backup</a></li>
+            <li><a href="#" onclick="showSection('webhooks')">Webhooks</a></li>
+            <li><a href="#" onclick="showSection('admin')">Admin</a></li>
+        </ul>
+    </div>
+
+    <div class="main-content">
+        <section id="dashboard" class="dashboard-section active">
+            <h2>Dashboard</h2>
+            <p>Dashboard content will go here.</p>
+        </section>
+
+        <section id="ledgers" class="ledgers-section">
+            <h2>Ledgers</h2>
+            <p>Ledgers content will go here.</p>
+        </section>
+
+        <section id="accounts" class="accounts-section">
+            <h2>Accounts</h2>
+            <p>Accounts content will go here.</p>
+        </section>
+        <section id="balances" class="balances-section">
+          <h2>Balances</h2>
+          <p>Balances content will go here.</p>
+        </section>
+        <section id="balance-monitors" class="balance-monitors-section">
+          <h2>Balance Monitors</h2>
+          <p>Balance Monitors content will go here.</p>
+        </section>
+        <section id="transactions" class="transactions-section">
+          <h2>Transactions</h2>
+          <p>Transactions content will go here.</p>
+        </section>
+        <section id="identities" class="identities-section">
+          <h2>Identities</h2>
+          <p>Identities content will go here.</p>
+        </section>
+        <section id="reconciliation" class="reconciliation-section">
+          <h2>Reconciliation</h2>
+          <p>Reconciliation content will go here.</p>
+        </section>
+        <section id="search" class="search-section">
+          <h2>Search</h2>
+          <p>Search content will go here.</p>
+        </section>
+        <section id="admin" class="admin-section">
+          <h2>Admin</h2>
+          <p>Admin content will go here.</p>
+        </section>
+        <section id="backup" class="backup-section">
+          <h2>Backup</h2>
+          <p>Backup content will go here.</p>
+        </section>
+        <section id="webhooks" class="webhooks-section">
+          <h2>Webhooks</h2>
+          <p>Webhooks content will go here.</p>
+        </section>
+    </div>
+    <script>
+      function showSection(sectionId) {
+        const sections = document.querySelectorAll('section');
+        sections.forEach(section => {
+          section.classList.remove('active');
+        });
+        const selectedSection = document.getElementById(sectionId);
+        selectedSection.classList.add('active');
+      }
+    </script>
+</body>
+</html>
