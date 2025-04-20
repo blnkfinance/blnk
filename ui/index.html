@@ -1,0 +1,425 @@
+1<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blnk Console</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: #f0f0f0;
+            padding: 10px;
+            width: 100%;
+            position: fixed;
+            z-index: 100;
+            top: 0;
+        }
+
+        .sidebar {
+            width: 200px;
+            background-color: #eee;
+            padding: 20px;
+            position: fixed;
+            top: 50px;
+            bottom: 0;
+        }
+
+        .main-content {
+            flex-grow: 1;
+            padding: 20px;
+            margin-left: 200px;
+            margin-top: 50px;
+        }
+
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .sidebar li {
+            margin-bottom: 10px;
+        }
+        .dashboard-section {
+            display: none;
+        }
+
+        .ledgers-section {
+            display: none;
+        }
+
+        .accounts-section {
+            display: none;
+        }
+        .balances-section{
+          display: none;
+        }
+        .balance-monitors-section{
+          display: none;
+        }
+        .transactions-section{
+          display: none;
+        }
+        .identities-section{
+          display: none;
+        }
+        .reconciliation-section{
+          display: none;
+        }
+        .search-section{
+          display: none;
+        }
+        .admin-section{
+          display: none;
+        }
+        .backup-section{
+          display: none;
+        }
+        .webhooks-section{
+          display: none;
+        }
+        .active {
+          display: block;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 20px;
+        }
+        th, td {
+          border: 1px solid #ddd;
+          padding: 8px;
+          text-align: left;
+        }
+        th {
+          background-color: #f0f0f0;
+        }
+        form {
+          margin-bottom: 20px;
+          border: 1px solid #ddd;
+          padding: 20px;
+        }
+        form label {
+          display: block;
+          margin-bottom: 5px;
+        }
+        form input[type="text"],
+        form input[type="number"],
+        form select {
+          width: 100%;
+          padding: 8px;
+          margin-bottom: 10px;
+          border: 1px solid #ddd;
+        }
+        form button {
+          background-color: #4CAF50;
+          color: white;
+          padding: 10px 20px;
+          border: none;
+          cursor: pointer;
+        }
+        .alert-box {
+          background-color: #f2dede;
+          border: 1px solid #ebccd1;
+          color: #a94442;
+          padding: 10px;
+          margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Blnk Console</h1>
+    </header>
+
+    <div class="sidebar">
+        <ul>
+            <li><a href="#" onclick="showSection('dashboard')">Dashboard</a></li>
+            <li><a href="#" onclick="showSection('ledgers')">Ledgers</a></li>
+            <li><a href="#" onclick="showSection('accounts')">Accounts</a></li>
+            <li><a href="#" onclick="showSection('balances')">Balances</a></li>
+            <li><a href="#" onclick="showSection('balance-monitors')">Balance Monitors</a></li>
+            <li><a href="#" onclick="showSection('transactions')">Transactions</a></li>
+            <li><a href="#" onclick="showSection('identities')">Identities</a></li>
+            <li><a href="#" onclick="showSection('reconciliation')">Reconciliation</a></li>
+            <li><a href="#" onclick="showSection('search')">Search</a></li>
+            <li><a href="#" onclick="showSection('backup')">Backup</a></li>
+            <li><a href="#" onclick="showSection('webhooks')">Webhooks</a></li>
+            <li><a href="#" onclick="showSection('admin')">Admin</a></li>
+        </ul>
+    </div>
+
+    <div class="main-content">
+        <section id="dashboard" class="dashboard-section active">
+          <h2>Dashboard</h2>
+          <div class="alert-box">
+            <p>Alert: Reconciliation needed!</p>
+          </div>
+          <p>Total Accounts: <span id="total-accounts"></span></p>
+          <p>Total Balance: <span id="total-balance"></span></p>
+          <h3>Recent Activity</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Transaction</td>
+                <td>100</td>
+                <td>2024-05-10</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="ledgers" class="ledgers-section">
+          <h2>Ledgers</h2>
+          <form id="create-ledger-form">
+            <label for="ledger-name">Ledger Name:</label>
+            <input type="text" id="ledger-name" name="ledger-name" required>
+            <button type="submit">Create Ledger</button>
+          </form>
+          <h3>Ledger List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="ledger-list">
+            </tbody>
+          </table>
+        </section>
+
+        <section id="accounts" class="accounts-section">
+          <h2>Accounts</h2>
+          <form id="create-account-form">
+            <label for="account-name">Account Name:</label>
+            <input type="text" id="account-name" name="account-name" required>
+            <label for="account-currency">Currency:</label>
+            <select id="account-currency" name="account-currency" required>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+            <button type="submit">Create Account</button>
+          </form>
+          <h3>Account List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Currency</th>
+                <th>Balance</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="account-list">
+            </tbody>
+          </table>
+        </section>
+        <section id="balances" class="balances-section">
+          <h2>Balances</h2>
+          <h3>Balance List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Account ID</th>
+                <th>Amount</th>
+                <th>Currency</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="balance-list">
+            </tbody>
+          </table>
+          <form id="create-balance-form">
+            <label for="balance-accountId">Account Id:</label>
+            <input type="text" id="balance-accountId" name="balance-accountId" required>
+            <label for="balance-amount">Amount:</label>
+            <input type="number" id="balance-amount" name="balance-amount" required>
+            <label for="balance-currency">Currency:</label>
+            <select id="balance-currency" name="balance-currency" required>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+            <button type="submit">Create Balance</button>
+          </form>
+        </section>
+        <section id="balance-monitors" class="balance-monitors-section">
+          <h2>Balance Monitors</h2>
+          <form id="create-balance-monitor-form">
+            <label for="balance-monitor-balanceId">Balance Id:</label>
+            <input type="text" id="balance-monitor-balanceId" name="balance-monitor-balanceId" required>
+            <label for="balance-monitor-threshold">Threshold:</label>
+            <input type="number" id="balance-monitor-threshold" name="balance-monitor-threshold" required>
+            <button type="submit">Create Balance Monitor</button>
+          </form>
+          <h3>Balance Monitors List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Balance Id</th>
+                <th>Threshold</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="balance-monitor-list">
+            </tbody>
+          </table>
+        </section>
+        <section id="transactions" class="transactions-section">
+          <h2>Transactions</h2>
+          <form id="create-transaction-form">
+            <label for="transaction-sourceAccountId">Source Account Id:</label>
+            <input type="text" id="transaction-sourceAccountId" name="transaction-sourceAccountId" required>
+            <label for="transaction-destinationAccountId">Destination Account Id:</label>
+            <input type="text" id="transaction-destinationAccountId" name="transaction-destinationAccountId" required>
+            <label for="transaction-amount">Amount:</label>
+            <input type="number" id="transaction-amount" name="transaction-amount" required>
+            <label for="transaction-currency">Currency:</label>
+            <select id="transaction-currency" name="transaction-currency" required>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+            <button type="submit">Create Transaction</button>
+          </form>
+          <h3>Transactions List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Source Account ID</th>
+                <th>Destination Account ID</th>
+                <th>Amount</th>
+                <th>Currency</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="transaction-list">
+            </tbody>
+          </table>
+        </section>
+        <section id="identities" class="identities-section">
+          <h2>Identities</h2>
+          <form id="create-identity-form">
+            <label for="identity-name">Identity Name:</label>
+            <input type="text" id="identity-name" name="identity-name" required>
+            <label for="identity-email">Email:</label>
+            <input type="text" id="identity-email" name="identity-email" required>
+            <button type="submit">Create Identity</button>
+          </form>
+          <h3>Identities List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="identity-list">
+            </tbody>
+          </table>
+        </section>
+        <section id="reconciliation" class="reconciliation-section">
+          <h2>Reconciliation</h2>
+          <form id="upload-reconciliation-form">
+            <label for="reconciliation-file">Upload File:</label>
+            <input type="file" id="reconciliation-file" name="reconciliation-file" required>
+            <button type="submit">Upload</button>
+          </form>
+          <form id="create-rule-form">
+            <label for="rule-name">Rule Name:</label>
+            <input type="text" id="rule-name" name="rule-name" required>
+            <button type="submit">Create Rule</button>
+          </form>
+          <form id="start-reconciliation-form">
+            <button type="submit">Start Reconciliation</button>
+          </form>
+          <h3>Report</h3>
+        </section>
+        <section id="search" class="search-section">
+          <h2>Search</h2>
+          <form id="search-form">
+            <label for="search-collection">Collection:</label>
+            <select id="search-collection" name="search-collection" required>
+              <option value="accounts">Accounts</option>
+              <option value="transactions">Transactions</option>
+              <option value="identities">Identities</option>
+            </select>
+            <label for="search-query">Query:</label>
+            <input type="text" id="search-query" name="search-query" required>
+            <button type="submit">Search</button>
+          </form>
+          <h3>Results</h3>
+          <div id="search-results"></div>
+        </section>
+        <section id="admin" class="admin-section">
+          <h2>Admin</h2>
+          <form id="multi-search-form">
+            <label for="multi-search-query">Multi Search Query:</label>
+            <input type="text" id="multi-search-query" name="multi-search-query" required>
+            <button type="submit">Multi Search</button>
+          </form>
+          <h3>Users List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+              </tr>
+            </thead>
+            <tbody id="user-list">
+            </tbody>
+          </table>
+        </section>
+        <section id="backup" class="backup-section">
+          <h2>Backup</h2>
+          <form id="backup-form">
+            <button type="submit">Backup Database</button>
+          </form>
+        </section>
+        <section id="webhooks" class="webhooks-section">
+          <h2>Webhooks</h2>
+          <h3>Webhooks List</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Event</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody id="webhook-list">
+            </tbody>
+          </table>
+        </section>
+    </div>
+    <script>
+      function showSection(sectionId) {
+        const sections = document.querySelectorAll('section');
+        sections.forEach(section => {
+          section.classList.remove('active');
+        });
+        const selectedSection = document.getElementById(sectionId);
+        selectedSection.classList.add('active');
+      }
+    </script>
+</body>
+</html>
