@@ -32,6 +32,7 @@
     ]
   },
   "devDependencies": {
+    "@cucumber/cucumber": "^11.2.0",
     "react-scripts": "^3.0.1"
   }
 }
