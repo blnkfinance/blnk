@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml -o k8s-manifests/
+    kompose.version: 1.26.1 (a9d05d509)
+  creationTimestamp: null
+  labels:
+    io.kompose.service: typesense
+  name: typesense
+  namespace: blnk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: typesense
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml -o k8s-manifests/
+        kompose.version: 1.26.1 (a9d05d509)
+      creationTimestamp: null
+      labels:
+        io.kompose.service: typesense
+    spec:
+      containers:
+        - args:
+            - --data-dir
+            - /data
+            - --api-key=blnk-api-key
+            - --listen-port
+            - "8108"
+          image: typesense/typesense:0.23.1
+          livenessProbe:
+            exec:
+              command:
+                - curl
+                - -f
+                - http://localhost:8108/health
+            failureThreshold: 5
+            periodSeconds: 30
+            timeoutSeconds: 10
+          name: typesense
+          resources: {}
+          volumeMounts:
+            - mountPath: /data
+              name: typesense-data
+      restartPolicy: Always
+      volumes:
+        - name: typesense-data
+          persistentVolumeClaim:
+            claimName: typesense-data
+status: {}

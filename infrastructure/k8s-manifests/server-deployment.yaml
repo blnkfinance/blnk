@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-compose.yaml -o k8s-manifests/
+    kompose.version: 1.26.1 (a9d05d509)
+  creationTimestamp: null
+  labels:
+    io.kompose.service: server
+  name: server
+  namespace: blnk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: server
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-compose.yaml -o k8s-manifests/
+        kompose.version: 1.26.1 (a9d05d509)
+      creationTimestamp: null
+      labels:
+        io.kompose.service: server
+    spec:
+      containers:
+        - args:
+            - blnk migrate up && blnk start
+          command:
+            - /bin/sh
+            - -c
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4318
+            - name: TZ
+              value: Etc/UTC
+          image: jerryenebeli/blnk:0.10.1
+          name: server
+          ports:
+            - containerPort: 5001
+            - containerPort: 80
+            - containerPort: 443
+          resources: {}
+          volumeMounts:
+            - name: blnk-config
+              mountPath: /blnk.json
+              subPath: blnk.json
+      restartPolicy: Always
+      volumes:
+        - name: blnk-config
+          configMap:
+            name: blnk-config
+status: {} 
