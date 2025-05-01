@@ -53,8 +53,12 @@ spec:
               name: pg-data
               subPath: pgdata
       restartPolicy: Always
-      volumes:
-        - name: pg-data
-          persistentVolumeClaim:
-            claimName: pg-data
+  volumeClaimTemplates:
+    - metadata:
+        name: pg-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
 status: {} 
