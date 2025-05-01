@@ -31,6 +31,10 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/jerry-enebeli/blnk/config"
+	"github.com/jerry-enebeli/blnk/database"
 )
 
 type BigIntString struct {
@@ -477,4 +481,76 @@ func TestDeleteMonitor(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
+}
+
+func TestGetBalanceByIndicator(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping real service test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Generate unique indicator and currency
+	indicator := "@" + model.GenerateUUIDWithSuffix("test")
+	currency := "USD"
+	ledgerID := "general_ledger_id"
+
+	// 1. Create the balance
+	balanceToCreate := model.Balance{
+		Indicator: indicator,
+		Currency:  currency,
+		LedgerID:  ledgerID,
+	}
+
+	createdBalance, err := blnk.CreateBalance(ctx, balanceToCreate)
+	require.NoError(t, err, "Failed to create balance")
+	require.NotEmpty(t, createdBalance.BalanceID, "Created balance should have an ID")
+	require.Equal(t, indicator, createdBalance.Indicator, "Created balance indicator mismatch")
+	require.Equal(t, currency, createdBalance.Currency, "Created balance currency mismatch")
+
+	// 2. Get the balance by indicator
+	retrievedBalance, err := blnk.GetBalanceByIndicator(ctx, indicator, currency)
+	require.NoError(t, err, "Failed to get balance by indicator")
+	require.NotNil(t, retrievedBalance, "Retrieved balance should not be nil")
+
+	// 3. Assert retrieved balance matches the created one
+	assert.Equal(t, createdBalance.BalanceID, retrievedBalance.BalanceID, "Balance IDs should match")
+	assert.Equal(t, createdBalance.Indicator, retrievedBalance.Indicator, "Indicators should match")
+	assert.Equal(t, createdBalance.Currency, retrievedBalance.Currency, "Currencies should match")
+	assert.Equal(t, createdBalance.LedgerID, retrievedBalance.LedgerID, "Ledger IDs should match")
+	// Assert default big.Int fields are initialized correctly (assuming they start at 0)
+	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.Balance), "Balance should be 0")
+	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.CreditBalance), "Credit balance should be 0")
+	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.DebitBalance), "Debit balance should be 0")
 }

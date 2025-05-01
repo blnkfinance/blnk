@@ -374,3 +374,36 @@ func (a Api) GetBalanceAtTime(c *gin.Context) {
 		"from_source": fromSource,
 	})
 }
+
+// GetBalanceByIndicator retrieves a balance by its indicator and currency.
+// It extracts the indicator and currency from the route parameters.
+// If either parameter is missing or there's an error retrieving the balance,
+// it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If indicator or currency is missing or there's an error retrieving the balance.
+// - 200 OK: If the balance is successfully retrieved.
+func (a Api) GetBalanceByIndicator(c *gin.Context) {
+	indicator, indicatorPassed := c.Params.Get("indicator")
+	if !indicatorPassed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "indicator is required. pass indicator in the route /indicator/:indicator"})
+		return
+	}
+
+	currency, currencyPassed := c.Params.Get("currency")
+	if !currencyPassed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency is required. pass currency in the route /currency/:currency"})
+		return
+	}
+
+	resp, err := a.blnk.GetBalanceByIndicator(c.Request.Context(), indicator, currency)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
