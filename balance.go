@@ -479,3 +479,33 @@ func (l *Blnk) GetBalanceAtTime(ctx context.Context, balanceID string, targetTim
 
 	return balance, nil
 }
+
+// GetBalanceByIndicator retrieves a balance by its indicator and currency.
+// It starts a tracing span, fetches the balance, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - indicator string: The indicator of the balance to retrieve.
+// - currency string: The currency of the balance to retrieve.
+//
+// Returns:
+// - *model.Balance: A pointer to the Balance model if found.
+// - error: An error if the balance could not be retrieved.
+func (l *Blnk) GetBalanceByIndicator(ctx context.Context, indicator, currency string) (*model.Balance, error) {
+	_, span := balanceTracer.Start(ctx, "GetBalanceByIndicator")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("balance.indicator", indicator),
+		attribute.String("balance.currency", currency),
+	)
+
+	balance, err := l.datasource.GetBalanceByIndicator(indicator, currency)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.AddEvent("Balance retrieved by indicator", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
+	return balance, nil
+}
