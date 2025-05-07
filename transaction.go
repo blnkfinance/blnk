@@ -73,8 +73,8 @@ type getTxns func(ctx context.Context, parentTransactionID string, batchSize int
 // - jobs <-chan *model.Transaction: A channel from which transactions are received for processing.
 // - results chan<- BatchJobResult: A channel to which the results of the processing are sent.
 // - wg *sync.WaitGroup: A wait group to synchronize the completion of the worker.
-// - amount float64: The amount to be processed in the transaction.
-type transactionWorker func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64)
+// - amount *big.Int: The amount to be processed in the transaction.
+type transactionWorker func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int)
 
 // BatchJobResult represents the result of processing a transaction in a batch job.
 //
@@ -460,7 +460,7 @@ func (l *Blnk) GetRefundableTransactionsByParentID(ctx context.Context, parentTr
 // Parameters:
 // - ctx context.Context: The context for the operation.
 // - parentTransactionID string: The ID of the parent transaction.
-// - amount float64: The amount to be processed in the transaction.
+// - amount *big.Int: The amount to be processed in the transaction.
 // - maxWorkers int: The maximum number of workers to process transactions concurrently.
 // - streamMode bool: A flag indicating whether to process transactions in streaming mode.
 // - gt getTxns: A function to retrieve transactions in batches.
@@ -469,7 +469,7 @@ func (l *Blnk) GetRefundableTransactionsByParentID(ctx context.Context, parentTr
 // Returns:
 // - []*model.Transaction: A slice of pointers to the processed Transaction models.
 // - error: An error if the transactions could not be processed.
-func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactionID string, amount float64, maxWorkers int, streamMode bool, gt getTxns, tw transactionWorker) ([]*model.Transaction, error) {
+func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactionID string, amount *big.Int, maxWorkers int, streamMode bool, gt getTxns, tw transactionWorker) ([]*model.Transaction, error) {
 	// Start a tracing span
 	ctx, span := tracer.Start(ctx, "ProcessTransactionInBatches")
 	defer span.End()
@@ -649,7 +649,7 @@ func fetchTransactions(ctx context.Context, parentTransactionID string, batchSiz
 // - results chan<- BatchJobResult: A channel to which the results of the processing are sent.
 // - wg *sync.WaitGroup: A wait group to synchronize the completion of the worker.
 // - amount float64: The amount to be processed in the transaction.
-func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
+func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
 	ctx, span := tracer.Start(ctx, "RefundWorker")
 	defer span.End()
 
@@ -691,8 +691,8 @@ func IsInflightTransaction(transaction *model.Transaction) bool {
 // - jobs <-chan *model.Transaction: A channel from which transactions are received for processing.
 // - results chan<- BatchJobResult: A channel to which the results of the processing are sent.
 // - wg *sync.WaitGroup: A wait group to synchronize the completion of the worker.
-// - amount float64: The amount to be processed in the transaction.
-func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
+// - amount *big.Int: The amount to be processed in the transaction.
+func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
 	ctx, span := tracer.Start(ctx, "CommitWorker")
 	defer span.End()
 
@@ -724,8 +724,8 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 // - jobs <-chan *model.Transaction: A channel from which transactions are received for processing.
 // - results chan<- BatchJobResult: A channel to which the results of the processing are sent.
 // - wg *sync.WaitGroup: A wait group to synchronize the completion of the worker.
-// - amount float64: The amount to be processed in the transaction (not used in this function).
-func (l *Blnk) VoidWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
+// - amount *big.Int: The amount to be processed in the transaction.
+func (l *Blnk) VoidWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
 	ctx, span := tracer.Start(ctx, "VoidWorker")
 	defer span.End()
 
@@ -1026,7 +1026,7 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 // Returns:
 // - *model.Transaction: A pointer to the committed Transaction model.
 // - error: An error if the transaction could not be committed.
-func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID string, amount float64) (*model.Transaction, error) {
+func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID string, amount *big.Int) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "CommitInflightTransaction")
 	defer span.End()
 
@@ -1059,7 +1059,7 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 //
 // Returns:
 // - error: An error if the amount validation or update fails.
-func (l *Blnk) validateAndUpdateAmount(ctx context.Context, transaction *model.Transaction, amount float64) error {
+func (l *Blnk) validateAndUpdateAmount(ctx context.Context, transaction *model.Transaction, amount *big.Int) error {
 	ctx, span := tracer.Start(ctx, "ValidateAndUpdateAmount")
 	defer span.End()
 
@@ -1114,13 +1114,13 @@ func (l *Blnk) checkTransactionCommitStatus(amountLeft *big.Int) error {
 //
 // Returns:
 // - error: An error if the requested amount exceeds allowed limits.
-func (l *Blnk) validateRequestedAmount(transaction *model.Transaction, amount float64, amountLeft *big.Int) error {
+func (l *Blnk) validateRequestedAmount(transaction *model.Transaction, amount *big.Int, amountLeft *big.Int) error {
 	// Skip validation for full commit (amount = 0)
-	if amount == 0 {
+	if amount.Cmp(big.NewInt(0)) == 0 {
 		return nil
 	}
 
-	requestedAmount := big.NewInt(int64(amount * transaction.Precision))
+	requestedAmount := amount
 
 	// Check if requested amount exceeds original transaction amount
 	if requestedAmount.Cmp(transaction.PreciseAmount) > 0 {
@@ -1144,11 +1144,10 @@ func (l *Blnk) validateRequestedAmount(transaction *model.Transaction, amount fl
 // - transaction *model.Transaction: The transaction to update.
 // - amount float64: The amount to commit (0 means commit the full remaining amount).
 // - amountLeft *big.Int: The remaining amount that can be committed.
-func (l *Blnk) updateTransactionAmount(transaction *model.Transaction, amount float64, amountLeft *big.Int) {
-	if amount != 0 {
+func (l *Blnk) updateTransactionAmount(transaction *model.Transaction, amount *big.Int, amountLeft *big.Int) {
+	if amount.Cmp(big.NewInt(0)) != 0 {
 		// Update with specific amount
-		transaction.Amount = amount
-		transaction.PreciseAmount = big.NewInt(int64(amount * transaction.Precision))
+		transaction.PreciseAmount = amount
 	} else {
 		// Update with full remaining amount
 		transaction.Amount = l.convertPreciseToFloat(amountLeft, transaction.Precision)
@@ -1972,7 +1971,7 @@ func (l *Blnk) voidInflightBatchTransactions(ctx context.Context, batchID string
 	_, err := l.ProcessTransactionInBatches(
 		ctx,
 		batchID,
-		0,
+		big.NewInt(0),
 		1, // Assuming 1 worker is sufficient for rollback, adjust if needed
 		false,
 		l.GetInflightTransactionsByParentID,
@@ -1986,7 +1985,7 @@ func (l *Blnk) refundNonInflightBatchTransactions(ctx context.Context, batchID s
 	_, err := l.ProcessTransactionInBatches(
 		ctx,
 		batchID,
-		0,
+		big.NewInt(0),
 		1, // Assuming 1 worker is sufficient for rollback, adjust if needed
 		false,
 		l.GetRefundableTransactionsByParentID,

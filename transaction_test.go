@@ -819,7 +819,7 @@ func TestInflightTransactionFlowWithSkipQueueThenCommit(t *testing.T) {
 	require.Equal(t, StatusInflight, queuedEntry.Status, "Should have an INFLIGHT transaction entry")
 
 	// Commit the transaction
-	_, err = blnk.CommitInflightTransaction(ctx, txn.TransactionID, 0)
+	_, err = blnk.CommitInflightTransaction(ctx, txn.TransactionID, big.NewInt(0))
 	require.NoError(t, err, "Failed to commit transaction")
 
 	// Verify balances were updated immediately
@@ -939,7 +939,8 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommit(t *testing.T) {
 
 	// Partially commit the transaction (commit half of the original amount)
 	partialAmount := originalAmount / 2 // 250.0
-	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialAmount)
+	partialPreciseAmount := new(big.Int).SetInt64(int64(partialAmount * txn.Precision))
+	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialPreciseAmount)
 	require.NoError(t, err, "Failed to partially commit transaction")
 	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
 	require.Equal(t, partialAmount, partialCommitTxn.Amount, "Partial commit amount should match specified amount")
@@ -971,7 +972,7 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommit(t *testing.T) {
 		"Destination inflight balance should be reduced by the committed amount")
 
 	// Commit the remaining amount (should succeed)
-	remainingCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0) // 0 means commit remaining amount
+	remainingCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, big.NewInt(0)) // 0 means commit remaining amount
 	require.NoError(t, err, "Failed to commit remaining transaction amount")
 	require.Equal(t, StatusApplied, remainingCommitTxn.Status, "Remaining commit transaction should have APPLIED status")
 
@@ -998,7 +999,7 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommit(t *testing.T) {
 		"Destination inflight balance should be zero after full commit")
 
 	// Attempt another commit (should fail)
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, big.NewInt(0))
 	require.Error(t, err, "Committing a fully committed transaction should fail")
 	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
 		"Error message should indicate transaction is already committed")
@@ -1137,7 +1138,8 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommitThenVoid(t *testin
 
 	// Partially commit the transaction (commit half of the original amount)
 	partialAmount := originalAmount / 2 // 250.0
-	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialAmount)
+	partialPreciseAmount := new(big.Int).SetInt64(int64(partialAmount * txn.Precision))
+	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialPreciseAmount)
 	require.NoError(t, err, "Failed to partially commit transaction")
 	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
 	require.Equal(t, partialAmount, partialCommitTxn.Amount, "Partial commit amount should match specified amount")
@@ -1193,7 +1195,7 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommitThenVoid(t *testin
 		"Destination inflight balance should be zero after void")
 
 	// Attempt another commit (should fail)
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, big.NewInt(0))
 	require.Error(t, err, "Committing a voided transaction should fail")
 	require.Contains(t, err.Error(), "transaction has already been voided",
 		"Error message should indicate transaction is already voided")
@@ -1352,7 +1354,8 @@ func TestTwoInflightTransactionsCommitOneVoidCommitted(t *testing.T) {
 		"Destination inflight balance should reflect both transactions")
 
 	// Commit the second transaction (lower amount)
-	commitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry2.TransactionID, amount2)
+	amount2Precise := new(big.Int).SetInt64(int64(amount2 * txn2.Precision))
+	commitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry2.TransactionID, amount2Precise)
 	require.NoError(t, err, "Failed to commit second transaction")
 	require.Equal(t, StatusApplied, commitTxn.Status, "Second transaction should have APPLIED status")
 
@@ -1575,7 +1578,8 @@ func TestInflightTransactionWithOvercommitValidation(t *testing.T) {
 
 	// Step 2: Attempt to overcommit the transaction (should fail)
 	overCommitAmount := 150.0
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, overCommitAmount)
+	overCommitPreciseAmount := new(big.Int).SetInt64(int64(overCommitAmount * txn.Precision))
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, overCommitPreciseAmount)
 
 	// Now verify overcommit is prevented
 	require.Error(t, err, "Overcommitting should fail with an error")
@@ -1607,7 +1611,8 @@ func TestInflightTransactionWithOvercommitValidation(t *testing.T) {
 
 	// Step 3: Partial commit (50 of the 100)
 	partialAmount := 50.0
-	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialAmount)
+	partialPreciseAmount := new(big.Int).SetInt64(int64(partialAmount * txn.Precision))
+	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialPreciseAmount)
 	require.NoError(t, err, "Partial commit should succeed")
 	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
 
@@ -1639,7 +1644,7 @@ func TestInflightTransactionWithOvercommitValidation(t *testing.T) {
 		"Destination inflight balance should be 50 after partial commit")
 
 	// Step 4: Full commit (remaining 50)
-	fullCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	fullCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, big.NewInt(0))
 	require.NoError(t, err, "Full commit should succeed")
 	require.Equal(t, StatusApplied, fullCommitTxn.Status, "Full commit transaction should have APPLIED status")
 
@@ -1667,7 +1672,7 @@ func TestInflightTransactionWithOvercommitValidation(t *testing.T) {
 		"Destination inflight balance should be zero after full commit")
 
 	// Step 5: Attempt another commit (should fail)
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, big.NewInt(0))
 	require.Error(t, err, "Second full commit should fail")
 	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
 		"Error should mention that transaction is already committed")
@@ -1848,7 +1853,8 @@ func TestInflightTransactionWithPartialOvercommitValidation(t *testing.T) {
 
 	// Step 2: Do a partial commit (50 of the 100)
 	partialAmount := 50.0
-	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialAmount)
+	partialPreciseAmount := new(big.Int).SetInt64(int64(partialAmount * txn.Precision))
+	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, partialPreciseAmount)
 	require.NoError(t, err, "Partial commit should succeed")
 	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
 
@@ -1882,7 +1888,8 @@ func TestInflightTransactionWithPartialOvercommitValidation(t *testing.T) {
 	// Step 3: Attempt to overcommit the REMAINING balance (should fail)
 	// Try to commit 60 when only 50 remains
 	overCommitAmount := 60.0
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, overCommitAmount)
+	overCommitPreciseAmount := new(big.Int).SetInt64(int64(overCommitAmount * txn.Precision))
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, overCommitPreciseAmount)
 
 	// Now verify partial overcommit is prevented
 	require.Error(t, err, "Partial overcommit should fail with an error")
@@ -1913,7 +1920,7 @@ func TestInflightTransactionWithPartialOvercommitValidation(t *testing.T) {
 		"Destination inflight balance should remain 50 after failed partial overcommit")
 
 	// Step 4: Full commit (remaining 50)
-	fullCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	fullCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, big.NewInt(0))
 	require.NoError(t, err, "Full commit should succeed")
 	require.Equal(t, StatusApplied, fullCommitTxn.Status, "Full commit transaction should have APPLIED status")
 
@@ -1941,7 +1948,7 @@ func TestInflightTransactionWithPartialOvercommitValidation(t *testing.T) {
 		"Destination inflight balance should be zero after full commit")
 
 	// Step 5: Attempt another commit (should fail)
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, 0)
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntry.TransactionID, big.NewInt(0))
 	require.Error(t, err, "Second full commit should fail")
 	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
 		"Error should mention that transaction is already committed")
@@ -2390,12 +2397,14 @@ func TestMultipleSourcesInflightTransactionFlowWithSkipQueueAndCommit(t *testing
 	// When committing half of the total, that's 250, which is 125 from each source
 	partialAmount := originalAmount / 2 // 250.0 total (125 from each source)
 
-	partialCommitTxn, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, sourceOnePartialAmount)
+	sourceOnePartialPreciseAmount := new(big.Int).SetInt64(int64(sourceOnePartialAmount * txn.Precision))
+	partialCommitTxnOne, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, sourceOnePartialPreciseAmount)
 	require.NoError(t, err, "Failed to partially commit transaction for source one")
-	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
-	require.Equal(t, sourceOnePartialAmount, partialCommitTxn.Amount, "Partial commit amount should match specified amount")
+	require.Equal(t, StatusApplied, partialCommitTxnOne.Status, "Partial commit transaction should have APPLIED status")
+	require.Equal(t, sourceOnePartialAmount, partialCommitTxnOne.Amount, "Partial commit amount should match specified amount")
 
-	partialCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, sourceTwoPartialAmount)
+	sourceTwoPartialPreciseAmount := new(big.Int).SetInt64(int64(sourceTwoPartialAmount * txn.Precision))
+	partialCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, sourceTwoPartialPreciseAmount)
 	require.NoError(t, err, "Failed to partially commit transaction for source two")
 	require.Equal(t, StatusApplied, partialCommitTxnTwo.Status, "Partial commit transaction should have APPLIED status")
 	require.Equal(t, sourceTwoPartialAmount, partialCommitTxnTwo.Amount, "Partial commit amount should match specified amount")
@@ -2436,11 +2445,11 @@ func TestMultipleSourcesInflightTransactionFlowWithSkipQueueAndCommit(t *testing
 		"Destination inflight balance should be reduced by the committed amount")
 
 	// Commit the remaining amount for both sources
-	remainingCommitTxnOne, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, 0) // 0 means commit remaining amount
+	remainingCommitTxnOne, err := blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, big.NewInt(0)) // 0 means commit remaining amount
 	require.NoError(t, err, "Failed to commit remaining transaction amount for source one")
 	require.Equal(t, StatusApplied, remainingCommitTxnOne.Status, "Remaining commit transaction should have APPLIED status")
 
-	remainingCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, 0) // 0 means commit remaining amount
+	remainingCommitTxnTwo, err := blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, big.NewInt(0)) // 0 means commit remaining amount
 	require.NoError(t, err, "Failed to commit remaining transaction amount for source two")
 	require.Equal(t, StatusApplied, remainingCommitTxnTwo.Status, "Remaining commit transaction should have APPLIED status")
 
@@ -2485,12 +2494,12 @@ func TestMultipleSourcesInflightTransactionFlowWithSkipQueueAndCommit(t *testing
 		"Destination inflight balance should be zero after full commit")
 
 	// Attempt another commit on each source (should fail)
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, 0)
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryOne.TransactionID, big.NewInt(0))
 	require.Error(t, err, "Committing a fully committed transaction should fail")
 	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
 		"Error message should indicate transaction is already committed")
 
-	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, 0)
+	_, err = blnk.CommitInflightTransaction(ctx, inflightEntryTwo.TransactionID, big.NewInt(0))
 	require.Error(t, err, "Committing a fully committed transaction should fail")
 	require.Contains(t, err.Error(), "cannot commit. Transaction already committed",
 		"Error message should indicate transaction is already committed")
@@ -3638,7 +3647,7 @@ func TestCommitWorkerFullFlow(t *testing.T) {
 	close(jobs)
 
 	// Step 6: Run the commit worker
-	go blnk.CommitWorker(ctx, jobs, results, &wg, 0) // 0 = commit full amount
+	go blnk.CommitWorker(ctx, jobs, results, &wg, big.NewInt(0)) // 0 = commit full amount
 
 	// Wait for the worker to finish
 	wg.Wait()
@@ -3796,7 +3805,7 @@ func TestVoidWorkerFullFlow(t *testing.T) {
 	close(jobs)
 
 	// Step 6: Run the void worker
-	go blnk.VoidWorker(ctx, jobs, results, &wg, 0) // Amount parameter is not used in VoidWorker
+	go blnk.VoidWorker(ctx, jobs, results, &wg, big.NewInt(0)) // Amount parameter is not used in VoidWorker
 
 	// Wait for the worker to finish
 	wg.Wait()
@@ -3845,7 +3854,7 @@ func TestVoidWorkerFullFlow(t *testing.T) {
 	jobs2 <- txnObj
 	close(jobs2)
 
-	go blnk.VoidWorker(ctx, jobs2, results2, &wg2, 0)
+	go blnk.VoidWorker(ctx, jobs2, results2, &wg2, big.NewInt(0))
 	wg2.Wait()
 	close(results2)
 
@@ -3980,7 +3989,7 @@ func TestRefundWorkerFullFlow(t *testing.T) {
 	close(jobs)
 
 	// Step 6: Run the refund worker
-	go blnk.RefundWorker(ctx, jobs, results, &wg, 0)
+	go blnk.RefundWorker(ctx, jobs, results, &wg, big.NewInt(0))
 
 	// Wait for the worker to finish
 	wg.Wait()
@@ -4055,7 +4064,7 @@ func TestRefundWorkerFullFlow(t *testing.T) {
 	jobs2 <- rejectedTxn
 	close(jobs2)
 
-	go blnk.RefundWorker(ctx, jobs2, results2, &wg2, 0)
+	go blnk.RefundWorker(ctx, jobs2, results2, &wg2, big.NewInt(0))
 	wg2.Wait()
 	close(results2)
 

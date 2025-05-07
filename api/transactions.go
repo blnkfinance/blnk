@@ -17,11 +17,14 @@ package api
 
 import (
 	"errors"
+	"math/big"
 	"net/http"
 
 	"github.com/sirupsen/logrus"
 
 	model2 "github.com/jerry-enebeli/blnk/api/model"
+	"github.com/jerry-enebeli/blnk/config"
+	pgconn "github.com/jerry-enebeli/blnk/internal/pg-conn"
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/gin-gonic/gin"
@@ -146,7 +149,7 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
 	}
-	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, 0, 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorker)
+	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorker)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -210,9 +213,26 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		return
 	}
 
+	cnf, err := config.Fetch()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	pg, err := pgconn.GetDBConnection(cnf)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	amount := model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: req.Amount, TransactionID: id}, pg)
+
+	if req.PreciseAmount != nil {
+		amount = req.PreciseAmount
+	}
+
 	status := req.Status
 	if status == "commit" {
-		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
+		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -223,7 +243,7 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		}
 		resp = transformTransaction(transaction[0])
 	} else if status == "void" {
-		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, req.Amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
+		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
