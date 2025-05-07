@@ -23,12 +23,15 @@ import (
 	"math/big"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/database"
+	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/brianvoe/gofakeit/v6"
@@ -38,6 +41,33 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// pollForTransactionStatus polls for a transaction until it reaches the expected status or a timeout occurs.
+func pollForTransactionStatus(ctx context.Context, ds database.IDataSource, transactionRef string, expectedStatus string, pollInterval time.Duration, timeoutDuration time.Duration) (*model.Transaction, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
+	defer cancel()
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, fmt.Errorf("timed out waiting for transaction ref %s to reach status %s: %w", transactionRef, expectedStatus, timeoutCtx.Err())
+		case <-ticker.C:
+			txn, err := ds.GetTransactionByRef(timeoutCtx, transactionRef) // Use timeoutCtx for the DB call as well
+			if err != nil {
+				// If the error is that the transaction is not found, we should continue polling.
+				// For other errors, the outer timeout will eventually catch persistent issues.
+				continue
+			}
+			// If err is nil, txn is a valid model.Transaction struct.
+			if txn.Status == expectedStatus {
+				return &txn, nil // Return a pointer to the transaction
+			}
+		}
+	}
+}
 
 func TestRecordTransaction(t *testing.T) {
 	cnf := &config.Configuration{
@@ -4197,4 +4227,580 @@ func TestRefundAlreadyRefundedTransaction(t *testing.T) {
 	require.NoError(t, err, "Failed to get destination balance after second refund attempt")
 	require.Equal(t, 0, sourceAfterSecondAttempt.Balance.Cmp(big.NewInt(0)), "Source balance should still be zero after failed second refund")
 	require.Equal(t, 0, destAfterSecondAttempt.Balance.Cmp(big.NewInt(0)), "Destination balance should still be zero after failed second refund")
+}
+
+func TestQueueTransactionFlowAsyncPolled(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping queue flow test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379", // Ensure Redis is running for queue tests
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable", // Ensure Postgres is running
+		},
+		Queue: config.QueueConfig{ // Ensure queue names are unique if tests run in parallel
+			WebhookQueue:        "webhook_queue_test_async_polled",
+			IndexQueue:          "index_queue_test_async_polled",
+			TransactionQueue:    "transaction_queue_test_async_polled", // Base name for transaction queue
+			NumberOfQueues:      1,                                     // Test with one queue for simplicity
+			InflightExpiryQueue: "inflight_expiry_queue_test_async_polled",
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret-async-polled",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index_async_polled",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnkInstance, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Construct the specific transaction queue name
+	transactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+
+	// Start the test Asynq worker
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnkInstance, transactionQueueName)
+	defer cleanupWorker()
+
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test_async_polled")
+
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err, "Failed to create destination balance")
+
+	txn := &model.Transaction{
+		Reference:      txnRef,
+		Source:         source.BalanceID,
+		Destination:    dest.BalanceID,
+		Amount:         500,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": true},
+		SkipQueue:      false, // Ensure transaction is queued
+	}
+
+	queuedTxn, err := blnkInstance.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue transaction")
+	require.Equal(t, StatusQueued, queuedTxn.Status, "Transaction should be QUEUED")
+	t.Logf("Transaction %s (Ref: %s) queued with ID %s", queuedTxn.Reference, queuedTxn.TransactionID, queuedTxn.TransactionID)
+
+	// The worker will pick up 'queuedTxn'.
+	// RecordTransaction, when processing a queued transaction, will:
+	// 1. Set queuedTxn.ID as ParentTransaction for the new record.
+	// 2. Generate a new TransactionID for the processed record.
+	// 3. Modify the Reference to be originalRef + "_q".
+	// So we poll for this modified reference.
+	processedTxnRef := fmt.Sprintf("%s_%s", txnRef, "q")
+	pollInterval := 200 * time.Millisecond // Increased poll interval slightly
+	timeoutDuration := 15 * time.Second    // Increased timeout slightly for real worker
+
+	t.Logf("Polling for processed transaction ref: %s (Original Queued Txn ID: %s)", processedTxnRef, queuedTxn.TransactionID)
+
+	appliedTxn, err := pollForTransactionStatus(ctx, ds, processedTxnRef, StatusApplied, pollInterval, timeoutDuration)
+	// Check error from polling more carefully
+	if err != nil {
+		// If timeout, try to get the transaction directly to see its status for debugging
+		currentTxn, getErr := ds.GetTransactionByRef(ctx, processedTxnRef)
+		if getErr == nil {
+			t.Logf("DEBUG: Polling timed out. Current status of txn ref %s is %s. Parent: %s", processedTxnRef, currentTxn.Status, currentTxn.ParentTransaction)
+		} else {
+			t.Logf("DEBUG: Polling timed out. Failed to get txn ref %s directly: %v", processedTxnRef, getErr)
+		}
+		// Also check original queued transaction status
+		originalQueuedTxn, getOrigErr := ds.GetTransaction(ctx, queuedTxn.TransactionID)
+		if getOrigErr == nil {
+			t.Logf("DEBUG: Original queued transaction ID %s status is %s.", queuedTxn.TransactionID, originalQueuedTxn.Status)
+		}
+		require.NoError(t, err, fmt.Sprintf("Polling failed for applied transaction %s. Error: %v", processedTxnRef, err))
+	}
+
+	require.NotNil(t, appliedTxn, "Applied transaction should not be nil")
+	require.Equal(t, StatusApplied, appliedTxn.Status, "Processed transaction status should be APPLIED")
+	require.Equal(t, queuedTxn.TransactionID, appliedTxn.ParentTransaction, "Applied transaction's parent ID should match original queued transaction ID")
+
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+	updatedDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance")
+
+	expectedDebit := big.NewInt(int64(-500) * 100)
+	expectedCredit := big.NewInt(int64(500) * 100)
+
+	assert.Equal(t, 0, updatedSource.Balance.Cmp(expectedDebit), "Source balance incorrect")
+	assert.Equal(t, 0, updatedDest.Balance.Cmp(expectedCredit), "Destination balance incorrect")
+}
+
+// Helper for Asynq logger to use t.Logf
+type testLogger struct {
+	t *testing.T
+}
+
+func newTestLogger(t *testing.T) *testLogger {
+	return &testLogger{t: t}
+}
+
+func (tl *testLogger) Debug(args ...interface{}) {
+	tl.t.Logf("ASYNQ_DEBUG: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Info(args ...interface{}) {
+	tl.t.Logf("ASYNQ_INFO: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Warn(args ...interface{}) {
+	tl.t.Logf("ASYNQ_WARN: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Error(args ...interface{}) {
+	tl.t.Logf("ASYNQ_ERROR: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Fatal(args ...interface{}) {
+	tl.t.Logf("ASYNQ_FATAL: %s", fmt.Sprint(args...)) // t.Fatalf would exit test
+}
+
+// startTestAsynqWorker sets up and starts an Asynq server for testing purposes.
+// It takes the testing object, configuration, Blnk instance, and the specific transaction queue name.
+// It returns a cleanup function that should be deferred by the caller to shut down the server.
+func startTestAsynqWorker(t *testing.T, cnf *config.Configuration, blnkInstance *Blnk, transactionQueueName string) func() {
+	redisOption, err := redis_db.ParseRedisURL(cnf.Redis.Dns)
+	require.NoError(t, err, "Failed to parse Redis URL for Asynq")
+
+	queues := make(map[string]int)
+	queues[transactionQueueName] = 1 // Concurrency for the transaction queue
+
+	srv := asynq.NewServer(
+		asynq.RedisClientOpt{
+			Addr:      redisOption.Addr,
+			Password:  redisOption.Password,
+			DB:        redisOption.DB,
+			TLSConfig: redisOption.TLSConfig,
+		},
+		asynq.Config{
+			Concurrency: 1, // Overall server concurrency
+			Queues:      queues,
+			Logger:      newTestLogger(t),
+		},
+	)
+
+	mux := asynq.NewServeMux()
+
+	// Define transaction processing handler
+	processTransactionHandler := func(ctx context.Context, task *asynq.Task) error {
+		var txn model.Transaction
+		if err := json.Unmarshal(task.Payload(), &txn); err != nil {
+			t.Logf("TEST_WORKER: Error unmarshalling transaction: %v", err)
+			return fmt.Errorf("failed to unmarshal transaction: %w", err)
+		}
+
+		t.Logf("TEST_WORKER: Picked up transaction %s (Ref: %s) for processing.", txn.TransactionID, txn.Reference)
+		processedTxn, err := blnkInstance.RecordTransaction(ctx, &txn) // Use blnkInstance from the outer scope
+		if err != nil {
+			t.Logf("TEST_WORKER: Error recording transaction %s (Ref: %s): %v", txn.TransactionID, txn.Reference, err)
+			if strings.Contains(strings.ToLower(err.Error()), "insufficient funds") || strings.Contains(strings.ToLower(err.Error()), "transaction exceeds overdraft limit") {
+				_, rejectErr := blnkInstance.RejectTransaction(ctx, &txn, err.Error())
+				if rejectErr != nil {
+					t.Logf("TEST_WORKER: Error rejecting transaction %s after processing error: %v", txn.TransactionID, rejectErr)
+					return fmt.Errorf("processing error: %v, rejection error: %w", err, rejectErr)
+				}
+				t.Logf("TEST_WORKER: Rejected transaction %s (Ref: %s) due to: %v", txn.TransactionID, txn.Reference, err)
+				return nil // Assuming rejection is a final state for this test handler.
+			}
+			return err // Allow Asynq to retry for other errors
+		}
+		t.Logf("TEST_WORKER: Successfully processed transaction %s (Ref: %s), new ID: %s, new Ref: %s, Status: %s", txn.TransactionID, txn.Reference, processedTxn.TransactionID, processedTxn.Reference, processedTxn.Status)
+		return nil
+	}
+
+	mux.HandleFunc(transactionQueueName, processTransactionHandler)
+
+	go func() {
+		t.Logf("TEST_WORKER: Starting Asynq server, listening on queue: %s", transactionQueueName)
+		if err := srv.Run(mux); err != nil {
+			t.Errorf("TEST_WORKER: Asynq server Run() error: %v", err)
+		}
+	}()
+
+	return func() {
+		t.Log("TEST_WORKER: Shutting down Asynq server...")
+		srv.Shutdown()
+		t.Log("TEST_WORKER: Asynq server shut down.")
+	}
+}
+
+func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping inflight async flow test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_inflight_async",
+			IndexQueue:       "index_queue_test_inflight_async",
+			TransactionQueue: "transaction_queue_test_inflight_async",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret-inflight-async",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index_inflight_async",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	// Construct the specific transaction queue name
+	transactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnkInstance, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Start the test Asynq worker
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnkInstance, transactionQueueName)
+	defer cleanupWorker()
+
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test_inflight_async")
+
+	sourceBalance := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+	destBalance := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err)
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err)
+
+	txn := &model.Transaction{
+		Reference:      txnRef,
+		Source:         source.BalanceID,
+		Destination:    dest.BalanceID,
+		Amount:         500,
+		Inflight:       true, // Key: This is an inflight transaction
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": true},
+		SkipQueue:      false, // Key: It will be queued first
+	}
+
+	queuedTxn, err := blnkInstance.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue inflight transaction")
+	require.Equal(t, StatusQueued, queuedTxn.Status, "Inflight transaction should initially be QUEUED")
+
+	// Simulate worker picking up and processing the queued inflight transaction
+	// The worker calls RecordTransaction, which should create the INFLIGHT record.
+	queueCopy := createQueueCopy(queuedTxn, queuedTxn.Reference) // Preserves Inflight=true
+
+	// Poll for the processed transaction (which should now be INFLIGHT)
+	// The reference for the processed transaction by RecordTransaction will be queueCopy.Reference
+	processedInflightTxnRef := queueCopy.Reference // This is typically originalRef + "_q"
+	pollInterval := 200 * time.Millisecond
+	timeoutDuration := 10 * time.Second
+
+	fmt.Printf("Polling for INFLIGHT transaction ref: %s (Original Queued ID: %s)\n", processedInflightTxnRef, queuedTxn.TransactionID)
+
+	inflightTxn, err := pollForTransactionStatus(ctx, ds, processedInflightTxnRef, StatusInflight, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for INFLIGHT transaction %s. Error: %v", processedInflightTxnRef, err))
+	require.NotNil(t, inflightTxn, "INFLIGHT transaction should not be nil after polling")
+	require.Equal(t, StatusInflight, inflightTxn.Status, "Processed transaction status should be INFLIGHT")
+	// The inflightTxn created by RecordTransaction is a child of the *queueCopy* if queueCopy was saved first.
+	// However, our createQueueCopy doesn't save itself, RecordTransaction processes its details.
+	// The key is that an INFLIGHT transaction now exists with reference `processedInflightTxnRef`.
+	// Let's verify its ParentTransaction refers to the *original* queued transaction.
+	require.Equal(t, queuedTxn.TransactionID, inflightTxn.ParentTransaction, "INFLIGHT transaction's parent ID should match original queued transaction ID")
+
+	// Verify inflight balances
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err)
+	updatedDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err)
+
+	expectedInflightDebit := big.NewInt(int64(-500) * 100)
+	expectedInflightCredit := big.NewInt(int64(500) * 100)
+
+	assert.Equal(t, 0, updatedSource.InflightBalance.Cmp(expectedInflightDebit), "Source inflight balance incorrect")
+	assert.Equal(t, 0, updatedDest.InflightBalance.Cmp(expectedInflightCredit), "Destination inflight balance incorrect")
+	assert.Equal(t, 0, updatedSource.Balance.Cmp(big.NewInt(0)), "Source main balance should be 0")
+	assert.Equal(t, 0, updatedDest.Balance.Cmp(big.NewInt(0)), "Destination main balance should be 0")
+
+	// Optional: Now commit this inflight transaction and poll for APPLIED status
+	commitTxn, err := blnkInstance.CommitInflightTransaction(ctx, inflightTxn.TransactionID, inflightTxn.PreciseAmount) // Commit full amount
+	require.NoError(t, err, "Failed to commit inflight transaction")
+	require.Equal(t, StatusApplied, commitTxn.Status, "Committed transaction should be APPLIED")
+
+	// Poll for the *commitTxn* reference to ensure it's APPLIED (it should be synchronous, but good practice if there were further async steps)
+	// The CommitInflightTransaction itself creates a new transaction record for the commit action.
+	// This new record (commitTxn) will have the status APPLIED.
+	// We can directly check commitTxn.Status, or poll if we suspect async behavior.
+	// For this test, direct check is fine as CommitInflightTransaction is synchronous in its DB update for the commit record.
+
+	// Verify final balances after commit
+	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err)
+	finalDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, finalSource.Balance.Cmp(expectedInflightDebit), "Source final balance incorrect after commit")
+	assert.Equal(t, 0, finalDest.Balance.Cmp(expectedInflightCredit), "Destination final balance incorrect after commit")
+	assert.Equal(t, 0, finalSource.InflightBalance.Cmp(big.NewInt(0)), "Source inflight balance should be 0 after commit")
+	assert.Equal(t, 0, finalDest.InflightBalance.Cmp(big.NewInt(0)), "Destination inflight balance should be 0 after commit")
+}
+
+func TestMultipleSourcesTransactionFlowAsyncPolled(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping multi-source async flow test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_ms_async",
+			IndexQueue:       "index_queue_test_ms_async",
+			TransactionQueue: "transaction_queue_test_ms_async",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret-ms-async",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index_ms_async",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnkInstance, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Construct the specific transaction queue name
+	transactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+
+	// Start the test Asynq worker
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnkInstance, transactionQueueName)
+	defer cleanupWorker()
+
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test_ms_async")
+
+	sourceBalanceOne := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+	sourceBalanceTwo := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+	destBalance := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+
+	sourceOne, err := ds.CreateBalance(*sourceBalanceOne)
+	require.NoError(t, err)
+	sourceTwo, err := ds.CreateBalance(*sourceBalanceTwo)
+	require.NoError(t, err)
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err)
+
+	txn := &model.Transaction{
+		Reference: txnRef,
+		Sources: []model.Distribution{
+			{Identifier: sourceOne.BalanceID, Distribution: "50%"},
+			{Identifier: sourceTwo.BalanceID, Distribution: "50%"},
+		},
+		Destination:    dest.BalanceID,
+		Amount:         500,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": true},
+		SkipQueue:      false, // Key: Will be queued
+	}
+
+	queuedTxn, err := blnkInstance.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue multi-source transaction")
+	require.Equal(t, StatusQueued, queuedTxn.Status, "Multi-source transaction should initially be QUEUED")
+
+	// Simulate worker processing
+	queueCopy := createQueueCopy(queuedTxn, queuedTxn.Reference)
+	fmt.Printf("Queue copy: %+v\n", queueCopy)
+
+	// Poll for each child transaction to be APPLIED
+	pollInterval := 200 * time.Millisecond
+	timeoutDuration := 10 * time.Second
+
+	childTxnRef1 := fmt.Sprintf("%s_1_q", queuedTxn.Reference) // Based on how RecordTransaction creates child refs
+	childTxnRef2 := fmt.Sprintf("%s_2_q", queuedTxn.Reference)
+
+	fmt.Printf("Polling for multi-source child transaction 1: %s\n", childTxnRef1)
+	appliedChild1, err := pollForTransactionStatus(ctx, ds, childTxnRef1, StatusApplied, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for multi-source child transaction 1 (%s). Error: %v", childTxnRef1, err))
+	require.NotNil(t, appliedChild1, "Applied child transaction 1 should not be nil")
+	require.Equal(t, StatusApplied, appliedChild1.Status)
+
+	fmt.Printf("Polling for multi-source child transaction 2: %s\n", childTxnRef2)
+	appliedChild2, err := pollForTransactionStatus(ctx, ds, childTxnRef2, StatusApplied, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for multi-source child transaction 2 (%s). Error: %v", childTxnRef2, err))
+	require.NotNil(t, appliedChild2, "Applied child transaction 2 should not be nil")
+	require.Equal(t, StatusApplied, appliedChild2.Status)
+
+	// Verify balances
+	updatedSourceOne, _ := ds.GetBalanceByIDLite(sourceOne.BalanceID)
+	updatedSourceTwo, _ := ds.GetBalanceByIDLite(sourceTwo.BalanceID)
+	updatedDest, _ := ds.GetBalanceByIDLite(dest.BalanceID)
+
+	expectedDebitEachSource := big.NewInt(int64(-250) * 100) // 50% of 500
+	expectedCreditDest := big.NewInt(int64(500) * 100)
+
+	assert.Equal(t, 0, updatedSourceOne.Balance.Cmp(expectedDebitEachSource), "Source one balance incorrect")
+	assert.Equal(t, 0, updatedSourceTwo.Balance.Cmp(expectedDebitEachSource), "Source two balance incorrect")
+	assert.Equal(t, 0, updatedDest.Balance.Cmp(expectedCreditDest), "Destination balance incorrect")
+}
+
+func TestMultipleDestinationsTransactionFlowAsyncPolled(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping multi-destination async flow test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_md_async",
+			IndexQueue:       "index_queue_test_md_async",
+			TransactionQueue: "transaction_queue_test_md_async",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret-md-async",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index_md_async",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnkInstance, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Construct the specific transaction queue name
+	transactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+
+	// Start the test Asynq worker
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnkInstance, transactionQueueName)
+	defer cleanupWorker()
+
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("test_md_async")
+
+	sourceBalance := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+	destBalanceOne := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+	destBalanceTwo := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err)
+	destOne, err := ds.CreateBalance(*destBalanceOne)
+	require.NoError(t, err)
+	destTwo, err := ds.CreateBalance(*destBalanceTwo)
+	require.NoError(t, err)
+
+	txn := &model.Transaction{
+		Reference: txnRef,
+		Source:    source.BalanceID,
+		Destinations: []model.Distribution{
+			{Identifier: destOne.BalanceID, Distribution: "50%"},
+			{Identifier: destTwo.BalanceID, Distribution: "50%"},
+		},
+		Amount:         500,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": true},
+		SkipQueue:      false, // Key: Will be queued
+	}
+
+	queuedTxn, err := blnkInstance.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue multi-destination transaction")
+	require.Equal(t, StatusQueued, queuedTxn.Status, "Multi-destination transaction should initially be QUEUED")
+
+	// Poll for each child transaction to be APPLIED
+	pollInterval := 200 * time.Millisecond
+	timeoutDuration := 10 * time.Second
+
+	childTxnRef1 := fmt.Sprintf("%s_1_q", queuedTxn.Reference)
+	childTxnRef2 := fmt.Sprintf("%s_2_q", queuedTxn.Reference)
+
+	fmt.Printf("Polling for multi-destination child transaction 1: %s\n", childTxnRef1)
+	appliedChild1, err := pollForTransactionStatus(ctx, ds, childTxnRef1, StatusApplied, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for multi-destination child transaction 1 (%s). Error: %v", childTxnRef1, err))
+	require.NotNil(t, appliedChild1, "Applied child transaction 1 should not be nil")
+	require.Equal(t, StatusApplied, appliedChild1.Status)
+
+	fmt.Printf("Polling for multi-destination child transaction 2: %s\n", childTxnRef2)
+	appliedChild2, err := pollForTransactionStatus(ctx, ds, childTxnRef2, StatusApplied, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for multi-destination child transaction 2 (%s). Error: %v", childTxnRef2, err))
+	require.NotNil(t, appliedChild2, "Applied child transaction 2 should not be nil")
+	require.Equal(t, StatusApplied, appliedChild2.Status)
+
+	// Verify balances
+	updatedSource, _ := ds.GetBalanceByIDLite(source.BalanceID)
+	updatedDestOne, _ := ds.GetBalanceByIDLite(destOne.BalanceID)
+	updatedDestTwo, _ := ds.GetBalanceByIDLite(destTwo.BalanceID)
+
+	expectedDebitSource := big.NewInt(int64(-500) * 100)
+	expectedCreditEachDest := big.NewInt(int64(250) * 100) // 50% of 500
+
+	assert.Equal(t, 0, updatedSource.Balance.Cmp(expectedDebitSource), "Source balance incorrect")
+	assert.Equal(t, 0, updatedDestOne.Balance.Cmp(expectedCreditEachDest), "Destination one balance incorrect")
+	assert.Equal(t, 0, updatedDestTwo.Balance.Cmp(expectedCreditEachDest), "Destination two balance incorrect")
 }
