@@ -47,6 +47,7 @@ type RecordTransaction struct {
 }
 
 type InflightUpdate struct {
-	Status string  `json:"status"`
-	Amount float64 `json:"amount"`
+	Status        string   `json:"status"`
+	Amount        float64  `json:"amount"`
+	PreciseAmount *big.Int `json:"precise_amount,omitempty"`
 }

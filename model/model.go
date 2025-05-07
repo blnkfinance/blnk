@@ -2,15 +2,27 @@ package model
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"strconv"
 
 	"github.com/google/uuid"
+	pgconn "github.com/jerry-enebeli/blnk/internal/pg-conn"
+
 	"github.com/shopspring/decimal"
 )
+
+// precisionCache stores transaction precisions fetched from the database.
+var precisionCache map[string]float64
+
+// init initializes the precisionCache.
+func init() {
+	precisionCache = make(map[string]float64)
+}
 
 // GenerateUUIDWithSuffix generates a UUID with a given module name as a suffix.
 // This is useful for creating unique identifiers with context-specific prefixes.
@@ -205,8 +217,20 @@ func (balance *Balance) RollbackInflightDebit(amount *big.Int) {
 // ApplyPrecision handles both operations involving precision:
 // 1. If PreciseAmount exists: converts it to a decimal Amount
 // 2. If Amount exists: converts it to a PreciseAmount
+// This function is now a wrapper that sets default precision if needed and calls applyPrecisionLogic.
 func ApplyPrecision(transaction *Transaction) *big.Int {
 	if transaction.Precision == 0 {
+		transaction.Precision = 1
+	}
+	return applyPrecisionLogic(transaction)
+}
+
+// applyPrecisionLogic contains the core logic for converting amounts based on precision.
+// It assumes transaction.Precision has been set appropriately before this call.
+func applyPrecisionLogic(transaction *Transaction) *big.Int {
+	// Ensure precision is not zero to avoid division by zero, though ApplyPrecision and ApplyPrecisionWithDBLookup should handle this.
+	if transaction.Precision == 0 {
+		log.Println("Warning: applyPrecisionLogic called with transaction.Precision = 0. Defaulting to 1.")
 		transaction.Precision = 1
 	}
 
@@ -217,6 +241,70 @@ func ApplyPrecision(transaction *Transaction) *big.Int {
 
 	transaction.PreciseAmount = convertDecimalToPrecise(transaction)
 	return transaction.PreciseAmount
+}
+
+// fetchTransactionPrecisionFromDB is a placeholder for fetching precision from the database.
+// In a real application, this would query your database.
+// It returns the precision, a boolean indicating if found, and an error.
+func fetchTransactionPrecisionFromDB(db *sql.DB, transactionID string) (float64, bool, error) {
+	// Check cache first
+	if precision, found := precisionCache[transactionID]; found {
+		log.Printf("Cache hit for transaction ID %s: precision %f", transactionID, precision)
+		return precision, true, nil
+	}
+
+	var precision float64
+	query := "SELECT precision FROM blnk.transactions WHERE transaction_id = $1"
+	err := db.QueryRow(query, transactionID).Scan(&precision)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		log.Printf("Error querying precision for transaction ID %s: %v", transactionID, err)
+		return 0, false, err
+	}
+	if precision <= 0 { // Or any other validation for valid precision
+		log.Printf("Invalid precision %f found in DB for transaction ID %s", precision, transactionID)
+		return 0, false, nil // Treat invalid precision as not found for fallback logic
+	}
+
+	// Store in cache
+	precisionCache[transactionID] = precision
+	log.Printf("Cache miss for transaction ID %s: fetched precision %f from DB and cached", transactionID, precision)
+	return precision, true, nil
+}
+
+// ApplyPrecisionWithDBLookup attempts to fetch precision from the database
+// and then applies it to the transaction. Falls back to transaction-defined
+// precision or a default of 1 if DB lookup fails or precision is invalid.
+func ApplyPrecisionWithDBLookup(transaction *Transaction, ds *pgconn.Datasource) *big.Int {
+	var dbPrecision float64
+	var found bool
+	var err error
+
+	if ds != nil && ds.Conn != nil && transaction.TransactionID != "" {
+		dbPrecision, found, err = fetchTransactionPrecisionFromDB(ds.Conn, transaction.TransactionID)
+		if err != nil {
+			log.Printf("Error fetching precision from DB for transaction %s: %v. Will use local/default precision.", transaction.TransactionID, err)
+			// Fall through to use local or default precision
+		}
+	} else {
+		log.Println("Datasource, DB connection, or TransactionID is nil/empty; skipping DB lookup for precision.")
+	}
+
+	if found && dbPrecision > 0 {
+		transaction.Precision = dbPrecision
+		log.Printf("Using precision %f from DB for transaction %s", transaction.Precision, transaction.TransactionID)
+	} else {
+		if transaction.Precision == 0 {
+			log.Printf("Precision not found in DB or invalid for transaction %s (or DB lookup skipped). Defaulting precision to 1.", transaction.TransactionID)
+			transaction.Precision = 1
+		} else {
+			log.Printf("Precision not found in DB or invalid for transaction %s (or DB lookup skipped). Using pre-set precision: %f", transaction.TransactionID, transaction.Precision)
+		}
+	}
+
+	return applyPrecisionLogic(transaction)
 }
 
 // convertPreciseToDecimal converts the precise integer amount to a decimal value

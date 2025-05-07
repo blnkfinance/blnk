@@ -27,6 +27,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/big"
 	"mime"
 	"net/http"
 	"os"
@@ -1034,11 +1035,11 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 	_, err = s.ProcessTransactionInBatches(
 		ctx,
 		uploadID,
-		0,
+		big.NewInt(0),
 		conf.Transaction.MaxWorkers,
 		false, // Stream mode is disabled.
 		transactionProcessor,
-		func(ctx context.Context, txns <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ float64) {
+		func(ctx context.Context, txns <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, _ *big.Int) {
 			defer wg.Done()
 			for txn := range txns {
 				if err := processor.process(ctx, txn); err != nil {
@@ -1423,11 +1424,11 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 	_, err = s.ProcessTransactionInBatches(
 		ctx,
 		externalTxn.TransactionID,
-		externalTxn.Amount,
+		big.NewInt(int64(externalTxn.Amount)),
 		conf.Transaction.MaxWorkers,
 		false, // Stream mode
 		s.getInternalTransactionsPaginated,
-		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount float64) {
+		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
 			defer wg.Done()
 			for internalTxn := range jobs {
 				select {
