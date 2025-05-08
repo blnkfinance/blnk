@@ -68,6 +68,10 @@ func SetUpTestRequest(s TestRequest) (*httptest.ResponseRecorder, error) {
 
 func setupRouter() (*gin.Engine, *blnk.Blnk, error) {
 	config.MockConfig(&config.Configuration{
+		Queue: config.QueueConfig{
+			TransactionQueue: "transaction_queue_test_api_md_async",
+			NumberOfQueues:   1,
+		},
 		Redis:      config.RedisConfig{Dns: "localhost:6379"},
 		DataSource: config.DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
 	})

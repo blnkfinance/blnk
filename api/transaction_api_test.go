@@ -17,18 +17,153 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/brianvoe/gofakeit/v6"
+	"github.com/hibiken/asynq"
+	"github.com/jerry-enebeli/blnk"
 	model2 "github.com/jerry-enebeli/blnk/api/model"
+	"github.com/jerry-enebeli/blnk/config"
+	"github.com/jerry-enebeli/blnk/database"
+	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 	"github.com/jerry-enebeli/blnk/internal/request"
 
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// pollForTransactionStatus polls for a transaction until it reaches the expected status or a timeout occurs.
+func pollForTransactionStatus(ctx context.Context, ds database.IDataSource, transactionRef string, expectedStatus string, pollInterval time.Duration, timeoutDuration time.Duration) (*model.Transaction, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
+	defer cancel()
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, fmt.Errorf("timed out waiting for transaction ref %s to reach status %s: %w", transactionRef, expectedStatus, timeoutCtx.Err())
+		case <-ticker.C:
+			txn, err := ds.GetTransactionByRef(timeoutCtx, transactionRef) // Use timeoutCtx for the DB call as well
+			if err != nil {
+				// If the error is that the transaction is not found, we should continue polling.
+				// For other errors, the outer timeout will eventually catch persistent issues.
+				continue
+			}
+			// If err is nil, txn is a valid model.Transaction struct.
+			if txn.Status == expectedStatus {
+				return &txn, nil // Return a pointer to the transaction
+			}
+		}
+	}
+}
+
+// Helper for Asynq logger to use t.Logf
+type testLogger struct {
+	t *testing.T
+}
+
+func newTestLogger(t *testing.T) *testLogger {
+	return &testLogger{t: t}
+}
+
+func (tl *testLogger) Debug(args ...interface{}) {
+	tl.t.Logf("ASYNQ_DEBUG: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Info(args ...interface{}) {
+	tl.t.Logf("ASYNQ_INFO: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Warn(args ...interface{}) {
+	tl.t.Logf("ASYNQ_WARN: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Error(args ...interface{}) {
+	tl.t.Logf("ASYNQ_ERROR: %s", fmt.Sprint(args...))
+}
+
+func (tl *testLogger) Fatal(args ...interface{}) {
+	tl.t.Logf("ASYNQ_FATAL: %s", fmt.Sprint(args...)) // t.Fatalf would exit test
+}
+
+// StartTestAsynqWorker sets up and starts an Asynq server for testing purposes.
+// It takes the testing object, configuration, Blnk instance, and the specific transaction queue name.
+// It returns a cleanup function that should be deferred by the caller to shut down the server.
+func StartTestAsynqWorker(t *testing.T, cnf *config.Configuration, blnkInstance *blnk.Blnk, transactionQueueName string) func() {
+	redisOption, err := redis_db.ParseRedisURL(cnf.Redis.Dns)
+	require.NoError(t, err, "Failed to parse Redis URL for Asynq")
+
+	queues := make(map[string]int)
+	queues[transactionQueueName] = 1 // Concurrency for the transaction queue
+
+	srv := asynq.NewServer(
+		asynq.RedisClientOpt{
+			Addr:      redisOption.Addr,
+			Password:  redisOption.Password,
+			DB:        redisOption.DB,
+			TLSConfig: redisOption.TLSConfig,
+		},
+		asynq.Config{
+			Concurrency: 1, // Overall server concurrency
+			Queues:      queues,
+			Logger:      newTestLogger(t),
+		},
+	)
+
+	mux := asynq.NewServeMux()
+
+	// Define transaction processing handler
+	processTransactionHandler := func(ctx context.Context, task *asynq.Task) error {
+		var txn model.Transaction
+		if err := json.Unmarshal(task.Payload(), &txn); err != nil {
+			t.Logf("TEST_WORKER: Error unmarshalling transaction: %v", err)
+			return fmt.Errorf("failed to unmarshal transaction: %w", err)
+		}
+
+		t.Logf("TEST_WORKER: Picked up transaction %s (Ref: %s) for processing.", txn.TransactionID, txn.Reference)
+		processedTxn, err := blnkInstance.RecordTransaction(ctx, &txn) // Use blnkInstance from the outer scope
+		if err != nil {
+			t.Logf("TEST_WORKER: Error recording transaction %s (Ref: %s): %v", txn.TransactionID, txn.Reference, err)
+			if strings.Contains(strings.ToLower(err.Error()), "insufficient funds") || strings.Contains(strings.ToLower(err.Error()), "transaction exceeds overdraft limit") {
+				_, rejectErr := blnkInstance.RejectTransaction(ctx, &txn, err.Error())
+				if rejectErr != nil {
+					t.Logf("TEST_WORKER: Error rejecting transaction %s after processing error: %v", txn.TransactionID, rejectErr)
+					return fmt.Errorf("processing error: %v, rejection error: %w", err, rejectErr)
+				}
+				t.Logf("TEST_WORKER: Rejected transaction %s (Ref: %s) due to: %v", txn.TransactionID, txn.Reference, err)
+				return nil // Assuming rejection is a final state for this test handler.
+			}
+			return err // Allow Asynq to retry for other errors
+		}
+		t.Logf("TEST_WORKER: Successfully processed transaction %s (Ref: %s), new ID: %s, new Ref: %s, Status: %s", txn.TransactionID, txn.Reference, processedTxn.TransactionID, processedTxn.Reference, processedTxn.Status)
+		return nil
+	}
+
+	mux.HandleFunc(transactionQueueName, processTransactionHandler)
+
+	go func() {
+		t.Logf("TEST_WORKER: Starting Asynq server, listening on queue: %s", transactionQueueName)
+		if err := srv.Run(mux); err != nil {
+			t.Errorf("TEST_WORKER: Asynq server Run() error: %v", err)
+		}
+	}()
+
+	return func() {
+		t.Log("TEST_WORKER: Shutting down Asynq server...")
+		srv.Shutdown()
+		t.Log("TEST_WORKER: Asynq server shut down.")
+	}
+}
 
 func TestRecordTransaction(t *testing.T) {
 	router, b, err := setupRouter()
@@ -237,6 +372,17 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 		t.Fatalf("Failed to setup router: %v", err)
 	}
 
+	cnf, err := config.Fetch()
+	if err != nil {
+		t.Fatalf("Failed to fetch config: %v", err)
+	}
+
+	// Determine the actual queue name the worker should listen to
+	// Assuming NumberOfQueues is 1 (default), the queue index will be 1.
+	actualTransactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+	cleanupWorker := StartTestAsynqWorker(t, cnf, b, actualTransactionQueueName)
+	defer cleanupWorker()
+
 	ctx := context.Background()
 	ledger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
 	assert.NoError(t, err)
@@ -257,7 +403,7 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 		Destination:    destBalance.BalanceID,
 		AllowOverDraft: true,
 		Inflight:       true,
-		SkipQueue:      true, // To process it synchronously as inflight
+		SkipQueue:      false,
 	}
 	payloadBytes, _ := request.ToJsonReq(&inflightPayload)
 	var inflightTxResponse model.Transaction
@@ -274,8 +420,14 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 	respInflight, errInflight := SetUpTestRequest(testReqInflight)
 	assert.NoError(t, errInflight)
 	assert.Equal(t, http.StatusCreated, respInflight.Code)
-	assert.Equal(t, "INFLIGHT", inflightTxResponse.Status)
+	assert.Equal(t, "QUEUED", inflightTxResponse.Status)
 	assert.True(t, inflightTxResponse.Inflight)
+
+	ds, err := database.NewDataSource(cnf)
+	assert.NoError(t, err)
+	committedTxn, err := pollForTransactionStatus(ctx, ds, inflightTxResponse.Reference+"_q", "INFLIGHT", 1*time.Second, 10*time.Second)
+	assert.NoError(t, err)
+	assert.Equal(t, "INFLIGHT", committedTxn.Status)
 
 	// 2. Verify Initial Balances (Inflight)
 	sbAfterInflight, _ := b.GetBalanceByID(ctx, sourceBalance.BalanceID, nil, false)
@@ -289,7 +441,7 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 	assert.Equal(t, int64(0), dbAfterInflight.Balance.Int64(), "Destination balance should be 0 before commit")
 	assert.Equal(t, expectedInflightCredit.String(), dbAfterInflight.InflightBalance.String(), "Destination inflight balance incorrect")
 
-	// 3. Commit Transaction
+	//3. Commit Transaction
 	commitPayload := model2.InflightUpdate{
 		Status:        "commit",
 		PreciseAmount: inflightTxResponse.PreciseAmount,
@@ -309,9 +461,17 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 	respCommit, errCommit := SetUpTestRequest(testReqCommit)
 	assert.NoError(t, errCommit)
 	assert.Equal(t, http.StatusOK, respCommit.Code)
-	assert.Equal(t, "APPLIED", commitTxResponse.Status)
+	assert.Equal(t, "COMMIT", commitTxResponse.Status)
 	assert.Equal(t, inflightTxResponse.PreciseAmount.String(), commitTxResponse.PreciseAmount.String())
 
+	ds, err = database.NewDataSource(cnf)
+	if err != nil {
+		t.Fatalf("Failed to create datasource: %v", err)
+	}
+
+	committedTxn, err = pollForTransactionStatus(ctx, ds, commitTxResponse.Reference, "APPLIED", 1*time.Second, 10*time.Second)
+	assert.NoError(t, err)
+	assert.Equal(t, "APPLIED", committedTxn.Status)
 	// 4. Verify Final Balances (Committed)
 	sbAfterCommit, _ := b.GetBalanceByID(ctx, sourceBalance.BalanceID, nil, false)
 	dbAfterCommit, _ := b.GetBalanceByID(ctx, destBalance.BalanceID, nil, false)
@@ -418,6 +578,16 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 		t.Fatalf("Failed to setup router: %v", err)
 	}
 
+	cnf, err := config.Fetch()
+	if err != nil {
+		t.Fatalf("Failed to fetch config: %v", err)
+	}
+	// Determine the actual queue name the worker should listen to
+	// Assuming NumberOfQueues is 1 (default), the queue index will be 1.
+	actualTransactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+	cleanupWorker := StartTestAsynqWorker(t, cnf, b, actualTransactionQueueName)
+	defer cleanupWorker()
+
 	ctx := context.Background()
 	ledger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
 	assert.NoError(t, err)
@@ -439,7 +609,7 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 		Destination:    destBalance.BalanceID,
 		AllowOverDraft: true,
 		Inflight:       true,
-		SkipQueue:      true, // To process it synchronously as inflight
+		SkipQueue:      false,
 	}
 	payloadBytes, _ := request.ToJsonReq(&inflightPayload)
 	var inflightTxResponse model.Transaction
@@ -456,9 +626,15 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 	respInflight, errInflight := SetUpTestRequest(testReqInflight)
 	assert.NoError(t, errInflight)
 	assert.Equal(t, http.StatusCreated, respInflight.Code)
-	assert.Equal(t, "INFLIGHT", inflightTxResponse.Status)
+	assert.Equal(t, "QUEUED", inflightTxResponse.Status)
 	assert.True(t, inflightTxResponse.Inflight)
 	originalPreciseAmount := inflightTxResponse.PreciseAmount
+
+	ds, err := database.NewDataSource(cnf)
+	assert.NoError(t, err)
+	committedTxn, err := pollForTransactionStatus(ctx, ds, inflightTxResponse.Reference+"_q", "INFLIGHT", 1*time.Second, 10*time.Second)
+	assert.NoError(t, err)
+	assert.Equal(t, "INFLIGHT", committedTxn.Status)
 
 	// 2. Verify Initial Balances (Inflight)
 	sbAfterInflight, _ := b.GetBalanceByID(ctx, sourceBalance.BalanceID, nil, false)
@@ -493,7 +669,11 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 	respPartialCommit, errPartialCommit := SetUpTestRequest(testReqPartialCommit)
 	assert.NoError(t, errPartialCommit)
 	assert.Equal(t, http.StatusOK, respPartialCommit.Code)
-	assert.Equal(t, "APPLIED", commitPartialTxResponse.Status)
+	assert.Equal(t, "COMMIT", commitPartialTxResponse.Status)
+
+	committedTxn, err = pollForTransactionStatus(ctx, ds, commitPartialTxResponse.Reference, "APPLIED", 1*time.Second, 10*time.Second)
+	assert.NoError(t, err)
+	assert.Equal(t, "APPLIED", committedTxn.Status)
 
 	// Assert that the response PreciseAmount is what we expect from the float Amount and precision
 	expectedPartialPreciseAmount := model.ApplyPrecision(&model.Transaction{Amount: partialAmountFloat, Precision: inflightPayload.Precision})
@@ -532,8 +712,12 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 	respRemainingCommit, errRemainingCommit := SetUpTestRequest(testReqRemainingCommit)
 	assert.NoError(t, errRemainingCommit)
 	assert.Equal(t, http.StatusOK, respRemainingCommit.Code)
-	assert.Equal(t, "APPLIED", commitRemainingTxResponse.Status)
+	assert.Equal(t, "COMMIT", commitRemainingTxResponse.Status)
 	assert.Equal(t, remainingInflightPreciseAmount.String(), commitRemainingTxResponse.PreciseAmount.String(), "Remaining committed amount mismatch")
+
+	committedTxn, err = pollForTransactionStatus(ctx, ds, commitRemainingTxResponse.Reference, "APPLIED", 1*time.Second, 10*time.Second)
+	assert.NoError(t, err)
+	assert.Equal(t, "APPLIED", committedTxn.Status)
 
 	// 6. Verify Final Balances (Fully Committed)
 	sbAfterFullCommit, _ := b.GetBalanceByID(ctx, sourceBalance.BalanceID, nil, false)

@@ -705,7 +705,7 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 			span.RecordError(err)
 			continue
 		}
-		queuedCommitTxn, err := l.CommitInflightTransaction(ctx, originalTxn.TransactionID, amount)
+		queuedCommitTxn, err := l.CommitInflightTransactionWithQueue(ctx, originalTxn.TransactionID, amount)
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 			span.RecordError(err)
@@ -1046,7 +1046,30 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 	span.AddEvent("Inflight transaction committed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
 	// Finalize the commitment of the transaction
-	return l.finalizeCommitment(ctx, transaction)
+	return l.finalizeCommitment(ctx, transaction, false)
+}
+
+func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transactionID string, amount *big.Int) (*model.Transaction, error) {
+	ctx, span := tracer.Start(ctx, "CommitInflightTransactionWithQueue")
+	defer span.End()
+
+	// Fetch and validate the inflight transaction
+	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	// Validate and update the transaction amount
+	if err := l.validateAndUpdateAmount(ctx, transaction, amount); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.AddEvent("Inflight transaction committed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
+
+	// Finalize the commitment of the transaction
+	return l.finalizeCommitment(ctx, transaction, true)
 }
 
 // validateAndUpdateAmount validates the amount to be committed for a transaction and updates the transaction's amount.
@@ -1180,7 +1203,7 @@ func (l *Blnk) convertPreciseToFloat(preciseAmount *big.Int, precision float64) 
 // Returns:
 // - *model.Transaction: A pointer to the finalized Transaction model.
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transaction, withQueue bool) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "FinalizeCommitment")
 	defer span.End()
 
@@ -1192,15 +1215,20 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
 
-	// Queue the transaction for further processing
-	transaction, err := l.RecordTransaction(ctx, transaction)
-	if err != nil {
-		span.RecordError(err)
-		return nil, l.logAndRecordError(span, "saving transaction to db error", err)
+	if withQueue {
+		enqueueTransactions(ctx, l.queue, transaction, nil)
+	} else {
+		// Queue the transaction for further processing
+		transaction, err := l.RecordTransaction(ctx, transaction)
+		if err != nil {
+			span.RecordError(err)
+			return nil, l.logAndRecordError(span, "saving transaction to db error", err)
+		}
+		return transaction, nil
 	}
-
 	span.AddEvent("Commitment finalized", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 	return transaction, nil
+
 }
 
 // VoidInflightTransaction voids an inflight transaction by validating it, calculating the remaining amount, and finalizing the void.
