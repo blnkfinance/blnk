@@ -4568,6 +4568,7 @@ func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
 	assert.Equal(t, 0, updatedSource.Balance.Cmp(big.NewInt(0)), "Source main balance should be 0")
 	assert.Equal(t, 0, updatedDest.Balance.Cmp(big.NewInt(0)), "Destination main balance should be 0")
 
+
 	// --- Partial Commits ---
 	originalAmountPrecise := inflightTxn.PreciseAmount // 50000
 	partialAmount1Precise := big.NewInt(100 * 100)     // 10000
@@ -4667,7 +4668,6 @@ func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
 	totalCommittedPrecise.Add(totalCommittedPrecise, appliedCommitTxn3.PreciseAmount)
 	require.Equal(t, 0, originalAmountPrecise.Cmp(totalCommittedPrecise), "Sum of partial commits does not equal original inflight amount")
 	t.Logf("Sum of partial commit amounts verified.")
-
 }
 
 func TestMultipleSourcesTransactionFlowAsyncPolled(t *testing.T) {
