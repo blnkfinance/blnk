@@ -143,8 +143,14 @@ func sendHeartbeat(client posthog.Client, heartbeatID string) {
 	}()
 }
 
+func healthCheckHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "UP"})
+}
+
 func initializeRouter(b *blnkInstance) *gin.Engine {
-	return api.NewAPI(b.blnk).Router()
+	router := api.NewAPI(b.blnk).Router()
+	router.GET("/health", healthCheckHandler) // Add health check route
+	return router
 }
 
 func initializeTracing(ctx context.Context) (func(context.Context) error, error) {
