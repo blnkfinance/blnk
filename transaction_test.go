@@ -3600,6 +3600,10 @@ func TestCommitWorkerFullFlow(t *testing.T) {
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
 
+	queueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnk, queueName)
+	defer cleanupWorker()
+
 	// Create test balances with initial amounts of zero
 	sourceBalance := &model.Balance{
 		Currency: "USD",
@@ -3698,6 +3702,10 @@ func TestCommitWorkerFullFlow(t *testing.T) {
 	require.Equal(t, StatusApplied, result.Txn.Status, "Committed transaction should have APPLIED status")
 	require.Equal(t, inflightEntry.TransactionID, result.Txn.ParentTransaction,
 		"Committed transaction should reference the original as parent")
+
+	polledTxn, err := pollForTransactionStatus(ctx, ds, result.Txn.Reference, "APPLIED", 1*time.Second, 10*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, StatusApplied, polledTxn.Status, "Committed transaction should have APPLIED status")
 
 	// Step 8: Verify final balances
 	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
@@ -4560,27 +4568,106 @@ func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
 	assert.Equal(t, 0, updatedSource.Balance.Cmp(big.NewInt(0)), "Source main balance should be 0")
 	assert.Equal(t, 0, updatedDest.Balance.Cmp(big.NewInt(0)), "Destination main balance should be 0")
 
-	// Optional: Now commit this inflight transaction and poll for APPLIED status
-	commitTxn, err := blnkInstance.CommitInflightTransaction(ctx, inflightTxn.TransactionID, inflightTxn.PreciseAmount) // Commit full amount
-	require.NoError(t, err, "Failed to commit inflight transaction")
-	require.Equal(t, StatusApplied, commitTxn.Status, "Committed transaction should be APPLIED")
 
-	// Poll for the *commitTxn* reference to ensure it's APPLIED (it should be synchronous, but good practice if there were further async steps)
-	// The CommitInflightTransaction itself creates a new transaction record for the commit action.
-	// This new record (commitTxn) will have the status APPLIED.
-	// We can directly check commitTxn.Status, or poll if we suspect async behavior.
-	// For this test, direct check is fine as CommitInflightTransaction is synchronous in its DB update for the commit record.
+	// --- Partial Commits ---
+	originalAmountPrecise := inflightTxn.PreciseAmount // 50000
+	partialAmount1Precise := big.NewInt(100 * 100)     // 10000
+	partialAmount2Precise := big.NewInt(150 * 100)     // 15000
+	// Remaining amount will be committed with big.NewInt(0) or calculated
 
-	// Verify final balances after commit
-	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
-	require.NoError(t, err)
-	finalDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
-	require.NoError(t, err)
+	// First Partial Commit (100)
+	t.Logf("Submitting first partial commit (amount: %s) for inflightTxn ID: %s, original queuedTxn ID: %s", partialAmount1Precise.String(), inflightTxn.TransactionID, queuedTxn.TransactionID)
+	commitTxn1, err := blnkInstance.CommitInflightTransactionWithQueue(ctx, inflightTxn.TransactionID, partialAmount1Precise)
+	require.NoError(t, err, "Failed to submit first partial commit")
+	require.Equal(t, StatusApplied, commitTxn1.Status, "First partial commit submission should have status COMMIT")
 
-	assert.Equal(t, 0, finalSource.Balance.Cmp(expectedInflightDebit), "Source final balance incorrect after commit")
-	assert.Equal(t, 0, finalDest.Balance.Cmp(expectedInflightCredit), "Destination final balance incorrect after commit")
-	assert.Equal(t, 0, finalSource.InflightBalance.Cmp(big.NewInt(0)), "Source inflight balance should be 0 after commit")
-	assert.Equal(t, 0, finalDest.InflightBalance.Cmp(big.NewInt(0)), "Destination inflight balance should be 0 after commit")
+	t.Logf("Polling for first APPLIED commit transaction (Ref: %s)", commitTxn1.Reference)
+	appliedCommitTxn1, err := pollForTransactionStatus(ctx, ds, commitTxn1.Reference, StatusApplied, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for first applied commit (Ref: %s). Error: %v", commitTxn1.Reference, err))
+	require.NotNil(t, appliedCommitTxn1, "First applied commit transaction should not be nil")
+	require.Equal(t, StatusApplied, appliedCommitTxn1.Status, "First commit transaction status should be APPLIED")
+	require.Equal(t, inflightTxn.TransactionID, appliedCommitTxn1.ParentTransaction, "First applied commit parent ID mismatch")
+
+	// Verify balances after first partial commit
+	sourceAfterPartial1, _ := ds.GetBalanceByIDLite(source.BalanceID)
+	destAfterPartial1, _ := ds.GetBalanceByIDLite(dest.BalanceID)
+
+	expectedSourceBalanceAfter1 := big.NewInt(0).Sub(big.NewInt(0), partialAmount1Precise)          // -10000
+	expectedDestBalanceAfter1 := partialAmount1Precise                                              //  10000
+	expectedSourceInflightAfter1 := big.NewInt(0).Add(expectedInflightDebit, partialAmount1Precise) // -50000 + 10000 = -40000
+	expectedDestInflightAfter1 := big.NewInt(0).Sub(expectedInflightCredit, partialAmount1Precise)  //  50000 -   10000  =  40000
+
+	assert.Equal(t, 0, sourceAfterPartial1.Balance.Cmp(expectedSourceBalanceAfter1), "Source balance incorrect after 1st partial commit")
+	assert.Equal(t, 0, destAfterPartial1.Balance.Cmp(expectedDestBalanceAfter1), "Destination balance incorrect after 1st partial commit")
+	assert.Equal(t, 0, sourceAfterPartial1.InflightBalance.Cmp(expectedSourceInflightAfter1), "Source inflight balance incorrect after 1st partial commit")
+	assert.Equal(t, 0, destAfterPartial1.InflightBalance.Cmp(expectedDestInflightAfter1), "Destination inflight balance incorrect after 1st partial commit")
+	t.Logf("Balances verified after first partial commit.")
+
+	// Second Partial Commit (150)
+	t.Logf("Submitting second partial commit (amount: %s) for inflightTxn ID: %s", partialAmount2Precise.String(), inflightTxn.TransactionID)
+	commitTxn2, err := blnkInstance.CommitInflightTransactionWithQueue(ctx, inflightTxn.TransactionID, partialAmount2Precise)
+	require.NoError(t, err, "Failed to submit second partial commit")
+	require.Equal(t, StatusApplied, commitTxn2.Status, "Second partial commit submission should have status COMMIT")
+
+	t.Logf("Polling for second APPLIED commit transaction (Ref: %s)", commitTxn2.Reference)
+	appliedCommitTxn2, err := pollForTransactionStatus(ctx, ds, commitTxn2.Reference, StatusApplied, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for second applied commit (Ref: %s). Error: %v", commitTxn2.Reference, err))
+	require.NotNil(t, appliedCommitTxn2, "Second applied commit transaction should not be nil")
+	require.Equal(t, StatusApplied, appliedCommitTxn2.Status, "Second commit transaction status should be APPLIED")
+	require.Equal(t, inflightTxn.TransactionID, appliedCommitTxn2.ParentTransaction, "Second applied commit parent ID mismatch")
+
+	// Verify balances after second partial commit
+	sourceAfterPartial2, _ := ds.GetBalanceByIDLite(source.BalanceID)
+	destAfterPartial2, _ := ds.GetBalanceByIDLite(dest.BalanceID)
+
+	totalCommittedAfter2 := big.NewInt(0).Add(partialAmount1Precise, partialAmount2Precise)        // 10000 + 15000 = 25000
+	expectedSourceBalanceAfter2 := big.NewInt(0).Sub(big.NewInt(0), totalCommittedAfter2)          // -25000
+	expectedDestBalanceAfter2 := totalCommittedAfter2                                              //  25000
+	expectedSourceInflightAfter2 := big.NewInt(0).Add(expectedInflightDebit, totalCommittedAfter2) // -50000 + 25000 = -25000
+	expectedDestInflightAfter2 := big.NewInt(0).Sub(expectedInflightCredit, totalCommittedAfter2)  //  50000 -   25000  =  25000
+
+	assert.Equal(t, 0, sourceAfterPartial2.Balance.Cmp(expectedSourceBalanceAfter2), "Source balance incorrect after 2nd partial commit")
+	assert.Equal(t, 0, destAfterPartial2.Balance.Cmp(expectedDestBalanceAfter2), "Destination balance incorrect after 2nd partial commit")
+	assert.Equal(t, 0, sourceAfterPartial2.InflightBalance.Cmp(expectedSourceInflightAfter2), "Source inflight balance incorrect after 2nd partial commit")
+	assert.Equal(t, 0, destAfterPartial2.InflightBalance.Cmp(expectedDestInflightAfter2), "Destination inflight balance incorrect after 2nd partial commit")
+	t.Logf("Balances verified after second partial commit.")
+
+	// Third Partial Commit (Remaining amount - 250)
+	// Committing with 0 means commit remaining
+	t.Logf("Submitting third partial commit (remaining amount) for inflightTxn ID: %s", inflightTxn.TransactionID)
+	commitTxn3, err := blnkInstance.CommitInflightTransactionWithQueue(ctx, inflightTxn.TransactionID, big.NewInt(0))
+	require.NoError(t, err, "Failed to submit third partial commit (remaining)")
+	require.Equal(t, StatusApplied, commitTxn3.Status, "Third partial commit submission should have status COMMIT")
+
+	t.Logf("Polling for third APPLIED commit transaction (Ref: %s)", commitTxn3.Reference)
+	appliedCommitTxn3, err := pollForTransactionStatus(ctx, ds, commitTxn3.Reference, StatusApplied, pollInterval, timeoutDuration)
+	require.NoError(t, err, fmt.Sprintf("Polling failed for third applied commit (Ref: %s). Error: %v", commitTxn3.Reference, err))
+	require.NotNil(t, appliedCommitTxn3, "Third applied commit transaction should not be nil")
+	require.Equal(t, StatusApplied, appliedCommitTxn3.Status, "Third commit transaction status should be APPLIED")
+	require.Equal(t, inflightTxn.TransactionID, appliedCommitTxn3.ParentTransaction, "Third applied commit parent ID mismatch")
+
+	// Verify final balances after all commits
+	finalSource, _ := ds.GetBalanceByIDLite(source.BalanceID)
+	finalDest, _ := ds.GetBalanceByIDLite(dest.BalanceID)
+
+	// Balances should now reflect the full originalAmount, and inflight should be zero.
+	// originalAmountPrecise = 50000
+	expectedFinalSourceBalance := big.NewInt(0).Sub(big.NewInt(0), originalAmountPrecise) // -50000
+	expectedFinalDestBalance := originalAmountPrecise                                     //  50000
+
+	assert.Equal(t, 0, finalSource.Balance.Cmp(expectedFinalSourceBalance), "Source final balance incorrect after all commits")
+	assert.Equal(t, 0, finalDest.Balance.Cmp(expectedFinalDestBalance), "Destination final balance incorrect after all commits")
+	assert.Equal(t, 0, finalSource.InflightBalance.Cmp(big.NewInt(0)), "Source inflight balance should be 0 after all commits")
+	assert.Equal(t, 0, finalDest.InflightBalance.Cmp(big.NewInt(0)), "Destination inflight balance should be 0 after all commits")
+	t.Logf("Balances verified after third (final) partial commit.")
+
+	// Verify the sum of amounts of appliedCommitTxn1, appliedCommitTxn2, appliedCommitTxn3 equals originalAmountPrecise
+	totalCommittedPrecise := big.NewInt(0)
+	totalCommittedPrecise.Add(totalCommittedPrecise, appliedCommitTxn1.PreciseAmount)
+	totalCommittedPrecise.Add(totalCommittedPrecise, appliedCommitTxn2.PreciseAmount)
+	totalCommittedPrecise.Add(totalCommittedPrecise, appliedCommitTxn3.PreciseAmount)
+	require.Equal(t, 0, originalAmountPrecise.Cmp(totalCommittedPrecise), "Sum of partial commits does not equal original inflight amount")
+	t.Logf("Sum of partial commit amounts verified.")
 }
 
 func TestMultipleSourcesTransactionFlowAsyncPolled(t *testing.T) {
@@ -4659,10 +4746,6 @@ func TestMultipleSourcesTransactionFlowAsyncPolled(t *testing.T) {
 	queuedTxn, err := blnkInstance.QueueTransaction(ctx, txn)
 	require.NoError(t, err, "Failed to queue multi-source transaction")
 	require.Equal(t, StatusQueued, queuedTxn.Status, "Multi-source transaction should initially be QUEUED")
-
-	// Simulate worker processing
-	queueCopy := createQueueCopy(queuedTxn, queuedTxn.Reference)
-	fmt.Printf("Queue copy: %+v\n", queueCopy)
 
 	// Poll for each child transaction to be APPLIED
 	pollInterval := 200 * time.Millisecond
