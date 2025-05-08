@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -33,6 +34,7 @@ import (
 	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/hibiken/asynq"
+	"github.com/hibiken/asynqmon"
 )
 
 // indexData represents the data structure used for indexing data in the system.
@@ -254,9 +256,30 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			mux := asynq.NewServeMux()
 			initializeTaskHandlers(b, mux)
 
-			// Run the server
+			// Start asynqmon server for health checks and monitoring
+			redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns)
+			h := asynqmon.New(asynqmon.Options{
+				RootPath: "/monitoring", //  Optional: if you want to serve asynqmon under a sub-path.
+				RedisConnOpt: asynq.RedisClientOpt{
+					Addr:      redisOption.Addr,
+					Password:  redisOption.Password,
+					DB:        redisOption.DB,
+					TLSConfig: redisOption.TLSConfig,
+				},
+			})
+
+			// Start asynqmon HTTP server in a new goroutine
+			go func() {
+				monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
+				log.Printf("Asynqmon server listening on %s/monitoring", monitoringAddr)
+				if err := http.ListenAndServe(monitoringAddr, h); err != nil {
+					log.Fatalf("could not start asynqmon server: %v", err)
+				}
+			}()
+
+			// Start worker server
 			if err := srv.Run(mux); err != nil {
-				log.Fatal("Error running server:", err)
+				log.Fatalf("could not run server: %v", err)
 			}
 		},
 	}
