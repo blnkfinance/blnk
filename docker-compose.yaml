@@ -15,7 +15,7 @@ version: "3.8"
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.10.1}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.10.2}
     container_name: server
     restart: on-failure
     entrypoint: ["/bin/sh", "-c"]
@@ -36,12 +36,14 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.10.1}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.10.2}
     container_name: worker
     restart: on-failure
     entrypoint: ["blnk", "workers"]
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    ports:
+      - "5004:5004"
     depends_on:
       - redis
       - postgres
