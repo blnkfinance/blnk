@@ -1226,6 +1226,10 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 		}
 		return transaction, nil
 	}
+
+	// Update the transaction status to applied for client response. commit is an internal status.
+	transaction.Status = StatusApplied
+
 	span.AddEvent("Commitment finalized", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 	return transaction, nil
 

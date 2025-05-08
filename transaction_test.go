@@ -3600,6 +3600,10 @@ func TestCommitWorkerFullFlow(t *testing.T) {
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
 
+	queueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnk, queueName)
+	defer cleanupWorker()
+
 	// Create test balances with initial amounts of zero
 	sourceBalance := &model.Balance{
 		Currency: "USD",
@@ -3698,6 +3702,10 @@ func TestCommitWorkerFullFlow(t *testing.T) {
 	require.Equal(t, StatusApplied, result.Txn.Status, "Committed transaction should have APPLIED status")
 	require.Equal(t, inflightEntry.TransactionID, result.Txn.ParentTransaction,
 		"Committed transaction should reference the original as parent")
+
+	polledTxn, err := pollForTransactionStatus(ctx, ds, result.Txn.Reference, "APPLIED", 1*time.Second, 10*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, StatusApplied, polledTxn.Status, "Committed transaction should have APPLIED status")
 
 	// Step 8: Verify final balances
 	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
@@ -4570,7 +4578,7 @@ func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
 	t.Logf("Submitting first partial commit (amount: %s) for inflightTxn ID: %s, original queuedTxn ID: %s", partialAmount1Precise.String(), inflightTxn.TransactionID, queuedTxn.TransactionID)
 	commitTxn1, err := blnkInstance.CommitInflightTransactionWithQueue(ctx, inflightTxn.TransactionID, partialAmount1Precise)
 	require.NoError(t, err, "Failed to submit first partial commit")
-	require.Equal(t, StatusCommit, commitTxn1.Status, "First partial commit submission should have status COMMIT")
+	require.Equal(t, StatusApplied, commitTxn1.Status, "First partial commit submission should have status COMMIT")
 
 	t.Logf("Polling for first APPLIED commit transaction (Ref: %s)", commitTxn1.Reference)
 	appliedCommitTxn1, err := pollForTransactionStatus(ctx, ds, commitTxn1.Reference, StatusApplied, pollInterval, timeoutDuration)
@@ -4598,7 +4606,7 @@ func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
 	t.Logf("Submitting second partial commit (amount: %s) for inflightTxn ID: %s", partialAmount2Precise.String(), inflightTxn.TransactionID)
 	commitTxn2, err := blnkInstance.CommitInflightTransactionWithQueue(ctx, inflightTxn.TransactionID, partialAmount2Precise)
 	require.NoError(t, err, "Failed to submit second partial commit")
-	require.Equal(t, StatusCommit, commitTxn2.Status, "Second partial commit submission should have status COMMIT")
+	require.Equal(t, StatusApplied, commitTxn2.Status, "Second partial commit submission should have status COMMIT")
 
 	t.Logf("Polling for second APPLIED commit transaction (Ref: %s)", commitTxn2.Reference)
 	appliedCommitTxn2, err := pollForTransactionStatus(ctx, ds, commitTxn2.Reference, StatusApplied, pollInterval, timeoutDuration)
@@ -4628,7 +4636,7 @@ func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
 	t.Logf("Submitting third partial commit (remaining amount) for inflightTxn ID: %s", inflightTxn.TransactionID)
 	commitTxn3, err := blnkInstance.CommitInflightTransactionWithQueue(ctx, inflightTxn.TransactionID, big.NewInt(0))
 	require.NoError(t, err, "Failed to submit third partial commit (remaining)")
-	require.Equal(t, StatusCommit, commitTxn3.Status, "Third partial commit submission should have status COMMIT")
+	require.Equal(t, StatusApplied, commitTxn3.Status, "Third partial commit submission should have status COMMIT")
 
 	t.Logf("Polling for third APPLIED commit transaction (Ref: %s)", commitTxn3.Reference)
 	appliedCommitTxn3, err := pollForTransactionStatus(ctx, ds, commitTxn3.Reference, StatusApplied, pollInterval, timeoutDuration)

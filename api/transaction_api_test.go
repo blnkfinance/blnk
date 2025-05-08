@@ -461,7 +461,7 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 	respCommit, errCommit := SetUpTestRequest(testReqCommit)
 	assert.NoError(t, errCommit)
 	assert.Equal(t, http.StatusOK, respCommit.Code)
-	assert.Equal(t, "COMMIT", commitTxResponse.Status)
+	assert.Equal(t, "APPLIED", commitTxResponse.Status)
 	assert.Equal(t, inflightTxResponse.PreciseAmount.String(), commitTxResponse.PreciseAmount.String())
 
 	ds, err = database.NewDataSource(cnf)
@@ -669,7 +669,7 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 	respPartialCommit, errPartialCommit := SetUpTestRequest(testReqPartialCommit)
 	assert.NoError(t, errPartialCommit)
 	assert.Equal(t, http.StatusOK, respPartialCommit.Code)
-	assert.Equal(t, "COMMIT", commitPartialTxResponse.Status)
+	assert.Equal(t, "APPLIED", commitPartialTxResponse.Status)
 
 	committedTxn, err = pollForTransactionStatus(ctx, ds, commitPartialTxResponse.Reference, "APPLIED", 1*time.Second, 10*time.Second)
 	assert.NoError(t, err)
@@ -712,7 +712,7 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 	respRemainingCommit, errRemainingCommit := SetUpTestRequest(testReqRemainingCommit)
 	assert.NoError(t, errRemainingCommit)
 	assert.Equal(t, http.StatusOK, respRemainingCommit.Code)
-	assert.Equal(t, "COMMIT", commitRemainingTxResponse.Status)
+	assert.Equal(t, "APPLIED", commitRemainingTxResponse.Status)
 	assert.Equal(t, remainingInflightPreciseAmount.String(), commitRemainingTxResponse.PreciseAmount.String(), "Remaining committed amount mismatch")
 
 	committedTxn, err = pollForTransactionStatus(ctx, ds, commitRemainingTxResponse.Reference, "APPLIED", 1*time.Second, 10*time.Second)
