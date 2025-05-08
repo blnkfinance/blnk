@@ -4568,7 +4568,6 @@ func TestInflightTransactionFlowAsyncPolled(t *testing.T) {
 	assert.Equal(t, 0, updatedSource.Balance.Cmp(big.NewInt(0)), "Source main balance should be 0")
 	assert.Equal(t, 0, updatedDest.Balance.Cmp(big.NewInt(0)), "Destination main balance should be 0")
 
-
 	// --- Partial Commits ---
 	originalAmountPrecise := inflightTxn.PreciseAmount // 50000
 	partialAmount1Precise := big.NewInt(100 * 100)     // 10000
@@ -4886,4 +4885,120 @@ func TestMultipleDestinationsTransactionFlowAsyncPolled(t *testing.T) {
 	assert.Equal(t, 0, updatedSource.Balance.Cmp(expectedDebitSource), "Source balance incorrect")
 	assert.Equal(t, 0, updatedDestOne.Balance.Cmp(expectedCreditEachDest), "Destination one balance incorrect")
 	assert.Equal(t, 0, updatedDestTwo.Balance.Cmp(expectedCreditEachDest), "Destination two balance incorrect")
+}
+
+func TestDiscardZeroAmountTransaction_MultiSource_SkipQueue(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping discard zero amount transaction test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_discard_zero",
+			IndexQueue:       "index_queue_test_discard_zero",
+			TransactionQueue: "transaction_queue_test_discard_zero",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret-discard-zero",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index_discard_zero",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnkInstance, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("discard_zero_test")
+
+	// Create balances
+	sourceBalanceOne := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+	sourceBalanceTwo := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+	destBalance := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
+
+	sourceOne, err := ds.CreateBalance(*sourceBalanceOne)
+	require.NoError(t, err, "Failed to create source balance one")
+	sourceTwo, err := ds.CreateBalance(*sourceBalanceTwo)
+	require.NoError(t, err, "Failed to create source balance two")
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err, "Failed to create destination balance")
+
+	// Define transaction: Amount 1, SourceOne takes 100% (Amount 1), SourceTwo takes "left" (Amount 0)
+	transactionAmount := 1.0
+	precision := int64(100)
+	txn := &model.Transaction{
+		Reference: txnRef,
+		Sources: []model.Distribution{
+			{Identifier: sourceOne.BalanceID, Distribution: "100%"}, // Takes the full amount
+			{Identifier: sourceTwo.BalanceID, Distribution: "left"}, // Remaining is 0
+		},
+		Destination:    dest.BalanceID,
+		Amount:         transactionAmount,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      float64(precision),
+		MetaData:       map[string]interface{}{"test": "discard_zero_multi_source"},
+		SkipQueue:      true, // Process synchronously
+	}
+
+	// Queue the transaction (will be processed synchronously due to SkipQueue)
+	queuedTxn, err := blnkInstance.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue/process transaction")
+	require.Equal(t, StatusApplied, queuedTxn.Status, "Overall transaction status should be APPLIED")
+
+	// Verify balances
+	updatedSourceOne, err := ds.GetBalanceByIDLite(sourceOne.BalanceID)
+	require.NoError(t, err, "Failed to get updated source one balance")
+	updatedSourceTwo, err := ds.GetBalanceByIDLite(sourceTwo.BalanceID)
+	require.NoError(t, err, "Failed to get updated source two balance")
+	updatedDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance")
+
+	// Expected balance changes
+	expectedDebitSourceOne := big.NewInt(-1 * precision) // SourceOne debited by 1.00
+	expectedBalanceSourceTwo := big.NewInt(0)            // SourceTwo balance remains 0
+	expectedCreditDest := big.NewInt(1 * precision)      // Dest credited by 1.00
+
+	assert.Equal(t, 0, updatedSourceOne.Balance.Cmp(expectedDebitSourceOne), "Source one balance incorrect")
+	assert.Equal(t, 0, updatedSourceTwo.Balance.Cmp(expectedBalanceSourceTwo), "Source two balance should be zero")
+	assert.Equal(t, 0, updatedDest.Balance.Cmp(expectedCreditDest), "Destination balance incorrect")
+
+	// Verify persistence of split transactions
+	// First split transaction (SourceOne) should exist
+	childTxnRef1 := fmt.Sprintf("%s-1", txnRef) // Reference for the first split part
+	persistedTxn1, err := ds.GetTransactionByRef(ctx, childTxnRef1)
+	require.NoError(t, err, "Failed to get first split transaction from DB")
+	require.NotNil(t, persistedTxn1, "First split transaction should be persisted")
+	require.Equal(t, StatusApplied, persistedTxn1.Status, "First split transaction status should be APPLIED")
+	require.Equal(t, transactionAmount, persistedTxn1.Amount, "First split transaction amount incorrect")
+
+	// Second split transaction (SourceTwo, amount 0) should NOT exist
+	childTxnRef2 := fmt.Sprintf("%s-2", txnRef) // Reference for the second split part
+	_, err = ds.GetTransactionByRef(ctx, childTxnRef2)
+	require.Error(t, err, "Expected error when getting second split transaction (amount 0)")
+	// Check if the error is "not found"
+	// The exact error message might vary, but it should indicate not found.
+	// For sql.ErrNoRows, which is a common indicator:
+	// require.True(t, errors.Is(err, sql.ErrNoRows) || strings.Contains(strings.ToLower(err.Error()), "not found"),
+	//  "Error for second split transaction should be a 'not found' error, got: %v", err)
+	// Using a more generic check as specific error message might depend on DB driver
+	require.Contains(t, strings.ToLower(err.Error()), "not found", "Error for zero-amount transaction should indicate it was not found")
+
+	t.Logf("Test TestDiscardZeroAmountTransaction_MultiSource_SkipQueue completed successfully.")
 }
