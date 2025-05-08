@@ -1216,7 +1216,11 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.Hash = transaction.HashTxn()
 
 	if withQueue {
-		enqueueTransactions(ctx, l.queue, transaction, nil)
+		err := enqueueTransactions(ctx, l.queue, transaction, nil)
+		if err != nil {
+			span.RecordError(err)
+			return nil, l.logAndRecordError(span, "failed to enqueue transaction", err)
+		}
 	} else {
 		// Queue the transaction for further processing
 		transaction, err := l.RecordTransaction(ctx, transaction)
