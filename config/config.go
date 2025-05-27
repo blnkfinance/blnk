@@ -296,6 +296,8 @@ func (cnf *Configuration) setTransactionDefaults() {
 	}
 	if cnf.Transaction.LockDuration == 0 {
 		cnf.Transaction.LockDuration = defaultTransaction.LockDuration
+	} else {
+		cnf.Transaction.LockDuration = cnf.Transaction.LockDuration * time.Second
 	}
 	if cnf.Transaction.IndexQueuePrefix == "" {
 		cnf.Transaction.IndexQueuePrefix = defaultTransaction.IndexQueuePrefix
