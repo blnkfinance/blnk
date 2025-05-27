@@ -957,7 +957,7 @@ func (l *Blnk) releaseLock(ctx context.Context, locker *redlock.Locker) {
 	// Attempt to release the lock
 	if err := locker.Unlock(ctx); err != nil {
 		span.RecordError(err)
-		logrus.Error("failed to release lock", err)
+		logrus.Error("failed to release lock: ", err)
 	}
 	span.AddEvent("Lock released")
 }

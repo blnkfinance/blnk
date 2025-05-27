@@ -34,12 +34,34 @@ import (
 // that metadata fields are properly represented as first-class fields.
 // This maintains backward compatibility while keeping responses clean.
 func transformTransaction(txn *model.Transaction) *model.Transaction {
-	// Create a copy to avoid modifying the original
+	if txn == nil {
+		return &model.Transaction{}
+	}
+
+	// Deep copy instead of shallow copy
 	result := *txn
 
-	// Check if metadata exists and has inflight information
+	// Deep copy the slices to avoid race conditions
+	if txn.Sources != nil {
+		result.Sources = make([]model.Distribution, len(txn.Sources))
+		copy(result.Sources, txn.Sources)
+	}
+
+	if txn.Destinations != nil {
+		result.Destinations = make([]model.Distribution, len(txn.Destinations))
+		copy(result.Destinations, txn.Destinations)
+	}
+
+	// Deep copy the metadata map
+	if txn.MetaData != nil {
+		result.MetaData = make(map[string]interface{})
+		for k, v := range txn.MetaData {
+			result.MetaData[k] = v
+		}
+	}
+
+	// Check for inflight flag in metadata and move it to the main field
 	if result.MetaData != nil {
-		// Check for inflight flag in metadata and move it to the main field
 		if inflightVal, exists := result.MetaData["inflight"]; exists {
 			if inflight, ok := inflightVal.(bool); ok && inflight {
 				result.Inflight = true
