@@ -19,10 +19,9 @@ package blnk
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/config"
-	lock "github.com/jerry-enebeli/blnk/internal/lock"
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/sirupsen/logrus"
@@ -100,68 +99,29 @@ func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, cur
 	ctx, span := balanceTracer.Start(ctx, "GetOrCreateBalanceByIndicator")
 	defer span.End()
 
-	// Try to get the balance first without a lock
 	balance, err := l.datasource.GetBalanceByIndicator(indicator, currency)
-	if err == nil {
-		span.AddEvent("Balance found", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
-		return balance, nil
-	}
-
-	// Balance not found, acquire a distributed lock to prevent race conditions
-	lockKey := fmt.Sprintf("balance_indicator:%s:%s", indicator, currency)
-	locker := lock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
-
-	// Get lock configuration
-	config, err := config.Fetch()
 	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to fetch config: %w", err)
-	}
-
-	// Acquire lock with timeout
-	err = locker.Lock(ctx, config.Transaction.LockDuration)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to acquire lock for balance creation: %w", err)
-	}
-
-	// Ensure lock is released when we're done
-	defer func() {
-		if unlockErr := locker.Unlock(ctx); unlockErr != nil {
-			logrus.Errorf("failed to release balance indicator lock: %v", unlockErr)
+		logrus.Errorf("error getting balance by indicator: %v", err)
+		span.AddEvent("Creating new balance")
+		balance = &model.Balance{
+			Indicator: indicator,
+			LedgerID:  GeneralLedgerID,
+			Currency:  currency,
 		}
-	}()
-
-	// Check again if the balance exists after acquiring the lock
-	// Another process might have created it while we were waiting
-	balance, err = l.datasource.GetBalanceByIndicator(indicator, currency)
-	if err == nil {
-		span.AddEvent("Balance found after lock acquisition", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
+		_, err := l.CreateBalance(ctx, *balance)
+		if err != nil && !strings.Contains(err.Error(), "Balance already exist") {
+			span.RecordError(err)
+			return nil, err
+		}
+		balance, err = l.datasource.GetBalanceByIndicator(indicator, currency)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+		span.AddEvent("New balance created", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
 		return balance, nil
 	}
-
-	// Now we can safely create a new balance
-	span.AddEvent("Creating new balance")
-	balance = &model.Balance{
-		Indicator: indicator,
-		LedgerID:  GeneralLedgerID,
-		Currency:  currency,
-	}
-
-	_, err = l.CreateBalance(ctx, *balance)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to create balance: %w", err)
-	}
-
-	// Retrieve the newly created balance to get the assigned ID
-	balance, err = l.datasource.GetBalanceByIndicator(indicator, currency)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to retrieve newly created balance: %w", err)
-	}
-
-	span.AddEvent("New balance created", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
+	span.AddEvent("Balance found", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
 	return balance, nil
 }
 
