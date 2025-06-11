@@ -268,7 +268,7 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 			span.RecordError(err)
 			notification.NotifyError(err)
 		}
-		err = SendWebhook(NewWebhook{
+		err = l.SendWebhook(NewWebhook{
 			Event:   getEventFromStatus(transaction.Status),
 			Payload: transaction,
 		})
@@ -2066,7 +2066,7 @@ func (l *Blnk) sendBulkTransactionWebhook(batchID, status, errorMsg string, tran
 		payload["error"] = errorMsg
 	}
 
-	err := SendWebhook(NewWebhook{
+	err := l.SendWebhook(NewWebhook{
 		Event:   "bulk_transaction." + status,
 		Payload: payload,
 	})

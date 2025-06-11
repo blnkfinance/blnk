@@ -93,7 +93,7 @@ func handleTransactionRejection(ctx context.Context, b *blnkInstance, txn *model
 		return rejectErr
 	}
 
-	webhookErr := blnk.SendWebhook(blnk.NewWebhook{
+	webhookErr := b.blnk.SendWebhook(blnk.NewWebhook{
 		Event:   "transaction.rejected",
 		Payload: *txn,
 	})

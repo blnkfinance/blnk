@@ -62,8 +62,10 @@ func TestSendWebhook(t *testing.T) {
 		Event:   "transaction.queued",
 		Payload: getTransactionMock(10000, false),
 	}
+	blnk, err := NewBlnk(nil)
+	assert.NoError(t, err)
 
-	err = SendWebhook(testData)
+	err = blnk.SendWebhook(testData)
 	assert.NoError(t, err)
 
 	// Verify that the task was enqueued

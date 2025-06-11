@@ -36,7 +36,7 @@ func (l *Blnk) postLedgerActions(_ context.Context, ledger *model.Ledger) {
 		if err != nil {
 			notification.NotifyError(err)
 		}
-		err = SendWebhook(NewWebhook{
+		err = l.SendWebhook(NewWebhook{
 			Event:   "ledger.created",
 			Payload: ledger,
 		})

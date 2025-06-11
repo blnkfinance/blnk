@@ -36,7 +36,7 @@ func (l *Blnk) postIdentityActions(_ context.Context, identity *model.Identity) 
 		if err != nil {
 			notification.NotifyError(err)
 		}
-		err = SendWebhook(NewWebhook{
+		err = l.SendWebhook(NewWebhook{
 			Event:   "identity.created",
 			Payload: identity,
 		})

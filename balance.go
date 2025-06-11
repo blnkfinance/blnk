@@ -71,7 +71,7 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 		if monitor.CheckCondition(updatedBalance) {
 			span.AddEvent(fmt.Sprintf("Condition met for balance: %s", monitor.MonitorID))
 			go func(monitor model.BalanceMonitor) {
-				err := SendWebhook(NewWebhook{
+				err := l.SendWebhook(NewWebhook{
 					Event:   "balance.monitor",
 					Payload: monitor,
 				})
@@ -141,7 +141,7 @@ func (l *Blnk) postBalanceActions(ctx context.Context, balance *model.Balance) {
 			span.RecordError(err)
 			notification.NotifyError(err)
 		}
-		err = SendWebhook(NewWebhook{
+		err = l.SendWebhook(NewWebhook{
 			Event:   "balance.created",
 			Payload: balance,
 		})
