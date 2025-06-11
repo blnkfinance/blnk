@@ -25,7 +25,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jerry-enebeli/blnk/config"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 
 	"github.com/hibiken/asynq"
 )
@@ -131,14 +130,14 @@ func processHTTP(data NewWebhook) error {
 	return nil
 }
 
-// SendWebhook enqueues a webhook notification task.
+// SendWebhook enqueues a webhook notification task using the Blnk instance's asynq client.
 //
 // Parameters:
 // - newWebhook NewWebhook: The webhook notification data to enqueue.
 //
 // Returns:
 // - error: An error if the task could not be enqueued.
-func SendWebhook(newWebhook NewWebhook) error {
+func (b *Blnk) SendWebhook(newWebhook NewWebhook) error {
 	conf, err := config.Fetch()
 	if err != nil {
 		return err
@@ -148,20 +147,13 @@ func SendWebhook(newWebhook NewWebhook) error {
 		return nil
 	}
 
-	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
-	if err != nil {
-		log.Fatalf("Error parsing Redis URL: %v", err)
-	}
-	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig}
-	client := asynq.NewClient(queueOptions)
-
 	payload, err := json.Marshal(newWebhook)
 	if err != nil {
 		return err
 	}
 	taskOptions := []asynq.Option{asynq.Queue(conf.Queue.WebhookQueue)}
 	task := asynq.NewTask(conf.Queue.WebhookQueue, payload, taskOptions...)
-	info, err := client.Enqueue(task)
+	info, err := b.asynqClient.Enqueue(task)
 	if err != nil {
 		log.Println(err, info)
 		return err

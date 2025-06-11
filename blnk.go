@@ -20,6 +20,7 @@ import (
 	"context"
 	"embed"
 
+	"github.com/hibiken/asynq"
 	"github.com/typesense/typesense-go/typesense/api"
 
 	"github.com/jerry-enebeli/blnk/config"
@@ -34,13 +35,14 @@ import (
 
 // Blnk represents the main struct for the Blnk application.
 type Blnk struct {
-	queue      *Queue
-	search     *TypesenseClient
-	redis      redis.UniversalClient
-	datasource database.IDataSource
-	bt         *model.BalanceTracker
-	tokenizer  *tokenization.TokenizationService
-	Hooks      hooks.HookManager
+	queue       *Queue
+	search      *TypesenseClient
+	redis       redis.UniversalClient
+	asynqClient *asynq.Client
+	datasource  database.IDataSource
+	bt          *model.BalanceTracker
+	tokenizer   *tokenization.TokenizationService
+	Hooks       hooks.HookManager
 }
 
 const (
@@ -68,6 +70,18 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	redisOption, err := redis_db.ParseRedisURL(configuration.Redis.Dns)
+	if err != nil {
+		return nil, err
+	}
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:      redisOption.Addr,
+		Password:  redisOption.Password,
+		DB:        redisOption.DB,
+		TLSConfig: redisOption.TLSConfig,
+	})
+
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
 	newSearch := NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
@@ -82,13 +96,14 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	}
 
 	newBlnk := &Blnk{
-		datasource: db,
-		bt:         bt,
-		queue:      newQueue,
-		redis:      redisClient.Client(),
-		search:     newSearch,
-		tokenizer:  tokenization.NewTokenizationService(tokenizationKey),
-		Hooks:      hookManager,
+		datasource:  db,
+		bt:          bt,
+		queue:       newQueue,
+		redis:       redisClient.Client(),
+		asynqClient: asynqClient,
+		search:      newSearch,
+		tokenizer:   tokenization.NewTokenizationService(tokenizationKey),
+		Hooks:       hookManager,
 	}
 	return newBlnk, nil
 }
@@ -109,4 +124,12 @@ func (l *Blnk) Search(collection string, query *api.SearchCollectionParams) (int
 // MultiSearch performs a multi-search operation across collections.
 func (l *Blnk) MultiSearch(searchParams *api.MultiSearchSearchesParameter) (*api.MultiSearchResult, error) {
 	return l.search.MultiSearch(context.Background(), *searchParams)
+}
+
+// Close properly closes all connections and resources used by the Blnk instance.
+func (b *Blnk) Close() error {
+	if b.asynqClient != nil {
+		return b.asynqClient.Close()
+	}
+	return nil
 }
