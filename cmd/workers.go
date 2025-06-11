@@ -208,7 +208,7 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 
 	// Register handlers for other task types
 	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
-	mux.HandleFunc(cfg.Queue.WebhookQueue, blnk.ProcessWebhook)
+	mux.HandleFunc(cfg.Queue.WebhookQueue, b.blnk.ProcessWebhook)
 	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
 }
 
