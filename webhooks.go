@@ -66,10 +66,11 @@ func getEventFromStatus(status string) string {
 //
 // Parameters:
 // - data NewWebhook: The webhook notification data to send.
+// - client *http.Client: The HTTP client to use for the request.
 //
 // Returns:
 // - error: An error if the request or processing fails.
-func processHTTP(data NewWebhook) error {
+func processHTTP(data NewWebhook, client *http.Client) error {
 	conf, err := config.Fetch()
 	if err != nil {
 		log.Println("Error fetching config:", err)
@@ -93,7 +94,6 @@ func processHTTP(data NewWebhook) error {
 		req.Header.Set(key, value)
 	}
 
-	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Println("Error sending request:", err)
@@ -169,7 +169,7 @@ func (b *Blnk) SendWebhook(newWebhook NewWebhook) error {
 //
 // Returns:
 // - error: An error if the webhook processing fails.
-func ProcessWebhook(_ context.Context, task *asynq.Task) error {
+func (b *Blnk) ProcessWebhook(_ context.Context, task *asynq.Task) error {
 	conf, err := config.Fetch()
 	if err != nil {
 		return err
@@ -183,7 +183,7 @@ func ProcessWebhook(_ context.Context, task *asynq.Task) error {
 		log.Printf("Error unmarshaling task payload: %v", err)
 		return err
 	}
-	err = processHTTP(payload)
+	err = processHTTP(payload, b.httpClient)
 	if err != nil {
 		return err
 	}

@@ -19,6 +19,8 @@ package blnk
 import (
 	"context"
 	"embed"
+	"net/http"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/typesense/typesense-go/typesense/api"
@@ -42,6 +44,7 @@ type Blnk struct {
 	datasource  database.IDataSource
 	bt          *model.BalanceTracker
 	tokenizer   *tokenization.TokenizationService
+	httpClient  *http.Client
 	Hooks       hooks.HookManager
 }
 
@@ -51,6 +54,50 @@ const (
 
 //go:embed sql/*.sql
 var SQLFiles embed.FS
+
+// initializeRedisClients sets up both the Redis client and Asynq client
+func initializeRedisClients(config *config.Configuration) (redis.UniversalClient, *asynq.Client, error) {
+	redisClient, err := redis_db.NewRedisClient([]string{config.Redis.Dns})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	redisOption, err := redis_db.ParseRedisURL(config.Redis.Dns)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:      redisOption.Addr,
+		Password:  redisOption.Password,
+		DB:        redisOption.DB,
+		TLSConfig: redisOption.TLSConfig,
+	})
+
+	return redisClient.Client(), asynqClient, nil
+}
+
+// initializeTokenizationService creates and configures the tokenization service
+func initializeTokenizationService(config *config.Configuration) *tokenization.TokenizationService {
+	tokenizationKey := []byte(config.TokenizationSecret)
+	if len(tokenizationKey) != 32 {
+		tokenizationKey = make([]byte, 32)
+		copy(tokenizationKey, config.TokenizationSecret)
+	}
+	return tokenization.NewTokenizationService(tokenizationKey)
+}
+
+// initializeHTTPClient creates and configures the HTTP client for webhook requests
+func initializeHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+}
 
 // NewBlnk initializes a new instance of Blnk with the provided database datasource.
 // It fetches the configuration, initializes Redis client, balance tracker, queue, and search client.
@@ -66,46 +113,30 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	if err != nil {
 		return nil, err
 	}
-	redisClient, err := redis_db.NewRedisClient([]string{configuration.Redis.Dns})
-	if err != nil {
-		return nil, err
-	}
 
-	redisOption, err := redis_db.ParseRedisURL(configuration.Redis.Dns)
+	redisClient, asynqClient, err := initializeRedisClients(configuration)
 	if err != nil {
 		return nil, err
 	}
-	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
-		Addr:      redisOption.Addr,
-		Password:  redisOption.Password,
-		DB:        redisOption.DB,
-		TLSConfig: redisOption.TLSConfig,
-	})
 
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
 	newSearch := NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
-	hookManager := hooks.NewHookManager(redisClient.Client())
+	hookManager := hooks.NewHookManager(redisClient)
+	tokenizer := initializeTokenizationService(configuration)
+	httpClient := initializeHTTPClient()
 
-	// Use the tokenization secret from configuration
-	tokenizationKey := []byte(configuration.TokenizationSecret)
-	if len(tokenizationKey) != 32 {
-		// Ensure the key is exactly 32 bytes for AES-256
-		tokenizationKey = make([]byte, 32)
-		copy(tokenizationKey, configuration.TokenizationSecret)
-	}
-
-	newBlnk := &Blnk{
+	return &Blnk{
 		datasource:  db,
 		bt:          bt,
 		queue:       newQueue,
-		redis:       redisClient.Client(),
+		redis:       redisClient,
 		asynqClient: asynqClient,
 		search:      newSearch,
-		tokenizer:   tokenization.NewTokenizationService(tokenizationKey),
+		tokenizer:   tokenizer,
+		httpClient:  httpClient,
 		Hooks:       hookManager,
-	}
-	return newBlnk, nil
+	}, nil
 }
 
 // Search performs a search on the specified collection using the provided query parameters.
