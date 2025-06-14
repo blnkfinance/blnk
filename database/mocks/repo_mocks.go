@@ -379,8 +379,8 @@ func (m *MockDataSource) ListAPIKeys(ctx context.Context, ownerID string) ([]*mo
 	return args.Get(0).([]*model.APIKey), args.Error(1)
 }
 
-func (m *MockDataSource) RevokeAPIKey(ctx context.Context, id string) error {
-	args := m.Called(ctx, id)
+func (m *MockDataSource) RevokeAPIKey(ctx context.Context, id, ownerID string) error {
+	args := m.Called(ctx, id, ownerID)
 	return args.Error(0)
 }
 

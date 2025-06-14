@@ -46,7 +46,7 @@ func (l *Blnk) ListAPIKeys(ctx context.Context, ownerID string) ([]*model.APIKey
 // Returns:
 // - error: An error if the operation fails
 func (l *Blnk) RevokeAPIKey(ctx context.Context, id, ownerID string) error {
-	return l.datasource.RevokeAPIKey(ctx, id)
+	return l.datasource.RevokeAPIKey(ctx, id, ownerID)
 }
 
 // GetAPIKeyByKey retrieves an API key by its key string
