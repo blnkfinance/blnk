@@ -134,7 +134,7 @@ type reconciliation interface {
 type apikey interface {
 	CreateAPIKey(ctx context.Context, name, ownerID string, scopes []string, expiresAt time.Time) (*model.APIKey, error) // Creates a new API key
 	GetAPIKey(ctx context.Context, key string) (*model.APIKey, error)                                                    // Retrieves an API key by its key string
-	RevokeAPIKey(ctx context.Context, id string) error                                                                   // Revokes an API key
+	RevokeAPIKey(ctx context.Context, id, ownerID string) error                                                          // Revokes an API key
 	ListAPIKeys(ctx context.Context, ownerID string) ([]*model.APIKey, error)                                            // Lists all API keys for a specific owner
 	UpdateLastUsed(ctx context.Context, id string) error                                                                 // Updates the last_used_at timestamp for an API key
 }

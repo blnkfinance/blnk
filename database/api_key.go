@@ -39,7 +39,6 @@ func (s *Datasource) CreateAPIKey(ctx context.Context, name, ownerID string, sco
 		apiKey.LastUsedAt,
 		apiKey.IsRevoked,
 	)
-
 	if err != nil {
 		return nil, err
 	}
@@ -84,14 +83,14 @@ func (s *Datasource) GetAPIKey(ctx context.Context, key string) (*model.APIKey, 
 }
 
 // RevokeAPIKey revokes an API key
-func (s *Datasource) RevokeAPIKey(ctx context.Context, id string) error {
+func (s *Datasource) RevokeAPIKey(ctx context.Context, id, ownerID string) error {
 	query := `
 		UPDATE blnk.api_keys
 		SET is_revoked = true, revoked_at = $1
-		WHERE api_key_id = $2
+		WHERE api_key_id = $2 AND owner_id = $3
 	`
 
-	result, err := s.Conn.ExecContext(ctx, query, time.Now(), id)
+	result, err := s.Conn.ExecContext(ctx, query, time.Now(), id, ownerID)
 	if err != nil {
 		return err
 	}
