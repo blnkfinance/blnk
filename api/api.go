@@ -27,6 +27,7 @@ import (
 	"github.com/jerry-enebeli/blnk"
 	"github.com/jerry-enebeli/blnk/api/middleware"
 	"github.com/jerry-enebeli/blnk/config"
+	"go.elastic.co/apm/module/apmgin/v2"
 )
 
 // Api represents the API structure for handling requests.
@@ -45,6 +46,7 @@ func (a Api) Router() *gin.Engine {
 
 	// Apply auth middleware to all routes
 	router.Use(a.auth.Authenticate())
+	router.Use(apmgin.Middleware(router))
 
 	// Ledger routes
 	router.POST("/ledgers", a.CreateLedger)
