@@ -390,6 +390,8 @@ go.elastic.co/apm/module/apmgin/v2 v2.7.1 h1:r/3ByBrtpYFX3M1Be7tq9h0exIjetcC7d3f
 go.elastic.co/apm/module/apmgin/v2 v2.7.1/go.mod h1:ogATM9cszPoersCjBpaDaQ3cT46LaC7i/h7wAmEVHpw=
 go.elastic.co/apm/module/apmhttp/v2 v2.7.1 h1:1uPHesdm9nKytQ/N0bPmlS7F69oXvkzW+IlvzQuDUs8=
 go.elastic.co/apm/module/apmhttp/v2 v2.7.1/go.mod h1:DlBnNivf+eArsEI1QtUx7fygo/JDbdMIcU9+i/Wid1U=
+go.elastic.co/apm/module/apmlogrus/v2 v2.7.1 h1:bEMTnpjK0F5Utp5+4rL1f4OtdVV/h0MGlcPoFf9C/v0=
+go.elastic.co/apm/module/apmlogrus/v2 v2.7.1/go.mod h1:zI7K647tYbHmyfhJ5a3bBLchioKV0uuDhZ8/ifpPn98=
 go.elastic.co/apm/v2 v2.7.1 h1:OFjARuESjBsxw7wHrEAnfSVNCHGBATXSI/kPvBARY/A=
 go.elastic.co/apm/v2 v2.7.1/go.mod h1:tQhBAjwh93b2leuAdzGwta/sP7Yc7QoKTSjeIHHDuog=
 go.elastic.co/fastjson v1.5.1 h1:zeh1xHrFH79aQ6Xsw7YxixvnOdAl3OSv0xch/jRDzko=

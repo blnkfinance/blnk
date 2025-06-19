@@ -100,6 +100,7 @@ require (
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.elastic.co/apm/module/apmgin/v2 v2.7.1 // indirect
 	go.elastic.co/apm/module/apmhttp/v2 v2.7.1 // indirect
+	go.elastic.co/apm/module/apmlogrus/v2 v2.7.1
 	go.elastic.co/apm/v2 v2.7.1 // indirect
 	go.elastic.co/fastjson v1.5.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect

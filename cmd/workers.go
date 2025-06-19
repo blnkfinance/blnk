@@ -26,6 +26,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"go.elastic.co/apm/module/apmlogrus/v2"
 	"go.opentelemetry.io/otel"
 
 	"github.com/jerry-enebeli/blnk"
@@ -42,6 +43,10 @@ import (
 type indexData struct {
 	Collection string                 `json:"collection"`
 	Payload    map[string]interface{} `json:"payload"`
+}
+
+func init() {
+	logrus.AddHook(&apmlogrus.Hook{})
 }
 
 // processTransaction processes a transaction received from the Redis queue.
