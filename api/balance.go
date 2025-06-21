@@ -407,3 +407,31 @@ func (a Api) GetBalanceByIndicator(c *gin.Context) {
 
 	c.JSON(http.StatusOK, resp)
 }
+
+// UpdateBalanceIdentity updates only the identity_id field of a balance.
+// Expected JSON payload: {"identity_id": "id_123"}
+func (a Api) UpdateBalanceIdentity(c *gin.Context) {
+	balanceID, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "balance id is required. pass id in the route /:id"})
+		return
+	}
+
+	var request model2.UpdateBalanceIdentity
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if request.IdentityId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "identity_id is required"})
+		return
+	}
+
+	if err := a.blnk.UpdateBalanceIdentity(balanceID, request.IdentityId); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Balance identity updated successfully"})
+}

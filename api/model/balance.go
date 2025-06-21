@@ -36,3 +36,9 @@ type MonitorCondition struct {
 	Operator  string  `json:"operator"`
 	Value     float64 `json:"value"`
 }
+
+// UpdateBalanceIdentity represents the payload required to update a balance's identity.
+// Only the identity_id field is accepted.
+type UpdateBalanceIdentity struct {
+	IdentityId string `json:"identity_id" binding:"required"`
+}

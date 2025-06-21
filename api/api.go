@@ -58,6 +58,7 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/balances/indicator/:indicator/currency/:currency", a.GetBalanceByIndicator)
 	router.GET("/balances/:id/at", a.GetBalanceAtTime)
 	router.POST("/balances-snapshots", a.TakeBalanceSnapshots)
+	router.PUT("/balances/:id/identity", a.UpdateBalanceIdentity)
 
 	// Balance Monitor routes
 	router.POST("/balance-monitors", a.CreateBalanceMonitor)

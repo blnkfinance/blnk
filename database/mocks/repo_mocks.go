@@ -403,3 +403,8 @@ func (m *MockDataSource) IsTransactionRefunded(ctx context.Context, transaction 
 	args := m.Called(ctx, transaction)
 	return args.Bool(0), args.Error(1)
 }
+
+func (m *MockDataSource) UpdateBalanceIdentity(balanceID string, identityID string) error {
+	args := m.Called(balanceID, identityID)
+	return args.Error(0)
+}
