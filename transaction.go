@@ -713,7 +713,7 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 			span.RecordError(err)
 			continue
 		}
-		queuedCommitTxn, err := l.CommitInflightTransactionWithQueue(ctx, originalTxn.TransactionID, amount)
+		queuedCommitTxn, err := l.CommitInflightTransaction(ctx, originalTxn.TransactionID, amount)
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 			span.RecordError(err)
@@ -1020,6 +1020,7 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 		}
 		l.handleAsyncBulkTransactionFailure(ctx, errors.New("transaction rejected"), parentTransactionID, transaction.Atomic, transaction.Inflight)
 	}
+	l.postTransactionActions(ctx, transaction)
 	return transaction, nil
 }
 
