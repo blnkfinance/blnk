@@ -92,7 +92,7 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 
 	// Execute the SQL query to retrieve the transaction by its ID
 	row := d.Conn.QueryRowContext(ctx, `
-		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash
 		FROM blnk.transactions
 		WHERE transaction_id = $1
 	`, id)
@@ -101,7 +101,7 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 	txn := &model.Transaction{}
 	var metaDataJSON []byte
 	var preciseAmountStr string
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON)
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction, &txn.Hash)
 
 	// Handle errors, including no rows found
 	if err != nil {
