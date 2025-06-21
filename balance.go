@@ -511,3 +511,33 @@ func (l *Blnk) GetBalanceByIndicator(ctx context.Context, indicator, currency st
 	span.AddEvent("Balance retrieved by indicator", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
 	return balance, nil
 }
+
+// UpdateBalanceIdentity updates only the identity_id associated with a balance.
+// It validates that both the balance and the identity exist before applying the change.
+//
+// Parameters:
+// - balanceID string: The ID of the balance whose identity reference should be modified.
+// - identityID string: The new identity ID to associate with the balance.
+//
+// Returns:
+// - error: An error is returned if either the balance or identity records are not found or the update fails.
+func (l *Blnk) UpdateBalanceIdentity(balanceID, identityID string) error {
+	// Ensure the referenced identity exists
+	_, err := l.datasource.GetIdentityByID(identityID)
+	if err != nil {
+		return fmt.Errorf("identity validation failed: %w", err)
+	}
+
+	// Ensure the balance exists (lite lookup)
+	_, err = l.datasource.GetBalanceByIDLite(balanceID)
+	if err != nil {
+		return fmt.Errorf("balance validation failed: %w", err)
+	}
+
+	// Apply the update
+	if err := l.datasource.UpdateBalanceIdentity(balanceID, identityID); err != nil {
+		return err
+	}
+
+	return nil
+}

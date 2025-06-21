@@ -1300,3 +1300,39 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 
 	return result, nil
 }
+
+// UpdateBalanceIdentity updates the identity_id of a balance entry in the database.
+//
+// Parameters:
+// - balanceID: The unique identifier of the balance whose identity reference is to be updated.
+// - identityID: The identity ID to be associated with the balance.
+//
+// Returns:
+// - error: An error is returned if the balance or identity does not exist or the database operation fails.
+func (d Datasource) UpdateBalanceIdentity(balanceID string, identityID string) error {
+	// Execute the SQL update statement to change the identity_id for the specified balance.
+	result, err := d.Conn.Exec(`
+		UPDATE blnk.balances
+		SET identity_id = $2
+		WHERE balance_id = $1
+	`, balanceID, identityID)
+
+	// Handle SQL execution errors
+	if err != nil {
+		// Delegate to apierror for consistent error handling across the project
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance identity", err)
+	}
+
+	// Ensure a row was actually updated
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		// No rows were updated – the balance record does not exist
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", balanceID), nil)
+	}
+
+	return nil
+}
