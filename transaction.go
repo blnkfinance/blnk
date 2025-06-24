@@ -30,6 +30,7 @@ import (
 	"github.com/jerry-enebeli/blnk/config"
 	redlock "github.com/jerry-enebeli/blnk/internal/lock"
 	"github.com/jerry-enebeli/blnk/internal/notification"
+	"go.elastic.co/apm/module/apmlogrus/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -52,6 +53,10 @@ const (
 	StatusCommit    = "COMMIT"
 	StatusRejected  = "REJECTED"
 )
+
+func init() {
+	logrus.AddHook(&apmlogrus.Hook{})
+}
 
 // getTxns is a function type that retrieves a batch of transactions based on the parent transaction ID, batch size, and offset.
 //

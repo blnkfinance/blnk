@@ -30,6 +30,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+
+	"go.elastic.co/apm/module/apmotel/v2"
 )
 
 // SetupOTelSDK bootstraps the OpenTelemetry pipeline.
@@ -59,13 +61,20 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 	otel.SetTextMapPropagator(prop)
 
 	// Set up trace provider.
-	tracerProvider, err := newTraceProvider(ctx, serviceName)
+	// tracerProvider, err := newTraceProvider(ctx, serviceName)
+	// if err != nil {
+	// 	handleErr(err)
+	// 	return
+	// }
+	// shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
+	// otel.SetTracerProvider(tracerProvider)
+
+	provider, err := apmotel.NewTracerProvider()
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
-	otel.SetTracerProvider(tracerProvider)
+	otel.SetTracerProvider(provider)
 
 	// Set up logger provider.
 	loggerProvider, err := newLoggerProvider()
