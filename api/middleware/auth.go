@@ -186,19 +186,10 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 			return
 		}
 
-		// Skip auth for health endpoints (server and worker health checks)
-		if c.Request != nil && c.Request.URL != nil {
-			path := c.Request.URL.Path
-			// Server health endpoint
-			if path == "/health" {
-				c.Next()
-				return
-			}
-			// Worker monitoring/health endpoint (includes sub-paths)
-			if strings.HasPrefix(path, "/monitoring") {
-				c.Next()
-				return
-			}
+		// Skip auth for health endpoint (server health check only)
+		if c.Request != nil && c.Request.URL != nil && c.Request.URL.Path == "/health" {
+			c.Next()
+			return
 		}
 
 		// Check if secure mode is enabled
