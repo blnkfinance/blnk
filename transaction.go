@@ -1475,7 +1475,7 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		retry := 0
 		if err != nil {
 			isLocked := strings.Contains(err.Error(), "failed to acquire lock")
-			for isLocked && retry < 5 {
+			for isLocked && retry < 10 {
 				time.Sleep(2 * time.Second)
 				_, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
 				if err != nil {
