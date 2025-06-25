@@ -110,6 +110,45 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			expectedCode: http.StatusOK,
 		},
 		{
+			name:   "Server health endpoint",
+			path:   "/health",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Worker monitoring endpoint",
+			path:   "/monitoring",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "Worker monitoring sub-path",
+			path:   "/monitoring/queues",
+			method: "GET",
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
 			name:   "Insufficient permissions",
 			path:   "/ledgers",
 			method: "POST",
