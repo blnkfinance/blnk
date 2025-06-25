@@ -256,9 +256,9 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			mux := asynq.NewServeMux()
 			initializeTaskHandlers(b, mux)
 
-			// Start asynqmon server for health checks and monitoring
+			// Start monitoring server with health check and asynqmon dashboard
 			redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns)
-			h := asynqmon.New(asynqmon.Options{
+			asynqmonHandler := asynqmon.New(asynqmon.Options{
 				RootPath: "/monitoring", //  Optional: if you want to serve asynqmon under a sub-path.
 				RedisConnOpt: asynq.RedisClientOpt{
 					Addr:      redisOption.Addr,
@@ -268,12 +268,25 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				},
 			})
 
-			// Start asynqmon HTTP server in a new goroutine
+			// Create a custom HTTP mux for monitoring port
+			monitoringMux := http.NewServeMux()
+			
+			// Add worker health check endpoint
+			monitoringMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
+			})
+			
+			// Mount asynqmon dashboard at /monitoring
+			monitoringMux.Handle("/monitoring/", asynqmonHandler)
+
+			// Start monitoring HTTP server in a new goroutine
 			go func() {
 				monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
-				log.Printf("Asynqmon server listening on %s/monitoring", monitoringAddr)
-				if err := http.ListenAndServe(monitoringAddr, h); err != nil {
-					log.Fatalf("could not start asynqmon server: %v", err)
+				log.Printf("Worker monitoring server listening on %s (health: /health, dashboard: /monitoring)", monitoringAddr)
+				if err := http.ListenAndServe(monitoringAddr, monitoringMux); err != nil {
+					log.Fatalf("could not start monitoring server: %v", err)
 				}
 			}()
 
