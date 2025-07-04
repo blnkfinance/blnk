@@ -101,7 +101,6 @@ func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, cur
 
 	balance, err := l.datasource.GetBalanceByIndicator(indicator, currency)
 	if err != nil {
-		logrus.Errorf("error getting balance by indicator: %v", err)
 		span.AddEvent("Creating new balance")
 		balance = &model.Balance{
 			Indicator: indicator,

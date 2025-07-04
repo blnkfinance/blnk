@@ -1972,11 +1972,11 @@ func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string, skip
 }
 
 // processBulkTransactions prepares and queues all transactions in a batch with the given batch ID
-func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*model.Transaction, batchID string, inflight bool) error {
+func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*model.Transaction, batchID string, inflight bool, skipQueue bool) error {
 	for i, txn := range transactions {
 		// Set transaction properties
 		txn.Inflight = inflight
-		txn.SkipQueue = true // Process synchronously within the batch context first
+		txn.SkipQueue = skipQueue // Process synchronously within the batch context first
 		txn.ParentTransaction = batchID
 
 		// Add sequence number to metadata
@@ -2126,7 +2126,7 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 				batchID, len(req.Transactions), req.Atomic, req.Inflight)
 
 			// Process transactions in batch
-			err := l.processBulkTransactions(bgCtx, req.Transactions, batchID, req.Inflight)
+			err := l.processBulkTransactions(bgCtx, req.Transactions, batchID, req.Inflight, req.SkipQueue)
 
 			if err != nil {
 				// Handle failure (rollback if atomic, send webhook)
@@ -2154,7 +2154,7 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 		batchID, len(req.Transactions), req.Atomic, req.Inflight)
 
 	// Process transactions in batch
-	if err := l.processBulkTransactions(ctx, req.Transactions, batchID, req.Inflight); err != nil {
+	if err := l.processBulkTransactions(ctx, req.Transactions, batchID, req.Inflight, req.SkipQueue); err != nil {
 		span.RecordError(err)
 		logrus.Errorf("Sync bulk transaction error for batch %s: %s", batchID, err.Error())
 

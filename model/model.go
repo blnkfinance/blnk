@@ -254,7 +254,13 @@ func fetchTransactionPrecisionFromDB(db *sql.DB, transactionID string) (float64,
 	}
 
 	var precision float64
-	query := "SELECT precision FROM blnk.transactions WHERE transaction_id = $1"
+	// First try to find precision by transaction_id
+	query := `
+		SELECT precision 
+		FROM blnk.transactions 
+		WHERE transaction_id = $1 
+		OR parent_transaction = $1
+		LIMIT 1`
 	err := db.QueryRow(query, transactionID).Scan(&precision)
 	if err == sql.ErrNoRows {
 		return 0, false, nil
