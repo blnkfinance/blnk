@@ -380,6 +380,7 @@ type BulkTransactionRequest struct {
 	Inflight     bool           `json:"inflight"`
 	Atomic       bool           `json:"atomic"`
 	RunAsync     bool           `json:"run_async"`
+	SkipQueue    bool           `json:"skip_queue"`
 }
 
 // BulkTransactionResult represents the outcome of a bulk transaction operation.
