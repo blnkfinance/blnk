@@ -174,7 +174,7 @@ func initializeQueues() map[string]int {
 }
 
 func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
-	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
+	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing Redis URL: %v", err)
 	}
@@ -257,7 +257,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			initializeTaskHandlers(b, mux)
 
 			// Start monitoring server with health check and asynqmon dashboard
-			redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns)
+			redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 			asynqmonHandler := asynqmon.New(asynqmon.Options{
 				RootPath: "/monitoring", //  Optional: if you want to serve asynqmon under a sub-path.
 				RedisConnOpt: asynq.RedisClientOpt{
@@ -270,14 +270,14 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			// Create a custom HTTP mux for monitoring port
 			monitoringMux := http.NewServeMux()
-			
+
 			// Add worker health check endpoint
 			monitoringMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
 			})
-			
+
 			// Mount asynqmon dashboard at /monitoring
 			monitoringMux.Handle("/monitoring/", asynqmonHandler)
 
