@@ -40,7 +40,7 @@ func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
 	}
 	config.ConfigStore.Store(cnf)
 
-	redisOption, err := redis_db.ParseRedisURL("localhost:6379")
+	redisOption, err := redis_db.ParseRedisURL("localhost:6379", false)
 	if err != nil {
 		log.Fatalf("Error parsing Redis URL: %v", err)
 	}

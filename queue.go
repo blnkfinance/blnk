@@ -50,10 +50,11 @@ type TransactionTypePayload struct {
 // Returns:
 // - *Queue: A pointer to the newly created Queue instance.
 func NewQueue(conf *config.Configuration) *Queue {
-	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
+	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 	if err != nil {
 		log.Fatalf("Error parsing Redis URL: %v", err)
 	}
+
 	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig}
 	client := asynq.NewClient(queueOptions)
 	inspector := asynq.NewInspector(queueOptions)
