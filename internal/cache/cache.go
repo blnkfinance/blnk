@@ -70,7 +70,7 @@ func NewCache() (Cache, error) {
 	}
 
 	// Initialize Redis cache with the configured Redis DNS
-	ca, err := newRedisCache([]string{cfg.Redis.Dns})
+	ca, err := newRedisCache([]string{cfg.Redis.Dns}, cfg.Redis.SkipTLSVerify)
 	if err != nil {
 		return nil, err
 	}
@@ -84,9 +84,9 @@ const cacheSize = 128000
 // Parameters:
 // - addresses: The Redis server addresses to connect to.
 // Returns a RedisCache instance and an error if the connection fails.
-func newRedisCache(addresses []string) (*RedisCache, error) {
+func newRedisCache(addresses []string, skipTLSVerify bool) (*RedisCache, error) {
 	// Initialize the Redis client using the provided addresses
-	client, err := redis_db.NewRedisClient(addresses)
+	client, err := redis_db.NewRedisClient(addresses, skipTLSVerify)
 	if err != nil {
 		return nil, err
 	}

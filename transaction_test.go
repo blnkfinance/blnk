@@ -4395,7 +4395,7 @@ func (tl *testLogger) Fatal(args ...interface{}) {
 // It takes the testing object, configuration, Blnk instance, and the specific transaction queue name.
 // It returns a cleanup function that should be deferred by the caller to shut down the server.
 func startTestAsynqWorker(t *testing.T, cnf *config.Configuration, blnkInstance *Blnk, transactionQueueName string) func() {
-	redisOption, err := redis_db.ParseRedisURL(cnf.Redis.Dns)
+	redisOption, err := redis_db.ParseRedisURL(cnf.Redis.Dns, false)
 	require.NoError(t, err, "Failed to parse Redis URL for Asynq")
 
 	queues := make(map[string]int)
