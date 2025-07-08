@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -53,6 +54,13 @@ func NewQueue(conf *config.Configuration) *Queue {
 	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns)
 	if err != nil {
 		log.Fatalf("Error parsing Redis URL: %v", err)
+	}
+
+	// Apply TLS skip verify if configured and TLS is enabled
+	if redisOption.TLSConfig != nil && conf.Redis.SkipTLSVerify {
+		redisOption.TLSConfig = &tls.Config{
+			InsecureSkipVerify: conf.Redis.SkipTLSVerify,
+		}
 	}
 	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig}
 	client := asynq.NewClient(queueOptions)

@@ -114,7 +114,9 @@ func NewRedisClient(addresses []string, skipTLSVerify bool) (*Redis, error) {
 
 		// Apply TLS skip verify if configured and TLS is enabled
 		if opts.TLSConfig != nil && skipTLSVerify {
-			opts.TLSConfig.InsecureSkipVerify = true
+			opts.TLSConfig = &tls.Config{
+				InsecureSkipVerify: skipTLSVerify,
+			}
 		}
 
 		client = redis.NewClient(opts)

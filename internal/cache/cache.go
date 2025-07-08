@@ -70,7 +70,7 @@ func NewCache() (Cache, error) {
 	}
 
 	// Initialize Redis cache with the configured Redis DNS
-	ca, err := newRedisCache([]string{cfg.Redis.Dns}, false) // Default to secure TLS verification for cache
+	ca, err := newRedisCache([]string{cfg.Redis.Dns}, cfg.Redis.SkipTLSVerify)
 	if err != nil {
 		return nil, err
 	}
