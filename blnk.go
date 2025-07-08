@@ -62,7 +62,7 @@ func initializeRedisClients(config *config.Configuration) (redis.UniversalClient
 		return nil, nil, err
 	}
 
-	redisOption, err := redis_db.ParseRedisURL(config.Redis.Dns)
+	redisOption, err := redis_db.ParseRedisURL(config.Redis.Dns, config.Redis.SkipTLSVerify)
 	if err != nil {
 		return nil, nil, err
 	}

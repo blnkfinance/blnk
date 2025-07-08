@@ -34,7 +34,7 @@ type Redis struct {
 
 // parseRedisURL parses a Redis URL into Redis options, handling various URL formats
 // including Azure Redis Cache URLs with special characters in passwords.
-func ParseRedisURL(rawURL string) (*redis.Options, error) {
+func ParseRedisURL(rawURL string, skipTLSVerify bool) (*redis.Options, error) {
 	// Don't modify docker-style addresses (e.g. redis:6379)
 	if strings.Count(rawURL, ":") == 1 && !strings.Contains(rawURL, "@") && !strings.Contains(rawURL, "//") {
 		return &redis.Options{
@@ -84,6 +84,13 @@ func ParseRedisURL(rawURL string) (*redis.Options, error) {
 		}
 	}
 
+	// // Apply TLS skip verify if configured and TLS is enabled
+	if opts.TLSConfig != nil && skipTLSVerify {
+		opts.TLSConfig = &tls.Config{
+			InsecureSkipVerify: skipTLSVerify,
+		}
+	}
+
 	return opts, nil
 }
 
@@ -107,16 +114,9 @@ func NewRedisClient(addresses []string, skipTLSVerify bool) (*Redis, error) {
 
 	// If a single address is provided, use it to create a standalone Redis client
 	if len(addresses) == 1 {
-		opts, err := ParseRedisURL(addresses[0])
+		opts, err := ParseRedisURL(addresses[0], skipTLSVerify)
 		if err != nil {
 			return nil, err
-		}
-
-		// Apply TLS skip verify if configured and TLS is enabled
-		if opts.TLSConfig != nil && skipTLSVerify {
-			opts.TLSConfig = &tls.Config{
-				InsecureSkipVerify: skipTLSVerify,
-			}
 		}
 
 		client = redis.NewClient(opts)
@@ -128,7 +128,7 @@ func NewRedisClient(addresses []string, skipTLSVerify bool) (*Redis, error) {
 		useTLS := false
 
 		for _, addr := range addresses {
-			opts, err := ParseRedisURL(addr)
+			opts, err := ParseRedisURL(addr, skipTLSVerify)
 			if err != nil {
 				return nil, err
 			}
