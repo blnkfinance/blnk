@@ -82,7 +82,7 @@ func TestNewRedisClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewRedisClient(tt.addresses)
+			client, err := NewRedisClient(tt.addresses, false)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -99,7 +99,7 @@ func TestRedisIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	client, err := NewRedisClient([]string{"localhost:6379"})
+	client, err := NewRedisClient([]string{"localhost:6379"}, false)
 	if err != nil {
 		t.Fatalf("Failed to create Redis client: %v", err)
 	}

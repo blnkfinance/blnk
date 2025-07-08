@@ -82,7 +82,8 @@ type DataSourceConfig struct {
 }
 
 type RedisConfig struct {
-	Dns string `json:"dns" envconfig:"BLNK_REDIS_DNS"`
+	Dns           string `json:"dns" envconfig:"BLNK_REDIS_DNS"`
+	SkipTLSVerify bool   `json:"skip_tls_verify" envconfig:"BLNK_REDIS_SKIP_TLS_VERIFY"`
 }
 
 type TypeSenseConfig struct {

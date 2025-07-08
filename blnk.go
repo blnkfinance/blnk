@@ -57,7 +57,7 @@ var SQLFiles embed.FS
 
 // initializeRedisClients sets up both the Redis client and Asynq client
 func initializeRedisClients(config *config.Configuration) (redis.UniversalClient, *asynq.Client, error) {
-	redisClient, err := redis_db.NewRedisClient([]string{config.Redis.Dns})
+	redisClient, err := redis_db.NewRedisClient([]string{config.Redis.Dns}, config.Redis.SkipTLSVerify)
 	if err != nil {
 		return nil, nil, err
 	}
