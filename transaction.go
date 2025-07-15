@@ -356,7 +356,7 @@ func (l *Blnk) validateTxn(ctx context.Context, transaction *model.Transaction) 
 
 	// If the transaction reference already exists, return an error
 	if txn {
-		err := fmt.Errorf("reference %s has already been used ", transaction.Reference)
+		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
 		span.RecordError(err)
 		return err
 	}
