@@ -112,6 +112,10 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 		return err
 	}
 
+	if cfg.TypeSense.Dns == "" {
+		return nil
+	}
+
 	payload := map[string]interface{}{
 		"collection": collection,
 		"payload":    data,

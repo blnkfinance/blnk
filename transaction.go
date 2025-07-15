@@ -356,7 +356,7 @@ func (l *Blnk) validateTxn(ctx context.Context, transaction *model.Transaction) 
 
 	// If the transaction reference already exists, return an error
 	if txn {
-		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
+		err := fmt.Errorf("reference %s has already been used ", transaction.Reference)
 		span.RecordError(err)
 		return err
 	}
@@ -713,7 +713,7 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 			span.RecordError(err)
 			continue
 		}
-		queuedCommitTxn, err := l.CommitInflightTransaction(ctx, originalTxn.TransactionID, amount)
+		queuedCommitTxn, err := l.CommitInflightTransactionWithQueue(ctx, originalTxn.TransactionID, amount)
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 			span.RecordError(err)
@@ -1221,7 +1221,7 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.CreatedAt = time.Now()
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
-	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	transaction.Reference = transaction.Reference + "-commit"
 	transaction.Hash = transaction.HashTxn()
 
 	if withQueue {
