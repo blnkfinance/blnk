@@ -713,7 +713,7 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 			span.RecordError(err)
 			continue
 		}
-		queuedCommitTxn, err := l.CommitInflightTransactionWithQueue(ctx, originalTxn.TransactionID, amount)
+		queuedCommitTxn, err := l.CommitInflightTransaction(ctx, originalTxn.TransactionID, amount)
 		if err != nil {
 			results <- BatchJobResult{Error: err}
 			span.RecordError(err)
@@ -1039,6 +1039,25 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 	ctx, span := tracer.Start(ctx, "CommitInflightTransaction")
 	defer span.End()
 
+	// Create a lock key using the transaction ID (which is the parent ID for the commit)
+	lockKey := fmt.Sprintf("inflight-commit:%s", transactionID)
+	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+
+	// Get lock duration from config
+	config, err := config.Fetch()
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	// Acquire the lock
+	err = locker.Lock(ctx, config.Transaction.LockDuration)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to acquire lock for inflight commit: %w", err)
+	}
+	defer l.releaseLock(ctx, locker)
+
 	// Fetch and validate the inflight transaction
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
 	if err != nil {
@@ -1061,6 +1080,25 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transactionID string, amount *big.Int) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "CommitInflightTransactionWithQueue")
 	defer span.End()
+
+	// Create a lock key using the transaction ID (which is the parent ID for the commit)
+	lockKey := fmt.Sprintf("inflight-commit:%s", transactionID)
+	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+
+	// Get lock duration from config
+	config, err := config.Fetch()
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	// Acquire the lock
+	err = locker.Lock(ctx, config.Transaction.LockDuration)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to acquire lock for inflight commit: %w", err)
+	}
+	defer l.releaseLock(ctx, locker)
 
 	// Fetch and validate the inflight transaction
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
@@ -1221,7 +1259,7 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.CreatedAt = time.Now()
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
-	transaction.Reference = transaction.Reference + "-commit"
+	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
 
 	if withQueue {
@@ -1261,6 +1299,25 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "VoidInflightTransaction")
 	defer span.End()
+
+	// Create a lock key using the transaction ID (which is the parent ID for the void)
+	lockKey := fmt.Sprintf("inflight-commit:%s", transactionID)
+	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+
+	// Get lock duration from config
+	config, err := config.Fetch()
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	// Acquire the lock
+	err = locker.Lock(ctx, config.Transaction.LockDuration)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to acquire lock for inflight void: %w", err)
+	}
+	defer l.releaseLock(ctx, locker)
 
 	// Fetch and validate the inflight transaction
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
