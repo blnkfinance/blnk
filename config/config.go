@@ -33,7 +33,6 @@ import (
 // Default constants
 const (
 	DEFAULT_PORT            = "5001"
-	DEFAULT_TYPESENSE_URL   = "http://typesense:8108"
 	DEFAULT_CLEANUP_SEC     = 10800 // 3 hours in seconds
 	DEFAULT_TYPESENSE_KEY   = "blnk-api-key"
 	DEFAULT_MONITORING_PORT = "5004"
@@ -259,10 +258,6 @@ func (cnf *Configuration) setDefaultValues() {
 		log.Printf("Warning: Port not specified in config. Setting default port: %s", DEFAULT_PORT)
 	}
 
-	// TypeSense defaults
-	if cnf.TypeSense.Dns == "" {
-		cnf.TypeSense.Dns = DEFAULT_TYPESENSE_URL
-	}
 	if cnf.TypeSenseKey == "" {
 		cnf.TypeSenseKey = DEFAULT_TYPESENSE_KEY
 	}

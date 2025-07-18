@@ -59,6 +59,11 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 
 	_, err := b.blnk.RecordTransaction(ctx, &txn)
 	if err != nil {
+		// Handle reference already used error
+		if strings.Contains(strings.ToLower(err.Error()), "reference") && strings.Contains(strings.ToLower(err.Error()), "already been used") {
+			return nil
+		}
+
 		if strings.Contains(strings.ToLower(err.Error()), "insufficient funds") {
 			cfg, _ := config.Fetch()
 			if !cfg.Queue.InsufficientFundRetries {
@@ -104,6 +109,10 @@ func handleTransactionRejection(ctx context.Context, b *blnkInstance, txn *model
 // It fetches the collection name and payload from the task, ensures the collections exist,
 // and sends the payload to the appropriate TypeSense collection for indexing.
 func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
+	if b.cnf.TypeSense.Dns == "" {
+		return nil
+	}
+
 	var data indexData
 
 	// Unmarshal the indexing data from the task payload.
