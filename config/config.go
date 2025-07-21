@@ -165,6 +165,7 @@ type Configuration struct {
 	Notification            Notification                  `json:"notification"`
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
 	EnableTelemetry         bool                          `json:"enable_telemetry" envconfig:"BLNK_ENABLE_TELEMETRY"`
+	EnableObservability     bool                          `json:"enable_observability" envconfig:"BLNK_ENABLE_OBSERVABILITY"`
 	Transaction             TransactionConfig             `json:"transaction"`
 	Reconciliation          ReconciliationConfig          `json:"reconciliation"`
 	Queue                   QueueConfig                   `json:"queue"`
@@ -211,7 +212,7 @@ func Fetch() (*Configuration, error) {
 	config := ConfigStore.Load()
 	c, ok := config.(*Configuration)
 	if !ok {
-		return nil, errors.New("config not loaded from file. Create a json file called blnk.json with your config ❌")
+		return nil, errors.New("config not loaded from file. Create a json file called blnk.json with your config ")
 	}
 	return c, nil
 }
@@ -273,10 +274,17 @@ func (cnf *Configuration) setDefaultValues() {
 	cnf.setReconciliationDefaults()
 	cnf.setQueueDefaults()
 
-	// Enable telemetry by default
-	if !cnf.EnableTelemetry {
-		cnf.EnableTelemetry = true
-		log.Println("Warning: Telemetry setting not specified. Enabling by default.")
+	// For a financial application, telemetry is opt-in for privacy reasons, don't enable by default if it's not specified
+	if cnf.EnableTelemetry {
+		log.Println("Info: Telemetry enabled.")
+	} else {
+		log.Println("Info: Telemetry disabled.")
+	}
+
+	if cnf.EnableObservability {
+		log.Println("Info: Observability enabled.")
+	} else {
+		log.Println("Info: Observability disabled.")
 	}
 }
 

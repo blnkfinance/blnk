@@ -153,7 +153,7 @@ func initializeRouter(b *blnkInstance) *gin.Engine {
 	return router
 }
 
-func initializeTracing(ctx context.Context) (func(context.Context) error, error) {
+func initializeOpenTelemetry(ctx context.Context) (func(context.Context) error, error) {
 	shutdown, err := trace.SetupOTelSDK(ctx, "BLNK")
 	if err != nil {
 		return nil, fmt.Errorf("error setting up OTel SDK: %v", err)
@@ -188,20 +188,26 @@ func startServer(router *gin.Engine, cfg config.ServerConfig) error {
 	return router.Run(":" + cfg.Port)
 }
 
-func initializeObservability(ctx context.Context, cfg *config.Configuration) (posthog.Client, func(context.Context) error, error) {
-	if !cfg.EnableTelemetry {
-		return nil, func(context.Context) error { return nil }, nil
+// Renamed from initializeObservability to better reflect its purpose
+func initializeTelemetryAndObservability(ctx context.Context, cfg *config.Configuration) (posthog.Client, func(context.Context) error, error) {
+	var phClient posthog.Client
+	var tracingShutdown func(context.Context) error = func(context.Context) error { return nil }
+	var err error
+
+	// Initialize tracing if observability is enabled
+	if cfg.EnableObservability {
+		tracingShutdown, err = initializeOpenTelemetry(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to initialize tracing: %w", err)
+		}
 	}
 
-	// Initialize tracing
-	shutdown, err := initializeTracing(ctx)
-	if err != nil {
-		return nil, nil, err
+	// Initialize PostHog if telemetry is enabled
+	if cfg.EnableTelemetry {
+		phClient, _ = initializePostHog()
 	}
 
-	// Initialize PostHog
-	phClient, _ := initializePostHog()
-	return phClient, shutdown, nil
+	return phClient, tracingShutdown, nil
 }
 
 /*
@@ -225,8 +231,8 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 				log.Println(err)
 			}
 
-			// Initialize observability (tracing and PostHog)
-			phClient, shutdown, err := initializeObservability(ctx, cfg)
+			// Initialize telemetry and observability
+			phClient, shutdown, err := initializeTelemetryAndObservability(ctx, cfg)
 			if err != nil {
 				log.Fatal(err)
 			}
