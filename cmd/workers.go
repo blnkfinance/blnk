@@ -237,7 +237,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			// Initialize observability (tracing and PostHog)
-			phClient, shutdown, err := initializeObservability(ctx, conf)
+			phClient, shutdown, err := initializeTelemetryAndObservability(ctx, conf)
 			if err != nil {
 				log.Fatal(err)
 			}
