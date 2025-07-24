@@ -54,7 +54,7 @@ func TestConnectDB_Success(t *testing.T) {
 	// Provide a valid DNS string for your testing database
 	dns := "postgres://postgres:password@localhost/blnk?sslmode=disable"
 
-	db, err := ConnectDB(dns)
+	db, err := ConnectDB(config.DataSourceConfig{Dns: dns})
 	assert.NoError(t, err)
 	assert.NotNil(t, db)
 
@@ -68,7 +68,7 @@ func TestConnectDB_Failure(t *testing.T) {
 	// Provide an invalid DNS string to simulate a failure
 	invalidDNS := "invalid-dns"
 
-	db, err := ConnectDB(invalidDNS)
+	db, err := ConnectDB(config.DataSourceConfig{Dns: invalidDNS})
 	assert.Error(t, err)
 	assert.Nil(t, db)
 }
