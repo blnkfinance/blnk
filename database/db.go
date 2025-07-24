@@ -53,7 +53,7 @@ func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
 func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
 	var err error
 	once.Do(func() {
-		con, errConn := ConnectDB(configuration.DataSource.Dns)
+		con, errConn := ConnectDB(configuration.DataSource)
 		if errConn != nil {
 			err = errConn
 			return
@@ -74,6 +74,6 @@ func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
 }
 
 // ConnectDB establishes a database connection with pooling.
-func ConnectDB(dsn string) (*sql.DB, error) {
-	return pgconn.ConnectDB(dsn)
+func ConnectDB(dsConfig config.DataSourceConfig) (*sql.DB, error) {
+	return pgconn.ConnectDB(dsConfig)
 }

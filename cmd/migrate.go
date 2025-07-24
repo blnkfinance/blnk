@@ -65,7 +65,7 @@ func migrateUpCommands() *cobra.Command {
 			}
 
 			// Connect to the database.
-			db, err := database.ConnectDB(cnf.DataSource.Dns)
+			db, err := database.ConnectDB(cnf.DataSource)
 			if err != nil {
 				log.Printf("Error connecting to database: %v", err)
 				return
@@ -106,7 +106,7 @@ func migrateDownCommands() *cobra.Command {
 			}
 
 			// Connect to the database.
-			db, err := database.ConnectDB(cnf.DataSource.Dns)
+			db, err := database.ConnectDB(cnf.DataSource)
 			if err != nil {
 				log.Printf("Error connecting to database: %v", err)
 				return

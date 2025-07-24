@@ -63,6 +63,13 @@ var (
 		NumberOfQueues:      20,
 		MonitoringPort:      DEFAULT_MONITORING_PORT,
 	}
+
+	defaultDatabase = DataSourceConfig{
+		MaxOpenConns:    25,
+		MaxIdleConns:    10,
+		ConnMaxLifetime: 30 * time.Minute,
+		ConnMaxIdleTime: 5 * time.Minute,
+	}
 )
 
 var ConfigStore atomic.Value
@@ -77,7 +84,11 @@ type ServerConfig struct {
 }
 
 type DataSourceConfig struct {
-	Dns string `json:"dns" envconfig:"BLNK_DATA_SOURCE_DNS"`
+	Dns             string        `json:"dns" envconfig:"BLNK_DATA_SOURCE_DNS"`
+	MaxOpenConns    int           `json:"max_open_conns" envconfig:"BLNK_DATABASE_MAX_OPEN_CONNS"`
+	MaxIdleConns    int           `json:"max_idle_conns" envconfig:"BLNK_DATABASE_MAX_IDLE_CONNS"`
+	ConnMaxLifetime time.Duration `json:"conn_max_lifetime" envconfig:"BLNK_DATABASE_CONN_MAX_LIFETIME"`
+	ConnMaxIdleTime time.Duration `json:"conn_max_idle_time" envconfig:"BLNK_DATABASE_CONN_MAX_IDLE_TIME"`
 }
 
 type RedisConfig struct {
@@ -270,6 +281,7 @@ func (cnf *Configuration) setDefaultValues() {
 	}
 
 	// Set module defaults
+	cnf.setDatabaseDefaults()
 	cnf.setTransactionDefaults()
 	cnf.setReconciliationDefaults()
 	cnf.setQueueDefaults()
@@ -341,6 +353,21 @@ func (cnf *Configuration) setQueueDefaults() {
 	}
 	if cnf.Queue.MonitoringPort == "" {
 		cnf.Queue.MonitoringPort = defaultQueue.MonitoringPort
+	}
+}
+
+func (cnf *Configuration) setDatabaseDefaults() {
+	if cnf.DataSource.MaxOpenConns == 0 {
+		cnf.DataSource.MaxOpenConns = defaultDatabase.MaxOpenConns
+	}
+	if cnf.DataSource.MaxIdleConns == 0 {
+		cnf.DataSource.MaxIdleConns = defaultDatabase.MaxIdleConns
+	}
+	if cnf.DataSource.ConnMaxLifetime == 0 {
+		cnf.DataSource.ConnMaxLifetime = defaultDatabase.ConnMaxLifetime
+	}
+	if cnf.DataSource.ConnMaxIdleTime == 0 {
+		cnf.DataSource.ConnMaxIdleTime = defaultDatabase.ConnMaxIdleTime
 	}
 }
 
