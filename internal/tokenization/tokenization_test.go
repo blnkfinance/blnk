@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestNewTokenizationService(t *testing.T) {
@@ -399,5 +401,244 @@ func TestInvalidKeySize(t *testing.T) {
 		} else if err == nil {
 			t.Errorf("Expected error with invalid %d-byte key, got nil", size)
 		}
+	}
+}
+
+// TestUTF8Tokenization tests tokenization with UTF-8 characters
+func TestUTF8Tokenization(t *testing.T) {
+	// Setup
+	key := []byte("0123456789ABCDEF0123456789ABCDEF") // 32-byte key for AES-256
+	service := NewTokenizationService(key)
+
+	// Test cases with UTF-8 characters mentioned in the bug report
+	testData := []string{
+		"Taizé",            // é character that caused the original bug
+		"José",             // Common Spanish name with accent
+		"François",         // French name with ç
+		"Müller",           // German name with umlaut ü
+		"Björk",            // Scandinavian name with ö
+		"Tschüß",           // German word with ü and ß
+		"Ångström",         // Swedish name with Å
+		"Zoë",              // Name with ë
+		"Pañuelos",         // Spanish word with ñ
+		"Café",             // Common word with é
+		"naïve",            // Word with ï
+		"résumé",           // Word with multiple accents
+		"José María Aznar", // Full name with spaces and accents
+		"北京",               // Chinese characters
+		"東京",               // Japanese characters
+		"москва",           // Russian characters
+		"العربية",          // Arabic characters
+		"हिन्दी",           // Hindi characters
+		"🔒🔑",               // Emoji (already tested but keeping for UTF-8 completeness)
+	}
+
+	for _, original := range testData {
+		t.Run(fmt.Sprintf("Standard_%s", original), func(t *testing.T) {
+			// Test standard tokenization
+			token, err := service.Tokenize(original)
+			if err != nil {
+				t.Errorf("Tokenize(%q) error: %v", original, err)
+				return
+			}
+
+			// Verify token is valid base64
+			_, err = base64.StdEncoding.DecodeString(token)
+			if err != nil {
+				t.Errorf("Token %q is not valid base64", token)
+				return
+			}
+
+			// Test detokenization
+			decrypted, err := service.Detokenize(token)
+			if err != nil {
+				t.Errorf("Detokenize(%q) error: %v", token, err)
+				return
+			}
+
+			// Verify the result matches exactly
+			if decrypted != original {
+				t.Errorf("Expected %q, got %q", original, decrypted)
+			}
+		})
+
+		t.Run(fmt.Sprintf("FormatPreserving_%s", original), func(t *testing.T) {
+			// Test format-preserving tokenization
+			token, err := service.TokenizeWithMode(original, FormatPreservingMode)
+			if err != nil {
+				t.Errorf("TokenizeWithMode(%q, FormatPreservingMode) error: %v", original, err)
+				return
+			}
+
+			// Verify token format
+			if !strings.HasPrefix(token, "FPT:") {
+				t.Errorf("Format-preserving token %q does not have FPT: prefix", token)
+				return
+			}
+
+			// Test detokenization
+			decrypted, err := service.Detokenize(token)
+			if err != nil {
+				t.Errorf("Detokenize(%q) error: %v", token, err)
+				return
+			}
+
+			// Verify the result matches exactly
+			if decrypted != original {
+				t.Errorf("Expected %q, got %q", original, decrypted)
+			}
+		})
+	}
+}
+
+// TestUTF8FormatPreservation tests that format-preserving tokenization
+// correctly handles UTF-8 characters while preserving format
+func TestUTF8FormatPreservation(t *testing.T) {
+	key := []byte("0123456789ABCDEF0123456789ABCDEF") // 32-byte key for AES-256
+	service := NewTokenizationService(key)
+
+	testCases := []struct {
+		original string
+		name     string
+	}{
+		{"Café", "French_word_with_accent"},
+		{"Müller", "German_name_with_umlaut"},
+		{"José", "Spanish_name_with_accent"},
+		{"Björk", "Scandinavian_name"},
+		{"naïve", "Word_with_diaeresis"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			token, err := service.TokenizeWithMode(tc.original, FormatPreservingMode)
+			if err != nil {
+				t.Fatalf("TokenizeWithMode error: %v", err)
+			}
+
+			// Extract the visible part of the format-preserving token
+			parts := strings.SplitN(token, ":", 3)
+			if len(parts) < 3 {
+				t.Fatalf("Invalid format-preserving token format: %q", token)
+			}
+
+			visibleToken := parts[1]
+			originalRunes := []rune(tc.original)
+			tokenRunes := []rune(visibleToken)
+
+			// Check length matches (in runes, not bytes)
+			if len(tokenRunes) != len(originalRunes) {
+				t.Errorf("Token length mismatch: expected %d runes, got %d runes", len(originalRunes), len(tokenRunes))
+			}
+
+			// Check character types are preserved
+			for i, origChar := range originalRunes {
+				if i >= len(tokenRunes) {
+					break
+				}
+
+				tokenChar := tokenRunes[i]
+
+				if 'A' <= origChar && origChar <= 'Z' {
+					if tokenChar < 'A' || tokenChar > 'Z' {
+						t.Errorf("Character type not preserved at position %d: expected uppercase, got %q", i, string(tokenChar))
+					}
+				} else if 'a' <= origChar && origChar <= 'z' {
+					if tokenChar < 'a' || tokenChar > 'z' {
+						t.Errorf("Character type not preserved at position %d: expected lowercase, got %q", i, string(tokenChar))
+					}
+				} else if '0' <= origChar && origChar <= '9' {
+					if tokenChar < '0' || tokenChar > '9' {
+						t.Errorf("Character type not preserved at position %d: expected digit, got %q", i, string(tokenChar))
+					}
+				} else {
+					// Special characters (including UTF-8) should be preserved exactly
+					if tokenChar != origChar {
+						t.Errorf("Special character not preserved at position %d: expected %q, got %q", i, string(origChar), string(tokenChar))
+					}
+				}
+			}
+
+			// Verify detokenization works
+			decrypted, err := service.Detokenize(token)
+			if err != nil {
+				t.Errorf("Detokenize error: %v", err)
+			}
+			if decrypted != tc.original {
+				t.Errorf("Expected %q, got %q", tc.original, decrypted)
+			}
+		})
+	}
+}
+
+// TestGenerateTokenWithFormat_UTF8 specifically tests the generateTokenWithFormat function with UTF-8
+func TestGenerateTokenWithFormat_UTF8(t *testing.T) {
+	testCases := []struct {
+		original string
+		name     string
+	}{
+		{"Café", "French_accent"},
+		{"Müller", "German_umlaut"},
+		{"José", "Spanish_accent"},
+		{"Björk", "Scandinavian_char"},
+		{"Tschüß", "German_special_chars"},
+		{"北京", "Chinese_chars"},
+		{"москва", "Cyrillic_chars"},
+	}
+
+	// Generate a random seed
+	seed := make([]byte, 32)
+	_, err := rand.Read(seed)
+	if err != nil {
+		t.Fatalf("Failed to generate random seed: %v", err)
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			token, err := generateTokenWithFormat(seed, tc.original)
+			if err != nil {
+				t.Fatalf("generateTokenWithFormat error: %v", err)
+			}
+
+			originalRunes := []rune(tc.original)
+			tokenRunes := []rune(token)
+
+			// Check length matches (in runes, not bytes)
+			if len(tokenRunes) != len(originalRunes) {
+				t.Errorf("Token length %d doesn't match original length %d", len(tokenRunes), len(originalRunes))
+			}
+
+			// Check format preservation for each character
+			for i, origChar := range originalRunes {
+				if i >= len(tokenRunes) {
+					break
+				}
+
+				tokenChar := tokenRunes[i]
+
+				if 'A' <= origChar && origChar <= 'Z' {
+					if tokenChar < 'A' || tokenChar > 'Z' {
+						t.Errorf("Expected uppercase at position %d, got %q", i, string(tokenChar))
+					}
+				} else if 'a' <= origChar && origChar <= 'z' {
+					if tokenChar < 'a' || tokenChar > 'z' {
+						t.Errorf("Expected lowercase at position %d, got %q", i, string(tokenChar))
+					}
+				} else if '0' <= origChar && origChar <= '9' {
+					if tokenChar < '0' || tokenChar > '9' {
+						t.Errorf("Expected digit at position %d, got %q", i, string(tokenChar))
+					}
+				} else {
+					// UTF-8 and special characters should be preserved exactly
+					if tokenChar != origChar {
+						t.Errorf("Expected UTF-8/special character %q at position %d, got %q", string(origChar), i, string(tokenChar))
+					}
+				}
+			}
+
+			// Verify the token is valid UTF-8
+			if !utf8.ValidString(token) {
+				t.Errorf("Generated token is not valid UTF-8: %q", token)
+			}
+		})
 	}
 }
