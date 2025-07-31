@@ -239,24 +239,25 @@ func (s *TokenizationService) formatPreservingDetokenize(token string) (string, 
 
 // generateTokenWithFormat creates a token that matches the format of the original value.
 func generateTokenWithFormat(seed []byte, originalValue string) (string, error) {
-	var result []byte
+	runes := []rune(originalValue)
+	result := make([]rune, len(runes))
 
-	// Use the seed to generate random bytes that preserve the format
-	for i, char := range originalValue {
+	// Use the seed to generate random runes that preserve the format
+	for i, char := range runes {
 		seedByte := seed[i%len(seed)]
 
 		if 'A' <= char && char <= 'Z' {
 			// Uppercase letter
-			result = append(result, 'A'+(seedByte%26))
+			result[i] = 'A' + rune(seedByte%26)
 		} else if 'a' <= char && char <= 'z' {
 			// Lowercase letter
-			result = append(result, 'a'+(seedByte%26))
+			result[i] = 'a' + rune(seedByte%26)
 		} else if '0' <= char && char <= '9' {
 			// Digit
-			result = append(result, '0'+(seedByte%10))
+			result[i] = '0' + rune(seedByte%10)
 		} else {
-			// Preserve special characters
-			result = append(result, byte(char))
+			// Preserve special characters (including UTF-8 characters)
+			result[i] = char
 		}
 	}
 
