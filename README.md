@@ -71,16 +71,19 @@ To install Blnk, make sure you have [Docker Compose](https://docs.docker.com/com
 
    ```json
    {
-     "project_name": "Blnk",
-     "data_source": {
-       "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
-     },
-     "redis": {
-       "dns": "redis:6379"
-     },
-     "server": {
-       "port": "5001"
-     }
+      "project_name": "Blnk",
+      "data_source": {
+         "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
+      },
+      "redis": {
+         "dns": "redis:6379"
+      },
+      "typesense":{
+         "dns": "http://typesense:8108"
+      },
+      "server": {
+         "port": "5001"
+      }
    }
    ```
 
