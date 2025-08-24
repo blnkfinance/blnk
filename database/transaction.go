@@ -854,7 +854,8 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 }
 
 // GetQueuedAmounts retrieves the total queued debit and credit amounts for a given balance ID.
-// It returns the total debit and credit amounts as big.Int values, or an error if the retrieval fails.
+// It only includes transactions with status 'QUEUED' that don't have child transactions with status 'APPLIED' or 'REJECTED'.
+// This ensures that queued transactions that have been processed (either applied or rejected) are excluded from the totals.
 // Parameters:
 // - ctx: Context for managing the request and tracing.
 // - balanceID: The ID of the balance to retrieve queued amounts for.
@@ -873,7 +874,7 @@ func (d Datasource) GetQueuedAmounts(ctx context.Context, balanceID string) (deb
             SELECT 1 
             FROM blnk.transactions child 
             WHERE child.parent_transaction = t.transaction_id 
-            AND child.status = 'APPLIED'
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED')
         )`, balanceID)
 	if err != nil {
 		return nil, nil, err

@@ -554,3 +554,263 @@ func TestGetBalanceByIndicator(t *testing.T) {
 	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.CreditBalance), "Credit balance should be 0")
 	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.DebitBalance), "Debit balance should be 0")
 }
+
+func TestGetOrCreateBalanceByIndicator(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping real service test in short mode")
+	}
+
+	ctx := context.Background()
+
+	t.Run("Balance exists - queued checks disabled", func(t *testing.T) {
+		// Set up config with queued checks disabled
+		cnf := &config.Configuration{
+			Redis: config.RedisConfig{
+				Dns: "localhost:6379",
+			},
+			DataSource: config.DataSourceConfig{
+				Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+			},
+			Queue: config.QueueConfig{
+				WebhookQueue:     "webhook_queue_test",
+				IndexQueue:       "index_queue_test",
+				TransactionQueue: "transaction_queue_test",
+				NumberOfQueues:   1,
+			},
+			Server: config.ServerConfig{
+				SecretKey: "test-secret",
+			},
+			Transaction: config.TransactionConfig{
+				BatchSize:          100,
+				MaxQueueSize:       1000,
+				LockDuration:       time.Second * 30,
+				IndexQueuePrefix:   "test_index",
+				EnableQueuedChecks: false,
+			},
+		}
+		config.ConfigStore.Store(cnf)
+
+		ds, err := database.NewDataSource(cnf)
+		require.NoError(t, err, "Failed to create datasource")
+
+		blnk, err := NewBlnk(ds)
+		require.NoError(t, err, "Failed to create Blnk instance")
+
+		// Generate unique indicator and currency
+		indicator := "@" + model.GenerateUUIDWithSuffix("test")
+		currency := "USD"
+
+		// 1. Create the balance first
+		balanceToCreate := model.Balance{
+			Indicator: indicator,
+			Currency:  currency,
+			LedgerID:  "general_ledger_id",
+		}
+
+		createdBalance, err := blnk.CreateBalance(ctx, balanceToCreate)
+		require.NoError(t, err, "Failed to create balance")
+
+		// 2. Test getOrCreateBalanceByIndicator with existing balance
+		result, err := blnk.getOrCreateBalanceByIndicator(ctx, indicator, currency)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, createdBalance.BalanceID, result.BalanceID)
+		assert.Equal(t, indicator, result.Indicator)
+		assert.Equal(t, currency, result.Currency)
+		// Should not have queued balances since queued checks are disabled
+		assert.Nil(t, result.QueuedDebitBalance)
+		assert.Nil(t, result.QueuedCreditBalance)
+	})
+
+	t.Run("Balance exists - queued checks enabled", func(t *testing.T) {
+		// Set up config with queued checks enabled
+		cnf := &config.Configuration{
+			Redis: config.RedisConfig{
+				Dns: "localhost:6379",
+			},
+			DataSource: config.DataSourceConfig{
+				Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+			},
+			Queue: config.QueueConfig{
+				WebhookQueue:     "webhook_queue_test",
+				IndexQueue:       "index_queue_test",
+				TransactionQueue: "transaction_queue_test",
+				NumberOfQueues:   1,
+			},
+			Server: config.ServerConfig{
+				SecretKey: "test-secret",
+			},
+			Transaction: config.TransactionConfig{
+				BatchSize:          100,
+				MaxQueueSize:       1000,
+				LockDuration:       time.Second * 30,
+				IndexQueuePrefix:   "test_index",
+				EnableQueuedChecks: true,
+			},
+		}
+		config.ConfigStore.Store(cnf)
+
+		ds, err := database.NewDataSource(cnf)
+		require.NoError(t, err, "Failed to create datasource")
+
+		blnk, err := NewBlnk(ds)
+		require.NoError(t, err, "Failed to create Blnk instance")
+
+		// Start the test Asynq worker to process queued transactions
+		cleanupWorker := startTestAsynqWorker(t, cnf, blnk, "fake-queue-to-stay-in-queue")
+		defer cleanupWorker()
+
+		// Generate unique indicator and currency
+		indicator := "@" + model.GenerateUUIDWithSuffix("test")
+		currency := "USD"
+
+		// 1. Create the balance first
+		balanceToCreate := model.Balance{
+			Indicator: indicator,
+			Currency:  currency,
+			LedgerID:  "general_ledger_id",
+		}
+
+		createdBalance, err := blnk.CreateBalance(ctx, balanceToCreate)
+		require.NoError(t, err, "Failed to create balance")
+
+		// 2. Create a queued transaction to test queued balance retrieval
+		queuedTxn := &model.Transaction{
+			Amount:      100,
+			Precision:   100,
+			Currency:    currency,
+			Source:      createdBalance.BalanceID,
+			Destination: "@" + model.GenerateUUIDWithSuffix("destination"),
+			Reference:   "test-queued-ref-" + model.GenerateUUIDWithSuffix("ref"),
+			Description: "Test queued transaction",
+		}
+
+		_, err = blnk.QueueTransaction(ctx, queuedTxn)
+		require.NoError(t, err, "Failed to create queued transaction")
+
+		time.Sleep(time.Second * 1)
+		// 3. Test getOrCreateBalanceByIndicator with existing balance and queued checks enabled
+		result, err := blnk.getOrCreateBalanceByIndicator(ctx, indicator, currency)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, createdBalance.BalanceID, result.BalanceID)
+		assert.Equal(t, indicator, result.Indicator)
+		assert.Equal(t, currency, result.Currency)
+		// Should have queued balances populated since queued checks are enabled
+		assert.NotNil(t, result.QueuedDebitBalance)
+		assert.NotNil(t, result.QueuedCreditBalance)
+		// Should have a queued debit balance of 10000 (100 * precision 100)
+		assert.Equal(t, big.NewInt(10000), result.QueuedDebitBalance)
+	})
+
+	t.Run("Balance does not exist - create new balance - queued checks disabled", func(t *testing.T) {
+		// Set up config with queued checks disabled
+		cnf := &config.Configuration{
+			Redis: config.RedisConfig{
+				Dns: "localhost:6379",
+			},
+			DataSource: config.DataSourceConfig{
+				Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+			},
+			Queue: config.QueueConfig{
+				WebhookQueue:     "webhook_queue_test",
+				IndexQueue:       "index_queue_test",
+				TransactionQueue: "transaction_queue_test",
+				NumberOfQueues:   1,
+			},
+			Server: config.ServerConfig{
+				SecretKey: "test-secret",
+			},
+			Transaction: config.TransactionConfig{
+				BatchSize:          100,
+				MaxQueueSize:       1000,
+				LockDuration:       time.Second * 30,
+				IndexQueuePrefix:   "test_index",
+				EnableQueuedChecks: false,
+			},
+		}
+		config.ConfigStore.Store(cnf)
+
+		ds, err := database.NewDataSource(cnf)
+		require.NoError(t, err, "Failed to create datasource")
+
+		blnk, err := NewBlnk(ds)
+		require.NoError(t, err, "Failed to create Blnk instance")
+
+		// Generate unique indicator and currency
+		indicator := "@" + model.GenerateUUIDWithSuffix("new")
+		currency := "USD"
+
+		// Test getOrCreateBalanceByIndicator with non-existing balance
+		result, err := blnk.getOrCreateBalanceByIndicator(ctx, indicator, currency)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.NotEmpty(t, result.BalanceID)
+		assert.Contains(t, result.BalanceID, "bln_")
+		assert.Equal(t, indicator, result.Indicator)
+		assert.Equal(t, currency, result.Currency)
+		assert.Equal(t, "general_ledger_id", result.LedgerID)
+		// Should not have queued balances since queued checks are disabled
+		assert.Nil(t, result.QueuedDebitBalance)
+		assert.Nil(t, result.QueuedCreditBalance)
+	})
+
+	t.Run("Balance does not exist - create new balance - queued checks enabled", func(t *testing.T) {
+		// Set up config with queued checks enabled
+		cnf := &config.Configuration{
+			Redis: config.RedisConfig{
+				Dns: "localhost:6379",
+			},
+			DataSource: config.DataSourceConfig{
+				Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+			},
+			Queue: config.QueueConfig{
+				WebhookQueue:     "webhook_queue_test",
+				IndexQueue:       "index_queue_test",
+				TransactionQueue: "transaction_queue_test",
+				NumberOfQueues:   1,
+			},
+			Server: config.ServerConfig{
+				SecretKey: "test-secret",
+			},
+			Transaction: config.TransactionConfig{
+				BatchSize:          100,
+				MaxQueueSize:       1000,
+				LockDuration:       time.Second * 30,
+				IndexQueuePrefix:   "test_index",
+				EnableQueuedChecks: true,
+			},
+		}
+		config.ConfigStore.Store(cnf)
+
+		ds, err := database.NewDataSource(cnf)
+		require.NoError(t, err, "Failed to create datasource")
+
+		blnk, err := NewBlnk(ds)
+		require.NoError(t, err, "Failed to create Blnk instance")
+
+		// Generate unique indicator and currency
+		indicator := "@" + model.GenerateUUIDWithSuffix("new")
+		currency := "USD"
+
+		// Test getOrCreateBalanceByIndicator with non-existing balance
+		result, err := blnk.getOrCreateBalanceByIndicator(ctx, indicator, currency)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.NotEmpty(t, result.BalanceID)
+		assert.Contains(t, result.BalanceID, "bln_")
+		assert.Equal(t, indicator, result.Indicator)
+		assert.Equal(t, currency, result.Currency)
+		assert.Equal(t, "general_ledger_id", result.LedgerID)
+		// Should have queued balances initialized to 0 since queued checks are enabled
+		assert.NotNil(t, result.QueuedDebitBalance)
+		assert.NotNil(t, result.QueuedCreditBalance)
+		assert.Equal(t, big.NewInt(0), result.QueuedDebitBalance)
+		assert.Equal(t, big.NewInt(0), result.QueuedCreditBalance)
+	})
+}
