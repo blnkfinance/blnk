@@ -663,6 +663,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 
 	// This query first checks if there are any INFLIGHT transactions for this parentTransactionID
 	// If there are, it returns only those. If not, it falls back to QUEUED with inflight=true
+	// It excludes any REJECTED transactions
 	rows, err := d.Conn.QueryContext(ctx, `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
@@ -672,16 +673,22 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
-			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
-			FROM blnk.transactions
-			WHERE (transaction_id = $1 OR parent_transaction = $1) 
-			AND status = 'QUEUED' AND meta_data->>'inflight' = 'true'
-			-- Don't include parent transactions that have children with INFLIGHT status
+			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
+				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+			FROM blnk.transactions t
+			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
+			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
+			-- Don't include transactions that have been rejected (check by reference with _q suffix)
+			AND NOT EXISTS (
+				SELECT 1 
+				FROM blnk.transactions rejected
+				WHERE rejected.reference = t.reference || '_q' AND rejected.status = 'REJECTED'
+			)
+			-- Also don't include if there are child transactions with INFLIGHT status
 			AND NOT EXISTS (
 				SELECT 1 
 				FROM blnk.transactions child
-				WHERE child.parent_transaction = transaction_id AND child.status = 'INFLIGHT'
+				WHERE child.parent_transaction = t.transaction_id AND child.status = 'INFLIGHT'
 			)
 		)
 		
