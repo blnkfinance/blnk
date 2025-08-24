@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -102,6 +103,20 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 		logrus.Warningf("Failed to ensure collections exist: %v", err)
 	}
 
+	// Process and normalize the data
+	if err := t.processMetadata(data); err != nil {
+		return err
+	}
+	t.convertLargeNumbers(table, data)
+	t.ensureSchemaFields(table, data)
+	t.normalizeTimeFields(data)
+
+	// Upsert the document
+	return t.upsertDocument(ctx, table, data)
+}
+
+// processMetadata handles metadata field normalization for object schemas
+func (t *TypesenseClient) processMetadata(data map[string]interface{}) error {
 	if metaData, ok := data["meta_data"]; ok {
 		if metaData == nil {
 			// If metadata is null, provide an empty object for object type schemas
@@ -117,17 +132,47 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 			data["meta_data"] = string(jsonString)
 		}
 	}
+	return nil
+}
 
+// convertLargeNumbers converts big.Int values to strings for Typesense compatibility
+func (t *TypesenseClient) convertLargeNumbers(table string, data map[string]interface{}) {
+	switch table {
+	case "balances":
+		balanceFields := []string{"balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance"}
+		for _, field := range balanceFields {
+			t.convertNumberField(data, field)
+		}
+	case "transactions":
+		t.convertNumberField(data, "precise_amount")
+	}
+}
+
+// convertNumberField converts a single numeric field to string format
+func (t *TypesenseClient) convertNumberField(data map[string]interface{}, field string) {
+	if val, ok := data[field]; ok {
+		switch v := val.(type) {
+		case *big.Int:
+			data[field] = v.String()
+		case float64:
+			// Convert scientific notation back to integer string
+			data[field] = fmt.Sprintf("%.0f", v)
+		}
+	}
+}
+
+// ensureSchemaFields ensures all required schema fields are present with default values
+func (t *TypesenseClient) ensureSchemaFields(table string, data map[string]interface{}) {
 	latestSchema := getLatestSchema(table)
-
-	// Ensure all fields from the latest schema are present in the data.
 	for _, field := range latestSchema.Fields {
 		if _, ok := data[field.Name]; !ok {
 			data[field.Name] = getDefaultValue(field.Type)
 		}
 	}
+}
 
-	// Handle time fields and convert them to Unix timestamps if necessary.
+// normalizeTimeFields converts time fields to Unix timestamps
+func (t *TypesenseClient) normalizeTimeFields(data map[string]interface{}) {
 	timeFields := []string{"created_at", "dob", "scheduled_for", "inflight_expiry_date", "inflight_expires_at", "completed_at", "started_at"}
 	for _, field := range timeFields {
 		if fieldValue, ok := data[field]; ok {
@@ -142,34 +187,43 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 			}
 		}
 	}
+}
 
-	// Special handling for reconciliations and identities collections
-
-	var idField string
+// getIDField returns the primary ID field name for a given table
+func (t *TypesenseClient) getIDField(table string) string {
 	switch table {
 	case "reconciliations":
-		idField = "reconciliation_id"
+		return "reconciliation_id"
 	case "identities":
-		idField = "identity_id"
+		return "identity_id"
 	case "ledgers":
-		idField = "ledger_id"
+		return "ledger_id"
 	case "balances":
-		idField = "balance_id"
+		return "balance_id"
+	case "transactions":
+		return "transaction_id"
+	default:
+		return ""
 	}
+}
 
-	if id, ok := data[idField].(string); ok && id != "" {
-		// Upsert the document in Typesense with the provided ID
-		data["id"] = id
+// upsertDocument handles the final upsert operation to Typesense
+func (t *TypesenseClient) upsertDocument(ctx context.Context, table string, data map[string]interface{}) error {
+	idField := t.getIDField(table)
 
-		_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
-		if err != nil {
-			fmt.Println(data["meta_data"], "got here")
-			return fmt.Errorf("failed to upsert document in Typesense: %w", err)
+	if idField != "" {
+		if id, ok := data[idField].(string); ok && id != "" {
+			// Upsert the document in Typesense with the provided ID
+			data["id"] = id
+			_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
+			if err != nil {
+				return fmt.Errorf("failed to upsert document in Typesense: %w", err)
+			}
+			return nil
 		}
-		return nil
 	}
 
-	// For other collections, perform a regular upsert.
+	// For other collections, perform a regular upsert
 	_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
 	if err != nil {
 		return fmt.Errorf("failed to index document in Typesense: %w", err)
@@ -296,13 +350,13 @@ func getBalanceSchema() *api.CollectionSchema {
 	return &api.CollectionSchema{
 		Name: "balances",
 		Fields: []api.Field{
-			{Name: "balance", Type: "int64", Facet: &facet},
+			{Name: "balance", Type: "string", Facet: &facet},
 			{Name: "version", Type: "int64", Facet: &facet},
-			{Name: "inflight_balance", Type: "int64", Facet: &facet},
-			{Name: "credit_balance", Type: "int64", Facet: &facet},
-			{Name: "inflight_credit_balance", Type: "int64", Facet: &facet},
-			{Name: "debit_balance", Type: "int64", Facet: &facet},
-			{Name: "inflight_debit_balance", Type: "int64", Facet: &facet},
+			{Name: "inflight_balance", Type: "string", Facet: &facet},
+			{Name: "credit_balance", Type: "string", Facet: &facet},
+			{Name: "inflight_credit_balance", Type: "string", Facet: &facet},
+			{Name: "debit_balance", Type: "string", Facet: &facet},
+			{Name: "inflight_debit_balance", Type: "string", Facet: &facet},
 			{Name: "precision", Type: "float", Facet: &facet},
 			{Name: "ledger_id", Type: "string", Facet: &facet},
 			{Name: "identity_id", Type: "string", Facet: &facet},
@@ -326,7 +380,7 @@ func getTransactionSchema() *api.CollectionSchema {
 	return &api.CollectionSchema{
 		Name: "transactions",
 		Fields: []api.Field{
-			{Name: "precise_amount", Type: "int64", Facet: &facet},
+			{Name: "precise_amount", Type: "string", Facet: &facet},
 			{Name: "amount", Type: "float", Facet: &facet},
 			{Name: "rate", Type: "float", Facet: &facet},
 			{Name: "precision", Type: "float", Facet: &facet},
