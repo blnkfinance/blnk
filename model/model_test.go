@@ -147,6 +147,87 @@ func TestCanProcessTransaction(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, "transaction exceeds overdraft limit")
 	})
+
+	t.Run("Sufficient funds with no inflight debits", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance:         big.NewInt(1000),
+			InflightBalance: big.NewInt(0),
+		}
+		txn := &Transaction{
+			PreciseAmount: Int64ToBigInt(500),
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Insufficient funds due to inflight debits", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance:         big.NewInt(1000),
+			InflightBalance: big.NewInt(600), // 600 already reserved
+		}
+		txn := &Transaction{
+			PreciseAmount: Int64ToBigInt(500), // Trying to reserve 500 more, but only 400 available
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "insufficient funds in source balance")
+	})
+
+	t.Run("Sufficient funds considering inflight debits", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance:         big.NewInt(1000),
+			InflightBalance: big.NewInt(600), // 600 already reserved
+		}
+		txn := &Transaction{
+			PreciseAmount: Int64ToBigInt(400), // Trying to reserve 400, exactly what's available
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Overdraft with inflight debits within limit", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance:         big.NewInt(500),
+			InflightBalance: big.NewInt(300), // 300 already reserved, available = 200
+		}
+		txn := &Transaction{
+			PreciseAmount:  Int64ToBigInt(600), // Would result in -400 from available balance
+			Precision:      1,
+			OverdraftLimit: 500, // Limit allows up to -500
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Overdraft with inflight debits exceeding limit", func(t *testing.T) {
+		sourceBalance := &Balance{
+			Balance:         big.NewInt(500),
+			InflightBalance: big.NewInt(300), // 300 already reserved, available = 200
+		}
+		txn := &Transaction{
+			PreciseAmount:  Int64ToBigInt(800), // Would result in -600 from available balance
+			Precision:      1,
+			OverdraftLimit: 500, // Limit only allows up to -500
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "transaction exceeds overdraft limit")
+	})
+
+	t.Run("multiple inflight transactions", func(t *testing.T) {
+		// Account has balance of 5000
+		sourceBalance := &Balance{
+			Balance:         big.NewInt(5000),
+			InflightBalance: big.NewInt(5000), // 5 transactions of 1000 each already inflight
+		}
+		// Trying to create 6th transaction of 1000
+		txn := &Transaction{
+			PreciseAmount: Int64ToBigInt(1000),
+		}
+		err := canProcessTransaction(txn, sourceBalance)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "insufficient funds in source balance")
+	})
 }
 
 func TestBalance_CommitInflightDebit(t *testing.T) {

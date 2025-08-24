@@ -128,24 +128,33 @@ func (balance *Balance) computeBalance(inflight bool) {
 
 // canProcessTransaction checks if a transaction can be processed given the source balance.
 // It returns an error if the balance is insufficient and overdraft is not allowed.
+// This function now includes inflight balances in the available balance calculation
+// to prevent creating inflight transactions that would exceed the actual available funds.
 func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) error {
 	if transaction.AllowOverdraft && transaction.OverdraftLimit == 0 {
 		// If unconditional overdraft is allowed, skip all balance checks
 		return nil
 	}
 
+	// Initialize balance fields to ensure inflight balances are not nil
+	sourceBalance.InitializeBalanceFields()
+
 	// Convert transaction.PreciseAmount to *big.Int for comparison.
 	transactionAmount := transaction.PreciseAmount
 
-	if sourceBalance.Balance.Cmp(transactionAmount) >= 0 {
-		// Sufficient funds
+	// Calculate available balance by subtracting inflight debits from committed balance
+	// This ensures inflight balances are considered when checking if new transactions can be processed
+	availableBalance := new(big.Int).Sub(sourceBalance.Balance, sourceBalance.InflightBalance)
+
+	if availableBalance.Cmp(transactionAmount) >= 0 {
+		// Sufficient funds considering inflight debits
 		return nil
 	}
 
 	// Insufficient funds, check if within overdraft limit
 	if transaction.OverdraftLimit > 0 {
-		// Calculate the resulting balance after transaction
-		resultingBalance := new(big.Int).Sub(sourceBalance.Balance, transactionAmount)
+		// Calculate the resulting balance after transaction, considering inflight debits
+		resultingBalance := new(big.Int).Sub(availableBalance, transactionAmount)
 
 		// Convert overdraft limit to big.Int with precision applied
 		overdraftLimitPrecise := int64(transaction.OverdraftLimit * transaction.Precision)
