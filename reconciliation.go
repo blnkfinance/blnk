@@ -352,9 +352,6 @@ func parseExternalTransaction(record []string, columnMap map[string]int, source 
 	}
 
 	amount := parseFloat(amountStr)
-	if err != nil {
-		return model.ExternalTransaction{}, fmt.Errorf("invalid amount: %w", err)
-	}
 
 	reference, err := getRequiredField(record, columnMap, "reference")
 	if err != nil {
@@ -371,9 +368,6 @@ func parseExternalTransaction(record []string, columnMap map[string]int, source 
 		return model.ExternalTransaction{}, err
 	}
 	date := parseTime(dateStr)
-	if err != nil {
-		return model.ExternalTransaction{}, fmt.Errorf("invalid date: %w", err)
-	}
 
 	// Return the parsed ExternalTransaction object.
 	return model.ExternalTransaction{

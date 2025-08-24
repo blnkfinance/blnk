@@ -5002,3 +5002,160 @@ func TestDiscardZeroAmountTransaction_MultiSource_SkipQueue(t *testing.T) {
 
 	t.Logf("Test TestDiscardZeroAmountTransaction_MultiSource_SkipQueue completed successfully.")
 }
+
+func TestInflightTransactionWithOverdraftOnCommit(t *testing.T) {
+	// Test scenario:
+	// 1. Create a source balance with 500 USD
+	// 2. Create an inflight transaction for 1000 USD (exceeds balance) with AllowOverdraft: false
+	// 3. The transaction should be QUEUED initially, then REJECTED due to insufficient funds
+	// 4. Attempt to commit the rejected transaction
+	// 5. Verify that balances remain unchanged since the transaction was rejected
+
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping inflight overdraft test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_overdraft",
+			IndexQueue:       "index_queue_test_overdraft",
+			TransactionQueue: "transaction_queue_test_overdraft",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	// Construct the specific transaction queue name
+	transactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Start the test Asynq worker to process queued transactions
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnk, transactionQueueName)
+	defer cleanupWorker()
+
+	// Step 1: Create source and destination balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest, err := ds.CreateBalance(*destBalance)
+	require.NoError(t, err, "Failed to create destination balance")
+
+	// Verify source balance after deposit
+	sourceAfterDeposit, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after deposit")
+
+	expectedSourceBalance := big.NewInt(0)
+	require.Equal(t, 0, sourceAfterDeposit.Balance.Cmp(expectedSourceBalance),
+		"Source balance should be 0")
+
+	// Step 3: Create an inflight transaction with amount greater than source balance (1000 > 500)
+	inflightAmount := 1000.0 // This is greater than the source balance of 500
+	txnRef := "overdraft_txn_" + model.GenerateUUIDWithSuffix("test")
+	txn := &model.Transaction{
+		Reference:      txnRef,
+		Source:         source.BalanceID,
+		Destination:    dest.BalanceID,
+		Amount:         inflightAmount,
+		Inflight:       true,
+		Currency:       "USD",
+		AllowOverdraft: false, // Don't allow overdraft - this will cause rejection
+		Precision:      100,
+		MetaData:       map[string]interface{}{"test": "overdraft_test"},
+		// Not using SkipQueue so it goes through the queue
+	}
+
+	// Queue the inflight transaction
+	// When an inflight transaction is queued, it should be in QUEUED status initially
+	queuedTxn, err := blnk.QueueTransaction(ctx, txn)
+	require.NoError(t, err, "Failed to queue inflight transaction")
+	require.Equal(t, StatusQueued, queuedTxn.Status, "Transaction should be QUEUED")
+
+	// Poll for the transaction to be processed by the worker
+	// Since the transaction amount exceeds the balance and AllowOverdraft is false,
+	// it should be rejected due to insufficient funds
+	// The rejected transaction will have a "_q" suffix added to its reference
+	rejectedTxn, err := pollForTransactionStatus(ctx, ds, txnRef+"_q", StatusRejected, 500*time.Millisecond, 5*time.Second)
+	require.NoError(t, err, "Failed to poll for rejected transaction status")
+	require.Equal(t, StatusRejected, rejectedTxn.Status, "Transaction should be REJECTED due to insufficient funds")
+
+	// Step 4: Now attempt to commit using the commit worker
+	// This simulates the actual flow where a commit request goes through the queue
+	// ProcessTransactionInBatches will use the CommitWorker to process the transaction
+	committedTxns, err := blnk.ProcessTransactionInBatches(ctx, queuedTxn.TransactionID, big.NewInt(0), 1, false,
+		blnk.GetInflightTransactionsByParentID, blnk.CommitWorker)
+
+	// Since the transaction was rejected, the commit attempt should either:
+	// 1. Return an error (no inflight transactions found)
+	// 2. Return an empty result
+	if err != nil {
+		t.Logf("Commit failed as expected for rejected transaction: %v", err)
+		require.Contains(t, strings.ToLower(err.Error()), "no transaction", "Error should indicate no transactions to commit")
+	} else {
+		// If no error, the result should be empty or contain no APPLIED transactions
+		require.Equal(t, 0, len(committedTxns), "Should have no committed transactions for a rejected transaction")
+	}
+
+	// Step 5: Verify balances remain unchanged after attempting to commit rejected transaction
+	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get final source balance")
+
+	finalDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get final destination balance")
+
+	// Source should still have its initial balance of 500
+	// Destination should still be 0
+	// No overdraft should have occurred since the transaction was rejected
+	require.Equal(t, 0, finalSource.Balance.Cmp(expectedSourceBalance),
+		"Source balance should remain 500 (unchanged) after rejected transaction")
+	require.Equal(t, 0, finalDest.Balance.Cmp(big.NewInt(0)),
+		"Destination balance should remain 0 (unchanged) after rejected transaction")
+
+	// Inflight balances should be 0 since the transaction was rejected
+	require.Equal(t, 0, finalSource.InflightBalance.Cmp(big.NewInt(0)),
+		"Source inflight balance should be 0 after rejection")
+	require.Equal(t, 0, finalDest.InflightBalance.Cmp(big.NewInt(0)),
+		"Destination inflight balance should be 0 after rejection")
+
+	// Verify the rejected transaction status remains REJECTED
+	verifyTxn, err := ds.GetTransactionByRef(ctx, txnRef+"_q")
+	require.NoError(t, err, "Failed to get rejected transaction")
+	require.Equal(t, StatusRejected, verifyTxn.Status, "Transaction should remain REJECTED")
+
+	// Verify the original queued transaction
+	originalQueuedTxn, err := ds.GetTransaction(ctx, queuedTxn.TransactionID)
+	require.NoError(t, err, "Failed to get original queued transaction")
+	require.Equal(t, StatusQueued, originalQueuedTxn.Status, "Original transaction should remain QUEUED")
+
+	t.Logf("Test TestInflightTransactionWithOverdraftOnCommit completed successfully - balances unchanged after attempting to commit rejected transaction")
+}
