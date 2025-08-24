@@ -103,11 +103,19 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 	}
 
 	if metaData, ok := data["meta_data"]; ok {
-		jsonString, err := json.Marshal(metaData)
-		if err != nil {
-			return fmt.Errorf("failed to marshal meta_data: %w", err)
+		if metaData == nil {
+			// If metadata is null, provide an empty object for object type schemas
+			data["meta_data"] = make(map[string]interface{})
+		} else if metaDataMap, ok := metaData.(map[string]interface{}); ok {
+			data["meta_data"] = metaDataMap
+		} else {
+			// For backward compatibility, convert to string for old schemas
+			jsonString, err := json.Marshal(metaData)
+			if err != nil {
+				return fmt.Errorf("failed to marshal meta_data: %w", err)
+			}
+			data["meta_data"] = string(jsonString)
 		}
-		data["meta_data"] = string(jsonString)
 	}
 
 	latestSchema := getLatestSchema(table)
@@ -135,44 +143,30 @@ func (t *TypesenseClient) HandleNotification(table string, data map[string]inter
 		}
 	}
 
-	// Special handling for balances and ledgers collections
-	if table == "balances" || table == "ledgers" {
-		var idField string
-		if table == "balances" {
-			idField = "balance_id"
-		} else {
-			idField = "ledger_id"
-		}
+	// Special handling for reconciliations and identities collections
 
-		if id, ok := data[idField].(string); ok && id != "" {
-			// Upsert the document in Typesense with the provided ID
-			data["id"] = id
-			_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
-			if err != nil {
-				return fmt.Errorf("failed to upsert document in Typesense: %w", err)
-			}
-			return nil
-		}
+	var idField string
+	switch table {
+	case "reconciliations":
+		idField = "reconciliation_id"
+	case "identities":
+		idField = "identity_id"
+	case "ledgers":
+		idField = "ledger_id"
+	case "balances":
+		idField = "balance_id"
 	}
 
-	// Special handling for reconciliations and identities collections
-	if table == "reconciliations" || table == "identities" {
-		var idField string
-		if table == "reconciliations" {
-			idField = "reconciliation_id"
-		} else {
-			idField = "identity_id"
-		}
+	if id, ok := data[idField].(string); ok && id != "" {
+		// Upsert the document in Typesense with the provided ID
+		data["id"] = id
 
-		if id, ok := data[idField].(string); ok && id != "" {
-			// Upsert the document in Typesense with the provided ID
-			data["id"] = id
-			_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
-			if err != nil {
-				return fmt.Errorf("failed to upsert document in Typesense: %w", err)
-			}
-			return nil
+		_, err := t.Client.Collection(table).Documents().Upsert(ctx, data)
+		if err != nil {
+			fmt.Println(data["meta_data"], "got here")
+			return fmt.Errorf("failed to upsert document in Typesense: %w", err)
 		}
+		return nil
 	}
 
 	// For other collections, perform a regular upsert.
@@ -280,15 +274,17 @@ func getLatestSchema(collectionName string) *api.CollectionSchema {
 func getLedgerSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
+	enableNested := true
 	return &api.CollectionSchema{
 		Name: "ledgers",
 		Fields: []api.Field{
 			{Name: "ledger_id", Type: "string", Facet: &facet},
 			{Name: "name", Type: "string", Facet: &facet},
 			{Name: "created_at", Type: "int64", Facet: &facet},
-			{Name: "meta_data", Type: "string", Facet: &facet},
+			{Name: "meta_data", Type: "object", Facet: &facet, Optional: &enableNested},
 		},
 		DefaultSortingField: &sortBy,
+		EnableNestedFields:  &enableNested,
 	}
 }
 
@@ -296,6 +292,7 @@ func getLedgerSchema() *api.CollectionSchema {
 func getBalanceSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
+	enableNested := true
 	return &api.CollectionSchema{
 		Name: "balances",
 		Fields: []api.Field{
@@ -314,9 +311,10 @@ func getBalanceSchema() *api.CollectionSchema {
 			{Name: "currency", Type: "string", Facet: &facet},
 			{Name: "created_at", Type: "int64", Facet: &facet},
 			{Name: "inflight_expires_at", Type: "int64", Facet: &facet},
-			{Name: "meta_data", Type: "string", Facet: &facet},
+			{Name: "meta_data", Type: "object", Facet: &facet, Optional: &enableNested},
 		},
 		DefaultSortingField: &sortBy,
+		EnableNestedFields:  &enableNested,
 	}
 }
 
@@ -324,6 +322,7 @@ func getBalanceSchema() *api.CollectionSchema {
 func getTransactionSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
+	enableNested := true
 	return &api.CollectionSchema{
 		Name: "transactions",
 		Fields: []api.Field{
@@ -347,9 +346,10 @@ func getTransactionSchema() *api.CollectionSchema {
 			{Name: "created_at", Type: "int64", Facet: &facet},
 			{Name: "scheduled_for", Type: "int64", Facet: &facet},
 			{Name: "inflight_expiry_date", Type: "int64", Facet: &facet},
-			{Name: "meta_data", Type: "string", Facet: &facet},
+			{Name: "meta_data", Type: "object", Facet: &facet, Optional: &enableNested},
 		},
 		DefaultSortingField: &sortBy,
+		EnableNestedFields:  &enableNested,
 	}
 }
 
@@ -376,6 +376,7 @@ func getReconciliationSchema() *api.CollectionSchema {
 func getIdentitySchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
+	enableNested := true
 	return &api.CollectionSchema{
 		Name: "identities",
 		Fields: []api.Field{
@@ -397,8 +398,9 @@ func getIdentitySchema() *api.CollectionSchema {
 			{Name: "city", Type: "string", Facet: &facet},
 			{Name: "dob", Type: "int64", Facet: &facet},
 			{Name: "created_at", Type: "int64", Facet: &facet},
-			{Name: "meta_data", Type: "string", Facet: &facet},
+			{Name: "meta_data", Type: "object", Facet: &facet, Optional: &enableNested},
 		},
 		DefaultSortingField: &sortBy,
+		EnableNestedFields:  &enableNested,
 	}
 }
