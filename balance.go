@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jerry-enebeli/blnk/config"
 	"github.com/jerry-enebeli/blnk/internal/notification"
 	"github.com/jerry-enebeli/blnk/model"
 	"github.com/sirupsen/logrus"
@@ -86,6 +87,7 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 // getOrCreateBalanceByIndicator retrieves a balance by its indicator and currency.
 // If the balance does not exist, it creates a new one.
 // It starts a tracing span, fetches or creates the balance, and records relevant events.
+// When EnableQueuedChecks is enabled in the transaction config, it will fetch the balance with queued data included.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -98,6 +100,14 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, currency string) (*model.Balance, error) {
 	ctx, span := balanceTracer.Start(ctx, "GetOrCreateBalanceByIndicator")
 	defer span.End()
+
+	// Get configuration to check if queued checks are enabled
+	cfg, err := config.Fetch()
+	if err != nil {
+		span.RecordError(err)
+		logrus.Errorf("failed to fetch config: %v", err)
+		return nil, err
+	}
 
 	balance, err := l.datasource.GetBalanceByIndicator(indicator, currency)
 	if err != nil {
@@ -118,8 +128,28 @@ func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, cur
 			return nil, err
 		}
 		span.AddEvent("New balance created", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
+
+		// If queued checks are enabled, fetch the balance with queued data
+		if cfg.Transaction.EnableQueuedChecks {
+			balance, err = l.datasource.GetBalanceByID(balance.BalanceID, []string{}, true)
+			if err != nil {
+				span.RecordError(err)
+				return nil, err
+			}
+		}
+
 		return balance, nil
 	}
+
+	// If queued checks are enabled, fetch the balance with queued data
+	if cfg.Transaction.EnableQueuedChecks {
+		balance, err = l.datasource.GetBalanceByID(balance.BalanceID, []string{}, true)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+	}
+
 	span.AddEvent("Balance found", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
 	return balance, nil
 }

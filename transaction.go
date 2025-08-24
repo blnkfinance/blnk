@@ -88,7 +88,8 @@ type BatchJobResult struct {
 
 // getSourceAndDestination retrieves the source and destination balances for a transaction.
 // It checks if the source or destination starts with "@", indicating the need to create or retrieve a balance by indicator.
-// If not, it retrieves the balances by their IDs.
+// If not, it retrieves the balances by their IDs. When EnableQueuedChecks is enabled in the transaction config,
+// it will use GetBalanceByID with queued balances included instead of GetBalanceByIDLite.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -104,6 +105,14 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 
 	var sourceBalance, destinationBalance *model.Balance
 
+	// Get configuration to check if queued checks are enabled
+	cfg, err := config.Fetch()
+	if err != nil {
+		span.RecordError(err)
+		logrus.Errorf("failed to fetch config: %v", err)
+		return nil, nil, err
+	}
+
 	// Check if Source starts with "@"
 	if strings.HasPrefix(transaction.Source, "@") {
 		sourceBalance, err = l.getOrCreateBalanceByIndicator(ctx, transaction.Source, transaction.Currency)
@@ -116,7 +125,12 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 		transaction.Source = sourceBalance.BalanceID
 		span.SetAttributes(attribute.String("source.balance_id", sourceBalance.BalanceID))
 	} else {
-		sourceBalance, err = l.datasource.GetBalanceByIDLite(transaction.Source)
+		// Use GetBalanceByID with queued checks if enabled, otherwise use lite version
+		if cfg.Transaction.EnableQueuedChecks {
+			sourceBalance, err = l.datasource.GetBalanceByID(transaction.Source, []string{}, true)
+		} else {
+			sourceBalance, err = l.datasource.GetBalanceByIDLite(transaction.Source)
+		}
 		if err != nil {
 			span.RecordError(err)
 			logrus.Errorf("source error %v", err)
@@ -136,7 +150,12 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 		transaction.Destination = destinationBalance.BalanceID
 		span.SetAttributes(attribute.String("destination.balance_id", destinationBalance.BalanceID))
 	} else {
-		destinationBalance, err = l.datasource.GetBalanceByIDLite(transaction.Destination)
+		// Use GetBalanceByID with queued checks if enabled, otherwise use lite version
+		if cfg.Transaction.EnableQueuedChecks {
+			destinationBalance, err = l.datasource.GetBalanceByID(transaction.Destination, []string{}, true)
+		} else {
+			destinationBalance, err = l.datasource.GetBalanceByIDLite(transaction.Destination)
+		}
 		if err != nil {
 			span.RecordError(err)
 			logrus.Errorf("destination error %v", err)
