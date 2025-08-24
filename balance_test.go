@@ -27,14 +27,14 @@ import (
 
 	"github.com/brianvoe/gofakeit/v6"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
 )
 
 type BigIntString struct {
@@ -225,7 +225,6 @@ func TestGetBalanceByID(t *testing.T) {
 }
 
 func TestGetAllBalances(t *testing.T) {
-
 	datasource, mock, err := newTestDataSource()
 	if err != nil {
 		t.Fatalf("Error creating test data source: %s", err)

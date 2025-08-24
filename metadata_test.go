@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jerry-enebeli/blnk/database/mocks"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/database/mocks"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -110,7 +110,6 @@ func TestUpdateMetadata(t *testing.T) {
 		_, err := blnk.UpdateMetadata(ctx, "invalid_123", map[string]interface{}{})
 		assert.Error(t, err)
 	})
-
 }
 
 func TestMergeMetadata(t *testing.T) {

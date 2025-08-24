@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database/mocks"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database/mocks"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // func TestOneToOneReconciliation(t *testing.T) {

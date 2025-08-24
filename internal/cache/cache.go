@@ -20,9 +20,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/blnkfinance/blnk/config"
+	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/go-redis/cache/v9"
-	"github.com/jerry-enebeli/blnk/config"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 )
 
 // Cache interface provides the basic operations for a cache system.

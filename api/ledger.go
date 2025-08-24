@@ -19,7 +19,7 @@ import (
 	"net/http"
 	"strconv"
 
-	model2 "github.com/jerry-enebeli/blnk/api/model"
+	model2 "github.com/blnkfinance/blnk/api/model"
 
 	"github.com/gin-gonic/gin"
 )

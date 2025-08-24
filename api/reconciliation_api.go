@@ -19,8 +19,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk/model"
 	"github.com/sirupsen/logrus"
 )
 
@@ -123,7 +123,6 @@ func (a Api) InstantReconciliation(c *gin.Context) {
 		req.MatchingRuleIDs,
 		req.DryRun,
 	)
-
 	if err != nil {
 		logrus.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start instant reconciliation"})

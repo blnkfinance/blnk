@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // CreateAccount inserts a new Account into the database.

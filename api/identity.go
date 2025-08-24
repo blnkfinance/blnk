@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"net/http"
 
+	apimodel "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
-	apimodel "github.com/jerry-enebeli/blnk/api/model"
-	"github.com/jerry-enebeli/blnk/model"
 )
 
 // CreateIdentity creates a new identity record in the system.

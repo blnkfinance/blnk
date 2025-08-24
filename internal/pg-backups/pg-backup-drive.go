@@ -33,14 +33,12 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	log = logrus.New()
-)
+var log = logrus.New()
 
 // BackupManager manages database backups, supporting both local disk and S3 storage.
 type BackupManager struct {
@@ -196,7 +194,6 @@ func (bm *BackupManager) BackupToS3(ctx context.Context) error {
 		Key:    aws.String(filename),
 		Body:   bytes.NewReader(fileBytes),
 	})
-
 	if err != nil {
 		return errors.Wrap(err, "failed to upload to S3")
 	}

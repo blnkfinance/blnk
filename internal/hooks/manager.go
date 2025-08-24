@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/internal/notification"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/redis/go-redis/v9"
 )
 

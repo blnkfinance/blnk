@@ -27,8 +27,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
 )

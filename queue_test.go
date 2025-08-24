@@ -22,9 +22,9 @@ import (
 	"log"
 	"testing"
 
+	"github.com/blnkfinance/blnk/config"
+	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/hibiken/asynq"
-	"github.com/jerry-enebeli/blnk/config"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -141,5 +141,4 @@ func TestEnqueueWithAsynqClientEnqueueError(t *testing.T) {
 	}
 
 	assert.Equal(t, "tx_123", task.ID)
-
 }

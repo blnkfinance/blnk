@@ -24,12 +24,12 @@ import (
 
 	"github.com/brianvoe/gofakeit/v6"
 
-	"github.com/jerry-enebeli/blnk/internal/cache"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/cache"
+	"github.com/blnkfinance/blnk/model"
 
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 
-	"github.com/jerry-enebeli/blnk/database"
+	"github.com/blnkfinance/blnk/database"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"

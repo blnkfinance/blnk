@@ -23,10 +23,10 @@ import (
 	"github.com/typesense/typesense-go/typesense/api"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/api/middleware"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/api/middleware"
-	"github.com/jerry-enebeli/blnk/config"
 )
 
 // Api represents the API structure for handling requests.

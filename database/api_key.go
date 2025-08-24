@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/lib/pq"
 )
 
