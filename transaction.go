@@ -329,22 +329,14 @@ func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBal
 	go func() {
 		defer wg.Done()
 		l.checkBalanceMonitors(ctx, sourceBalance)
-		err := l.queue.queueIndexData(sourceBalance.BalanceID, "balances", sourceBalance)
-		if err != nil {
-			span.RecordError(err)
-			notification.NotifyError(err)
-		}
+		l.queueBalanceForIndexing(ctx, sourceBalance.BalanceID, span)
 	}()
 
 	// Goroutine to check monitors and queue index data for the destination balance
 	go func() {
 		defer wg.Done()
 		l.checkBalanceMonitors(ctx, destinationBalance)
-		err := l.queue.queueIndexData(destinationBalance.BalanceID, "balances", destinationBalance)
-		if err != nil {
-			span.RecordError(err)
-			notification.NotifyError(err)
-		}
+		l.queueBalanceForIndexing(ctx, destinationBalance.BalanceID, span)
 	}()
 
 	// Wait for both goroutines to complete
@@ -352,6 +344,29 @@ func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBal
 
 	span.AddEvent("Balances updated")
 	return nil
+}
+
+// queueBalanceForIndexing fetches the complete balance data (including metadata) and queues it for indexing.
+// This ensures that the search index contains the latest balance information with all metadata.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balanceID string: The ID of the balance to fetch and index.
+// - span trace.Span: The tracing span for error recording.
+func (l *Blnk) queueBalanceForIndexing(ctx context.Context, balanceID string, span trace.Span) {
+	// Fetch the complete balance data including metadata
+	completeBalance, err := l.datasource.GetBalanceByID(balanceID, []string{}, false)
+	if err != nil {
+		span.RecordError(err)
+		notification.NotifyError(err)
+		return
+	}
+	// Queue the complete balance data for indexing
+	err = l.queue.queueIndexData(balanceID, "balances", completeBalance)
+	if err != nil {
+		span.RecordError(err)
+		notification.NotifyError(err)
+	}
 }
 
 // validateTxn validates a transaction by checking if its reference has already been used.
