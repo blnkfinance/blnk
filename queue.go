@@ -24,11 +24,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/config"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
+	"github.com/blnkfinance/blnk/config"
+	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 
+	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
-	"github.com/jerry-enebeli/blnk/model"
 )
 
 // Queue represents a queue for handling various tasks.

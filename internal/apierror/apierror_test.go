@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/jerry-enebeli/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/stretchr/testify/assert"
 )
 

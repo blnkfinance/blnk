@@ -30,8 +30,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/model"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -62,7 +62,6 @@ func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transactio
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.AmountString, txn.PreciseAmount.String(), txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash, txn.EffectiveDate,
 	)
-
 	// Handle errors that may occur during the execution of the query
 	if err != nil {
 		span.RecordError(err)
@@ -102,7 +101,6 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 	var metaDataJSON []byte
 	var preciseAmountStr string
 	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction, &txn.Hash)
-
 	// Handle errors, including no rows found
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -156,7 +154,6 @@ func (d Datasource) IsParentTransactionVoid(ctx context.Context, parentID string
 			AND status = 'VOID'
 		)
 	`, parentID).Scan(&exists)
-
 	// Handle errors from the query
 	if err != nil {
 		span.RecordError(err)
@@ -191,7 +188,6 @@ func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string
 	err := d.Conn.QueryRowContext(ctx, `
 		SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
 	`, reference).Scan(&exists)
-
 	// Handle errors from the query
 	if err != nil {
 		span.RecordError(err)
@@ -277,7 +273,6 @@ func (d Datasource) UpdateTransactionStatus(ctx context.Context, id string, stat
 		SET status = $2
 		WHERE transaction_id = $1
 	`, id, status)
-
 	if err != nil {
 		span.RecordError(err)
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update transaction status", err)
@@ -701,7 +696,6 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`, parentTransactionID, batchSize, offset)
-
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve inflight transactions", err)
@@ -923,7 +917,6 @@ func (d Datasource) TransactionExistsByIDOrParentID(ctx context.Context, id stri
 			WHERE transaction_id = $1 OR parent_transaction = $1
 		)
 	`, id).Scan(&exists)
-
 	if err != nil {
 		span.RecordError(err)
 		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check if transaction exists", err)
@@ -972,7 +965,6 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`, parentID, limit, offset)
-
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions by parent", err)
@@ -1061,7 +1053,6 @@ func (d Datasource) IsTransactionRefunded(ctx context.Context, transaction *mode
 			AND destination = $3
 		)
 	`, transaction.TransactionID, transaction.Destination, transaction.Source).Scan(&exists)
-
 	if err != nil {
 		span.RecordError(err)
 		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check refund status", err)

@@ -21,8 +21,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/lib/pq"
 )
 
@@ -51,7 +51,6 @@ func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 		INSERT INTO blnk.ledgers (meta_data, name, ledger_id)
 		VALUES ($1, $2, $3)
 	`, metaDataJSON, ledger.Name, ledger.LedgerID)
-
 	// Handle database errors, specifically unique constraint violations
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)

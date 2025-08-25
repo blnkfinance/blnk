@@ -25,13 +25,13 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/typesense/typesense-go/typesense/api"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
-	"github.com/jerry-enebeli/blnk/internal/hooks"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
-	"github.com/jerry-enebeli/blnk/internal/tokenization"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/hooks"
+	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
+	"github.com/blnkfinance/blnk/internal/tokenization"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/redis/go-redis/v9"
 )
 

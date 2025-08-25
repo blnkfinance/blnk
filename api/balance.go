@@ -20,10 +20,10 @@ import (
 	"strconv"
 	"time"
 
-	model2 "github.com/jerry-enebeli/blnk/api/model"
+	model2 "github.com/blnkfinance/blnk/api/model"
 
+	"github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk/model"
 )
 
 // CreateBalance creates a new balance record in the system.

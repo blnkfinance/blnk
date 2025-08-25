@@ -10,8 +10,8 @@ import (
 	"math/big"
 	"strconv"
 
+	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
 	"github.com/google/uuid"
-	pgconn "github.com/jerry-enebeli/blnk/internal/pg-conn"
 
 	"github.com/shopspring/decimal"
 )

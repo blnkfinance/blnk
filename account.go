@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jerry-enebeli/blnk/internal/request"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/request"
+	"github.com/blnkfinance/blnk/model"
 
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 )
 
 // applyExternalAccount applies external account details to the given account.

@@ -22,9 +22,9 @@ import (
 
 	"github.com/brianvoe/gofakeit/v6"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jarcoal/httpmock"
@@ -78,7 +78,6 @@ func TestCreateAccount(t *testing.T) {
 }
 
 func TestCreateAccountWithExternalGenerator(t *testing.T) {
-
 	// Initialize the mock HTTP responder
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()

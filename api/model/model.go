@@ -23,7 +23,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 )
@@ -147,6 +147,7 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		),
 	)
 }
+
 func (a *CreateAccount) ValidateCreateAccount() error {
 	return validation.ValidateStruct(a,
 		validation.Field(&a.LedgerId, validation.When(a.BalanceId == "", validation.Required.Error("Ledger ID is required when Balance ID is not provided"))),

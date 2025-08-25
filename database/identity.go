@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // CreateIdentity inserts a new identity record into the database.
@@ -50,7 +50,6 @@ func (d Datasource) CreateIdentity(identity model.Identity) (model.Identity, err
 		INSERT INTO blnk.identity (identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
-
 	// Handle any errors that occur during insertion
 	if err != nil {
 		return identity, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to create identity", err)
@@ -94,7 +93,6 @@ func (d Datasource) GetIdentityByID(id string) (*model.Identity, error) {
 		&identity.OrganizationName, &identity.Category,
 		&identity.Street, &identity.Country, &identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt, &metaDataJSON,
 	)
-
 	// Handle potential errors during the scan
 	if err != nil {
 		_ = tx.Rollback()
@@ -283,7 +281,6 @@ func (d Datasource) DeleteIdentity(id string) error {
 		DELETE FROM blnk.identity
 		WHERE identity_id = $1
 	`, id)
-
 	// Handle any errors that occur during execution
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to delete identity", err)

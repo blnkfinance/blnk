@@ -37,10 +37,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
-	"github.com/jerry-enebeli/blnk/internal/notification"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/texttheater/golang-levenshtein/levenshtein"
 	"github.com/wacul/ptr"
 	"go.opentelemetry.io/otel"
@@ -552,7 +552,7 @@ func (s *Blnk) parseAndStoreData(ctx context.Context, uploadID, source string, r
 func (s *Blnk) createTempFile(originalFilename string) (*os.File, error) {
 	// Create the directory for temporary files if it doesn't exist.
 	tempDir := filepath.Join(os.TempDir(), "blnk_uploads")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return nil, fmt.Errorf("error creating temporary directory: %w", err)
 	}
 
@@ -669,8 +669,8 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 // - string: The ID of the reconciliation process.
 // - error: If the reconciliation fails to start.
 func (s *Blnk) StartInstantReconciliation(ctx context.Context, externalTransactions []model.ExternalTransaction,
-	strategy string, groupCriteria string, matchingRuleIDs []string, isDryRun bool) (string, error) {
-
+	strategy string, groupCriteria string, matchingRuleIDs []string, isDryRun bool,
+) (string, error) {
 	// Generate a unique ID for the reconciliation
 	reconciliationID := model.GenerateUUIDWithSuffix("recon")
 

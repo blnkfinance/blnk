@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -81,7 +81,6 @@ func TestGet(t *testing.T) {
 	err = mockCache.Get(ctx, "nonExistentKey", &getValue1)
 	assert.NoError(t, err) // Assuming Get returns no error for non-existent keys
 	assert.Empty(t, getValue1)
-
 }
 
 func TestGetNonExistentKey(t *testing.T) {

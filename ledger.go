@@ -19,8 +19,8 @@ package blnk
 import (
 	"context"
 
-	"github.com/jerry-enebeli/blnk/internal/notification"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // postLedgerActions performs some actions after a ledger has been created.

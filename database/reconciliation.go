@@ -24,8 +24,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/model"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -49,7 +49,6 @@ func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconci
 		rec.ReconciliationID, rec.UploadID, rec.Status, rec.MatchedTransactions,
 		rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt,
 	)
-
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record reconciliation", err)
 	}
@@ -78,7 +77,6 @@ func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Re
 		&rec.MatchedTransactions, &rec.UnmatchedTransactions,
 		&rec.StartedAt, &rec.CompletedAt,
 	)
-
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Reconciliation with ID '%s' not found", id), err)
@@ -110,7 +108,6 @@ func (d Datasource) UpdateReconciliationStatus(ctx context.Context, id string, s
 		SET status = $2, matched_transactions = $3, unmatched_transactions = $4, completed_at = $5
 		WHERE reconciliation_id = $1
 	`, id, status, matchedCount, unmatchedCount, completedAt)
-
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update reconciliation status", err)
 	}
@@ -264,7 +261,6 @@ func (d Datasource) recordMatchInTransaction(ctx context.Context, tx *sql.Tx, ma
 		) VALUES ($1, $2, $3, $4, $5)`,
 		match.ExternalTransactionID, match.InternalTransactionID, match.ReconciliationID, match.Amount, match.Date,
 	)
-
 	if err != nil {
 		// For other errors, return the original error
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record match", err)
@@ -290,7 +286,6 @@ func (d Datasource) RecordMatch(ctx context.Context, match *model.Match) error {
 		) VALUES ($1, $2, $3, $4, $5)`,
 		match.ExternalTransactionID, match.InternalTransactionID, match.ReconciliationID, match.Amount, match.Date,
 	)
-
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record match", err)
 	}
@@ -361,7 +356,6 @@ func (d Datasource) RecordExternalTransaction(ctx context.Context, tx *model.Ext
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		tx.ID, tx.Amount, tx.Reference, tx.Currency, tx.Description, tx.Date, tx.Source, uploadID,
 	)
-
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record external transaction", err)
 	}
@@ -434,7 +428,6 @@ func (d Datasource) RecordMatchingRule(ctx context.Context, rule *model.Matching
 		) VALUES ($1, $2, $3, $4, $5, $6)`,
 		rule.RuleID, rule.CreatedAt, rule.UpdatedAt, rule.Name, rule.Description, criteriaJSON,
 	)
-
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record matching rule", err)
 	}
@@ -515,7 +508,6 @@ func (d Datasource) UpdateMatchingRule(ctx context.Context, rule *model.Matching
 		SET name = $2, description = $3, criteria = $4
 		WHERE rule_id = $1
 	`, rule.RuleID, rule.Name, rule.Description, criteriaJSON)
-
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update matching rule", err)
 	}
@@ -549,7 +541,6 @@ func (d Datasource) DeleteMatchingRule(ctx context.Context, id string) error {
 		DELETE FROM blnk.matching_rules
 		WHERE rule_id = $1
 	`, id)
-
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to delete matching rule", err)
 	}
@@ -590,7 +581,6 @@ func (d Datasource) GetMatchingRule(ctx context.Context, id string) (*model.Matc
 		&rule.ID, &rule.RuleID, &rule.CreatedAt, &rule.UpdatedAt,
 		&rule.Name, &rule.Description, &criteriaJSON,
 	)
-
 	if err != nil {
 		// Return NotFound error if no rows are returned
 		if err == sql.ErrNoRows {
@@ -695,7 +685,6 @@ func (d Datasource) SaveReconciliationProgress(ctx context.Context, reconciliati
 		ON CONFLICT (reconciliation_id) DO UPDATE
 		SET processed_count = $2, last_processed_external_txn_id = $3
 	`, reconciliationID, progress.ProcessedCount, progress.LastProcessedExternalTxnID)
-
 	// Return an API error if the query fails
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to save reconciliation progress", err)
@@ -721,7 +710,6 @@ func (d Datasource) LoadReconciliationProgress(ctx context.Context, reconciliati
 		FROM blnk.reconciliation_progress
 		WHERE reconciliation_id = $1
 	`, reconciliationID).Scan(&progress.ProcessedCount, &progress.LastProcessedExternalTxnID)
-
 	// Handle potential errors
 	if err != nil {
 		if err == sql.ErrNoRows {

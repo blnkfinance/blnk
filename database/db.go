@@ -21,14 +21,16 @@ import (
 	"log"
 	"sync"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/internal/cache"
-	pgconn "github.com/jerry-enebeli/blnk/internal/pg-conn"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/cache"
+	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
 )
 
 // Declare a package-level variable to hold the singleton instance.
-var instance *Datasource
-var once sync.Once
+var (
+	instance *Datasource
+	once     sync.Once
+)
 
 type Datasource struct {
 	Conn  *sql.DB

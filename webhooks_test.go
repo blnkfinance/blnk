@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -77,7 +77,6 @@ func TestSendWebhook(t *testing.T) {
 	tasks := mr.Keys()
 	assert.NoError(t, err)
 	assert.NotEmpty(t, tasks)
-
 }
 
 func TestConnectionReuse(t *testing.T) {

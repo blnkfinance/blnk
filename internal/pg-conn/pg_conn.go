@@ -5,14 +5,16 @@ import (
 	"log"
 	"sync"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/internal/cache"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/cache"
 	_ "github.com/lib/pq" // Import the postgres driver
 )
 
 // Declare a package-level variable to hold the singleton instance.
-var instance *Datasource
-var once sync.Once
+var (
+	instance *Datasource
+	once     sync.Once
+)
 
 type Datasource struct {
 	Conn  *sql.DB

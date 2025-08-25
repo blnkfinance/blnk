@@ -20,7 +20,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/mock"
 )
 

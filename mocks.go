@@ -19,7 +19,7 @@ package blnk
 import (
 	"context"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // MockBlnk is a mock implementation of the Blnk struct for testing purposes.

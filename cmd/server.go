@@ -24,13 +24,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/api"
+	"github.com/blnkfinance/blnk/config"
+	trace "github.com/blnkfinance/blnk/internal/traces"
 	"github.com/caddyserver/certmagic"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/api"
-	"github.com/jerry-enebeli/blnk/config"
-	trace "github.com/jerry-enebeli/blnk/internal/traces"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/posthog/posthog-go"
 	"github.com/spf13/cobra"
@@ -94,6 +94,7 @@ func migrateTypeSenseSchema(ctx context.Context, t *blnk.TypesenseClient) error 
 	}
 	return nil
 }
+
 func getOrCreateHeartbeatID() string {
 	db, err := sql.Open("sqlite3", "./heartbeat.db")
 	if err != nil {

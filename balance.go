@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/internal/notification"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

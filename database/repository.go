@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // IDataSource defines the interface for data source operations, grouping related functionalities.
@@ -78,7 +78,7 @@ type balance interface {
 	GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error)                                         // Retrieves balances between source and destination
 	TakeBalanceSnapshots(ctx context.Context, batchSize int) (int, error)                                                  // Takes balance snapshots
 	GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time, fromSource bool) (*model.Balance, error) // Retrieves a balance at a specific time
-	UpdateBalanceIdentity(balanceID string, identityID string) error                                         // Updates only the identity_id of a balance
+	UpdateBalanceIdentity(balanceID string, identityID string) error                                                       // Updates only the identity_id of a balance
 }
 
 // account defines methods for handling accounts.

@@ -18,9 +18,9 @@ package api
 import (
 	"net/http"
 
+	"github.com/blnkfinance/blnk/internal/apierror"
+	backups "github.com/blnkfinance/blnk/internal/pg-backups"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	backups "github.com/jerry-enebeli/blnk/internal/pg-backups"
 )
 
 // BackupDB creates a backup of the database and stores it on disk.

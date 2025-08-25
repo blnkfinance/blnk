@@ -25,9 +25,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
 	migrate "github.com/rubenv/sql-migrate"
 	"github.com/spf13/cobra"
 )

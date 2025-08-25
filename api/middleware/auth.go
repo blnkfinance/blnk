@@ -22,9 +22,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/config"
 	"github.com/sirupsen/logrus"
 )
 

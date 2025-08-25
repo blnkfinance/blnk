@@ -21,10 +21,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
-	"github.com/jerry-enebeli/blnk/internal/notification"
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -105,7 +105,7 @@ func NewCLI() *Blnk {
 	b := &blnkInstance{}  // Instance of Blnk to be passed into commands
 
 	// Define the root command with usage and description.
-	var rootCmd = &cobra.Command{
+	rootCmd := &cobra.Command{
 		Use:   "blnk",
 		Short: "Open source ledger",                       // Brief description for the CLI tool
 		Run:   func(cmd *cobra.Command, args []string) {}, // Main function for the root command

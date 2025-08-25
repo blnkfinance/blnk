@@ -25,16 +25,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blnkfinance/blnk"
+	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
+	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
+	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/hibiken/asynq"
-	"github.com/jerry-enebeli/blnk"
-	model2 "github.com/jerry-enebeli/blnk/api/model"
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
-	"github.com/jerry-enebeli/blnk/internal/request"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -441,7 +441,7 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 	assert.Equal(t, int64(0), dbAfterInflight.Balance.Int64(), "Destination balance should be 0 before commit")
 	assert.Equal(t, expectedInflightCredit.String(), dbAfterInflight.InflightBalance.String(), "Destination inflight balance incorrect")
 
-	//3. Commit Transaction
+	// 3. Commit Transaction
 	commitPayload := model2.InflightUpdate{
 		Status:        "commit",
 		PreciseAmount: inflightTxResponse.PreciseAmount,

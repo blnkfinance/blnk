@@ -27,21 +27,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/config"
-	redlock "github.com/jerry-enebeli/blnk/internal/lock"
-	"github.com/jerry-enebeli/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/config"
+	redlock "github.com/blnkfinance/blnk/internal/lock"
+	"github.com/blnkfinance/blnk/internal/notification"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 )
 
-var (
-	tracer = otel.Tracer("blnk.transactions")
-)
+var tracer = otel.Tracer("blnk.transactions")
 
 const (
 	StatusQueued    = "QUEUED"
@@ -1317,7 +1315,6 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 
 	span.AddEvent("Commitment finalized", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 	return transaction, nil
-
 }
 
 // VoidInflightTransaction voids an inflight transaction by validating it, calculating the remaining amount, and finalizing the void.

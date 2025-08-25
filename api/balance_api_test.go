@@ -22,11 +22,11 @@ import (
 	"net/http"
 	"testing"
 
+	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/brianvoe/gofakeit/v6"
-	model2 "github.com/jerry-enebeli/blnk/api/model"
-	"github.com/jerry-enebeli/blnk/internal/request"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 
 	"github.com/stretchr/testify/assert"
 )
