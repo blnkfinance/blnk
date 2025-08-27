@@ -144,7 +144,7 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 
 	// Calculate available balance by subtracting inflight balances from committed balance
 	// This ensures inflight balances are considered when checking if new transactions can be processed
-	availableBalance := new(big.Int).Sub(sourceBalance.Balance, sourceBalance.InflightBalance)
+	availableBalance := new(big.Int).Sub(sourceBalance.Balance, sourceBalance.InflightDebitBalance)
 
 	// If queued balances are available (when enable_queued_checks is on), also subtract queued debit balance
 	// This provides an even more comprehensive check by considering pending queued transactions

@@ -162,8 +162,8 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Insufficient funds due to inflight debits", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:         big.NewInt(1000),
-			InflightBalance: big.NewInt(600), // 600 already reserved
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(600), // 600 already reserved
 		}
 		txn := &Transaction{
 			PreciseAmount: Int64ToBigInt(500), // Trying to reserve 500 more, but only 400 available
@@ -175,8 +175,8 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Sufficient funds considering inflight debits", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:         big.NewInt(1000),
-			InflightBalance: big.NewInt(600), // 600 already reserved
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(600), // 600 already reserved
 		}
 		txn := &Transaction{
 			PreciseAmount: Int64ToBigInt(400), // Trying to reserve 400, exactly what's available
@@ -187,8 +187,8 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Overdraft with inflight debits within limit", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:         big.NewInt(500),
-			InflightBalance: big.NewInt(300), // 300 already reserved, available = 200
+			Balance:              big.NewInt(500),
+			InflightDebitBalance: big.NewInt(300), // 300 already reserved, available = 200
 		}
 		txn := &Transaction{
 			PreciseAmount:  Int64ToBigInt(600), // Would result in -400 from available balance
@@ -201,8 +201,8 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Overdraft with inflight debits exceeding limit", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:         big.NewInt(500),
-			InflightBalance: big.NewInt(300), // 300 already reserved, available = 200
+			Balance:              big.NewInt(500),
+			InflightDebitBalance: big.NewInt(300), // 300 already reserved, available = 200
 		}
 		txn := &Transaction{
 			PreciseAmount:  Int64ToBigInt(800), // Would result in -600 from available balance
@@ -217,8 +217,8 @@ func TestCanProcessTransaction(t *testing.T) {
 	t.Run("multiple inflight transactions", func(t *testing.T) {
 		// Account has balance of 5000
 		sourceBalance := &Balance{
-			Balance:         big.NewInt(5000),
-			InflightBalance: big.NewInt(5000), // 5 transactions of 1000 each already inflight
+			Balance:              big.NewInt(5000),
+			InflightDebitBalance: big.NewInt(5000), // 5 transactions of 1000 each already inflight
 		}
 		// Trying to create 6th transaction of 1000
 		txn := &Transaction{
@@ -232,10 +232,10 @@ func TestCanProcessTransaction(t *testing.T) {
 	// Tests for queued balance functionality (when enable_queued_checks is on)
 	t.Run("Sufficient funds with no queued debits", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(1000),
-			InflightBalance:     big.NewInt(0),
-			QueuedDebitBalance:  big.NewInt(0),
-			QueuedCreditBalance: big.NewInt(0),
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(0),
+			QueuedDebitBalance:   big.NewInt(0),
+			QueuedCreditBalance:  big.NewInt(0),
 		}
 		txn := &Transaction{
 			PreciseAmount: Int64ToBigInt(500),
@@ -246,10 +246,10 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Insufficient funds due to queued debits", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(1000),
-			InflightBalance:     big.NewInt(0),
-			QueuedDebitBalance:  big.NewInt(600), // 600 already queued for processing
-			QueuedCreditBalance: big.NewInt(0),
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(0),
+			QueuedDebitBalance:   big.NewInt(600), // 600 already queued for processing
+			QueuedCreditBalance:  big.NewInt(0),
 		}
 		txn := &Transaction{
 			PreciseAmount: Int64ToBigInt(500), // Trying to process 500 more, but only 400 available
@@ -261,10 +261,10 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Sufficient funds considering queued debits", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(1000),
-			InflightBalance:     big.NewInt(0),
-			QueuedDebitBalance:  big.NewInt(600), // 600 already queued
-			QueuedCreditBalance: big.NewInt(0),
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(0),
+			QueuedDebitBalance:   big.NewInt(600), // 600 already queued
+			QueuedCreditBalance:  big.NewInt(0),
 		}
 		txn := &Transaction{
 			PreciseAmount: Int64ToBigInt(400), // Trying to process 400, exactly what's available
@@ -275,10 +275,10 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Insufficient funds due to combined inflight and queued debits", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(1000),
-			InflightBalance:     big.NewInt(300), // 300 already inflight
-			QueuedDebitBalance:  big.NewInt(400), // 400 already queued
-			QueuedCreditBalance: big.NewInt(0),
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(300), // 300 already inflight
+			QueuedDebitBalance:   big.NewInt(400), // 400 already queued
+			QueuedCreditBalance:  big.NewInt(0),
 		}
 		// Available balance = 1000 - 300 - 400 = 300
 		txn := &Transaction{
@@ -291,10 +291,10 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Sufficient funds with combined inflight and queued debits", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(1000),
-			InflightBalance:     big.NewInt(300), // 300 already inflight
-			QueuedDebitBalance:  big.NewInt(400), // 400 already queued
-			QueuedCreditBalance: big.NewInt(0),
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(300), // 300 already inflight
+			QueuedDebitBalance:   big.NewInt(400), // 400 already queued
+			QueuedCreditBalance:  big.NewInt(0),
 		}
 		// Available balance = 1000 - 300 - 400 = 300
 		txn := &Transaction{
@@ -306,10 +306,10 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Overdraft with queued debits within limit", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(500),
-			InflightBalance:     big.NewInt(200), // 200 already inflight
-			QueuedDebitBalance:  big.NewInt(100), // 100 already queued
-			QueuedCreditBalance: big.NewInt(0),
+			Balance:              big.NewInt(500),
+			InflightDebitBalance: big.NewInt(200), // 200 already inflight
+			QueuedDebitBalance:   big.NewInt(100), // 100 already queued
+			QueuedCreditBalance:  big.NewInt(0),
 		}
 		// Available balance = 500 - 200 - 100 = 200
 		txn := &Transaction{
@@ -323,10 +323,10 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Overdraft with queued debits exceeding limit", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(500),
-			InflightBalance:     big.NewInt(200), // 200 already inflight
-			QueuedDebitBalance:  big.NewInt(100), // 100 already queued
-			QueuedCreditBalance: big.NewInt(0),
+			Balance:              big.NewInt(500),
+			InflightDebitBalance: big.NewInt(200), // 200 already inflight
+			QueuedDebitBalance:   big.NewInt(100), // 100 already queued
+			QueuedCreditBalance:  big.NewInt(0),
 		}
 		// Available balance = 500 - 200 - 100 = 200
 		txn := &Transaction{
@@ -341,10 +341,10 @@ func TestCanProcessTransaction(t *testing.T) {
 
 	t.Run("Queued balance is nil (queued checks disabled)", func(t *testing.T) {
 		sourceBalance := &Balance{
-			Balance:             big.NewInt(1000),
-			InflightBalance:     big.NewInt(300),
-			QueuedDebitBalance:  nil, // Queued checks disabled, should be ignored
-			QueuedCreditBalance: nil,
+			Balance:              big.NewInt(1000),
+			InflightDebitBalance: big.NewInt(300),
+			QueuedDebitBalance:   nil, // Queued checks disabled, should be ignored
+			QueuedCreditBalance:  nil,
 		}
 		// Available balance = 1000 - 300 = 700 (queued balance ignored)
 		txn := &Transaction{
