@@ -23,9 +23,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/jerry-enebeli/blnk/internal/notification"
-	"github.com/jerry-enebeli/blnk/internal/tokenization"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/internal/tokenization"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // postIdentityActions performs actions after an identity has been created.

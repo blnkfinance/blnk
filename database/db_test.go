@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/stretchr/testify/assert"
 )
 

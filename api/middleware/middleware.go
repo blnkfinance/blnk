@@ -19,10 +19,10 @@ package middleware
 import (
 	"time"
 
+	"github.com/blnkfinance/blnk/config"
 	"github.com/didip/tollbooth/v7"
 	"github.com/didip/tollbooth/v7/limiter"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk/config"
 )
 
 // RateLimitMiddleware creates a middleware for rate limiting using Tollbooth.

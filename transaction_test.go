@@ -28,11 +28,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
+	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
-	"github.com/jerry-enebeli/blnk/model"
 
 	"github.com/brianvoe/gofakeit/v6"
 
@@ -382,6 +382,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
 }
+
 func TestVoidInflightTransaction_Negative(t *testing.T) {
 	datasource, mock, err := newTestDataSource()
 	assert.NoError(t, err)
@@ -547,7 +548,6 @@ func TestQueueTransactionFlow(t *testing.T) {
 		"Source balance should be reduced by transaction amount")
 	require.Equal(t, 0, updatedDest.Balance.Cmp(updatedDest.Balance),
 		"Destination balance should be increased by transaction amount")
-
 }
 
 func TestQueueTransactionFlowWithSkipQueue(t *testing.T) {
@@ -864,7 +864,6 @@ func TestInflightTransactionFlowWithSkipQueueThenCommit(t *testing.T) {
 		"Source balance should be immediately reduced by transaction amount")
 	require.Equal(t, 0, updatedDestAfterCommit.Balance.Cmp(expectedCredit),
 		"Destination balance should be immediately increased by transaction amount")
-
 }
 
 func TestInflightTransactionFlowWithSkipQueueThenPartialCommit(t *testing.T) {
@@ -2280,7 +2279,6 @@ func TestMultipleSourcesTransactionFlowWithSkipQueue(t *testing.T) {
 	queuedEntryTwo, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-2", txnRef))
 	require.NoError(t, err, "Failed to get queued transaction entry")
 	require.Equal(t, StatusApplied, queuedEntryTwo.Status, "Should have an APPLIED transaction entry")
-
 }
 
 func TestMultipleSourcesInflightTransactionFlowWithSkipQueueAndCommit(t *testing.T) {
@@ -2713,7 +2711,6 @@ func TestMultipleDestinationTransactionFlowWithSkipQueue(t *testing.T) {
 	queuedEntryTwo, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-2", txnRef))
 	require.NoError(t, err, "Failed to get queued transaction entry")
 	require.Equal(t, StatusApplied, queuedEntryTwo.Status, "Should have an APPLIED transaction entry")
-
 }
 
 func TestMultipleDestinationTransactionFlowWithTwoDistributions(t *testing.T) {
@@ -3068,7 +3065,6 @@ func TestMultipleSourcesTransactionFlowWithSkipQueueAndPreciseAmount(t *testing.
 	queuedEntryTwo, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-2", txnRef))
 	require.NoError(t, err, "Failed to get queued transaction entry")
 	require.Equal(t, StatusApplied, queuedEntryTwo.Status, "Should have an APPLIED transaction entry")
-
 }
 
 func TestMultipleDestinationTransactionFlowWithSkipQueueWithPreciseAmount(t *testing.T) {
@@ -3190,7 +3186,6 @@ func TestMultipleDestinationTransactionFlowWithSkipQueueWithPreciseAmount(t *tes
 	queuedEntryTwo, err := ds.GetTransactionByRef(ctx, fmt.Sprintf("%s-2", txnRef))
 	require.NoError(t, err, "Failed to get queued transaction entry")
 	require.Equal(t, StatusApplied, queuedEntryTwo.Status, "Should have an APPLIED transaction entry")
-
 }
 
 func TestQueueTransactionStatus(t *testing.T) {
@@ -4019,7 +4014,7 @@ func TestRefundWorkerFullFlow(t *testing.T) {
 	txnObj, err := ds.GetTransaction(ctx, appliedEntry.TransactionID)
 	require.NoError(t, err, "Failed to get transaction by ID")
 
-	//apply skip queue to txn to process refund immediately
+	// apply skip queue to txn to process refund immediately
 	txnObj.SkipQueue = true
 
 	// Push to the jobs channel

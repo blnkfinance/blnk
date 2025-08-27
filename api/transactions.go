@@ -22,10 +22,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	model2 "github.com/jerry-enebeli/blnk/api/model"
-	"github.com/jerry-enebeli/blnk/config"
-	pgconn "github.com/jerry-enebeli/blnk/internal/pg-conn"
-	"github.com/jerry-enebeli/blnk/model"
+	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/config"
+	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
+	"github.com/blnkfinance/blnk/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -296,7 +296,6 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 
 	// Call the service layer method to handle bulk transaction creation
 	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), &req)
-
 	// Handle the response based on the result and error from the service layer
 	if err != nil {
 		// If there was an error during synchronous processing

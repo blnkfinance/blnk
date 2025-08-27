@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/hooks"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	"github.com/jerry-enebeli/blnk/internal/hooks"
 )
 
 // RegisterHook handles the registration of a new webhook.

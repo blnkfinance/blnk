@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
+	"github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/database"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk/api/model"
-	"github.com/jerry-enebeli/blnk/database"
 )
 
 // CreateAPIKey creates a new API key for the authenticated user

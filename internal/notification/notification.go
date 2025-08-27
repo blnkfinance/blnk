@@ -23,10 +23,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/internal/request"
+	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/sirupsen/logrus"
 
-	"github.com/jerry-enebeli/blnk/config"
+	"github.com/blnkfinance/blnk/config"
 )
 
 // SlackNotification sends an error message to a Slack webhook.

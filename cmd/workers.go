@@ -28,10 +28,10 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/config"
-	redis_db "github.com/jerry-enebeli/blnk/internal/redis-db"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/config"
+	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
+	"github.com/blnkfinance/blnk/model"
 
 	"github.com/hibiken/asynq"
 	"github.com/hibiken/asynqmon"

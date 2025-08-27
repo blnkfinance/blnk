@@ -28,8 +28,8 @@ import (
 	"github.com/lib/pq"
 	"github.com/sirupsen/logrus"
 
-	"github.com/jerry-enebeli/blnk/internal/apierror"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // Helper function to check if a slice contains a value.
@@ -223,7 +223,6 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)
 	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON)
-
 	if err != nil {
 		// Handle specific PostgreSQL errors (e.g., unique or foreign key violations)
 		pqErr, ok := err.(*pq.Error)
@@ -726,7 +725,6 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
 		WHERE balance_id = $1
 	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
-
 	// Handle SQL execution errors
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
@@ -773,7 +771,6 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
-
 	// Handle database errors
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)
@@ -961,7 +958,6 @@ func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
 		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7
 		WHERE monitor_id = $1
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL)
-
 	// If an error occurred during execution, return an internal server error
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update monitor", err)
@@ -996,7 +992,6 @@ func (d Datasource) DeleteMonitor(id string) error {
 	result, err := d.Conn.Exec(`
 		DELETE FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
-
 	// If an error occurred during execution, return an internal server error
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to delete monitor", err)
@@ -1036,7 +1031,6 @@ func (d Datasource) TakeBalanceSnapshots(ctx context.Context, batchSize int) (in
 	err := d.Conn.QueryRowContext(ctx, `
         SELECT blnk.take_daily_balance_snapshots_batched($1)
     `, batchSize).Scan(&totalProcessed)
-
 	if err != nil {
 		return 0, apierror.NewAPIError(
 			apierror.ErrInternalServer,
@@ -1066,7 +1060,6 @@ func (d Datasource) getBalanceInfo(ctx context.Context, tx *sql.Tx, balanceID st
 	err = tx.QueryRowContext(ctx, `
 		SELECT currency, created_at FROM blnk.balances WHERE balance_id = $1
 	`, balanceID).Scan(&currency, &createdAt)
-
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", time.Time{}, apierror.NewAPIError(
@@ -1131,7 +1124,6 @@ func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startT
         AND status = 'APPLIED'
         ORDER BY COALESCE(effective_date, created_at) ASC
     `, balanceID, startTime, targetTime)
-
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get transactions", err)
 	}
@@ -1146,7 +1138,8 @@ func applyTransaction(txn struct {
 	Destination   string
 	CreatedAt     time.Time
 	EffectiveDate time.Time
-}, balanceID string, creditBalance, debitBalance *big.Int) (*big.Int, *big.Int, error) {
+}, balanceID string, creditBalance, debitBalance *big.Int,
+) (*big.Int, *big.Int, error) {
 	txAmount, ok := new(big.Int).SetString(txn.PreciseAmount, 10)
 	if !ok {
 		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Invalid transaction amount", nil)
@@ -1319,7 +1312,6 @@ func (d Datasource) UpdateBalanceIdentity(balanceID string, identityID string) e
 		SET identity_id = $2
 		WHERE balance_id = $1
 	`, balanceID, identityID)
-
 	// Handle SQL execution errors
 	if err != nil {
 		// Delegate to apierror for consistent error handling across the project

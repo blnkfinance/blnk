@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
 	"github.com/gin-gonic/gin"
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/database"
 	"github.com/stretchr/testify/assert"
 )
 

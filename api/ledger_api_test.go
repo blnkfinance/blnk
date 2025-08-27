@@ -24,16 +24,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jerry-enebeli/blnk/internal/request"
+	"github.com/blnkfinance/blnk/internal/request"
 
+	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/brianvoe/gofakeit/v6"
-	model2 "github.com/jerry-enebeli/blnk/api/model"
 
-	"github.com/jerry-enebeli/blnk/config"
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/model"
 
-	"github.com/jerry-enebeli/blnk"
-	"github.com/jerry-enebeli/blnk/database"
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/database"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -53,7 +53,6 @@ func SetUpTestRequest(s TestRequest) (*httptest.ResponseRecorder, error) {
 	req := httptest.NewRequest(s.Method, s.Route, s.Payload)
 	for key, value := range s.Header {
 		req.Header.Set(key, value)
-
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jerry-enebeli/blnk/model"
+	"github.com/blnkfinance/blnk/model"
 )
 
 // CreateAPIKey creates a new API key for the specified owner

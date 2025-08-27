@@ -22,7 +22,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jerry-enebeli/blnk/internal/request"
+	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/stretchr/testify/assert"
 )
 
