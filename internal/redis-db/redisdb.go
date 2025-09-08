@@ -17,10 +17,12 @@ limitations under the License.
 package redis_db
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -159,6 +161,12 @@ func NewRedisClient(addresses []string, skipTLSVerify bool) (*Redis, error) {
 		})
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err := client.Ping(ctx).Result()
+	if err != nil {
+		return nil, err
+	}
 	return &Redis{addresses: addresses, client: client}, nil
 }
 
