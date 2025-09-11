@@ -71,11 +71,16 @@ func TestNewRedisClient(t *testing.T) {
 		{
 			name:      "single address",
 			addresses: []string{"localhost:6379"},
-			wantErr:   true,
+			wantErr:   false,
 		},
 		{
 			name:      "multiple addresses",
 			addresses: []string{"localhost:6379", "localhost:6380"},
+			wantErr:   false,
+		},
+		{
+			name:      "single address with wrong port",
+			addresses: []string{"localhost:65749"},
 			wantErr:   true,
 		},
 	}
