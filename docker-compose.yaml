@@ -54,6 +54,7 @@ services:
   redis:
     image: redis:7.2.4
     container_name: redis
+    restart: on-failure
 
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16}

@@ -78,6 +78,11 @@ func TestNewRedisClient(t *testing.T) {
 			addresses: []string{"localhost:6379", "localhost:6380"},
 			wantErr:   false,
 		},
+		{
+			name:      "single address with wrong port",
+			addresses: []string{"localhost:65749"},
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {
