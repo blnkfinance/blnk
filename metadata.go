@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/blnkfinance/blnk/internal/notification"
 )
 
 // getEntityTypeFromID determines the entity type from the ID prefix.
@@ -69,7 +71,10 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		go func() {
 			updatedLedger, err := l.GetLedgerByID(entityID)
 			if err == nil {
-				l.queue.queueIndexData(entityID, "ledgers", updatedLedger)
+				err = l.queue.queueIndexData(entityID, "ledgers", updatedLedger)
+				if err != nil {
+					notification.NotifyError(err)
+				}
 			}
 		}()
 
@@ -96,7 +101,10 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		go func() {
 			updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
 			if err == nil {
-				l.queue.queueIndexData(entityID, "transactions", updatedTransaction)
+				err = l.queue.queueIndexData(entityID, "transactions", updatedTransaction)
+				if err != nil {
+					notification.NotifyError(err)
+				}
 			}
 		}()
 
@@ -118,7 +126,10 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		go func() {
 			updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
 			if err == nil {
-				l.queue.queueIndexData(entityID, "balances", updatedBalance)
+				err = l.queue.queueIndexData(entityID, "balances", updatedBalance)
+				if err != nil {
+					notification.NotifyError(err)
+				}
 			}
 		}()
 
@@ -140,7 +151,10 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		go func() {
 			updatedIdentity, err := l.GetIdentity(entityID)
 			if err == nil {
-				l.queue.queueIndexData(entityID, "identities", updatedIdentity)
+				err = l.queue.queueIndexData(entityID, "identities", updatedIdentity)
+				if err != nil {
+					notification.NotifyError(err)
+				}
 			}
 		}()
 
