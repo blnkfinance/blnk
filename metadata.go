@@ -68,15 +68,17 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		// Queue the updated ledger for re-indexing in Typesense
-		go func() {
-			updatedLedger, err := l.GetLedgerByID(entityID)
-			if err == nil {
-				err = l.queue.queueIndexData(entityID, "ledgers", updatedLedger)
-				if err != nil {
-					notification.NotifyError(err)
+		if l.queue != nil {
+			go func() {
+				updatedLedger, err := l.GetLedgerByID(entityID)
+				if err == nil {
+					err = l.queue.queueIndexData(entityID, "ledgers", updatedLedger)
+					if err != nil {
+						notification.NotifyError(err)
+					}
 				}
-			}
-		}()
+			}()
+		}
 
 		return mergedMetadata, nil
 
@@ -98,15 +100,17 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		// Queue the updated transaction for re-indexing in Typesense
-		go func() {
-			updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
-			if err == nil {
-				err = l.queue.queueIndexData(entityID, "transactions", updatedTransaction)
-				if err != nil {
-					notification.NotifyError(err)
+		if l.queue != nil {
+			go func() {
+				updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
+				if err == nil {
+					err = l.queue.queueIndexData(entityID, "transactions", updatedTransaction)
+					if err != nil {
+						notification.NotifyError(err)
+					}
 				}
-			}
-		}()
+			}()
+		}
 
 		return newMetadata, nil
 
@@ -122,16 +126,18 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		// Queue the updated balance for re-indexing in Typesense
-		go func() {
-			updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
-			if err == nil {
-				err = l.queue.queueIndexData(entityID, "balances", updatedBalance)
-				if err != nil {
-					notification.NotifyError(err)
+		if l.queue != nil {
+			// Queue the updated balance for re-indexing in Typesense
+			go func() {
+				updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
+				if err == nil {
+					err = l.queue.queueIndexData(entityID, "balances", updatedBalance)
+					if err != nil {
+						notification.NotifyError(err)
+					}
 				}
-			}
-		}()
+			}()
+		}
 
 		return mergedMetadata, nil
 
@@ -148,15 +154,17 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		// Queue the updated identity for re-indexing in Typesense
-		go func() {
-			updatedIdentity, err := l.GetIdentity(entityID)
-			if err == nil {
-				err = l.queue.queueIndexData(entityID, "identities", updatedIdentity)
-				if err != nil {
-					notification.NotifyError(err)
+		if l.queue != nil {
+			go func() {
+				updatedIdentity, err := l.GetIdentity(entityID)
+				if err == nil {
+					err = l.queue.queueIndexData(entityID, "identities", updatedIdentity)
+					if err != nil {
+						notification.NotifyError(err)
+					}
 				}
-			}
-		}()
+			}()
+		}
 
 		return mergedMetadata, nil
 
