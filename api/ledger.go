@@ -122,3 +122,42 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 
 	c.JSON(http.StatusOK, resp)
 }
+
+// UpdateLedger updates an existing ledger's name.
+// It binds the incoming JSON request to an UpdateLedger object, validates it,
+// and then updates the ledger record. If any errors occur during validation
+// or update, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in binding JSON, validating the ledger, or if the ID is missing.
+// - 200 OK: If the ledger is successfully updated.
+func (a Api) UpdateLedger(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. Pass id in the route /:id"})
+		return
+	}
+
+	var updateLedger model2.UpdateLedger
+	if err := c.ShouldBindJSON(&updateLedger); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		return
+	}
+
+	err := updateLedger.ValidateUpdateLedger()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		return
+	}
+
+	resp, err := a.blnk.UpdateLedger(id, updateLedger.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}

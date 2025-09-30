@@ -41,11 +41,12 @@ func TestGetEntityTypeFromID(t *testing.T) {
 }
 
 func TestUpdateMetadata(t *testing.T) {
-	mockDS := new(mocks.MockDataSource)
-	blnk := &Blnk{datasource: mockDS}
 	ctx := context.Background()
 
 	t.Run("Update Ledger Metadata", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
 		existingMetadata := map[string]interface{}{"existing": "value"}
 		ledger := &model.Ledger{MetaData: existingMetadata}
 		mockDS.On("GetLedgerByID", "ldg_123").Return(ledger, nil)
@@ -57,9 +58,13 @@ func TestUpdateMetadata(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, result, "existing")
 		assert.Contains(t, result, "new")
+		mockDS.AssertExpectations(t)
 	})
 
 	t.Run("Update Transaction Metadata", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
 		// Set up expectations for transaction exists check
 		mockDS.On("TransactionExistsByIDOrParentID", ctx, "txn_123").Return(true, nil)
 
@@ -75,6 +80,9 @@ func TestUpdateMetadata(t *testing.T) {
 	})
 
 	t.Run("Update Balance Metadata", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
 		existingMetadata := map[string]interface{}{"existing": "value"}
 		balance := &model.Balance{MetaData: existingMetadata}
 
@@ -91,6 +99,9 @@ func TestUpdateMetadata(t *testing.T) {
 	})
 
 	t.Run("Update Identity Metadata", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
 		existingMetadata := map[string]interface{}{"existing": "value"}
 		identity := &model.Identity{MetaData: existingMetadata}
 
@@ -107,6 +118,9 @@ func TestUpdateMetadata(t *testing.T) {
 	})
 
 	t.Run("Invalid Entity ID", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
 		_, err := blnk.UpdateMetadata(ctx, "invalid_123", map[string]interface{}{})
 		assert.Error(t, err)
 	})

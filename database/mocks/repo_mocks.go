@@ -113,6 +113,11 @@ func (m *MockDataSource) GetLedgerByID(id string) (*model.Ledger, error) {
 	return args.Get(0).(*model.Ledger), args.Error(1)
 }
 
+func (m *MockDataSource) UpdateLedger(id, name string) (*model.Ledger, error) {
+	args := m.Called(id, name)
+	return args.Get(0).(*model.Ledger), args.Error(1)
+}
+
 // Metadata update methods
 func (m *MockDataSource) UpdateLedgerMetadata(id string, metadata map[string]interface{}) error {
 	args := m.Called(id, metadata)

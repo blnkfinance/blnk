@@ -52,6 +52,12 @@ func (l *CreateLedger) ValidateCreateLedger() error {
 	)
 }
 
+func (l *UpdateLedger) ValidateUpdateLedger() error {
+	return validation.ValidateStruct(l,
+		validation.Field(&l.Name, validation.Required),
+	)
+}
+
 func validateDateFormat(format, value string) error {
 	_, err := time.Parse(format, value)
 	if err != nil {

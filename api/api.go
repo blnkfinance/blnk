@@ -50,6 +50,7 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/ledgers", a.CreateLedger)
 	router.GET("/ledgers/:id", a.GetLedger)
 	router.GET("/ledgers", a.GetAllLedgers)
+	router.PUT("/ledgers/:id", a.UpdateLedger)
 
 	// Balance routes
 	router.POST("/balances", a.CreateBalance)
@@ -72,6 +73,7 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/transactions/bulk", a.CreateBulkTransactions)
 	router.POST("/refund-transaction/:id", a.RefundTransaction)
 	router.GET("/transactions/:id", a.GetTransaction)
+	router.GET("/transactions/reference/:reference", a.GetTransactionByRef)
 	router.PUT("/transactions/inflight/:txID", a.UpdateInflightStatus)
 
 	// Identity routes

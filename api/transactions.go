@@ -211,6 +211,33 @@ func (a Api) GetTransaction(c *gin.Context) {
 	c.JSON(http.StatusOK, transformTransaction(resp))
 }
 
+// GetTransactionByRef retrieves a transaction by its reference.
+// It returns the transaction details if found. If the reference is not provided or an error
+// occurs while retrieving the transaction, it responds with an appropriate error message.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error in retrieving the transaction or the reference is missing.
+// - 200 OK: If the transaction is successfully retrieved.
+func (a Api) GetTransactionByRef(c *gin.Context) {
+	reference, passed := c.Params.Get("reference")
+
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reference is required. pass reference in the route /ref/:reference"})
+		return
+	}
+
+	resp, err := a.blnk.GetTransactionByRef(c.Request.Context(), reference)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, transformTransaction(&resp))
+}
+
 // UpdateInflightStatus updates the status of an inflight transaction based on the provided ID and status.
 // It processes the transaction in batches according to the specified status (commit or void).
 // If any errors occur during processing or if the status is unsupported, it responds with an appropriate error message.
