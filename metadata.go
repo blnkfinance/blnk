@@ -35,7 +35,7 @@ func getEntityTypeFromID(id string) (string, error) {
 
 // UpdateMetadata updates the metadata for a given entity ID.
 // It first determines the entity type, retrieves current metadata, merges it with new metadata,
-// and updates the entity with the merged metadata.
+// updates the entity with the merged metadata, and queues the updated entity for re-indexing in Typesense.
 //
 // Parameters:
 // - ctx: The context for the operation.
@@ -64,6 +64,15 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
+
+		// Queue the updated ledger for re-indexing in Typesense
+		go func() {
+			updatedLedger, err := l.GetLedgerByID(entityID)
+			if err == nil {
+				l.queue.queueIndexData(entityID, "ledgers", updatedLedger)
+			}
+		}()
+
 		return mergedMetadata, nil
 
 	case "transactions":
@@ -83,6 +92,14 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
+		// Queue the updated transaction for re-indexing in Typesense
+		go func() {
+			updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
+			if err == nil {
+				l.queue.queueIndexData(entityID, "transactions", updatedTransaction)
+			}
+		}()
+
 		return newMetadata, nil
 
 	case "balances":
@@ -96,6 +113,15 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
+
+		// Queue the updated balance for re-indexing in Typesense
+		go func() {
+			updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
+			if err == nil {
+				l.queue.queueIndexData(entityID, "balances", updatedBalance)
+			}
+		}()
+
 		return mergedMetadata, nil
 
 	case "identities":
@@ -109,6 +135,15 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
+
+		// Queue the updated identity for re-indexing in Typesense
+		go func() {
+			updatedIdentity, err := l.GetIdentity(entityID)
+			if err == nil {
+				l.queue.queueIndexData(entityID, "identities", updatedIdentity)
+			}
+		}()
+
 		return mergedMetadata, nil
 
 	default:

@@ -162,3 +162,45 @@ func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 
 	return &ledger, nil
 }
+
+// UpdateLedger updates an existing ledger's name in the database.
+// It validates that the ledger exists and updates only the name field.
+//
+// Parameters:
+// - id: The unique ID of the ledger to update.
+// - name: The new name for the ledger.
+//
+// Returns:
+// - *model.Ledger: The updated ledger object.
+// - error: An error if the ledger is not found or if the update fails.
+func (d Datasource) UpdateLedger(id, name string) (*model.Ledger, error) {
+	// First, check if the ledger exists
+	existingLedger, err := d.GetLedgerByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the ledger name
+	_, err = d.Conn.Exec(`
+		UPDATE blnk.ledgers 
+		SET name = $1 
+		WHERE ledger_id = $2
+	`, name, id)
+	if err != nil {
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "unique_violation":
+				return nil, apierror.NewAPIError(apierror.ErrConflict, "Ledger with this name already exists", err)
+			default:
+				return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Database error occurred", err)
+			}
+		}
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update ledger", err)
+	}
+
+	// Update the existing ledger object with the new name
+	existingLedger.Name = name
+
+	return existingLedger, nil
+}

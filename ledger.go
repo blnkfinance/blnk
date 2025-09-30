@@ -86,3 +86,22 @@ func (l *Blnk) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
 func (l *Blnk) GetLedgerByID(id string) (*model.Ledger, error) {
 	return l.datasource.GetLedgerByID(id)
 }
+
+// UpdateLedger updates an existing ledger's name.
+// It calls postLedgerActions after a successful update to handle indexing and webhooks.
+//
+// Parameters:
+// - id: A string representing the ID of the ledger to update.
+// - name: A string representing the new name for the ledger.
+//
+// Returns:
+// - *model.Ledger: A pointer to the updated Ledger model.
+// - error: An error if the ledger could not be updated.
+func (l *Blnk) UpdateLedger(id, name string) (*model.Ledger, error) {
+	ledger, err := l.datasource.UpdateLedger(id, name)
+	if err != nil {
+		return nil, err
+	}
+	l.postLedgerActions(context.Background(), ledger)
+	return ledger, nil
+}

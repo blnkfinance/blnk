@@ -17,6 +17,7 @@ limitations under the License.
 package blnk
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"testing"
@@ -151,6 +152,77 @@ func TestGetLedgerByID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, testID, result.LedgerID)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestUpdateLedger(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "ldg_1234567"
+	originalName := "Original Ledger"
+	newName := "Updated Ledger"
+	testTime := time.Now()
+
+	// Mock the GetLedgerByID call first (called by UpdateLedger)
+	row := sqlmock.NewRows([]string{"ledger_id", "name", "created_at", "meta_data"}).
+		AddRow(testID, originalName, testTime, `{"key":"value"}`)
+
+	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers WHERE ledger_id =").
+		WithArgs(testID).
+		WillReturnRows(row)
+
+	// Mock the UPDATE query
+	mock.ExpectExec("UPDATE blnk.ledgers SET name = \\$1 WHERE ledger_id = \\$2").
+		WithArgs(newName, testID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	result, err := d.UpdateLedger(testID, newName)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, testID, result.LedgerID)
+	assert.Equal(t, newName, result.Name)
+	assert.Equal(t, testTime, result.CreatedAt)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestUpdateLedgerNotFound(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "ldg_nonexistent"
+	newName := "Updated Ledger"
+
+	// Mock the GetLedgerByID call to return no rows (ledger not found)
+	mock.ExpectQuery("SELECT ledger_id, name, created_at, meta_data FROM blnk.ledgers WHERE ledger_id =").
+		WithArgs(testID).
+		WillReturnError(sql.ErrNoRows)
+
+	result, err := d.UpdateLedger(testID, newName)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)

@@ -63,7 +63,8 @@ type transaction interface {
 type ledger interface {
 	CreateLedger(ledger model.Ledger) (model.Ledger, error) // Creates a new ledger
 	GetAllLedgers(limit, offset int) ([]model.Ledger, error)
-	GetLedgerByID(id string) (*model.Ledger, error) // Retrieves a ledger by ID
+	GetLedgerByID(id string) (*model.Ledger, error)      // Retrieves a ledger by ID
+	UpdateLedger(id, name string) (*model.Ledger, error) // Updates a ledger's name
 }
 
 // balance defines methods for handling balances.

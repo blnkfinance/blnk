@@ -118,6 +118,36 @@ func TestValidateCreateLedger(t *testing.T) {
 	}
 }
 
+func TestValidateUpdateLedger(t *testing.T) {
+	tests := []struct {
+		name    string
+		ledger  UpdateLedger
+		wantErr bool
+	}{
+		{
+			name:    "Valid Update Ledger",
+			ledger:  UpdateLedger{Name: "Updated Ledger"},
+			wantErr: false,
+		},
+		{
+			name:    "Invalid Update Ledger - Empty Name",
+			ledger:  UpdateLedger{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.ledger.ValidateUpdateLedger()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestValidateCreateBalance(t *testing.T) {
 	tests := []struct {
 		name    string
