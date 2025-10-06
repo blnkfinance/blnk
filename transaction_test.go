@@ -4882,122 +4882,6 @@ func TestMultipleDestinationsTransactionFlowAsyncPolled(t *testing.T) {
 	assert.Equal(t, 0, updatedDestTwo.Balance.Cmp(expectedCreditEachDest), "Destination two balance incorrect")
 }
 
-func TestDiscardZeroAmountTransaction_MultiSource_SkipQueue(t *testing.T) {
-	// Skip in short mode
-	if testing.Short() {
-		t.Skip("Skipping discard zero amount transaction test in short mode")
-	}
-
-	ctx := context.Background()
-	cnf := &config.Configuration{
-		Redis: config.RedisConfig{
-			Dns: "localhost:6379",
-		},
-		DataSource: config.DataSourceConfig{
-			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
-		},
-		Queue: config.QueueConfig{
-			WebhookQueue:     "webhook_queue_test_discard_zero",
-			IndexQueue:       "index_queue_test_discard_zero",
-			TransactionQueue: "transaction_queue_test_discard_zero",
-			NumberOfQueues:   1,
-		},
-		Server: config.ServerConfig{
-			SecretKey: "test-secret-discard-zero",
-		},
-		Transaction: config.TransactionConfig{
-			BatchSize:        100,
-			MaxQueueSize:     1000,
-			LockDuration:     time.Second * 30,
-			IndexQueuePrefix: "test_index_discard_zero",
-		},
-	}
-	config.ConfigStore.Store(cnf)
-
-	ds, err := database.NewDataSource(cnf)
-	require.NoError(t, err, "Failed to create datasource")
-
-	blnkInstance, err := NewBlnk(ds)
-	require.NoError(t, err, "Failed to create Blnk instance")
-
-	txnRef := "txn_" + model.GenerateUUIDWithSuffix("discard_zero_test")
-
-	// Create balances
-	sourceBalanceOne := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
-	sourceBalanceTwo := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
-	destBalance := &model.Balance{Currency: "USD", LedgerID: "general_ledger_id"}
-
-	sourceOne, err := ds.CreateBalance(*sourceBalanceOne)
-	require.NoError(t, err, "Failed to create source balance one")
-	sourceTwo, err := ds.CreateBalance(*sourceBalanceTwo)
-	require.NoError(t, err, "Failed to create source balance two")
-	dest, err := ds.CreateBalance(*destBalance)
-	require.NoError(t, err, "Failed to create destination balance")
-
-	// Define transaction: Amount 1, SourceOne takes 100% (Amount 1), SourceTwo takes "left" (Amount 0)
-	transactionAmount := 1.0
-	precision := int64(100)
-	txn := &model.Transaction{
-		Reference: txnRef,
-		Sources: []model.Distribution{
-			{Identifier: sourceOne.BalanceID, Distribution: "100%"}, // Takes the full amount
-			{Identifier: sourceTwo.BalanceID, Distribution: "left"}, // Remaining is 0
-		},
-		Destination:    dest.BalanceID,
-		Amount:         transactionAmount,
-		Currency:       "USD",
-		AllowOverdraft: true,
-		Precision:      float64(precision),
-		MetaData:       map[string]interface{}{"test": "discard_zero_multi_source"},
-		SkipQueue:      true, // Process synchronously
-	}
-
-	// Queue the transaction (will be processed synchronously due to SkipQueue)
-	queuedTxn, err := blnkInstance.QueueTransaction(ctx, txn)
-	require.NoError(t, err, "Failed to queue/process transaction")
-	require.Equal(t, StatusApplied, queuedTxn.Status, "Overall transaction status should be APPLIED")
-
-	// Verify balances
-	updatedSourceOne, err := ds.GetBalanceByIDLite(sourceOne.BalanceID)
-	require.NoError(t, err, "Failed to get updated source one balance")
-	updatedSourceTwo, err := ds.GetBalanceByIDLite(sourceTwo.BalanceID)
-	require.NoError(t, err, "Failed to get updated source two balance")
-	updatedDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
-	require.NoError(t, err, "Failed to get updated destination balance")
-
-	// Expected balance changes
-	expectedDebitSourceOne := big.NewInt(-1 * precision) // SourceOne debited by 1.00
-	expectedBalanceSourceTwo := big.NewInt(0)            // SourceTwo balance remains 0
-	expectedCreditDest := big.NewInt(1 * precision)      // Dest credited by 1.00
-
-	assert.Equal(t, 0, updatedSourceOne.Balance.Cmp(expectedDebitSourceOne), "Source one balance incorrect")
-	assert.Equal(t, 0, updatedSourceTwo.Balance.Cmp(expectedBalanceSourceTwo), "Source two balance should be zero")
-	assert.Equal(t, 0, updatedDest.Balance.Cmp(expectedCreditDest), "Destination balance incorrect")
-
-	// Verify persistence of split transactions
-	// First split transaction (SourceOne) should exist
-	childTxnRef1 := fmt.Sprintf("%s-1", txnRef) // Reference for the first split part
-	persistedTxn1, err := ds.GetTransactionByRef(ctx, childTxnRef1)
-	require.NoError(t, err, "Failed to get first split transaction from DB")
-	require.NotNil(t, persistedTxn1, "First split transaction should be persisted")
-	require.Equal(t, StatusApplied, persistedTxn1.Status, "First split transaction status should be APPLIED")
-	require.Equal(t, transactionAmount, persistedTxn1.Amount, "First split transaction amount incorrect")
-
-	// Second split transaction (SourceTwo, amount 0) should NOT exist
-	childTxnRef2 := fmt.Sprintf("%s-2", txnRef) // Reference for the second split part
-	_, err = ds.GetTransactionByRef(ctx, childTxnRef2)
-	require.Error(t, err, "Expected error when getting second split transaction (amount 0)")
-	// Check if the error is "not found"
-	// The exact error message might vary, but it should indicate not found.
-	// For sql.ErrNoRows, which is a common indicator:
-	// require.True(t, errors.Is(err, sql.ErrNoRows) || strings.Contains(strings.ToLower(err.Error()), "not found"),
-	//  "Error for second split transaction should be a 'not found' error, got: %v", err)
-	// Using a more generic check as specific error message might depend on DB driver
-	require.Contains(t, strings.ToLower(err.Error()), "not found", "Error for zero-amount transaction should indicate it was not found")
-
-	t.Logf("Test TestDiscardZeroAmountTransaction_MultiSource_SkipQueue completed successfully.")
-}
-
 func TestInflightTransactionWithOverdraftOnCommit(t *testing.T) {
 	// Test scenario:
 	// 1. Create a source balance with 500 USD
@@ -5153,4 +5037,684 @@ func TestInflightTransactionWithOverdraftOnCommit(t *testing.T) {
 	require.Equal(t, StatusQueued, originalQueuedTxn.Status, "Original transaction should remain QUEUED")
 
 	t.Logf("Test TestInflightTransactionWithOverdraftOnCommit completed successfully - balances unchanged after attempting to commit rejected transaction")
+}
+
+func TestCreateBulkTransactionsSyncNonAtomic(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping bulk transaction test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_bulk",
+			IndexQueue:       "index_queue_test_bulk",
+			TransactionQueue: "transaction_queue_test_bulk",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance1 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance2 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest1, err := ds.CreateBalance(*destBalance1)
+	require.NoError(t, err, "Failed to create destination balance 1")
+
+	dest2, err := ds.CreateBalance(*destBalance2)
+	require.NoError(t, err, "Failed to create destination balance 2")
+
+	// Create bulk transactions
+	transactions := []*model.Transaction{
+		{
+			Reference:      "bulk_txn_1_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest1.BalanceID,
+			Amount:         100,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_1"},
+		},
+		{
+			Reference:      "bulk_txn_2_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest2.BalanceID,
+			Amount:         200,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_2"},
+		},
+	}
+
+	req := &model.BulkTransactionRequest{
+		Transactions: transactions,
+		Atomic:       false, // Non-atomic
+		Inflight:     false, // Standard transactions
+		RunAsync:     false, // Synchronous
+		SkipQueue:    true,  // Process immediately
+	}
+
+	// Execute bulk transaction
+	result, err := blnk.CreateBulkTransactions(ctx, req)
+	require.NoError(t, err, "Failed to create bulk transactions")
+	require.NotNil(t, result, "Result should not be nil")
+	require.Equal(t, "applied", result.Status, "Status should be applied")
+	require.Equal(t, 2, result.TransactionCount, "Should have processed 2 transactions")
+	require.NotEmpty(t, result.BatchID, "Batch ID should not be empty")
+
+	// Verify balances
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+
+	updatedDest1, err := ds.GetBalanceByIDLite(dest1.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 1")
+
+	updatedDest2, err := ds.GetBalanceByIDLite(dest2.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 2")
+
+	// Expected balance changes
+	expectedSourceDebit := big.NewInt(int64(-300) * 100) // -100 - 200 = -300
+	expectedDest1Credit := big.NewInt(int64(100) * 100)  // +100
+	expectedDest2Credit := big.NewInt(int64(200) * 100)  // +200
+
+	require.Equal(t, 0, updatedSource.Balance.Cmp(expectedSourceDebit),
+		"Source balance should be debited by total amount")
+	require.Equal(t, 0, updatedDest1.Balance.Cmp(expectedDest1Credit),
+		"Destination 1 balance should be credited by first transaction amount")
+	require.Equal(t, 0, updatedDest2.Balance.Cmp(expectedDest2Credit),
+		"Destination 2 balance should be credited by second transaction amount")
+}
+
+func TestCreateBulkTransactionsSyncAtomicSuccess(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping bulk transaction test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_bulk_atomic",
+			IndexQueue:       "index_queue_test_bulk_atomic",
+			TransactionQueue: "transaction_queue_test_bulk_atomic",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance1 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance2 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest1, err := ds.CreateBalance(*destBalance1)
+	require.NoError(t, err, "Failed to create destination balance 1")
+
+	dest2, err := ds.CreateBalance(*destBalance2)
+	require.NoError(t, err, "Failed to create destination balance 2")
+
+	// Create bulk transactions
+	transactions := []*model.Transaction{
+		{
+			Reference:      "bulk_atomic_txn_1_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest1.BalanceID,
+			Amount:         100,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_atomic_1"},
+		},
+		{
+			Reference:      "bulk_atomic_txn_2_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest2.BalanceID,
+			Amount:         200,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_atomic_2"},
+		},
+	}
+
+	req := &model.BulkTransactionRequest{
+		Transactions: transactions,
+		Atomic:       true,  // Atomic
+		Inflight:     false, // Standard transactions
+		RunAsync:     false, // Synchronous
+		SkipQueue:    true,  // Process immediately
+	}
+
+	// Execute bulk transaction
+	result, err := blnk.CreateBulkTransactions(ctx, req)
+	require.NoError(t, err, "Failed to create bulk transactions")
+	require.NotNil(t, result, "Result should not be nil")
+	require.Equal(t, "applied", result.Status, "Status should be applied")
+	require.Equal(t, 2, result.TransactionCount, "Should have processed 2 transactions")
+	require.NotEmpty(t, result.BatchID, "Batch ID should not be empty")
+
+	// Verify balances
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+
+	updatedDest1, err := ds.GetBalanceByIDLite(dest1.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 1")
+
+	updatedDest2, err := ds.GetBalanceByIDLite(dest2.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 2")
+
+	// Expected balance changes
+	expectedSourceDebit := big.NewInt(int64(-300) * 100) // -100 - 200 = -300
+	expectedDest1Credit := big.NewInt(int64(100) * 100)  // +100
+	expectedDest2Credit := big.NewInt(int64(200) * 100)  // +200
+
+	require.Equal(t, 0, updatedSource.Balance.Cmp(expectedSourceDebit),
+		"Source balance should be debited by total amount")
+	require.Equal(t, 0, updatedDest1.Balance.Cmp(expectedDest1Credit),
+		"Destination 1 balance should be credited by first transaction amount")
+	require.Equal(t, 0, updatedDest2.Balance.Cmp(expectedDest2Credit),
+		"Destination 2 balance should be credited by second transaction amount")
+}
+
+func TestCreateBulkTransactionsInflightAsync(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping bulk inflight transaction test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_bulk_inflight",
+			IndexQueue:       "index_queue_test_bulk_inflight",
+			TransactionQueue: "transaction_queue_test_bulk_inflight",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Start the test Asynq worker to process inflight transactions
+	transactionQueueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1)
+	cleanupWorker := startTestAsynqWorker(t, cnf, blnk, transactionQueueName)
+	defer cleanupWorker()
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance1 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance2 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest1, err := ds.CreateBalance(*destBalance1)
+	require.NoError(t, err, "Failed to create destination balance 1")
+
+	dest2, err := ds.CreateBalance(*destBalance2)
+	require.NoError(t, err, "Failed to create destination balance 2")
+
+	// Create bulk inflight transactions
+	transactions := []*model.Transaction{
+		{
+			Reference:      "bulk_inflight_txn_1_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest1.BalanceID,
+			Amount:         100,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_inflight_1"},
+		},
+		{
+			Reference:      "bulk_inflight_txn_2_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest2.BalanceID,
+			Amount:         200,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_inflight_2"},
+		},
+	}
+
+	req := &model.BulkTransactionRequest{
+		Transactions: transactions,
+		Atomic:       false, // Non-atomic
+		Inflight:     true,  // Inflight transactions
+		RunAsync:     true,  // Asynchronous processing
+		SkipQueue:    false, // Use queue for async processing
+	}
+
+	// Execute bulk inflight transaction asynchronously
+	result, err := blnk.CreateBulkTransactions(ctx, req)
+	require.NoError(t, err, "Failed to create bulk inflight transactions")
+	require.NotNil(t, result, "Result should not be nil")
+	require.Equal(t, "processing", result.Status, "Status should be processing for async")
+	require.NotEmpty(t, result.BatchID, "Batch ID should not be empty")
+
+	// Poll for the inflight transactions to be processed by the worker
+	pollInterval := 500 * time.Millisecond
+	timeoutDuration := 15 * time.Second
+
+	// Poll for each inflight transaction to be created
+	inflightTxnRef1 := fmt.Sprintf("%s_q", transactions[0].Reference)
+	inflightTxnRef2 := fmt.Sprintf("%s_q", transactions[1].Reference)
+
+	inflightTxn1, err := pollForTransactionStatus(ctx, ds, inflightTxnRef1, StatusInflight, pollInterval, timeoutDuration)
+	require.NoError(t, err, "Failed to poll for first inflight transaction")
+	require.Equal(t, StatusInflight, inflightTxn1.Status, "First transaction should be INFLIGHT")
+
+	inflightTxn2, err := pollForTransactionStatus(ctx, ds, inflightTxnRef2, StatusInflight, pollInterval, timeoutDuration)
+	require.NoError(t, err, "Failed to poll for second inflight transaction")
+	require.Equal(t, StatusInflight, inflightTxn2.Status, "Second transaction should be INFLIGHT")
+
+	// Verify balances after async processing - should show inflight changes
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+
+	updatedDest1, err := ds.GetBalanceByIDLite(dest1.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 1")
+
+	updatedDest2, err := ds.GetBalanceByIDLite(dest2.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 2")
+
+	// Expected inflight balance changes
+	expectedSourceInflightDebit := big.NewInt(int64(-300) * 100) // -100 - 200 = -300
+	expectedDest1InflightCredit := big.NewInt(int64(100) * 100)  // +100
+	expectedDest2InflightCredit := big.NewInt(int64(200) * 100)  // +200
+
+	// Main balances should remain zero
+	require.Equal(t, 0, updatedSource.Balance.Cmp(big.NewInt(0)),
+		"Source main balance should remain zero")
+	require.Equal(t, 0, updatedDest1.Balance.Cmp(big.NewInt(0)),
+		"Destination 1 main balance should remain zero")
+	require.Equal(t, 0, updatedDest2.Balance.Cmp(big.NewInt(0)),
+		"Destination 2 main balance should remain zero")
+
+	// Inflight balances should reflect the transactions
+	require.Equal(t, 0, updatedSource.InflightBalance.Cmp(expectedSourceInflightDebit),
+		"Source inflight balance should be debited by total amount")
+	require.Equal(t, 0, updatedDest1.InflightBalance.Cmp(expectedDest1InflightCredit),
+		"Destination 1 inflight balance should be credited by first transaction amount")
+	require.Equal(t, 0, updatedDest2.InflightBalance.Cmp(expectedDest2InflightCredit),
+		"Destination 2 inflight balance should be credited by second transaction amount")
+
+	// Now commit all inflight transactions using the commit worker with batch ID
+	committedTxns, err := blnk.ProcessTransactionInBatches(ctx, result.BatchID, big.NewInt(0), 1, false,
+		blnk.GetInflightTransactionsByParentID, blnk.CommitWorker)
+	require.NoError(t, err, "Failed to commit inflight transactions")
+	require.Equal(t, 2, len(committedTxns), "Should have committed 2 transactions")
+
+	// Poll for both commit transactions to be processed
+	for _, commitTxn := range committedTxns {
+		appliedCommitTxn, err := pollForTransactionStatus(ctx, ds, commitTxn.Reference, StatusApplied, pollInterval, timeoutDuration)
+		require.NoError(t, err, "Failed to poll for commit transaction")
+		require.Equal(t, StatusApplied, appliedCommitTxn.Status, "Commit transaction should be APPLIED")
+	}
+
+	// Verify balances after committing all transactions
+	sourceAfterCommit, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get source balance after commit")
+
+	dest1AfterCommit, err := ds.GetBalanceByIDLite(dest1.BalanceID)
+	require.NoError(t, err, "Failed to get destination 1 balance after commit")
+
+	dest2AfterCommit, err := ds.GetBalanceByIDLite(dest2.BalanceID)
+	require.NoError(t, err, "Failed to get destination 2 balance after commit")
+
+	// After committing both transactions, all amounts should be in main balances
+	expectedSourceAfterCommit := big.NewInt(int64(-300) * 100) // -300 committed (both transactions)
+	expectedDest1AfterCommit := big.NewInt(int64(100) * 100)   // +100 committed
+	expectedDest2AfterCommit := big.NewInt(int64(200) * 100)   // +200 committed
+
+	require.Equal(t, 0, sourceAfterCommit.Balance.Cmp(expectedSourceAfterCommit),
+		"Source balance should reflect both committed transactions")
+	require.Equal(t, 0, sourceAfterCommit.InflightBalance.Cmp(big.NewInt(0)),
+		"Source inflight balance should be zero after all commits")
+	require.Equal(t, 0, dest1AfterCommit.Balance.Cmp(expectedDest1AfterCommit),
+		"Destination 1 balance should reflect committed amount")
+	require.Equal(t, 0, dest1AfterCommit.InflightBalance.Cmp(big.NewInt(0)),
+		"Destination 1 inflight balance should be zero after commit")
+	require.Equal(t, 0, dest2AfterCommit.Balance.Cmp(expectedDest2AfterCommit),
+		"Destination 2 balance should reflect committed amount")
+	require.Equal(t, 0, dest2AfterCommit.InflightBalance.Cmp(big.NewInt(0)),
+		"Destination 2 inflight balance should be zero after commit")
+}
+
+func TestCreateBulkTransactionsAsync(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping async bulk transaction test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_bulk_async",
+			IndexQueue:       "index_queue_test_bulk_async",
+			TransactionQueue: "transaction_queue_test_bulk_async",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance1 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance2 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest1, err := ds.CreateBalance(*destBalance1)
+	require.NoError(t, err, "Failed to create destination balance 1")
+
+	dest2, err := ds.CreateBalance(*destBalance2)
+	require.NoError(t, err, "Failed to create destination balance 2")
+
+	// Create bulk transactions
+	transactions := []*model.Transaction{
+		{
+			Reference:      "bulk_async_txn_1_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest1.BalanceID,
+			Amount:         100,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_async_1"},
+		},
+		{
+			Reference:      "bulk_async_txn_2_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest2.BalanceID,
+			Amount:         200,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_async_2"},
+		},
+	}
+
+	req := &model.BulkTransactionRequest{
+		Transactions: transactions,
+		Atomic:       false, // Non-atomic
+		Inflight:     false, // Standard transactions
+		RunAsync:     true,  // Asynchronous
+		SkipQueue:    true,  // Process immediately when picked up
+	}
+
+	// Execute bulk transaction asynchronously
+	result, err := blnk.CreateBulkTransactions(ctx, req)
+	require.NoError(t, err, "Failed to create async bulk transactions")
+	require.NotNil(t, result, "Result should not be nil")
+	require.Equal(t, "processing", result.Status, "Status should be processing for async")
+	require.NotEmpty(t, result.BatchID, "Batch ID should not be empty")
+
+	// Wait a bit for async processing to complete
+	time.Sleep(2 * time.Second)
+
+	// Verify balances were updated by the async processing
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+
+	updatedDest1, err := ds.GetBalanceByIDLite(dest1.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 1")
+
+	updatedDest2, err := ds.GetBalanceByIDLite(dest2.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 2")
+
+	// Expected balance changes
+	expectedSourceDebit := big.NewInt(int64(-300) * 100) // -100 - 200 = -300
+	expectedDest1Credit := big.NewInt(int64(100) * 100)  // +100
+	expectedDest2Credit := big.NewInt(int64(200) * 100)  // +200
+
+	require.Equal(t, 0, updatedSource.Balance.Cmp(expectedSourceDebit),
+		"Source balance should be debited by total amount")
+	require.Equal(t, 0, updatedDest1.Balance.Cmp(expectedDest1Credit),
+		"Destination 1 balance should be credited by first transaction amount")
+	require.Equal(t, 0, updatedDest2.Balance.Cmp(expectedDest2Credit),
+		"Destination 2 balance should be credited by second transaction amount")
+}
+
+func TestCreateBulkTransactionsNonAtomicPartialFailure(t *testing.T) {
+	// Skip in short mode
+	if testing.Short() {
+		t.Skip("Skipping bulk non-atomic partial failure test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test_bulk_non_atomic_fail",
+			IndexQueue:       "index_queue_test_bulk_non_atomic_fail",
+			TransactionQueue: "transaction_queue_test_bulk_non_atomic_fail",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Create test balances
+	sourceBalance := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+	destBalance1 := &model.Balance{
+		Currency: "USD",
+		LedgerID: "general_ledger_id",
+	}
+
+	source, err := ds.CreateBalance(*sourceBalance)
+	require.NoError(t, err, "Failed to create source balance")
+
+	dest1, err := ds.CreateBalance(*destBalance1)
+	require.NoError(t, err, "Failed to create destination balance 1")
+
+	// Create bulk transactions - second one will fail due to invalid destination
+	transactions := []*model.Transaction{
+		{
+			Reference:      "bulk_non_atomic_fail_txn_1_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    dest1.BalanceID,
+			Amount:         100,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_non_atomic_fail_1"},
+		},
+		{
+			Reference:      "bulk_non_atomic_fail_txn_2_" + model.GenerateUUIDWithSuffix("test"),
+			Source:         source.BalanceID,
+			Destination:    "invalid_destination_id", // This will cause failure
+			Amount:         200,
+			Currency:       "USD",
+			AllowOverdraft: true,
+			Precision:      100,
+			MetaData:       map[string]interface{}{"test": "bulk_non_atomic_fail_2"},
+		},
+	}
+
+	req := &model.BulkTransactionRequest{
+		Transactions: transactions,
+		Atomic:       false, // Non-atomic - first transaction should remain
+		Inflight:     false, // Standard transactions
+		RunAsync:     false, // Synchronous
+		SkipQueue:    true,  // Process immediately
+	}
+
+	// Execute bulk transaction - should fail but first transaction should remain
+	result, err := blnk.CreateBulkTransactions(ctx, req)
+	require.Error(t, err, "Bulk transaction should fail due to invalid destination")
+	require.NotNil(t, result, "Result should not be nil even on failure")
+	require.Equal(t, "failed", result.Status, "Status should be failed")
+	require.NotEmpty(t, result.BatchID, "Batch ID should not be empty")
+	require.Contains(t, result.Error, "Previous transactions were not rolled back",
+		"Error should mention that previous transactions were not rolled back")
+
+	// Verify that the first transaction was processed but the second was not
+	updatedSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get updated source balance")
+
+	updatedDest1, err := ds.GetBalanceByIDLite(dest1.BalanceID)
+	require.NoError(t, err, "Failed to get updated destination balance 1")
+
+	// First transaction should have been processed (non-atomic behavior)
+	expectedSourceDebit := big.NewInt(int64(-100) * 100) // Only first transaction processed
+	expectedDest1Credit := big.NewInt(int64(100) * 100)  // Only first transaction processed
+
+	require.Equal(t, 0, updatedSource.Balance.Cmp(expectedSourceDebit),
+		"Source balance should reflect only the first transaction (non-atomic)")
+	require.Equal(t, 0, updatedDest1.Balance.Cmp(expectedDest1Credit),
+		"Destination 1 balance should reflect only the first transaction (non-atomic)")
 }

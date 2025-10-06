@@ -1571,6 +1571,10 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		if transaction.MetaData != nil && !transaction.SkipQueue {
 			transaction.MetaData["QUEUED_PARENT_TRANSACTION"] = originalTxnID
 		}
+
+		if strings.Contains(transaction.ParentTransaction, "bulk") {
+			transaction.MetaData["QUEUED_PARENT_TRANSACTION"] = transaction.ParentTransaction
+		}
 		// For normal queue mode, process asynchronously
 		processTransactionAsync(context.Background(), l, transaction, originalRef, originalTxnID, transactions)
 	}
