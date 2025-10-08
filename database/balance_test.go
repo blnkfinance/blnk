@@ -483,7 +483,7 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
             SELECT 1 
             FROM blnk.transactions child 
             WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED')
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID')
         )
     `
 
@@ -656,7 +656,7 @@ func TestGetBalanceByID_WithQueuedTransactions_HasAppliedChild(t *testing.T) {
             SELECT 1 
             FROM blnk.transactions child 
             WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED')
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID')
         )
     `
 
