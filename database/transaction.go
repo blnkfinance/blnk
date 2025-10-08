@@ -868,7 +868,7 @@ func (d Datasource) GetQueuedAmounts(ctx context.Context, balanceID string) (deb
             SELECT 1 
             FROM blnk.transactions child 
             WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED')
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
         )`, balanceID)
 	if err != nil {
 		return nil, nil, err

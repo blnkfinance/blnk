@@ -288,7 +288,11 @@ func (cnf *Configuration) setDefaultValues() {
 	cnf.setReconciliationDefaults()
 	cnf.setQueueDefaults()
 
-	// For a financial application, telemetry is opt-in for privacy reasons, don't enable by default if it's not specified
+	// Enable telemetry by default unless explicitly disabled
+	if os.Getenv("BLNK_ENABLE_TELEMETRY") == "" {
+		cnf.EnableTelemetry = true
+	}
+
 	if cnf.EnableTelemetry {
 		log.Println("Info: Telemetry enabled.")
 	} else {
