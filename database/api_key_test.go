@@ -14,7 +14,7 @@ import (
 func TestCreateAPIKey_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -44,7 +44,7 @@ func TestCreateAPIKey_Success(t *testing.T) {
 func TestCreateAPIKey_DatabaseError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -69,7 +69,7 @@ func TestCreateAPIKey_DatabaseError(t *testing.T) {
 func TestGetAPIKey_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -107,7 +107,7 @@ func TestGetAPIKey_Success(t *testing.T) {
 func TestGetAPIKey_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -129,7 +129,7 @@ func TestGetAPIKey_NotFound(t *testing.T) {
 func TestGetAPIKey_DatabaseError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -151,7 +151,7 @@ func TestGetAPIKey_DatabaseError(t *testing.T) {
 func TestRevokeAPIKey_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -172,7 +172,7 @@ func TestRevokeAPIKey_Success(t *testing.T) {
 func TestRevokeAPIKey_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -194,7 +194,7 @@ func TestRevokeAPIKey_NotFound(t *testing.T) {
 func TestRevokeAPIKey_DatabaseError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -216,7 +216,7 @@ func TestRevokeAPIKey_DatabaseError(t *testing.T) {
 func TestUpdateLastUsed_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -236,7 +236,7 @@ func TestUpdateLastUsed_Success(t *testing.T) {
 func TestUpdateLastUsed_DatabaseError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -257,7 +257,7 @@ func TestUpdateLastUsed_DatabaseError(t *testing.T) {
 func TestListAPIKeys_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -303,7 +303,7 @@ func TestListAPIKeys_Success(t *testing.T) {
 func TestListAPIKeys_EmptyResult(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -326,7 +326,7 @@ func TestListAPIKeys_EmptyResult(t *testing.T) {
 func TestListAPIKeys_DatabaseError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -348,7 +348,7 @@ func TestListAPIKeys_DatabaseError(t *testing.T) {
 func TestListAPIKeys_ScanError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
