@@ -319,6 +319,112 @@ func TestRecordTransaction(t *testing.T) {
 	}
 }
 
+func TestRecordTransactionPrecisionValidation(t *testing.T) {
+	t.Run("accepts integer precision", func(t *testing.T) {
+		router, b, err := setupRouter()
+		if err != nil {
+			t.Fatalf("Failed to setup router: %v", err)
+		}
+
+		ctx := context.Background()
+		ledger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+		require.NoError(t, err)
+
+		sourceBalance, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "USD"})
+		require.NoError(t, err)
+		destBalance, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "USD"})
+		require.NoError(t, err)
+
+		validPayload := model2.RecordTransaction{
+			Amount:      95.42,
+			Precision:   100,
+			Reference:   "precision_valid_" + gofakeit.UUID(),
+			Description: "Valid integer precision",
+			Currency:    "USD",
+			Source:      sourceBalance.BalanceID,
+			Destination: destBalance.BalanceID,
+		}
+
+		payloadBytes, _ := request.ToJsonReq(&validPayload)
+		var response model.Transaction
+		testRequest := TestRequest{
+			Payload:  payloadBytes,
+			Response: &response,
+			Method:   "POST",
+			Route:    "/transactions",
+			Auth:     "",
+			Router:   router,
+		}
+
+		resp, reqErr := SetUpTestRequest(testRequest)
+		require.NoError(t, reqErr)
+		assert.Equal(t, http.StatusCreated, resp.Code)
+		assert.Equal(t, validPayload.Precision, response.Precision)
+		assert.Equal(t, "QUEUED", response.Status)
+	})
+
+	t.Run("rejects fractional precision and preserves balances", func(t *testing.T) {
+		router, b, err := setupRouter()
+		if err != nil {
+			t.Fatalf("Failed to setup router: %v", err)
+		}
+
+		ctx := context.Background()
+		ledger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+		require.NoError(t, err)
+
+		sourceBalance, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "USD"})
+		require.NoError(t, err)
+		destBalance, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "USD"})
+		require.NoError(t, err)
+
+		sourceBefore, err := b.GetBalanceByID(ctx, sourceBalance.BalanceID, nil, false)
+		require.NoError(t, err)
+		destBefore, err := b.GetBalanceByID(ctx, destBalance.BalanceID, nil, false)
+		require.NoError(t, err)
+
+		ref := "precision_invalid_" + gofakeit.UUID()
+		invalidPayload := model2.RecordTransaction{
+			Amount:      150.32,
+			Precision:   10.5,
+			Reference:   ref,
+			Description: "Invalid fractional precision",
+			Currency:    "USD",
+			Source:      sourceBalance.BalanceID,
+			Destination: destBalance.BalanceID,
+		}
+
+		payloadBytes, _ := request.ToJsonReq(&invalidPayload)
+		response := map[string]string{}
+		testRequest := TestRequest{
+			Payload:  payloadBytes,
+			Response: &response,
+			Method:   "POST",
+			Route:    "/transactions",
+			Auth:     "",
+			Router:   router,
+		}
+
+		resp, reqErr := SetUpTestRequest(testRequest)
+		require.NoError(t, reqErr)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, model2.ErrPrecisionMustBeInteger.Error(), response["error"])
+
+		sourceAfter, err := b.GetBalanceByID(ctx, sourceBalance.BalanceID, nil, false)
+		require.NoError(t, err)
+		destAfter, err := b.GetBalanceByID(ctx, destBalance.BalanceID, nil, false)
+		require.NoError(t, err)
+
+		assert.Equal(t, sourceBefore.Balance.String(), sourceAfter.Balance.String(), "source balance should remain unchanged")
+		assert.Equal(t, sourceBefore.InflightBalance.String(), sourceAfter.InflightBalance.String(), "source inflight balance should remain unchanged")
+		assert.Equal(t, destBefore.Balance.String(), destAfter.Balance.String(), "destination balance should remain unchanged")
+		assert.Equal(t, destBefore.InflightBalance.String(), destAfter.InflightBalance.String(), "destination inflight balance should remain unchanged")
+
+		_, txnErr := b.GetTransactionByRef(ctx, ref)
+		assert.Error(t, txnErr, "transaction with fractional precision should not be persisted")
+	})
+}
+
 func TestRecordTransactionWithExitingRef(t *testing.T) {
 	router, b, _ := setupRouter()
 	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})

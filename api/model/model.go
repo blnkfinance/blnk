@@ -17,6 +17,7 @@ package model
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,21 @@ import (
 
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 )
+
+var ErrPrecisionMustBeInteger = errors.New("precision must be an integer value")
+
+func validatePrecisionIsInteger(value interface{}) error {
+	precision, ok := value.(float64)
+	if !ok {
+		return errors.New("invalid precision type")
+	}
+
+	if math.Trunc(precision) != precision {
+		return ErrPrecisionMustBeInteger
+	}
+
+	return nil
+}
 
 func sourceOrSourcesValidation(t *RecordTransaction) validation.RuleFunc {
 	return func(value interface{}) error {
@@ -130,6 +146,7 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 
 			return nil
 		})),
+		validation.Field(&t.Precision, validation.By(validatePrecisionIsInteger)),
 		validation.Field(&t.Currency, validation.Required),
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.Description, validation.Required),
