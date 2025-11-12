@@ -28,6 +28,7 @@ import (
 	"github.com/blnkfinance/blnk/model"
 
 	"github.com/gin-gonic/gin"
+	validation "github.com/go-ozzo/ozzo-validation/v4"
 )
 
 // transformTransaction prepares a transaction for API response by ensuring
@@ -79,6 +80,23 @@ func transformTransaction(txn *model.Transaction) *model.Transaction {
 	return &result
 }
 
+func handleRecordTransactionValidationError(c *gin.Context, err error) {
+	var validationErrors validation.Errors
+	if errors.As(err, &validationErrors) {
+		if precisionErr, ok := validationErrors["Precision"]; ok && errors.Is(precisionErr, model2.ErrPrecisionMustBeInteger) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": precisionErr.Error()})
+			return
+		}
+	}
+
+	if errors.Is(err, model2.ErrPrecisionMustBeInteger) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+}
+
 // RecordTransaction handles the recording of a new transaction.
 // It binds the incoming JSON request to a RecordTransaction object, validates it,
 // and then records the transaction. If any errors occur during validation or recording,
@@ -101,7 +119,7 @@ func (a Api) RecordTransaction(c *gin.Context) {
 	// Validate the transaction data
 	err := newTransaction.ValidateRecordTransaction()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		handleRecordTransactionValidationError(c, err)
 		return
 	}
 
@@ -139,7 +157,7 @@ func (a Api) QueueTransaction(c *gin.Context) {
 	// Validate the transaction data
 	err := newTransaction.ValidateRecordTransaction()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		handleRecordTransactionValidationError(c, err)
 		return
 	}
 

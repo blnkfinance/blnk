@@ -243,6 +243,32 @@ func TestValidateRecordTransaction(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Valid Transaction - Integer Precision",
+			transaction: RecordTransaction{
+				Amount:      50,
+				Precision:   1000,
+				Currency:    "USD",
+				Reference:   "ref_precision_int",
+				Description: "Integer precision transaction",
+				Source:      "source1",
+				Destination: "dest1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Invalid Transaction - Non-integer Precision",
+			transaction: RecordTransaction{
+				Amount:      50,
+				Precision:   10.5,
+				Currency:    "USD",
+				Reference:   "ref_precision_float",
+				Description: "Fractional precision transaction",
+				Source:      "source1",
+				Destination: "dest1",
+			},
+			wantErr: true,
+		},
+		{
 			name: "Invalid Transaction - Missing Required Fields",
 			transaction: RecordTransaction{
 				Amount: 100,
