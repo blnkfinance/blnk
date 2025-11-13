@@ -347,6 +347,8 @@ func getBalanceSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
 	enableNested := true
+	identityId := "identities.identity_id"
+	ledgerId := "ledgers.ledger_id"
 	return &api.CollectionSchema{
 		Name: "balances",
 		Fields: []api.Field{
@@ -358,8 +360,8 @@ func getBalanceSchema() *api.CollectionSchema {
 			{Name: "debit_balance", Type: "string", Facet: &facet},
 			{Name: "inflight_debit_balance", Type: "string", Facet: &facet},
 			{Name: "precision", Type: "float", Facet: &facet},
-			{Name: "ledger_id", Type: "string", Facet: &facet},
-			{Name: "identity_id", Type: "string", Facet: &facet},
+			{Name: "ledger_id", Type: "string", Reference: &ledgerId, Facet: &facet},
+			{Name: "identity_id", Type: "string", Facet: &facet, Reference: &identityId},
 			{Name: "balance_id", Type: "string", Facet: &facet},
 			{Name: "indicator", Type: "string", Facet: &facet},
 			{Name: "currency", Type: "string", Facet: &facet},
@@ -377,6 +379,10 @@ func getTransactionSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
 	enableNested := true
+	sourceId := "balances.balance_id"
+	destinationId := "balances.balance_id"
+	sourcesId := "balances.balance_id"
+	destinationsId := "balances.balance_id"
 	return &api.CollectionSchema{
 		Name: "transactions",
 		Fields: []api.Field{
@@ -386,8 +392,8 @@ func getTransactionSchema() *api.CollectionSchema {
 			{Name: "precision", Type: "float", Facet: &facet},
 			{Name: "transaction_id", Type: "string", Facet: &facet},
 			{Name: "parent_transaction", Type: "string", Facet: &facet},
-			{Name: "source", Type: "string", Facet: &facet},
-			{Name: "destination", Type: "string", Facet: &facet},
+			{Name: "source", Type: "string", Reference: &sourceId, Facet: &facet},
+			{Name: "destination", Type: "string", Reference: &destinationId, Facet: &facet},
 			{Name: "reference", Type: "string", Facet: &facet},
 			{Name: "currency", Type: "string", Facet: &facet},
 			{Name: "description", Type: "string", Facet: &facet},
@@ -395,8 +401,8 @@ func getTransactionSchema() *api.CollectionSchema {
 			{Name: "hash", Type: "string", Facet: &facet},
 			{Name: "allow_overdraft", Type: "bool", Facet: &facet},
 			{Name: "inflight", Type: "bool", Facet: &facet},
-			{Name: "sources", Type: "string[]", Facet: &facet},
-			{Name: "destinations", Type: "string[]", Facet: &facet},
+			{Name: "sources", Type: "string[]", Reference: &sourcesId, Facet: &facet},
+			{Name: "destinations", Type: "string[]", Reference: &destinationsId, Facet: &facet},
 			{Name: "created_at", Type: "int64", Facet: &facet},
 			{Name: "scheduled_for", Type: "int64", Facet: &facet},
 			{Name: "inflight_expiry_date", Type: "int64", Facet: &facet},
