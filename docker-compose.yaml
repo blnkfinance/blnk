@@ -76,7 +76,7 @@ services:
       retries: 5
 
   typesense:
-    image: typesense/typesense:0.24.0
+    image: typesense/typesense:29.0
     container_name: typesense
     command:
       ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
