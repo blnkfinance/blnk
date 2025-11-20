@@ -67,6 +67,21 @@ func (t *TypesenseClient) EnsureCollectionsExist(ctx context.Context) error {
 	return nil
 }
 
+// EnsureDefaultGeneralLedger ensures that the default general ledger exists in Typesense.
+func (t *TypesenseClient) EnsureDefaultGeneralLedger(ctx context.Context) error {
+	if err := t.EnsureCollectionsExist(ctx); err != nil {
+		return err
+	}
+
+	data := map[string]interface{}{
+		"ledger_id":  "general_ledger_id",
+		"name":       "General Ledger",
+		"created_at": time.Now().Unix(),
+	}
+
+	return t.upsertDocument(ctx, "ledgers", data)
+}
+
 // CreateCollection creates a collection in Typesense based on the provided schema.
 // If the collection already exists, it will return without error.
 func (t *TypesenseClient) CreateCollection(ctx context.Context, schema *api.CollectionSchema) (*api.CollectionResponse, error) {
