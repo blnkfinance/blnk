@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
-	"github.com/sirupsen/logrus"
 	"github.com/typesense/typesense-go/typesense/api"
 
 	"github.com/blnkfinance/blnk/config"
@@ -123,9 +122,6 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
 	newSearch := NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
-	if err := newSearch.EnsureDefaultGeneralLedger(context.Background()); err != nil {
-		logrus.Errorf("failed to ensure default general ledger: %v", err)
-	}
 	hookManager := hooks.NewHookManager(redisClient)
 	tokenizer := initializeTokenizationService(configuration)
 	httpClient := initializeHTTPClient()
