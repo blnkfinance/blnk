@@ -64,14 +64,15 @@ func (t *TypesenseClient) EnsureCollectionsExist(ctx context.Context) error {
 			return fmt.Errorf("failed to create collection %s: %w", c, err)
 		}
 	}
+
+	if err := t.ensureDefaultGeneralLedger(ctx); err != nil {
+		logrus.Errorf("failed to ensure default general ledger: %v", err)
+	}
 	return nil
 }
 
 // EnsureDefaultGeneralLedger ensures that the default general ledger exists in Typesense.
-func (t *TypesenseClient) EnsureDefaultGeneralLedger(ctx context.Context) error {
-	if err := t.EnsureCollectionsExist(ctx); err != nil {
-		return err
-	}
+func (t *TypesenseClient) ensureDefaultGeneralLedger(ctx context.Context) error {
 
 	data := map[string]interface{}{
 		"ledger_id":  "general_ledger_id",
