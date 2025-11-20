@@ -179,9 +179,28 @@ func (t *TypesenseClient) convertNumberField(data map[string]interface{}, field 
 // ensureSchemaFields ensures all required schema fields are present with default values
 func (t *TypesenseClient) ensureSchemaFields(table string, data map[string]interface{}) {
 	latestSchema := getLatestSchema(table)
+
+	optionalFieldMap := make(map[string]bool)
+	for _, field := range latestSchema.Fields {
+		if field.Optional != nil && *field.Optional {
+			optionalFieldMap[field.Name] = true
+		}
+	}
+
 	for _, field := range latestSchema.Fields {
 		if _, ok := data[field.Name]; !ok {
-			data[field.Name] = getDefaultValue(field.Type)
+			isOptional := field.Optional != nil && *field.Optional
+			if !isOptional {
+				data[field.Name] = getDefaultValue(field.Type)
+			}
+		}
+	}
+
+	for key, value := range data {
+		if optionalFieldMap[key] {
+			if strVal, ok := value.(string); ok && strVal == "" {
+				delete(data, key)
+			}
 		}
 	}
 }
@@ -376,7 +395,7 @@ func getBalanceSchema() *api.CollectionSchema {
 			{Name: "inflight_debit_balance", Type: "string", Facet: &facet},
 			{Name: "precision", Type: "float", Facet: &facet},
 			{Name: "ledger_id", Type: "string", Reference: &ledgerId, Facet: &facet},
-			{Name: "identity_id", Type: "string", Facet: &facet, Reference: &identityId},
+			{Name: "identity_id", Type: "string", Facet: &facet, Reference: &identityId, Optional: &enableNested},
 			{Name: "balance_id", Type: "string", Facet: &facet},
 			{Name: "indicator", Type: "string", Facet: &facet},
 			{Name: "currency", Type: "string", Facet: &facet},
