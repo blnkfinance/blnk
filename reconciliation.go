@@ -1098,18 +1098,31 @@ func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.
 // - []model.Match: A list of matched transactions.
 // - []string: A list of unmatched transaction IDs.
 func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model.Transaction, matchingRules []model.MatchingRule) ([]model.Match, []string) {
+	conf, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching configuration: %v", err)
+	}
+	maxWorkers := 10 // Default
+	if conf != nil {
+		maxWorkers = conf.Transaction.MaxWorkers
+	}
+
 	var matches []model.Match
 	var unmatched []string
 
 	matchChan := make(chan model.Match, len(externalTxns)) // Channel to collect matched transactions.
 	unmatchedChan := make(chan string, len(externalTxns))  // Channel to collect unmatched transactions.
 	var wg sync.WaitGroup                                  // WaitGroup to manage concurrent goroutines.
+	sem := make(chan struct{}, maxWorkers)                 // Semaphore to limit concurrency
 
 	// Iterate over each external transaction and attempt to match it against internal transactions.
 	for _, externalTxn := range externalTxns {
 		wg.Add(1)
 		go func(extTxn *model.Transaction) {
 			defer wg.Done()
+			sem <- struct{}{}        // Acquire token
+			defer func() { <-sem }() // Release token
+
 			err := s.findMatchingInternalTransaction(ctx, extTxn, matchingRules, matchChan, unmatchedChan)
 			if err != nil {
 				unmatchedChan <- extTxn.TransactionID
@@ -1291,10 +1304,23 @@ func (s *Blnk) groupExternalTransactions(ctx context.Context, groupingCriteria s
 // Returns:
 // - error: If any error occurs during processing.
 func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, matchChan chan model.Match, unMatchChan chan string) error {
+	conf, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching configuration: %v", err)
+	}
+	maxWorkers := 10 // Default
+	if conf != nil {
+		maxWorkers = conf.Transaction.MaxWorkers
+	}
+	sem := make(chan struct{}, maxWorkers) // Semaphore to limit concurrency
+
 	for _, singleTxn := range singleTxns {
 		wg.Add(1)
 		go func(txn *model.Transaction) {
 			defer wg.Done()
+			sem <- struct{}{}        // Acquire token
+			defer func() { <-sem }() // Release token
+
 			matched := s.matchSingleTransaction(txn, groupedTxns, groupMap, matchingRules, isExternalGrouped, matchChan)
 			if !matched {
 				unMatchChan <- txn.TransactionID
@@ -1421,7 +1447,79 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 		big.NewInt(int64(externalTxn.Amount)),
 		conf.Transaction.MaxWorkers,
 		false, // Stream mode
-		s.getInternalTransactionsPaginated,
+		func(ctx context.Context, id string, limit int, offset int64) ([]*model.Transaction, error) {
+			var minAmount, maxAmount *float64
+			var minDate, maxDate *time.Time
+			var currency *string
+
+			c := externalTxn.Currency
+			currency = &c
+
+			var lowestMinAmount, highestMaxAmount float64
+			var earliestMinDate, latestMaxDate time.Time
+
+			firstAmount := true
+			firstDate := true
+			hasAmountCriteria := false
+			hasDateCriteria := false
+
+			for _, rule := range matchingRules {
+				for _, criteria := range rule.Criteria {
+					if criteria.Field == "amount" && criteria.Operator == "equals" {
+						drift := criteria.AllowableDrift // percentage
+						amt := externalTxn.Amount
+						delta := amt * (drift / 100.0)
+						low := amt - delta
+						high := amt + delta
+
+						if firstAmount {
+							lowestMinAmount = low
+							highestMaxAmount = high
+							firstAmount = false
+						} else {
+							if low < lowestMinAmount {
+								lowestMinAmount = low
+							}
+							if high > highestMaxAmount {
+								highestMaxAmount = high
+							}
+						}
+						hasAmountCriteria = true
+					}
+					if criteria.Field == "date" && criteria.Operator == "equals" {
+						drift := time.Duration(criteria.AllowableDrift) * time.Second
+						d := externalTxn.CreatedAt
+						low := d.Add(-drift)
+						high := d.Add(drift)
+
+						if firstDate {
+							earliestMinDate = low
+							latestMaxDate = high
+							firstDate = false
+						} else {
+							if low.Before(earliestMinDate) {
+								earliestMinDate = low
+							}
+							if high.After(latestMaxDate) {
+								latestMaxDate = high
+							}
+						}
+						hasDateCriteria = true
+					}
+				}
+			}
+
+			if hasAmountCriteria {
+				minAmount = &lowestMinAmount
+				maxAmount = &highestMaxAmount
+			}
+			if hasDateCriteria {
+				minDate = &earliestMinDate
+				maxDate = &latestMaxDate
+			}
+
+			return s.datasource.GetTransactionsByCriteria(ctx, minAmount, maxAmount, currency, minDate, maxDate, limit, offset)
+		},
 		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
 			defer wg.Done()
 			for internalTxn := range jobs {

@@ -413,3 +413,8 @@ func (m *MockDataSource) UpdateBalanceIdentity(balanceID string, identityID stri
 	args := m.Called(balanceID, identityID)
 	return args.Error(0)
 }
+
+func (m *MockDataSource) GetTransactionsByCriteria(ctx context.Context, minAmount, maxAmount *float64, currency *string, minDate, maxDate *time.Time, limit int, offset int64) ([]*model.Transaction, error) {
+	args := m.Called(ctx, minAmount, maxAmount, currency, minDate, maxDate, limit, offset)
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
