@@ -1441,6 +1441,8 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 
 	matchFound := false
 
+	minAmount, maxAmount, minDate, maxDate, currency := s.calculateMatchingBounds(externalTxn, matchingRules)
+
 	_, err = s.ProcessTransactionInBatches(
 		ctx,
 		externalTxn.TransactionID,
@@ -1448,78 +1450,9 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 		conf.Transaction.MaxWorkers,
 		false, // Stream mode
 		func(ctx context.Context, id string, limit int, offset int64) ([]*model.Transaction, error) {
-			var minAmount, maxAmount *float64
-			var minDate, maxDate *time.Time
-			var currency *string
-
-			c := externalTxn.Currency
-			currency = &c
-
-			var lowestMinAmount, highestMaxAmount float64
-			var earliestMinDate, latestMaxDate time.Time
-
-			firstAmount := true
-			firstDate := true
-			hasAmountCriteria := false
-			hasDateCriteria := false
-
-			for _, rule := range matchingRules {
-				for _, criteria := range rule.Criteria {
-					if criteria.Field == "amount" && criteria.Operator == "equals" {
-						drift := criteria.AllowableDrift // percentage
-						amt := externalTxn.Amount
-						delta := amt * (drift / 100.0)
-						low := amt - delta
-						high := amt + delta
-
-						if firstAmount {
-							lowestMinAmount = low
-							highestMaxAmount = high
-							firstAmount = false
-						} else {
-							if low < lowestMinAmount {
-								lowestMinAmount = low
-							}
-							if high > highestMaxAmount {
-								highestMaxAmount = high
-							}
-						}
-						hasAmountCriteria = true
-					}
-					if criteria.Field == "date" && criteria.Operator == "equals" {
-						drift := time.Duration(criteria.AllowableDrift) * time.Second
-						d := externalTxn.CreatedAt
-						low := d.Add(-drift)
-						high := d.Add(drift)
-
-						if firstDate {
-							earliestMinDate = low
-							latestMaxDate = high
-							firstDate = false
-						} else {
-							if low.Before(earliestMinDate) {
-								earliestMinDate = low
-							}
-							if high.After(latestMaxDate) {
-								latestMaxDate = high
-							}
-						}
-						hasDateCriteria = true
-					}
-				}
-			}
-
-			if hasAmountCriteria {
-				minAmount = &lowestMinAmount
-				maxAmount = &highestMaxAmount
-			}
-			if hasDateCriteria {
-				minDate = &earliestMinDate
-				maxDate = &latestMaxDate
-			}
-
 			return s.datasource.GetTransactionsByCriteria(ctx, minAmount, maxAmount, currency, minDate, maxDate, limit, offset)
 		},
+
 		func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
 			defer wg.Done()
 			for internalTxn := range jobs {
@@ -1957,4 +1890,80 @@ func (s *Blnk) matchesGroupDate(externalDate, groupEarliestDate time.Time, crite
 		return externalDate.Before(groupEarliestDate)
 	}
 	return false
+}
+
+// calculateMatchingBounds calculates the query bounds (amount, date) for matching external transactions against internal ones.
+// It iterates through matching rules to find the widest possible range that satisfies all criteria.
+func (s *Blnk) calculateMatchingBounds(externalTxn *model.Transaction, matchingRules []model.MatchingRule) (*float64, *float64, *time.Time, *time.Time, *string) {
+	var minAmount, maxAmount *float64
+	var minDate, maxDate *time.Time
+	var currency *string
+
+	c := externalTxn.Currency
+	currency = &c
+
+	var lowestMinAmount, highestMaxAmount float64
+	var earliestMinDate, latestMaxDate time.Time
+
+	firstAmount := true
+	firstDate := true
+	hasAmountCriteria := false
+	hasDateCriteria := false
+
+	for _, rule := range matchingRules {
+		for _, criteria := range rule.Criteria {
+			if criteria.Field == "amount" && criteria.Operator == "equals" {
+				drift := criteria.AllowableDrift // percentage
+				amt := externalTxn.Amount
+				delta := amt * (drift / 100.0)
+				low := amt - delta
+				high := amt + delta
+
+				if firstAmount {
+					lowestMinAmount = low
+					highestMaxAmount = high
+					firstAmount = false
+				} else {
+					if low < lowestMinAmount {
+						lowestMinAmount = low
+					}
+					if high > highestMaxAmount {
+						highestMaxAmount = high
+					}
+				}
+				hasAmountCriteria = true
+			}
+			if criteria.Field == "date" && criteria.Operator == "equals" {
+				drift := time.Duration(criteria.AllowableDrift) * time.Second
+				d := externalTxn.CreatedAt
+				low := d.Add(-drift)
+				high := d.Add(drift)
+
+				if firstDate {
+					earliestMinDate = low
+					latestMaxDate = high
+					firstDate = false
+				} else {
+					if low.Before(earliestMinDate) {
+						earliestMinDate = low
+					}
+					if high.After(latestMaxDate) {
+						latestMaxDate = high
+					}
+				}
+				hasDateCriteria = true
+			}
+		}
+	}
+
+	if hasAmountCriteria {
+		minAmount = &lowestMinAmount
+		maxAmount = &highestMaxAmount
+	}
+	if hasDateCriteria {
+		minDate = &earliestMinDate
+		maxDate = &latestMaxDate
+	}
+
+	return minAmount, maxAmount, minDate, maxDate, currency
 }
