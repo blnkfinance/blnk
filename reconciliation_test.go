@@ -420,7 +420,7 @@ func TestReconciliationEdgeCases(t *testing.T) {
 			{TransactionID: "ext1", Amount: 100, CreatedAt: time.Now()},
 		}
 
-		mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100000, int64(0)).Return([]*model.Transaction{}, nil).Once()
+		mockDS.On("GetTransactionsByCriteria", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, 100000, int64(0)).Return([]*model.Transaction{}, nil).Once()
 
 		matchingRules := []model.MatchingRule{
 			{
