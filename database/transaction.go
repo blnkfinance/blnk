@@ -1121,7 +1121,11 @@ func (d Datasource) GetTransactionsByCriteria(ctx context.Context, minAmount, ma
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions by criteria", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	transactions := []*model.Transaction{}
 	for rows.Next() {
