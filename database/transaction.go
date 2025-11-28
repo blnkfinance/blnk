@@ -324,7 +324,11 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	// Initialize a slice to store the transactions
 	var transactions []model.Transaction
@@ -465,7 +469,11 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve paginated transactions", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	transactions = []*model.Transaction{}
 
@@ -580,7 +588,11 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped transactions", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	groupedTransactions = make(map[string][]*model.Transaction)
 
@@ -700,7 +712,11 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve inflight transactions", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	var transactions []*model.Transaction
 
@@ -793,7 +809,11 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve refundable transactions", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	var transactions []*model.Transaction
 
@@ -873,7 +893,11 @@ func (d Datasource) GetQueuedAmounts(ctx context.Context, balanceID string) (deb
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	for rows.Next() {
 		var preciseAmountStr string
@@ -969,7 +993,11 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions by parent", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	transactions = []*model.Transaction{}
 
