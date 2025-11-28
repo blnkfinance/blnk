@@ -171,15 +171,47 @@ func initializeQueues() map[string]int {
 	}
 
 	queues := make(map[string]int)
-	queues[cfg.Queue.WebhookQueue] = 3
+	queues[cfg.Queue.InflightExpiryQueue] = 1
 	queues[cfg.Queue.IndexQueue] = 1
-	queues[cfg.Queue.InflightExpiryQueue] = 3
 
 	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
 		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
 		queues[queueName] = 1
 	}
 	return queues
+}
+
+func initializeWebhookQueues() map[string]int {
+	cfg, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching config, using defaults: %v", err)
+		return nil
+	}
+
+	queues := make(map[string]int)
+	queues[cfg.Queue.WebhookQueue] = 3
+
+	return queues
+}
+
+func initializeWebhookWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
+	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing Redis URL: %v", err)
+	}
+
+	return asynq.NewServer(
+		asynq.RedisClientOpt{
+			Addr:      redisOption.Addr,
+			Password:  redisOption.Password,
+			DB:        redisOption.DB,
+			TLSConfig: redisOption.TLSConfig,
+		},
+		asynq.Config{
+			Concurrency: conf.Queue.WebhookConcurrency,
+			Queues:      queues,
+		},
+	), nil
 }
 
 func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
@@ -214,11 +246,19 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
 		mux.HandleFunc(queueName, b.processTransaction)
 	}
+	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
+	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
+}
+
+func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
+	cfg, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching config, using defaults: %v", err)
+		return
+	}
 
 	// Register handlers for other task types
-	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
 	mux.HandleFunc(cfg.Queue.WebhookQueue, b.blnk.ProcessWebhook)
-	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
 }
 
 // workerCommands defines the "workers" command to start worker processes.
@@ -254,6 +294,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			// Initialize queues
 			queues := initializeQueues()
+			webhookQueues := initializeWebhookQueues()
 
 			// Initialize worker server
 			srv, err := initializeWorkerServer(conf, queues)
@@ -261,9 +302,17 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				log.Fatal(err)
 			}
 
+			webhookSrv, err := initializeWebhookWorkerServer(conf, webhookQueues)
+			if err != nil {
+				log.Fatal(err)
+			}
+
 			// Initialize task handlers
 			mux := asynq.NewServeMux()
 			initializeTaskHandlers(b, mux)
+
+			webhookMux := asynq.NewServeMux()
+			initializeWebhookTaskHandlers(b, webhookMux)
 
 			// Start monitoring server with health check and asynqmon dashboard
 			redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
@@ -300,8 +349,14 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}()
 
 			// Start worker server
-			if err := srv.Run(mux); err != nil {
-				log.Fatalf("could not run server: %v", err)
+			if err := srv.Start(mux); err != nil {
+				log.Fatalf("could not start transaction worker server: %v", err)
+			}
+			// Ensure transaction server shuts down gracefully when the webhook server (blocking) exits
+			defer srv.Shutdown()
+
+			if err := webhookSrv.Run(webhookMux); err != nil {
+				log.Fatalf("could not run webhook worker server: %v", err)
 			}
 		},
 	}

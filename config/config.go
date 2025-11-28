@@ -63,6 +63,7 @@ var (
 		InflightExpiryQueue: "new:inflight-expiry",
 		NumberOfQueues:      20,
 		MonitoringPort:      DEFAULT_MONITORING_PORT,
+		WebhookConcurrency:  20,
 	}
 
 	defaultDatabase = DataSourceConfig{
@@ -158,6 +159,7 @@ type QueueConfig struct {
 	InsufficientFundRetries bool   `json:"insufficient_fund_retries" envconfig:"BLNK_QUEUE_INSUFFICIENT_FUND_RETRIES"`
 	MaxRetryAttempts        int    `json:"max_retry_attempts" envconfig:"BLNK_QUEUE_MAX_RETRY_ATTEMPTS"`
 	MonitoringPort          string `json:"monitoring_port" envconfig:"BLNK_QUEUE_MONITORING_PORT"`
+	WebhookConcurrency      int    `json:"webhook_concurrency" envconfig:"BLNK_QUEUE_WEBHOOK_CONCURRENCY"`
 }
 
 type Configuration struct {
@@ -359,6 +361,9 @@ func (cnf *Configuration) setQueueDefaults() {
 	}
 	if cnf.Queue.MonitoringPort == "" {
 		cnf.Queue.MonitoringPort = defaultQueue.MonitoringPort
+	}
+	if cnf.Queue.WebhookConcurrency == 0 {
+		cnf.Queue.WebhookConcurrency = defaultQueue.WebhookConcurrency
 	}
 }
 
