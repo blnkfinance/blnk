@@ -120,8 +120,8 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
-	newSearch := search.NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
-	hookManager := hooks.NewHookManager(redisClient)
+	newSearch := NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
+	hookManager := hooks.NewHookManager(redisClient, asynqClient)
 	tokenizer := initializeTokenizationService(configuration)
 	httpClient := initializeHTTPClient()
 

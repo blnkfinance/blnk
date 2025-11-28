@@ -260,6 +260,7 @@ func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 
 	// Register handlers for other task types
 	mux.HandleFunc(cfg.Queue.WebhookQueue, b.blnk.ProcessWebhook)
+	mux.HandleFunc("new:hook_execution", b.blnk.Hooks.ProcessHookTask)
 }
 
 // workerCommands defines the "workers" command to start worker processes.
