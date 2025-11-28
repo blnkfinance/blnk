@@ -92,7 +92,11 @@ func (m *redisHookManager) executeHook(ctx context.Context, hook *Hook, payload 
 		}
 		return fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logrus.WithError(err).Error("Failed to close response body")
+		}
+	}()
 
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
