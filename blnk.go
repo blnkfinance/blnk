@@ -17,18 +17,17 @@ limitations under the License.
 package blnk
 
 import (
-	"context"
 	"embed"
 	"net/http"
 	"time"
 
 	"github.com/hibiken/asynq"
-	"github.com/typesense/typesense-go/typesense/api"
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/hooks"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
+	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/blnkfinance/blnk/internal/tokenization"
 
 	"github.com/blnkfinance/blnk/model"
@@ -38,7 +37,7 @@ import (
 // Blnk represents the main struct for the Blnk application.
 type Blnk struct {
 	queue       *Queue
-	search      *TypesenseClient
+	search      *search.TypesenseClient
 	redis       redis.UniversalClient
 	asynqClient *asynq.Client
 	datasource  database.IDataSource
@@ -121,7 +120,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 
 	bt := NewBalanceTracker()
 	newQueue := NewQueue(configuration)
-	newSearch := NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
+	newSearch := search.NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
 	hookManager := hooks.NewHookManager(redisClient, asynqClient)
 	tokenizer := initializeTokenizationService(configuration)
 	httpClient := initializeHTTPClient()
@@ -137,24 +136,6 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 		httpClient:  httpClient,
 		Hooks:       hookManager,
 	}, nil
-}
-
-// Search performs a search on the specified collection using the provided query parameters.
-//
-// Parameters:
-// - collection string: The name of the collection to search.
-// - query *api.SearchCollectionParams: The search query parameters.
-//
-// Returns:
-// - interface{}: The search results.
-// - error: An error if the search operation fails.
-func (l *Blnk) Search(collection string, query *api.SearchCollectionParams) (interface{}, error) {
-	return l.search.Search(context.Background(), collection, query)
-}
-
-// MultiSearch performs a multi-search operation across collections.
-func (l *Blnk) MultiSearch(searchParams *api.MultiSearchSearchesParameter) (*api.MultiSearchResult, error) {
-	return l.search.MultiSearch(context.Background(), *searchParams)
 }
 
 // Close properly closes all connections and resources used by the Blnk instance.

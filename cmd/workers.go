@@ -31,6 +31,7 @@ import (
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
+	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/blnkfinance/blnk/model"
 
 	"github.com/hibiken/asynq"
@@ -125,7 +126,7 @@ func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
 	payload := data.Payload
 
 	// Initialize a new TypeSense client and ensure collections exist.
-	newSearch := blnk.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
+	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
 	err := newSearch.EnsureCollectionsExist(context.Background())
 	if err != nil {
 		log.Printf("Failed to ensure collections exist: %v", err)

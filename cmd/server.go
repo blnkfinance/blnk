@@ -24,9 +24,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/api"
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/search"
 	trace "github.com/blnkfinance/blnk/internal/traces"
 	"github.com/caddyserver/certmagic"
 	"github.com/gin-gonic/gin"
@@ -81,7 +81,7 @@ migrateTypeSenseSchema ensures that the necessary TypeSense schema is migrated f
 It takes a TypesenseClient and a context as parameters.
 This function loops through the predefined collections and migrates their schema in TypeSense.
 */
-func migrateTypeSenseSchema(ctx context.Context, t *blnk.TypesenseClient) error {
+func migrateTypeSenseSchema(ctx context.Context, t *search.TypesenseClient) error {
 	// Define the collections to migrate schema for
 	collections := []string{"ledgers", "balances", "transactions", "identities", "reconciliations"}
 
@@ -162,8 +162,8 @@ func initializeOpenTelemetry(ctx context.Context) (func(context.Context) error, 
 	return shutdown, nil
 }
 
-func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*blnk.TypesenseClient, error) {
-	newSearch := blnk.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns})
+func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*search.TypesenseClient, error) {
+	newSearch := search.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns})
 	if err := newSearch.EnsureCollectionsExist(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ensure collections exist: %v", err)
 	}
