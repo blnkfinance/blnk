@@ -8,7 +8,6 @@ require (
 	github.com/aws/aws-sdk-go v1.55.6
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/caddyserver/certmagic v0.22.0
-	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
@@ -50,6 +49,7 @@ require (
 	github.com/bytedance/sonic v1.12.10 // indirect
 	github.com/bytedance/sonic/loader v0.2.3 // indirect
 	github.com/caddyserver/zerossl v0.1.3 // indirect
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
