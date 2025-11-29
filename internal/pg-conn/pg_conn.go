@@ -60,10 +60,10 @@ func ConnectDB(dsConfig config.DataSourceConfig) (*sql.DB, error) {
 	// Verify connection
 	err = db.Ping()
 	if err != nil {
-		log.Printf("Database connection error ❌: %v", err)
+		log.Printf("Database connection error: %v", err)
 		return nil, err
 	}
 
-	log.Println("Database connection established ✅")
+	log.Println("Database connection established")
 	return db, nil
 }
