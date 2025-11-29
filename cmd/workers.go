@@ -362,7 +362,7 @@ func startMonitoringServer(conf *config.Configuration) {
 	monitoringMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
+		_, _ = fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
 	})
 
 	// Mount asynqmon dashboard at /monitoring
