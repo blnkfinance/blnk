@@ -163,14 +163,35 @@ func initializeOpenTelemetry(ctx context.Context) (func(context.Context) error, 
 }
 
 func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*search.TypesenseClient, error) {
+	if cfg.TypeSense.Dns == "" {
+		log.Println("TypeSense DNS not configured. Search functionality will be disabled.")
+		return nil, nil
+	}
+
 	newSearch := search.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns})
-	if err := newSearch.EnsureCollectionsExist(ctx); err != nil {
-		return nil, fmt.Errorf("failed to ensure collections exist: %v", err)
+
+	const maxRetries = 5
+	var retryDelay = 2 * time.Second
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		if err = newSearch.EnsureCollectionsExist(ctx); err == nil {
+			if err = migrateTypeSenseSchema(ctx, newSearch); err == nil {
+				return newSearch, nil
+			}
+		}
+
+		log.Printf("TypeSense initialization failed (attempt %d/%d): %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retryDelay):
+			retryDelay *= 2
+		}
 	}
-	if err := migrateTypeSenseSchema(ctx, newSearch); err != nil {
-		return nil, fmt.Errorf("failed to migrate typesense schema: %v", err)
-	}
-	return newSearch, nil
+
+	return nil, fmt.Errorf("failed to initialize TypeSense after %d attempts: %v", maxRetries, err)
 }
 
 func initializePostHog() (posthog.Client, string) {

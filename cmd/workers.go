@@ -109,7 +109,7 @@ func handleTransactionRejection(ctx context.Context, b *blnkInstance, txn *model
 // indexData indexes data into TypeSense for searchability.
 // It fetches the collection name and payload from the task, ensures the collections exist,
 // and sends the payload to the appropriate TypeSense collection for indexing.
-func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
+func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 	if b.cnf.TypeSense.Dns == "" {
 		return nil
 	}
@@ -127,14 +127,14 @@ func (b *blnkInstance) indexData(_ context.Context, t *asynq.Task) error {
 
 	// Initialize a new TypeSense client and ensure collections exist.
 	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
-	err := newSearch.EnsureCollectionsExist(context.Background())
+	err := newSearch.EnsureCollectionsExist(ctx)
 	if err != nil {
 		log.Printf("Failed to ensure collections exist: %v", err)
 		return err
 	}
 
 	// Handle the notification and send the payload to the collection for indexing.
-	err = newSearch.HandleNotification(collection, payload)
+	err = newSearch.HandleNotification(ctx, collection, payload)
 	if err != nil {
 		log.Println("Error indexing data", err)
 		return err
@@ -173,7 +173,6 @@ func initializeQueues() map[string]int {
 
 	queues := make(map[string]int)
 	queues[cfg.Queue.InflightExpiryQueue] = 1
-	queues[cfg.Queue.IndexQueue] = 1
 
 	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
 		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
@@ -191,6 +190,7 @@ func initializeWebhookQueues() map[string]int {
 
 	queues := make(map[string]int)
 	queues[cfg.Queue.WebhookQueue] = 3
+	queues[cfg.Queue.IndexQueue] = 1
 
 	return queues
 }
@@ -248,7 +248,7 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 		mux.HandleFunc(queueName, b.processTransaction)
 	}
 	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
-	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
+
 }
 
 func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
@@ -261,6 +261,7 @@ func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 	// Register handlers for other task types
 	mux.HandleFunc(cfg.Queue.WebhookQueue, b.blnk.ProcessWebhook)
 	mux.HandleFunc("new:hook_execution", b.blnk.Hooks.ProcessHookTask)
+	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
 }
 
 // workerCommands defines the "workers" command to start worker processes.
@@ -294,61 +295,13 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				defer phClient.Close()
 			}
 
-			// Initialize queues
-			queues := initializeQueues()
-			webhookQueues := initializeWebhookQueues()
-
-			// Initialize worker server
-			srv, err := initializeWorkerServer(conf, queues)
+			// Setup Workers
+			srv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			webhookSrv, err := initializeWebhookWorkerServer(conf, webhookQueues)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			// Initialize task handlers
-			mux := asynq.NewServeMux()
-			initializeTaskHandlers(b, mux)
-
-			webhookMux := asynq.NewServeMux()
-			initializeWebhookTaskHandlers(b, webhookMux)
-
-			// Start monitoring server with health check and asynqmon dashboard
-			redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
-			asynqmonHandler := asynqmon.New(asynqmon.Options{
-				RootPath: "/monitoring", //  Optional: if you want to serve asynqmon under a sub-path.
-				RedisConnOpt: asynq.RedisClientOpt{
-					Addr:      redisOption.Addr,
-					Password:  redisOption.Password,
-					DB:        redisOption.DB,
-					TLSConfig: redisOption.TLSConfig,
-				},
-			})
-
-			// Create a custom HTTP mux for monitoring port
-			monitoringMux := http.NewServeMux()
-
-			// Add worker health check endpoint
-			monitoringMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
-			})
-
-			// Mount asynqmon dashboard at /monitoring
-			monitoringMux.Handle("/monitoring/", asynqmonHandler)
-
-			// Start monitoring HTTP server in a new goroutine
-			go func() {
-				monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
-				log.Printf("Worker monitoring server listening on %s (health: /health, dashboard: /monitoring)", monitoringAddr)
-				if err := http.ListenAndServe(monitoringAddr, monitoringMux); err != nil {
-					log.Fatalf("could not start monitoring server: %v", err)
-				}
-			}()
+			startMonitoringServer(conf)
 
 			// Start worker server
 			if err := srv.Start(mux); err != nil {
@@ -364,4 +317,63 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 	}
 
 	return cmd
+}
+
+func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Server, *asynq.Server, *asynq.ServeMux, *asynq.ServeMux, error) {
+	queues := initializeQueues()
+	webhookQueues := initializeWebhookQueues()
+
+	srv, err := initializeWorkerServer(conf, queues)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	webhookSrv, err := initializeWebhookWorkerServer(conf, webhookQueues)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	mux := asynq.NewServeMux()
+	initializeTaskHandlers(b, mux)
+
+	webhookMux := asynq.NewServeMux()
+	initializeWebhookTaskHandlers(b, webhookMux)
+
+	return srv, webhookSrv, mux, webhookMux, nil
+}
+
+func startMonitoringServer(conf *config.Configuration) {
+	// Start monitoring server with health check and asynqmon dashboard
+	redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+	asynqmonHandler := asynqmon.New(asynqmon.Options{
+		RootPath: "/monitoring", //  Optional: if you want to serve asynqmon under a sub-path.
+		RedisConnOpt: asynq.RedisClientOpt{
+			Addr:      redisOption.Addr,
+			Password:  redisOption.Password,
+			DB:        redisOption.DB,
+			TLSConfig: redisOption.TLSConfig,
+		},
+	})
+
+	// Create a custom HTTP mux for monitoring port
+	monitoringMux := http.NewServeMux()
+
+	// Add worker health check endpoint
+	monitoringMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
+	})
+
+	// Mount asynqmon dashboard at /monitoring
+	monitoringMux.Handle("/monitoring/", asynqmonHandler)
+
+	// Start monitoring HTTP server in a new goroutine
+	go func() {
+		monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
+		log.Printf("Worker monitoring server listening on %s (health: /health, dashboard: /monitoring)", monitoringAddr)
+		if err := http.ListenAndServe(monitoringAddr, monitoringMux); err != nil {
+			log.Fatalf("could not start monitoring server: %v", err)
+		}
+	}()
 }

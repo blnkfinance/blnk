@@ -29,6 +29,63 @@ import (
 	"github.com/typesense/typesense-go/typesense/api"
 )
 
+const (
+	CollectionLedgers         = "ledgers"
+	CollectionBalances        = "balances"
+	CollectionTransactions    = "transactions"
+	CollectionReconciliations = "reconciliations"
+	CollectionIdentities      = "identities"
+)
+
+// CollectionConfig holds configuration for a specific collection.
+type CollectionConfig struct {
+	Schema           *api.CollectionSchema
+	IDField          string
+	TimeFields       []string
+	BigIntFields     []string
+	DefaultSortField string
+}
+
+var collectionConfigs map[string]CollectionConfig
+
+func init() {
+	collectionConfigs = map[string]CollectionConfig{
+		CollectionLedgers: {
+			Schema:       getLedgerSchema(),
+			IDField:      "ledger_id",
+			TimeFields:   []string{"created_at"},
+			BigIntFields: []string{},
+		},
+		CollectionBalances: {
+			Schema:     getBalanceSchema(),
+			IDField:    "balance_id",
+			TimeFields: []string{"created_at", "inflight_expires_at"},
+			BigIntFields: []string{
+				"balance", "credit_balance", "debit_balance",
+				"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
+			},
+		},
+		CollectionTransactions: {
+			Schema:  getTransactionSchema(),
+			IDField: "transaction_id",
+			TimeFields: []string{
+				"created_at", "scheduled_for", "inflight_expiry_date",
+			},
+			BigIntFields: []string{"precise_amount"},
+		},
+		CollectionReconciliations: {
+			Schema:     getReconciliationSchema(),
+			IDField:    "reconciliation_id",
+			TimeFields: []string{"started_at", "completed_at"},
+		},
+		CollectionIdentities: {
+			Schema:     getIdentitySchema(),
+			IDField:    "identity_id",
+			TimeFields: []string{"created_at", "dob"},
+		},
+	}
+}
+
 // TypesenseClient wraps the Typesense client and provides methods to interact with it.
 type TypesenseClient struct {
 	Client *typesense.Client
@@ -56,17 +113,15 @@ func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
 // EnsureCollectionsExist ensures that all the necessary collections exist in the Typesense schema.
 // If a collection doesn't exist, it will create the collection based on the latest schema.
 func (t *TypesenseClient) EnsureCollectionsExist(ctx context.Context) error {
-	collections := []string{"ledgers", "balances", "transactions", "reconciliations", "identities"}
-
-	for _, c := range collections {
-		latestSchema := getLatestSchema(c)
-		if _, err := t.CreateCollection(ctx, latestSchema); err != nil {
-			return fmt.Errorf("failed to create collection %s: %w", c, err)
+	for name, config := range collectionConfigs {
+		if _, err := t.CreateCollection(ctx, config.Schema); err != nil {
+			return fmt.Errorf("failed to create collection %s: %w", name, err)
 		}
 	}
 
 	if err := t.ensureDefaultGeneralLedger(ctx); err != nil {
 		logrus.Errorf("failed to ensure default general ledger: %v", err)
+		return err
 	}
 	return nil
 }
@@ -113,19 +168,19 @@ func (t *TypesenseClient) MultiSearch(ctx context.Context, searchRequests api.Mu
 
 // HandleNotification processes incoming notifications and updates Typesense collections based on the table and data.
 // It ensures the required fields exist and upserts the data into Typesense.
-func (t *TypesenseClient) HandleNotification(table string, data map[string]interface{}) error {
-	ctx := context.Background()
-	if err := t.EnsureCollectionsExist(ctx); err != nil {
-		logrus.Warningf("Failed to ensure collections exist: %v", err)
+func (t *TypesenseClient) HandleNotification(ctx context.Context, table string, data map[string]interface{}) error {
+	config, ok := collectionConfigs[table]
+	if !ok {
+		return fmt.Errorf("unknown collection: %s", table)
 	}
 
 	// Process and normalize the data
 	if err := t.processMetadata(data); err != nil {
 		return err
 	}
-	t.convertLargeNumbers(table, data)
-	t.ensureSchemaFields(table, data)
-	t.normalizeTimeFields(data)
+	t.convertLargeNumbers(config, data)
+	t.ensureSchemaFields(config, data)
+	t.normalizeTimeFields(config, data)
 
 	// Upsert the document
 	return t.upsertDocument(ctx, table, data)
@@ -152,15 +207,9 @@ func (t *TypesenseClient) processMetadata(data map[string]interface{}) error {
 }
 
 // convertLargeNumbers converts big.Int values to strings for Typesense compatibility
-func (t *TypesenseClient) convertLargeNumbers(table string, data map[string]interface{}) {
-	switch table {
-	case "balances":
-		balanceFields := []string{"balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance"}
-		for _, field := range balanceFields {
-			t.convertNumberField(data, field)
-		}
-	case "transactions":
-		t.convertNumberField(data, "precise_amount")
+func (t *TypesenseClient) convertLargeNumbers(config CollectionConfig, data map[string]interface{}) {
+	for _, field := range config.BigIntFields {
+		t.convertNumberField(data, field)
 	}
 }
 
@@ -178,8 +227,8 @@ func (t *TypesenseClient) convertNumberField(data map[string]interface{}, field 
 }
 
 // ensureSchemaFields ensures all required schema fields are present with default values
-func (t *TypesenseClient) ensureSchemaFields(table string, data map[string]interface{}) {
-	latestSchema := getLatestSchema(table)
+func (t *TypesenseClient) ensureSchemaFields(config CollectionConfig, data map[string]interface{}) {
+	latestSchema := config.Schema
 
 	optionalFieldMap := make(map[string]bool)
 	for _, field := range latestSchema.Fields {
@@ -207,9 +256,8 @@ func (t *TypesenseClient) ensureSchemaFields(table string, data map[string]inter
 }
 
 // normalizeTimeFields converts time fields to Unix timestamps
-func (t *TypesenseClient) normalizeTimeFields(data map[string]interface{}) {
-	timeFields := []string{"created_at", "dob", "scheduled_for", "inflight_expiry_date", "inflight_expires_at", "completed_at", "started_at"}
-	for _, field := range timeFields {
+func (t *TypesenseClient) normalizeTimeFields(config CollectionConfig, data map[string]interface{}) {
+	for _, field := range config.TimeFields {
 		if fieldValue, ok := data[field]; ok {
 			switch v := fieldValue.(type) {
 			case time.Time:
@@ -226,20 +274,10 @@ func (t *TypesenseClient) normalizeTimeFields(data map[string]interface{}) {
 
 // getIDField returns the primary ID field name for a given table
 func (t *TypesenseClient) getIDField(table string) string {
-	switch table {
-	case "reconciliations":
-		return "reconciliation_id"
-	case "identities":
-		return "identity_id"
-	case "ledgers":
-		return "ledger_id"
-	case "balances":
-		return "balance_id"
-	case "transactions":
-		return "transaction_id"
-	default:
-		return ""
+	if config, ok := collectionConfigs[table]; ok {
+		return config.IDField
 	}
+	return ""
 }
 
 // upsertDocument handles the final upsert operation to Typesense
@@ -282,7 +320,11 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 		Fields: currentSchemaResponse.Fields,
 	}
 
-	latestSchema := getLatestSchema(collectionName)
+	config, ok := collectionConfigs[collectionName]
+	if !ok {
+		return fmt.Errorf("unknown collection: %s", collectionName)
+	}
+	latestSchema := config.Schema
 
 	// Compare the current schema with the latest schema and get any new fields.
 	newFields := compareSchemas(currentSchema, latestSchema)
@@ -336,24 +378,6 @@ func getDefaultValue(fieldType string) interface{} {
 		return false
 	case "string[]":
 		return []string{}
-	default:
-		return nil
-	}
-}
-
-// getLatestSchema returns the latest schema for a given collection name. This function should be updated whenever the schema changes.
-func getLatestSchema(collectionName string) *api.CollectionSchema {
-	switch collectionName {
-	case "ledgers":
-		return getLedgerSchema()
-	case "balances":
-		return getBalanceSchema()
-	case "transactions":
-		return getTransactionSchema()
-	case "reconciliations":
-		return getReconciliationSchema()
-	case "identities":
-		return getIdentitySchema()
 	default:
 		return nil
 	}
