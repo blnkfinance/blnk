@@ -177,7 +177,7 @@ function postTxn(dest) {
     allow_overdraft: true,
     reference: uuidv4(),
     currency: "USD",
-    source: "@world",
+    source: "@test_account_" + uuidv4(),
     destination: dest,
   });
 
