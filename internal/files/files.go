@@ -156,7 +156,9 @@ func createTempFile(originalFilename string) (*os.File, error) {
 func cleanupTempFile(file *os.File) {
 	if file != nil {
 		filename := file.Name()
-		file.Close()
+		if err := file.Close(); err != nil {
+			log.Printf("Error closing temporary file %s: %v", filename, err)
+		}
 		if err := os.Remove(filename); err != nil {
 			log.Printf("Error removing temporary file %s: %v", filename, err)
 		}
