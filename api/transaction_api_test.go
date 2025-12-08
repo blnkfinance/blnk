@@ -408,7 +408,7 @@ func TestRecordTransactionPrecisionValidation(t *testing.T) {
 		resp, reqErr := SetUpTestRequest(testRequest)
 		require.NoError(t, reqErr)
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
-		assert.Equal(t, model2.ErrPrecisionMustBeInteger.Error(), response["error"])
+		assert.Equal(t, "precision: precision must be an integer value.", response["errors"])
 
 		sourceAfter, err := b.GetBalanceByID(ctx, sourceBalance.BalanceID, nil, false)
 		require.NoError(t, err)

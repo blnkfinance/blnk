@@ -99,6 +99,16 @@ func SlackNotification(err error) {
 	}
 }
 
+// WebhookSender defines a function signature for sending webhooks.
+type WebhookSender func(event string, payload interface{}) error
+
+var webhookSender WebhookSender
+
+// RegisterWebhookSender registers a function to handle webhook sending.
+func RegisterWebhookSender(sender WebhookSender) {
+	webhookSender = sender
+}
+
 // NotifyError sends an error notification through the configured notification system.
 // It logs the error locally and sends a notification via Slack (if configured).
 //
@@ -121,6 +131,18 @@ func NotifyError(systemError error) {
 		// If Slack is configured, send the error notification to Slack
 		if conf.Notification.Slack.WebhookUrl != "" {
 			SlackNotification(systemError)
+		}
+
+		// If a webhook sender is registered and webhook URL is configured, send the webhook
+		if webhookSender != nil && conf.Notification.Webhook.Url != "" {
+			payload := map[string]interface{}{
+				"error": systemError.Error(),
+				"time":  time.Now(),
+			}
+			err := webhookSender("system.error", payload)
+			if err != nil {
+				log.Printf("Error sending webhook notification: %v", err)
+			}
 		}
 	}(systemError)
 }
