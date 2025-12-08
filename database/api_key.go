@@ -104,9 +104,11 @@ func (s *Datasource) GetAPIKey(ctx context.Context, key string) (*model.APIKey, 
 
 	// Try to get from cache first
 	var apiKey model.APIKey
-	err := s.Cache.Get(ctx, cacheKey, &apiKey)
-	if err == nil && apiKey.Key != "" {
-		return &apiKey, nil
+	if s.Cache != nil {
+		err := s.Cache.Get(ctx, cacheKey, &apiKey)
+		if err == nil && apiKey.Key != "" {
+			return &apiKey, nil
+		}
 	}
 
 	// Cache miss - query the database
@@ -117,7 +119,7 @@ func (s *Datasource) GetAPIKey(ctx context.Context, key string) (*model.APIKey, 
 	`
 
 	var scopes pq.StringArray
-	err = s.Conn.QueryRowContext(ctx, query, hashedKey).Scan(
+	err := s.Conn.QueryRowContext(ctx, query, hashedKey).Scan(
 		&apiKey.APIKeyID,
 		&apiKey.Key,
 		&apiKey.Name,
@@ -138,11 +140,11 @@ func (s *Datasource) GetAPIKey(ctx context.Context, key string) (*model.APIKey, 
 		return nil, err
 	}
 
-	// Cache the result for 5 minutes
-	err = s.Cache.Set(ctx, cacheKey, &apiKey, 5*time.Minute)
-	if err != nil {
-		// Log the error, but don't fail the request
-		log.Printf("Failed to cache API key: %v", err)
+	if s.Cache != nil {
+		err = s.Cache.Set(ctx, cacheKey, &apiKey, 5*time.Minute)
+		if err != nil {
+			log.Printf("Failed to cache API key: %v", err)
+		}
 	}
 
 	return &apiKey, nil
@@ -201,10 +203,12 @@ func (s *Datasource) RevokeAPIKey(ctx context.Context, id, ownerID string) error
 
 	// Invalidate the cache entry for this API key
 	cacheKey := getAPIKeyCacheKey(hashedKey)
-	err = s.Cache.Delete(ctx, cacheKey)
-	if err != nil {
-		// Log the error, but don't fail the revocation
-		log.Printf("Failed to invalidate API key cache: %v", err)
+	if s.Cache != nil {
+		err = s.Cache.Delete(ctx, cacheKey)
+		if err != nil {
+			// Log the error, but don't fail the revocation
+			log.Printf("Failed to invalidate API key cache: %v", err)
+		}
 	}
 
 	return nil
