@@ -30,6 +30,7 @@ import (
 
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/blnkfinance/blnk/model"
@@ -62,6 +63,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 	if err != nil {
 		// Handle reference already used error
 		if strings.Contains(strings.ToLower(err.Error()), "reference") && strings.Contains(strings.ToLower(err.Error()), "already been used") {
+			notification.NotifyError(err)
 			return nil
 		}
 
