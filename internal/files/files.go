@@ -29,8 +29,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blnkfinance/blnk/model"
@@ -38,6 +40,15 @@ import (
 
 // StoreFunc defines the function signature for storing transactions.
 type StoreFunc func(ctx context.Context, uploadID string, txn model.ExternalTransaction) error
+
+// Configuration constants for performance tuning
+const (
+	DefaultBatchSize     = 500
+	DefaultWorkerCount   = 4
+	DefaultBufferSize    = 64 * 1024 // 64KB buffer
+	DefaultChannelSize   = 1000
+	ContextCheckInterval = 100
+)
 
 // UploadExternalData handles the process of uploading external data by detecting file type, parsing, and storing it.
 // Parameters:
@@ -51,22 +62,22 @@ type StoreFunc func(ctx context.Context, uploadID string, txn model.ExternalTran
 // - int: The total number of records processed.
 // - error: If any step of the process fails.
 func UploadExternalData(ctx context.Context, source string, reader io.Reader, filename string, store StoreFunc) (string, int, error) {
-	uploadID := model.GenerateUUIDWithSuffix("upload") // Generate a unique ID for the upload.
+	uploadID := model.GenerateUUIDWithSuffix("upload")
 
-	// Create a temporary file and populate it with the uploaded data.
-	tempFile, err := createAndPopulateTempFile(filename, reader)
+	// Use buffered reader for better I/O performance
+	bufferedReader := bufio.NewReaderSize(reader, DefaultBufferSize)
+
+	tempFile, err := createAndPopulateTempFile(filename, bufferedReader)
 	if err != nil {
 		return "", 0, err
 	}
-	defer cleanupTempFile(tempFile) // Ensure the temp file is cleaned up after processing.
+	defer cleanupTempFile(tempFile)
 
-	// Detect the file type (CSV or JSON) based on the content.
 	fileType, err := detectFileTypeFromTempFile(tempFile, filename)
 	if err != nil {
 		return "", 0, err
 	}
 
-	// Parse and store the data based on its file type.
 	total, err := parseAndStoreData(ctx, uploadID, source, tempFile, fileType, store)
 	if err != nil {
 		return "", 0, err
@@ -75,20 +86,22 @@ func UploadExternalData(ctx context.Context, source string, reader io.Reader, fi
 	return uploadID, total, nil
 }
 
-// createAndPopulateTempFile creates a temporary file and writes the uploaded data to it.
 func createAndPopulateTempFile(filename string, reader io.Reader) (*os.File, error) {
-	// Create a new temporary file with a name based on the original filename.
 	tempFile, err := createTempFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("error creating temporary file: %w", err)
 	}
 
-	// Copy the uploaded data into the temporary file.
-	if _, err := io.Copy(tempFile, reader); err != nil {
+	// Use buffered writer for faster writes
+	writer := bufio.NewWriterSize(tempFile, DefaultBufferSize)
+	if _, err := io.Copy(writer, reader); err != nil {
 		return nil, fmt.Errorf("error copying upload data: %w", err)
 	}
 
-	// Reset the file pointer to the beginning for subsequent reading.
+	if err := writer.Flush(); err != nil {
+		return nil, fmt.Errorf("error flushing temporary file: %w", err)
+	}
+
 	if _, err := tempFile.Seek(0, 0); err != nil {
 		return nil, fmt.Errorf("error seeking temporary file: %w", err)
 	}
@@ -96,21 +109,17 @@ func createAndPopulateTempFile(filename string, reader io.Reader) (*os.File, err
 	return tempFile, nil
 }
 
-// detectFileTypeFromTempFile detects the file type by reading the first 512 bytes from the temporary file.
 func detectFileTypeFromTempFile(tempFile *os.File, filename string) (string, error) {
 	header := make([]byte, 512)
-	// Read the first 512 bytes of the file (enough for MIME type detection).
 	if _, err := tempFile.Read(header); err != nil && err != io.EOF {
 		return "", fmt.Errorf("error reading file header: %w", err)
 	}
 
-	// Detect the file type based on the content.
 	fileType, err := DetectFileType(header, filename)
 	if err != nil {
 		return "", fmt.Errorf("error detecting file type: %w", err)
 	}
 
-	// Reset the file pointer to the beginning for subsequent reading.
 	if _, err := tempFile.Seek(0, 0); err != nil {
 		return "", fmt.Errorf("error seeking temporary file: %w", err)
 	}
@@ -118,31 +127,23 @@ func detectFileTypeFromTempFile(tempFile *os.File, filename string) (string, err
 	return fileType, nil
 }
 
-// parseAndStoreData parses and stores data based on the file type (either CSV or JSON).
 func parseAndStoreData(ctx context.Context, uploadID, source string, reader io.Reader, fileType string, store StoreFunc) (int, error) {
 	switch fileType {
 	case "text/csv", "text/csv; charset=utf-8":
-		// Handle CSV files.
-		err := ProcessCSV(ctx, uploadID, source, reader, store)
-		return 0, err // CSV parsing doesn't return a count in the original implementation logic for count in ProcessCSVRows return
+		return ProcessCSV(ctx, uploadID, source, reader, store)
 	case "application/json":
-		// Handle JSON files.
 		return ProcessJSON(ctx, uploadID, source, reader, store)
 	default:
-		// Return an error if the file type is unsupported.
 		return 0, fmt.Errorf("unsupported file type: %s", fileType)
 	}
 }
 
-// createTempFile creates a new temporary file for storing the uploaded data.
 func createTempFile(originalFilename string) (*os.File, error) {
-	// Create the directory for temporary files if it doesn't exist.
 	tempDir := filepath.Join(os.TempDir(), "blnk_uploads")
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return nil, fmt.Errorf("error creating temporary directory: %w", err)
 	}
 
-	// Create a temporary file with a prefix based on the original filename.
 	prefix := fmt.Sprintf("%s_", filepath.Base(originalFilename))
 	tempFile, err := os.CreateTemp(tempDir, prefix)
 	if err != nil {
@@ -152,52 +153,41 @@ func createTempFile(originalFilename string) (*os.File, error) {
 	return tempFile, nil
 }
 
-// cleanupTempFile removes the specified temporary file from the filesystem.
 func cleanupTempFile(file *os.File) {
 	if file != nil {
-		filename := file.Name() // Get the file name.
-		file.Close()            // Close the file before removing it.
+		filename := file.Name()
+		file.Close()
 		if err := os.Remove(filename); err != nil {
-			// Log any errors encountered during file removal.
 			log.Printf("Error removing temporary file %s: %v", filename, err)
 		}
 	}
 }
 
-// DetectFileType attempts to detect the file type based on its extension or content.
-// If the file extension can identify the type, it returns that, otherwise, it inspects the content of the file.
 func DetectFileType(data []byte, filename string) (string, error) {
-	// Attempt to detect file type by its extension first.
 	if mimeType := DetectByExtension(filename); mimeType != "" {
 		return mimeType, nil
 	}
-	// If detection by extension fails, analyze the content.
 	return DetectByContent(data)
 }
 
-// DetectByExtension detects the MIME type by the file extension.
 func DetectByExtension(filename string) string {
-	ext := strings.ToLower(filepath.Ext(filename)) // Extract and lower the file extension.
-	return mime.TypeByExtension(ext)               // Use the standard library to get MIME type.
+	ext := strings.ToLower(filepath.Ext(filename))
+	return mime.TypeByExtension(ext)
 }
 
-// DetectByContent detects the MIME type based on the content of the file.
 func DetectByContent(data []byte) (string, error) {
-	mimeType := http.DetectContentType(data) // Detect content type by analyzing the first 512 bytes.
+	mimeType := http.DetectContentType(data)
 
 	switch mimeType {
 	case "application/octet-stream", "text/plain":
-		// If detected as binary or plain text, analyze the content further.
 		return AnalyzeTextContent(data)
 	case "text/csv; charset=utf-8":
-		// Directly return if CSV is detected.
 		return "text/csv", nil
 	default:
-		return mimeType, nil // Return detected MIME type.
+		return mimeType, nil
 	}
 }
 
-// AnalyzeTextContent further inspects text-based content to differentiate between CSV, JSON, or plain text.
 func AnalyzeTextContent(data []byte) (string, error) {
 	if LooksLikeCSV(data) {
 		return "text/csv", nil
@@ -205,109 +195,196 @@ func AnalyzeTextContent(data []byte) (string, error) {
 	if json.Valid(data) {
 		return "application/json", nil
 	}
-	return "text/plain", nil // Default to plain text if no other format matches.
+	return "text/plain", nil
 }
 
-// LooksLikeCSV checks whether the provided data looks like a CSV file.
 func LooksLikeCSV(data []byte) bool {
-	lines := bytes.Split(data, []byte("\n")) // Split the content into lines.
+	lines := bytes.Split(data, []byte("\n"))
 	if len(lines) < 2 {
-		return false // Require at least two lines for CSV.
+		return false
 	}
 
-	// Count the number of fields (columns) in the first line.
 	fields := bytes.Count(lines[0], []byte(",")) + 1
-	// Ensure all subsequent lines have the same number of fields.
-	for _, line := range lines[1:] {
+	// Only check first few lines for performance
+	maxLinesToCheck := 5
+	if len(lines) < maxLinesToCheck {
+		maxLinesToCheck = len(lines)
+	}
+
+	for _, line := range lines[1:maxLinesToCheck] {
 		if len(line) == 0 {
-			continue // Skip empty lines.
+			continue
 		}
 		if bytes.Count(line, []byte(","))+1 != fields {
-			return false // Return false if field count doesn't match.
+			return false
 		}
 	}
 
-	return fields > 1 // Return true if there are at least two fields.
+	return fields > 1
 }
 
-// ProcessCSV reads and processes a CSV file from an io.Reader, parsing each row and storing the corresponding transactions.
-func ProcessCSV(ctx context.Context, uploadID, source string, reader io.Reader, store StoreFunc) error {
-	csvReader := csv.NewReader(bufio.NewReader(reader))
+// ProcessCSV now uses parallel processing with workers
+func ProcessCSV(ctx context.Context, uploadID, source string, reader io.Reader, store StoreFunc) (int, error) {
+	bufferedReader := bufio.NewReaderSize(reader, DefaultBufferSize)
+	csvReader := csv.NewReader(bufferedReader)
+	csvReader.ReuseRecord = true // Reuse slice to reduce allocations
 
-	// Read the header row to determine column mapping.
 	headers, err := csvReader.Read()
 	if err != nil {
-		return fmt.Errorf("error reading CSV headers: %w", err)
+		return 0, fmt.Errorf("error reading CSV headers: %w", err)
 	}
 
-	// Create a column map to associate column names with their indices.
-	columnMap, err := createColumnMap(headers)
+	// Make a copy of headers since ReuseRecord is enabled
+	headersCopy := make([]string, len(headers))
+	copy(headersCopy, headers)
+
+	columnMap, err := createColumnMap(headersCopy)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	// Process the CSV rows based on the column map.
-	return processCSVRows(ctx, uploadID, source, csvReader, columnMap, store)
+	return processCSVRowsParallel(ctx, uploadID, source, csvReader, columnMap, store)
 }
 
-// processCSVRows reads and processes each row in the CSV file, parsing the fields and storing the transactions.
-func processCSVRows(ctx context.Context, uploadID, source string, csvReader *csv.Reader, columnMap map[string]int, store StoreFunc) error {
-	var errs []error // To accumulate any errors encountered during processing.
-	rowNum := 1      // Row number starts at 1 to account for the header row.
+// Parallel CSV processing with worker pool
+func processCSVRowsParallel(ctx context.Context, uploadID, source string, csvReader *csv.Reader, columnMap map[string]int, store StoreFunc) (int, error) {
+	workerCount := runtime.NumCPU()
+	if workerCount > DefaultWorkerCount {
+		workerCount = DefaultWorkerCount
+	}
 
-	for {
-		record, err := csvReader.Read() // Read the next row.
-		if err == io.EOF {
-			break // Stop processing if end of file is reached.
-		}
-		if err != nil {
-			errs = append(errs, fmt.Errorf("error reading row %d: %w", rowNum, err))
-			continue // Continue processing other rows even if this row fails.
-		}
+	rowChan := make(chan []string, DefaultChannelSize)
+	errChan := make(chan error, workerCount)
+	var wg sync.WaitGroup
+	totalCount := int64(0)
+	var countMu sync.Mutex
 
-		rowNum++ // Increment row number.
+	// Start workers
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			processWorker(ctx, uploadID, source, rowChan, columnMap, store, &totalCount, &countMu, errChan)
+		}()
+	}
 
-		// Parse the row into an ExternalTransaction object.
-		externalTxn, err := parseExternalTransaction(record, columnMap, source)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("error parsing row %d: %w", rowNum, err))
-			continue // Skip this row if parsing fails.
-		}
+	// Read CSV rows and send to workers
+	go func() {
+		rowNum := 1
+		for {
+			record, err := csvReader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				errChan <- fmt.Errorf("error reading row %d: %w", rowNum, err)
+				continue
+			}
 
-		// Store the parsed transaction.
-		if err := store(ctx, uploadID, externalTxn); err != nil {
-			errs = append(errs, fmt.Errorf("error storing transaction from row %d: %w", rowNum, err))
-		}
+			rowNum++
 
-		// Check for context cancellation every 1000 rows.
-		if rowNum%1000 == 0 {
+			// Make a copy since csvReader.ReuseRecord is true
+			recordCopy := make([]string, len(record))
+			copy(recordCopy, record)
+
 			select {
 			case <-ctx.Done():
-				return ctx.Err() // Return if the context is cancelled.
+				close(rowChan)
+				return
+			case rowChan <- recordCopy:
+			}
+		}
+		close(rowChan)
+	}()
+
+	// Wait for workers to finish
+	wg.Wait()
+	close(errChan)
+
+	// Collect errors
+	var errs []error
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		return int(totalCount), fmt.Errorf("encountered %d errors while processing CSV: %v", len(errs), errs)
+	}
+
+	return int(totalCount), nil
+}
+
+func processWorker(ctx context.Context, uploadID, source string, rowChan <-chan []string, columnMap map[string]int, store StoreFunc, totalCount *int64, countMu *sync.Mutex, errChan chan<- error) {
+	batch := make([]model.ExternalTransaction, 0, DefaultBatchSize)
+	processCount := 0
+
+	for record := range rowChan {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		externalTxn, err := parseExternalTransaction(record, columnMap, source)
+		if err != nil {
+			errChan <- err
+			continue
+		}
+
+		batch = append(batch, externalTxn)
+
+		// Process batch when full
+		if len(batch) >= DefaultBatchSize {
+			if err := storeBatch(ctx, uploadID, batch, store); err != nil {
+				errChan <- err
+			} else {
+				countMu.Lock()
+				*totalCount += int64(len(batch))
+				countMu.Unlock()
+			}
+			batch = batch[:0] // Reset batch
+		}
+
+		processCount++
+		if processCount%ContextCheckInterval == 0 {
+			select {
+			case <-ctx.Done():
+				return
 			default:
 			}
 		}
 	}
 
-	if len(errs) > 0 {
-		// If there were errors, return a summary of them.
-		return fmt.Errorf("encountered %d errors while processing CSV: %v", len(errs), errs)
+	// Process remaining items in batch
+	if len(batch) > 0 {
+		if err := storeBatch(ctx, uploadID, batch, store); err != nil {
+			errChan <- err
+		} else {
+			countMu.Lock()
+			*totalCount += int64(len(batch))
+			countMu.Unlock()
+		}
 	}
+}
 
+func storeBatch(ctx context.Context, uploadID string, batch []model.ExternalTransaction, store StoreFunc) error {
+	for _, txn := range batch {
+		if err := store(ctx, uploadID, txn); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// createColumnMap creates a map of column names to their indices based on the headers row of a CSV file.
 func createColumnMap(headers []string) (map[string]int, error) {
-	requiredColumns := []string{"ID", "Amount", "Date"} // Columns that must be present in the CSV.
-	columnMap := make(map[string]int)
+	requiredColumns := []string{"ID", "Amount", "Date"}
+	columnMap := make(map[string]int, len(headers))
 
-	// Map each column name to its index.
 	for i, header := range headers {
-		columnMap[strings.ToLower(strings.TrimSpace(header))] = i
+		normalized := strings.ToLower(strings.TrimSpace(header))
+		columnMap[normalized] = i
 	}
 
-	// Ensure all required columns are present.
 	for _, col := range requiredColumns {
 		if _, exists := columnMap[strings.ToLower(col)]; !exists {
 			return nil, fmt.Errorf("required column '%s' not found in CSV", col)
@@ -317,14 +394,11 @@ func createColumnMap(headers []string) (map[string]int, error) {
 	return columnMap, nil
 }
 
-// parseExternalTransaction parses a row of the CSV file into an ExternalTransaction object.
 func parseExternalTransaction(record []string, columnMap map[string]int, source string) (model.ExternalTransaction, error) {
 	if len(record) != len(columnMap) {
-		// Return an error if the number of fields in the row doesn't match the column map.
 		return model.ExternalTransaction{}, fmt.Errorf("incorrect number of fields in record")
 	}
 
-	// Get required fields from the record and parse them into appropriate types.
 	id, err := getRequiredField(record, columnMap, "id")
 	if err != nil {
 		return model.ExternalTransaction{}, err
@@ -358,7 +432,6 @@ func parseExternalTransaction(record []string, columnMap map[string]int, source 
 	}
 	date := parseTime(dateStr)
 
-	// Return the parsed ExternalTransaction object.
 	return model.ExternalTransaction{
 		ID:          id,
 		Amount:      amount,
@@ -370,7 +443,6 @@ func parseExternalTransaction(record []string, columnMap map[string]int, source 
 	}, nil
 }
 
-// getRequiredField retrieves a field from a CSV record, ensuring it is not empty.
 func getRequiredField(record []string, columnMap map[string]int, field string) (string, error) {
 	if index, exists := columnMap[field]; exists && index < len(record) {
 		value := strings.TrimSpace(record[index])
@@ -382,51 +454,61 @@ func getRequiredField(record []string, columnMap map[string]int, field string) (
 	return "", fmt.Errorf("required field '%s' not found in record", field)
 }
 
-// ProcessJSON parses and stores transactions from a JSON file.
+// ProcessJSON now uses batch processing
 func ProcessJSON(ctx context.Context, uploadID, source string, reader io.Reader, store StoreFunc) (int, error) {
-	decoder := json.NewDecoder(reader)
+	bufferedReader := bufio.NewReaderSize(reader, DefaultBufferSize)
+	decoder := json.NewDecoder(bufferedReader)
+
 	var transactions []model.ExternalTransaction
-	// Decode the JSON data into a slice of ExternalTransaction objects.
 	if err := decoder.Decode(&transactions); err != nil {
 		return 0, err
 	}
 
-	// Store each parsed transaction.
-	for _, txn := range transactions {
-		txn.Source = source
-		if err := store(ctx, uploadID, txn); err != nil {
-			return 0, err
+	// Process in batches for better performance
+	batchSize := DefaultBatchSize
+	totalProcessed := 0
+
+	for i := 0; i < len(transactions); i += batchSize {
+		end := i + batchSize
+		if end > len(transactions) {
+			end = len(transactions)
+		}
+
+		batch := transactions[i:end]
+		for j := range batch {
+			batch[j].Source = source
+			if err := store(ctx, uploadID, batch[j]); err != nil {
+				return totalProcessed, err
+			}
+		}
+
+		totalProcessed += len(batch)
+
+		// Check context periodically
+		if i%ContextCheckInterval == 0 {
+			select {
+			case <-ctx.Done():
+				return totalProcessed, ctx.Err()
+			default:
+			}
 		}
 	}
 
 	return len(transactions), nil
 }
 
-// parseFloat parses a string into a float64 value.
 func parseFloat(s string) float64 {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return 0 // Return 0 if parsing fails.
+		return 0
 	}
 	return f
 }
 
-// parseTime parses a string into a time.Time object in RFC3339 format.
 func parseTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Time{} // Return zero time if parsing fails.
+		return time.Time{}
 	}
 	return t
-}
-
-// contains checks whether a slice contains a specific string.
-// Not used locally but useful helper; keeping it if needed or can be removed if not used.
-func contains(slice []string, item string) bool {
-	for _, a := range slice {
-		if a == item {
-			return true
-		}
-	}
-	return false
 }
