@@ -41,7 +41,7 @@ func (a Api) CreateAPIKey(c *gin.Context) {
 // - 200 OK: Returns the list of API keys
 // - 500 Internal Server Error: If there's an error retrieving the keys
 func (a Api) ListAPIKeys(c *gin.Context) {
-	owner := c.GetString("owner")
+	owner := c.Query("owner")
 	if owner == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
@@ -67,7 +67,7 @@ func (a Api) ListAPIKeys(c *gin.Context) {
 // - 403 Forbidden: If the user doesn't own the API key
 func (a Api) RevokeAPIKey(c *gin.Context) {
 	id := c.Param("id")
-	owner := c.GetString("owner")
+	owner := c.Query("owner")
 	if owner == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
