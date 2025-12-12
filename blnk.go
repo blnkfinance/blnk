@@ -26,6 +26,7 @@ import (
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/hooks"
+	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/blnkfinance/blnk/internal/tokenization"
@@ -125,7 +126,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	tokenizer := initializeTokenizationService(configuration)
 	httpClient := initializeHTTPClient()
 
-	return &Blnk{
+	b := &Blnk{
 		datasource:  db,
 		bt:          bt,
 		queue:       newQueue,
@@ -135,7 +136,16 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 		tokenizer:   tokenizer,
 		httpClient:  httpClient,
 		Hooks:       hookManager,
-	}, nil
+	}
+
+	notification.RegisterWebhookSender(func(event string, payload interface{}) error {
+		return b.SendWebhook(NewWebhook{
+			Event:   event,
+			Payload: payload,
+		})
+	})
+
+	return b, nil
 }
 
 // Close properly closes all connections and resources used by the Blnk instance.
