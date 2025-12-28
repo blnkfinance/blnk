@@ -20,6 +20,7 @@ import (
 	"math"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -279,5 +280,46 @@ func TestSplitTransactionPrecise(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+// TestGetEffectiveDate tests the GetEffectiveDate helper method
+func TestGetEffectiveDate(t *testing.T) {
+	now := time.Now()
+	yesterday := now.Add(-24 * time.Hour)
+
+	tests := []struct {
+		name          string
+		transaction   Transaction
+		expectedTime  time.Time
+		description   string
+	}{
+		{
+			name: "EffectiveDate is set - should return EffectiveDate",
+			transaction: Transaction{
+				CreatedAt:     now,
+				EffectiveDate: &yesterday,
+			},
+			expectedTime: yesterday,
+			description:  "When EffectiveDate is explicitly set, it should be returned",
+		},
+		{
+			name: "EffectiveDate is nil - should return CreatedAt",
+			transaction: Transaction{
+				CreatedAt:     now,
+				EffectiveDate: nil,
+			},
+			expectedTime: now,
+			description:  "When EffectiveDate is nil, CreatedAt should be returned as fallback",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.transaction.GetEffectiveDate()
+			if !result.Equal(tt.expectedTime) {
+				t.Errorf("GetEffectiveDate() = %v, want %v. %s", result, tt.expectedTime, tt.description)
+			}
+		})
 	}
 }

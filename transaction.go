@@ -1290,6 +1290,9 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	transaction.Status = StatusCommit
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.CreatedAt = time.Now()
+	if transaction.EffectiveDate == nil {
+		transaction.EffectiveDate = &transaction.CreatedAt
+	}
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
 	transaction.Hash = transaction.HashTxn()
@@ -1486,6 +1489,9 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	transaction.Status = StatusVoid
 	transaction.PreciseAmount = amountLeft
 	transaction.CreatedAt = time.Now()
+	if transaction.EffectiveDate == nil {
+		transaction.EffectiveDate = &transaction.CreatedAt
+	}
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
@@ -1761,6 +1767,9 @@ func setTransactionStatus(transaction *model.Transaction) {
 // - transaction *model.Transaction: The transaction for which to set metadata.
 func setTransactionMetadata(transaction *model.Transaction) {
 	transaction.CreatedAt = time.Now()
+	if transaction.EffectiveDate == nil {
+		transaction.EffectiveDate = &transaction.CreatedAt
+	}
 	transaction.Hash = transaction.HashTxn()
 	transaction.PreciseAmount = model.ApplyPrecision(transaction)
 	if transaction.TransactionID == "" {
