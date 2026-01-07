@@ -69,7 +69,7 @@ func init() {
 			Schema:  getTransactionSchema(),
 			IDField: "transaction_id",
 			TimeFields: []string{
-				"created_at", "scheduled_for", "inflight_expiry_date",
+				"created_at", "scheduled_for", "inflight_expiry_date", "effective_date",
 			},
 			BigIntFields: []string{"precise_amount"},
 		},
@@ -465,6 +465,7 @@ func getTransactionSchema() *api.CollectionSchema {
 			{Name: "created_at", Type: "int64", Facet: &facet},
 			{Name: "scheduled_for", Type: "int64", Facet: &facet},
 			{Name: "inflight_expiry_date", Type: "int64", Facet: &facet},
+			{Name: "effective_date", Type: "int64", Facet: &facet},
 			{Name: "meta_data", Type: "object", Facet: &facet, Optional: &enableNested},
 		},
 		DefaultSortingField: &sortBy,
