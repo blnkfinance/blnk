@@ -146,6 +146,41 @@ func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 
+// indexBatchData indexes a batch of items into TypeSense in dependency order.
+// It first indexes all dependencies (e.g., balances), then indexes the primary item (e.g., transaction).
+// This ensures referential integrity in the search index.
+func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error {
+	if b.cnf.TypeSense.Dns == "" {
+		return nil
+	}
+
+	var batch search.IndexBatch
+
+	// Unmarshal the batch data from the task payload.
+	if err := json.Unmarshal(t.Payload(), &batch); err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	// Initialize a new TypeSense client and ensure collections exist.
+	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
+	err := newSearch.EnsureCollectionsExist(ctx)
+	if err != nil {
+		log.Printf("Failed to ensure collections exist: %v", err)
+		return err
+	}
+
+	// Handle the batch notification - indexes dependencies first, then primary.
+	err = newSearch.HandleBatchNotification(ctx, &batch)
+	if err != nil {
+		log.Printf("Error indexing batch %s: %v", batch.ID, err)
+		return err
+	}
+
+	log.Printf(" [*] Batch indexed: %s (deps: %d)", batch.ID, len(batch.Dependencies))
+	return nil
+}
+
 // processInflightExpiry handles the expiry of inflight transactions.
 // It voids the transaction by its ID and logs the action.
 func (b *blnkInstance) processInflightExpiry(cxt context.Context, t *asynq.Task) error {
@@ -264,6 +299,7 @@ func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 	mux.HandleFunc(cfg.Queue.WebhookQueue, b.blnk.ProcessWebhook)
 	mux.HandleFunc("new:hook_execution", b.blnk.Hooks.ProcessHookTask)
 	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
+	mux.HandleFunc("new:index:batch", b.indexBatchData)
 }
 
 // workerCommands defines the "workers" command to start worker processes.

@@ -97,6 +97,66 @@ type NotificationPayload struct {
 	Data  map[string]interface{} `json:"data"`
 }
 
+// IndexItem represents a single item to be indexed in Typesense.
+type IndexItem struct {
+	Collection string      `json:"collection"` // Collection name (e.g., "balances", "transactions")
+	DocumentID string      `json:"document_id"`
+	Data       interface{} `json:"data"`
+}
+
+// IndexBatch represents a batch of items to be indexed in dependency order.
+// Dependencies are indexed first, then the primary item is indexed.
+// This ensures referential integrity in the search index.
+type IndexBatch struct {
+	ID           string      `json:"id"`
+	Dependencies []IndexItem `json:"dependencies"` // Items that must be indexed first (e.g., balances)
+	Primary      *IndexItem  `json:"primary"`      // Primary item indexed after dependencies (e.g., transaction)
+	CreatedAt    time.Time   `json:"created_at"`
+}
+
+// NewIndexBatch creates a new IndexBatch with the given ID.
+func NewIndexBatch(id string) *IndexBatch {
+	return &IndexBatch{
+		ID:           id,
+		Dependencies: make([]IndexItem, 0),
+		CreatedAt:    time.Now(),
+	}
+}
+
+// AddDependency adds a dependency item to the batch.
+// Dependencies are indexed before the primary item.
+func (b *IndexBatch) AddDependency(collection, documentID string, data interface{}) {
+	b.Dependencies = append(b.Dependencies, IndexItem{
+		Collection: collection,
+		DocumentID: documentID,
+		Data:       data,
+	})
+}
+
+// SetPrimary sets the primary item to be indexed after all dependencies.
+func (b *IndexBatch) SetPrimary(collection, documentID string, data interface{}) {
+	b.Primary = &IndexItem{
+		Collection: collection,
+		DocumentID: documentID,
+		Data:       data,
+	}
+}
+
+// Deduplicate removes duplicate dependencies based on collection and document ID.
+func (b *IndexBatch) Deduplicate() {
+	seen := make(map[string]bool)
+	unique := make([]IndexItem, 0, len(b.Dependencies))
+
+	for _, dep := range b.Dependencies {
+		key := dep.Collection + ":" + dep.DocumentID
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, dep)
+		}
+	}
+	b.Dependencies = unique
+}
+
 // NewTypesenseClient initializes and returns a new Typesense client instance.
 func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
 	client := typesense.NewClient(
@@ -184,6 +244,59 @@ func (t *TypesenseClient) HandleNotification(ctx context.Context, table string, 
 
 	// Upsert the document
 	return t.upsertDocument(ctx, table, data)
+}
+
+// HandleBatchNotification processes a batch of items and indexes them in dependency order.
+// It first indexes all dependencies (e.g., balances), then indexes the primary item (e.g., transaction).
+// This ensures referential integrity in the search index.
+func (t *TypesenseClient) HandleBatchNotification(ctx context.Context, batch *IndexBatch) error {
+	// Deduplicate dependencies to avoid redundant indexing
+	batch.Deduplicate()
+
+	// Step 1: Index all dependencies first (in order)
+	for _, dep := range batch.Dependencies {
+		data, err := toMap(dep.Data)
+		if err != nil {
+			return fmt.Errorf("failed to convert dependency %s/%s to map: %w", dep.Collection, dep.DocumentID, err)
+		}
+		if err := t.HandleNotification(ctx, dep.Collection, data); err != nil {
+			return fmt.Errorf("failed to index dependency %s/%s: %w", dep.Collection, dep.DocumentID, err)
+		}
+	}
+
+	// Step 2: Index primary entity after dependencies exist
+	if batch.Primary != nil {
+		data, err := toMap(batch.Primary.Data)
+		if err != nil {
+			return fmt.Errorf("failed to convert primary %s/%s to map: %w", batch.Primary.Collection, batch.Primary.DocumentID, err)
+		}
+		if err := t.HandleNotification(ctx, batch.Primary.Collection, data); err != nil {
+			return fmt.Errorf("failed to index primary %s/%s: %w", batch.Primary.Collection, batch.Primary.DocumentID, err)
+		}
+	}
+
+	return nil
+}
+
+// toMap converts an interface{} to map[string]interface{} via JSON marshaling.
+func toMap(data interface{}) (map[string]interface{}, error) {
+	// If already a map, return it directly
+	if m, ok := data.(map[string]interface{}); ok {
+		return m, nil
+	}
+
+	// Marshal and unmarshal to convert struct to map
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // processMetadata handles metadata field normalization for object schemas
@@ -305,8 +418,8 @@ func (t *TypesenseClient) upsertDocument(ctx context.Context, table string, data
 	return nil
 }
 
-// MigrateTypeSenseSchema adds new fields from the latest schema to the existing collection schema in Typesense.
-// This is useful when the schema has been updated, and new fields need to be added.
+// MigrateTypeSenseSchema adds new fields and removes old fields from the existing collection schema in Typesense.
+// This is useful when the schema has been updated, and fields need to be added or removed.
 func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collectionName string) error {
 	collection := t.Client.Collection(collectionName)
 
@@ -326,10 +439,22 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 	}
 	latestSchema := config.Schema
 
-	// Compare the current schema with the latest schema and get any new fields.
-	newFields := compareSchemas(currentSchema, latestSchema)
+	newFields, removedFields := compareSchemas(currentSchema, latestSchema)
 
-	// Add each new field to the collection.
+	for _, field := range removedFields {
+		dropField := true
+		updateSchema := &api.CollectionUpdateSchema{
+			Fields: []api.Field{{Name: field, Drop: &dropField}},
+		}
+
+		_, err := collection.Update(ctx, updateSchema)
+		if err != nil {
+			logrus.Warnf("Could not drop field %s from collection %s: %v (continuing)", field, collectionName, err)
+			continue
+		}
+		logrus.Infof("Dropped field %s from collection %s", field, collectionName)
+	}
+
 	for _, field := range newFields {
 		updateSchema := &api.CollectionUpdateSchema{
 			Fields: []api.Field{field},
@@ -345,24 +470,34 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 	return nil
 }
 
-// compareSchemas compares the old schema with the new schema and returns any new fields that are present in the new schema but not in the old one.
-func compareSchemas(oldSchema, newSchema *api.CollectionSchema) []api.Field {
+// compareSchemas compares the old schema with the new schema and returns:
+// - newFields: fields present in new schema but not in old schema
+// - removedFields: field names present in old schema but not in new schema
+func compareSchemas(oldSchema, newSchema *api.CollectionSchema) ([]api.Field, []string) {
 	var newFields []api.Field
-	oldFieldMap := make(map[string]bool)
+	var removedFields []string
 
-	// Create a map of the old fields.
+	oldFieldMap := make(map[string]bool)
+	newFieldMap := make(map[string]bool)
+
 	for _, field := range oldSchema.Fields {
 		oldFieldMap[field.Name] = true
 	}
 
-	// Identify new fields that are in the new schema but not in the old schema.
 	for _, field := range newSchema.Fields {
+		newFieldMap[field.Name] = true
 		if !oldFieldMap[field.Name] {
 			newFields = append(newFields, field)
 		}
 	}
 
-	return newFields
+	for _, field := range oldSchema.Fields {
+		if !newFieldMap[field.Name] {
+			removedFields = append(removedFields, field.Name)
+		}
+	}
+
+	return newFields, removedFields
 }
 
 // getDefaultValue returns the default value for a given field type in Typesense.
@@ -440,8 +575,6 @@ func getTransactionSchema() *api.CollectionSchema {
 	enableNested := true
 	sourceId := "balances.balance_id"
 	destinationId := "balances.balance_id"
-	sourcesId := "balances.balance_id"
-	destinationsId := "balances.balance_id"
 	return &api.CollectionSchema{
 		Name: "transactions",
 		Fields: []api.Field{
@@ -460,8 +593,6 @@ func getTransactionSchema() *api.CollectionSchema {
 			{Name: "hash", Type: "string", Facet: &facet},
 			{Name: "allow_overdraft", Type: "bool", Facet: &facet},
 			{Name: "inflight", Type: "bool", Facet: &facet},
-			{Name: "sources", Type: "string[]", Reference: &sourcesId, Facet: &facet},
-			{Name: "destinations", Type: "string[]", Reference: &destinationsId, Facet: &facet},
 			{Name: "created_at", Type: "int64", Facet: &facet},
 			{Name: "scheduled_for", Type: "int64", Facet: &facet},
 			{Name: "inflight_expiry_date", Type: "int64", Facet: &facet},
