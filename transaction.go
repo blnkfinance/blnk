@@ -30,6 +30,7 @@ import (
 	"github.com/blnkfinance/blnk/config"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/internal/search"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -264,27 +265,47 @@ func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transa
 }
 
 // postTransactionActions performs post-processing actions for a transaction.
-// It starts a tracing span, queues the transaction data for indexing, and sends a webhook notification.
+// It starts a tracing span, queues the transaction and balance data for indexing in dependency order,
+// and sends a webhook notification.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
 // - transaction *model.Transaction: The transaction for which to perform post-processing actions.
-func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Transaction) {
+// - sourceBalance *model.Balance: The source balance (can be nil for rejected transactions).
+// - destinationBalance *model.Balance: The destination balance (can be nil for rejected transactions).
+func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) {
 	_, span := tracer.Start(ctx, "Post Transaction Actions")
 	defer span.End()
 
-	config, err := config.Fetch()
+	cfg, err := config.Fetch()
 	if err != nil {
 		span.RecordError(err)
 		return
 	}
 
 	go func() {
-		err := l.queue.queueIndexData(transaction.TransactionID, config.Transaction.IndexQueuePrefix, transaction)
+		// Create an index batch to ensure balances are indexed before the transaction
+		batch := search.NewIndexBatch(transaction.TransactionID)
+
+		// Add balances as dependencies (indexed first) if they exist
+		if sourceBalance != nil {
+			batch.AddDependency("balances", sourceBalance.BalanceID, sourceBalance)
+		}
+		if destinationBalance != nil {
+			batch.AddDependency("balances", destinationBalance.BalanceID, destinationBalance)
+		}
+
+		// Set transaction as the primary item (indexed after dependencies)
+		batch.SetPrimary(cfg.Transaction.IndexQueuePrefix, transaction.TransactionID, transaction)
+
+		// Queue the batch for indexing
+		err := l.queue.queueIndexBatch(batch)
 		if err != nil {
 			span.RecordError(err)
 			notification.NotifyError(err)
 		}
+
+		// Send webhook notification
 		err = l.SendWebhook(NewWebhook{
 			Event:   getEventFromStatus(transaction.Status),
 			Payload: transaction,
@@ -298,8 +319,9 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 }
 
 // updateBalances updates the source and destination balances in the database.
-// It starts a tracing span, updates the balances, and performs post-update actions such as checking balance monitors
-// and queuing the balances for indexing.
+// It starts a tracing span, updates the balances, and checks balance monitors.
+// Note: Balance indexing is now handled by postTransactionActions via batch indexing
+// to ensure proper ordering (balances indexed before transactions).
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -312,59 +334,30 @@ func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBal
 	ctx, span := tracer.Start(ctx, "Updating Balances")
 	defer span.End()
 
-	var wg sync.WaitGroup
-
 	// Update the balances in the datasource
 	if err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance); err != nil {
 		span.RecordError(err)
 		return err
 	}
 
-	// Add two tasks to the wait group
+	// Check balance monitors in parallel
+	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Goroutine to check monitors and queue index data for the source balance
 	go func() {
 		defer wg.Done()
 		l.checkBalanceMonitors(ctx, sourceBalance)
-		l.queueBalanceForIndexing(ctx, sourceBalance.BalanceID, span)
 	}()
 
-	// Goroutine to check monitors and queue index data for the destination balance
 	go func() {
 		defer wg.Done()
 		l.checkBalanceMonitors(ctx, destinationBalance)
-		l.queueBalanceForIndexing(ctx, destinationBalance.BalanceID, span)
 	}()
 
-	// Wait for both goroutines to complete
 	wg.Wait()
 
 	span.AddEvent("Balances updated")
 	return nil
-}
-
-// queueBalanceForIndexing fetches the complete balance data (including metadata) and queues it for indexing.
-// This ensures that the search index contains the latest balance information with all metadata.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - balanceID string: The ID of the balance to fetch and index.
-// - span trace.Span: The tracing span for error recording.
-func (l *Blnk) queueBalanceForIndexing(ctx context.Context, balanceID string, span trace.Span) {
-	// Fetch the complete balance data including metadata
-	completeBalance, err := l.datasource.GetBalanceByID(balanceID, []string{}, false)
-	if err != nil {
-		span.RecordError(err)
-		notification.NotifyError(err)
-		return
-	}
-	// Queue the complete balance data for indexing
-	err = l.queue.queueIndexData(balanceID, "balances", completeBalance)
-	if err != nil {
-		span.RecordError(err)
-		notification.NotifyError(err)
-	}
 }
 
 // validateTxn validates a transaction by checking if its reference has already been used.
@@ -838,7 +831,8 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 		}
 
 		// Perform post-transaction actions such as indexing and sending webhooks
-		l.postTransactionActions(ctx, transaction)
+		// Pass balances to ensure they are indexed before the transaction
+		l.postTransactionActions(ctx, transaction, sourceBalance, destinationBalance)
 
 		span.AddEvent("Transaction processed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 		return transaction, nil
@@ -1052,7 +1046,8 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 		}
 		l.handleAsyncBulkTransactionFailure(ctx, errors.New("transaction rejected"), parentTransactionID, transaction.Atomic, transaction.Inflight)
 	}
-	l.postTransactionActions(ctx, transaction)
+	// For rejected transactions, no balances were updated, so pass nil
+	l.postTransactionActions(ctx, transaction, nil, nil)
 	return transaction, nil
 }
 

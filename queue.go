@@ -97,6 +97,42 @@ func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) e
 	return nil
 }
 
+// queueIndexBatch enqueues a batch of items to be indexed in dependency order.
+// This ensures that dependencies (e.g., balances) are indexed before the primary item (e.g., transaction).
+// Uses the same IndexQueue but with a different task type for routing.
+//
+// Parameters:
+// - batch interface{}: The batch containing dependencies and primary item to index.
+//
+// Returns:
+// - error: An error if the task could not be enqueued.
+func (q *Queue) queueIndexBatch(batch interface{}) error {
+	cfg, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+
+	if cfg.TypeSense.Dns == "" {
+		return nil
+	}
+
+	payload, err := json.Marshal(batch)
+	if err != nil {
+		return err
+	}
+
+	// Use same queue but different task type for batch indexing
+	taskOptions := []asynq.Option{asynq.Queue(cfg.Queue.IndexQueue)}
+	task := asynq.NewTask("new:index:batch", payload, taskOptions...)
+	_, err = q.Client.Enqueue(task)
+	if err != nil {
+		log.Printf("failed to enqueue index batch: %v", err)
+		return err
+	}
+	log.Printf(" [*] Successfully enqueued index batch")
+	return nil
+}
+
 // queueIndexData enqueues a task to index data in a specified collection.
 //
 // Parameters:
