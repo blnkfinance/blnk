@@ -377,9 +377,26 @@ func (t *TypesenseClient) normalizeTimeFields(config CollectionConfig, data map[
 				data[field] = v.Unix()
 			case int64:
 				// Time already in Unix format, no action needed
+			case string:
+				if v == "" {
+					delete(data, field)
+					continue
+				}
+
+				if t, err := time.Parse(time.RFC3339, v); err == nil {
+					data[field] = t.Unix()
+				} else if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+					data[field] = t.Unix()
+				} else {
+					logrus.Warnf("Failed to parse time field %s with value %v, setting to 0", field, v)
+					data[field] = int64(0)
+				}
+			case float64:
+				data[field] = int64(v)
 			default:
-				// Set current time if value type is not recognized
-				data[field] = time.Now().Unix()
+				// For truly unrecognized types, set to 0 and log
+				logrus.Warnf("Unrecognized time field type for %s: %T, setting to 0", field, v)
+				data[field] = int64(0)
 			}
 		}
 	}

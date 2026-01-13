@@ -7,3 +7,5 @@ blnk.json
 promtail
 dump.rdb
 heartbeat.db
+.claude
+CLAUDE.md
