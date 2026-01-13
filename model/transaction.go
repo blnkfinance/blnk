@@ -35,9 +35,10 @@ import (
 var tracer = otel.Tracer("blnk.model.transaction")
 
 type Distribution struct {
-	Identifier    string `json:"identifier"`
-	Distribution  string `json:"distribution"` // Can be a percentage (e.g., "10%"), a fixed amount (e.g., "100"), or "left"
-	TransactionID string `json:"transaction_id"`
+	Identifier          string `json:"identifier"`
+	Distribution        string `json:"distribution"`                   // Can be a percentage (e.g., "10%"), a fixed amount (e.g., "100"), or "left"
+	PreciseDistribution string `json:"precise_distribution,omitempty"` // Fixed amount in minor units (e.g., "1006" for 1006 cents)
+	TransactionID       string `json:"transaction_id"`
 }
 
 type Transaction struct {
@@ -161,18 +162,35 @@ func CalculateDistributionsPrecise(ctx context.Context, totalPreciseAmount *big.
 	// First pass: Handle fixed amounts
 	fixedAmounts := make(map[string]decimal.Decimal)
 	for _, dist := range distributions {
-		if dist.Distribution == "left" || strings.HasSuffix(dist.Distribution, "%") {
+		// Skip percentage and "left" distributions
+		isLeftDist := dist.Distribution == "left" || dist.PreciseDistribution == "left"
+		isPercentDist := strings.HasSuffix(dist.Distribution, "%")
+
+		if isLeftDist || isPercentDist {
 			continue
 		}
 
-		fixedAmount, err := strconv.ParseFloat(dist.Distribution, 64)
-		if err != nil {
-			span.RecordError(err)
-			return nil, errors.New("invalid fixed amount format")
-		}
+		var fixedAmountDec decimal.Decimal
 
-		// Convert to precise amount (multiply by precision)
-		fixedAmountDec := decimal.NewFromFloat(fixedAmount).Mul(precisionDec)
+		// Check if precise_distribution is provided (already in minor units)
+		if dist.PreciseDistribution != "" {
+			preciseAmount, err := strconv.ParseInt(dist.PreciseDistribution, 10, 64)
+			if err != nil {
+				span.RecordError(err)
+				return nil, errors.New("invalid precise_distribution format: must be an integer value in minor units")
+			}
+			fixedAmountDec = decimal.NewFromInt(preciseAmount)
+		} else if dist.Distribution != "" {
+			// Existing behavior: parse as major units and multiply by precision
+			fixedAmount, err := strconv.ParseFloat(dist.Distribution, 64)
+			if err != nil {
+				span.RecordError(err)
+				return nil, errors.New("invalid fixed amount format")
+			}
+			fixedAmountDec = decimal.NewFromFloat(fixedAmount).Mul(precisionDec)
+		} else {
+			continue
+		}
 
 		if fixedAmountDec.Cmp(amountLeftDec) > 0 {
 			err := errors.New("fixed amount exceeds remaining transaction amount")
@@ -265,7 +283,7 @@ func CalculateDistributionsPrecise(ctx context.Context, totalPreciseAmount *big.
 
 	// Final pass: Handle "left" distribution
 	for _, dist := range distributions {
-		if dist.Distribution == "left" {
+		if dist.Distribution == "left" || dist.PreciseDistribution == "left" {
 			if _, exists := resultDistributions[dist.Identifier]; exists {
 				err := errors.New("multiple identifiers with 'left' distribution")
 				span.RecordError(err)
