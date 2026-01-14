@@ -58,9 +58,9 @@ func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transactio
 
 	// Execute the SQL insert statement to record the transaction
 	_, err = d.Conn.ExecContext(ctx,
-		`INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) 
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.AmountString, txn.PreciseAmount.String(), txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash, txn.EffectiveDate,
+		`INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date, allow_overdraft) 
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.AmountString, txn.PreciseAmount.String(), txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash, txn.EffectiveDate, txn.AllowOverdraft,
 	)
 	// Handle errors that may occur during the execution of the query
 	if err != nil {
@@ -91,7 +91,7 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 
 	// Execute the SQL query to retrieve the transaction by its ID
 	row := d.Conn.QueryRowContext(ctx, `
-		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, allow_overdraft
 		FROM blnk.transactions
 		WHERE transaction_id = $1
 	`, id)
@@ -100,7 +100,7 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 	txn := &model.Transaction{}
 	var metaDataJSON []byte
 	var preciseAmountStr string
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction, &txn.Hash)
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction, &txn.Hash, &txn.AllowOverdraft)
 	// Handle errors, including no rows found
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -217,7 +217,7 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 
 	// Query the transaction by reference
 	row := d.Conn.QueryRowContext(ctx, `
-		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction, allow_overdraft
 		FROM blnk.transactions
 		WHERE reference = $1
 	`, reference)
@@ -226,7 +226,7 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 	txn := model.Transaction{}
 	var metaDataJSON []byte
 	var preciseAmountStr string
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction)
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction, &txn.AllowOverdraft)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			span.RecordError(err)
@@ -315,7 +315,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 
 	// Execute the query to retrieve all transactions
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data, allow_overdraft
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -351,6 +351,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 			&transaction.Hash,
 			&transaction.CreatedAt,
 			&metaDataJSON,
+			&transaction.AllowOverdraft,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -460,7 +461,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 
 	// If not found in cache, fetch from the database
 	rows, err := d.Conn.QueryContext(ctx, `
-        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
         FROM blnk.transactions
         ORDER BY created_at ASC
         LIMIT $1 OFFSET $2
@@ -499,6 +500,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.AllowOverdraft,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -576,7 +578,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	query := `
         SELECT $1::text AS group_key, transaction_id, parent_transaction, source, reference, 
                amount, precise_amount, precision, rate, currency, destination, 
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
         FROM blnk.transactions
         WHERE $1::text IS NOT NULL AND $1::text != ''
         ORDER BY $1::text
@@ -620,6 +622,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.AllowOverdraft,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -674,14 +677,14 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	rows, err := d.Conn.QueryContext(ctx, `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.allow_overdraft
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -742,6 +745,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.AllowOverdraft,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -788,7 +792,7 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 		SELECT 
 			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
 			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
-			t.meta_data, t.scheduled_for, t.hash
+			t.meta_data, t.scheduled_for, t.hash, t.allow_overdraft
 		FROM 
 			blnk.transactions t
 		WHERE 
@@ -839,6 +843,7 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.AllowOverdraft,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -983,7 +988,7 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 	// If not in cache, query the database
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
@@ -1023,6 +1028,7 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.AllowOverdraft,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -1102,7 +1108,7 @@ func (d Datasource) GetTransactionsByCriteria(ctx context.Context, minAmount, ma
 
 	query := `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
 		FROM blnk.transactions
 		WHERE 1=1
 	`
@@ -1177,6 +1183,7 @@ func (d Datasource) GetTransactionsByCriteria(ctx context.Context, minAmount, ma
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.AllowOverdraft,
 		)
 		if err != nil {
 			span.RecordError(err)
