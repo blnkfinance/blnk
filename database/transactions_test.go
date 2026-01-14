@@ -69,7 +69,7 @@ func TestRecordTransaction_Success(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate, transaction.AllowOverdraft).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := ds.RecordTransaction(ctx, transaction)
@@ -93,6 +93,7 @@ func TestRecordTransaction_Failure(t *testing.T) {
 		Source:            "src1",
 		Reference:         "ref123",
 		Amount:            1000,
+		AmountString:      "1000",
 		Currency:          "USD",
 		Destination:       "dest1",
 		Description:       "Test Transaction",
@@ -112,7 +113,7 @@ func TestRecordTransaction_Failure(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate, transaction.AllowOverdraft).
 		WillReturnError(errors.New("db error"))
 
 	_, err = ds.RecordTransaction(ctx, transaction)
@@ -135,10 +136,10 @@ func TestGetTransaction_Success(t *testing.T) {
 	metaDataJSON, err := json.Marshal(metaData)
 	assert.NoError(t, err)
 
-	rows := sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash"}).
-		AddRow("txn123", "src1", "ref123", 1000, 1000, 2, "USD", "dest1", "Test Transaction", "PENDING", time.Now(), metaDataJSON, "parent123", "hash123")
+	rows := sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash", "allow_overdraft"}).
+		AddRow("txn123", "src1", "ref123", 1000, 1000, 2, "USD", "dest1", "Test Transaction", "PENDING", time.Now(), metaDataJSON, "parent123", "hash123", false)
 
-	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = ?").
+	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, allow_overdraft FROM blnk.transactions WHERE transaction_id = ?").
 		WithArgs("txn123").
 		WillReturnRows(rows)
 
@@ -162,7 +163,7 @@ func TestGetTransaction_NotFound(t *testing.T) {
 
 	ds := Datasource{Conn: db}
 
-	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = ?").
+	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, allow_overdraft FROM blnk.transactions WHERE transaction_id = ?").
 		WithArgs("txn123").
 		WillReturnError(sql.ErrNoRows)
 
@@ -235,12 +236,12 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 		"transaction_id", "parent_transaction", "source", "reference",
 		"amount", "precise_amount", "precision", "rate", "currency",
 		"destination", "description", "status", "created_at",
-		"meta_data", "scheduled_for", "hash",
+		"meta_data", "scheduled_for", "hash", "allow_overdraft",
 	}).AddRow(
 		"txn123", parentID, "source1", "ref123",
 		1000, 1000, 2, 1.0, "USD",
 		"dest1", "Test Transaction", "INFLIGHT", time.Now(),
-		metaDataJSON, time.Now(), "hash123",
+		metaDataJSON, time.Now(), "hash123", false,
 	)
 
 	// Expect the query with the correct WHERE clause
@@ -248,14 +249,14 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.allow_overdraft
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -310,14 +311,14 @@ func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.allow_overdraft
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -370,14 +371,14 @@ func TestGetInflightTransactionsByParentID_Error(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, allow_overdraft
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.allow_overdraft
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'

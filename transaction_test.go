@@ -191,7 +191,7 @@ func TestRecordTransaction(t *testing.T) {
 `)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
 	// Expect transaction insertion (placed last, but can happen in any order due to MatchExpectationsInOrder=false)
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date, allow_overdraft) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(), // transaction_id
 		sqlmock.AnyArg(), // parent_transaction
@@ -210,6 +210,7 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(), // scheduled_for
 		sqlmock.AnyArg(), // hash
 		sqlmock.AnyArg(), // effective_date
+		txn.AllowOverdraft, // allow_overdraft
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Execute the function being tested
@@ -350,7 +351,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 `)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
 	// Expect transaction insertion
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date, allow_overdraft) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(), // transaction_id
 		sqlmock.AnyArg(), // parent_transaction
@@ -369,6 +370,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		sqlmock.AnyArg(), // scheduled_for
 		sqlmock.AnyArg(), // hash
 		sqlmock.AnyArg(), // effective_date
+		txn.AllowOverdraft, // allow_overdraft
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Execute the function being tested
@@ -396,10 +398,10 @@ func TestVoidInflightTransaction_Negative(t *testing.T) {
 	t.Run("Transaction not in INFLIGHT status", func(t *testing.T) {
 		transactionID := gofakeit.UUID()
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = $1`)).
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, allow_overdraft FROM blnk.transactions WHERE transaction_id = $1`)).
 			WithArgs(transactionID).
-			WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash"}).
-				AddRow(transactionID, source, gofakeit.UUID(), 100.0, 10000, 100, "USD", destination, gofakeit.UUID(), "APPLIED", time.Now(), metaDataJSON, "", ""))
+			WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash", "allow_overdraft"}).
+				AddRow(transactionID, source, gofakeit.UUID(), 100.0, 10000, 100, "USD", destination, gofakeit.UUID(), "APPLIED", time.Now(), metaDataJSON, "", "", false))
 
 		_, err := d.VoidInflightTransaction(context.Background(), transactionID)
 		assert.Error(t, err)
@@ -409,10 +411,10 @@ func TestVoidInflightTransaction_Negative(t *testing.T) {
 	t.Run("Transaction already voided", func(t *testing.T) {
 		transactionID := gofakeit.UUID()
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = $1`)).
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, allow_overdraft FROM blnk.transactions WHERE transaction_id = $1`)).
 			WithArgs(transactionID).
-			WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash"}).
-				AddRow(transactionID, source, gofakeit.UUID(), 100.0, 10000, 100, "USD", destination, gofakeit.UUID(), "INFLIGHT", time.Now(), metaDataJSON, "", ""))
+			WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash", "allow_overdraft"}).
+				AddRow(transactionID, source, gofakeit.UUID(), 100.0, 10000, 100, "USD", destination, gofakeit.UUID(), "INFLIGHT", time.Now(), metaDataJSON, "", "", false))
 
 		// Mock IsParentTransactionVoid
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS ( SELECT 1 FROM blnk.transactions WHERE parent_transaction = $1 AND status = 'VOID' )`)).
