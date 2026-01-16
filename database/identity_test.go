@@ -32,7 +32,7 @@ import (
 func TestCreateIdentity_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -74,7 +74,7 @@ func TestCreateIdentity_Success(t *testing.T) {
 func TestCreateIdentity_Fail(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -96,7 +96,7 @@ func TestCreateIdentity_Fail(t *testing.T) {
 func TestGetIdentityByID_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -114,7 +114,7 @@ func TestGetIdentityByID_NotFound(t *testing.T) {
 func TestGetIdentityByID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -162,7 +162,7 @@ func TestGetIdentityByID_Success(t *testing.T) {
 func TestGetAllIdentities_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -236,7 +236,7 @@ func TestGetAllIdentities_Success(t *testing.T) {
 func TestUpdateIdentity_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -266,7 +266,7 @@ func TestUpdateIdentity_Success(t *testing.T) {
 func TestUpdateIdentity_NoFieldsProvided(t *testing.T) {
 	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -282,7 +282,7 @@ func TestUpdateIdentity_NoFieldsProvided(t *testing.T) {
 func TestUpdateIdentity_PartialUpdate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -311,7 +311,7 @@ func TestUpdateIdentity_PartialUpdate(t *testing.T) {
 func TestDeleteIdentity_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -326,7 +326,7 @@ func TestDeleteIdentity_Success(t *testing.T) {
 func TestDeleteIdentity_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -342,7 +342,7 @@ func TestDeleteIdentity_NotFound(t *testing.T) {
 func TestGetIdentityByID_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -360,7 +360,7 @@ func TestGetIdentityByID_QueryError(t *testing.T) {
 func TestGetAllIdentities_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -376,7 +376,7 @@ func TestGetAllIdentities_QueryError(t *testing.T) {
 func TestGetAllIdentities_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -395,7 +395,7 @@ func TestGetAllIdentities_Empty(t *testing.T) {
 func TestUpdateIdentity_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -420,7 +420,7 @@ func TestUpdateIdentity_QueryError(t *testing.T) {
 func TestDeleteIdentity_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 

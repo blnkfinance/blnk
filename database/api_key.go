@@ -261,7 +261,7 @@ func (s *Datasource) ListAPIKeys(ctx context.Context, ownerID string) ([]*model.
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var apiKeys []*model.APIKey
 	for rows.Next() {

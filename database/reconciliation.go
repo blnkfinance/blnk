@@ -144,7 +144,7 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve reconciliations", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var reconciliations []*model.Reconciliation
 
@@ -314,7 +314,7 @@ func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconcilia
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matches", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var matches []*model.Match
 
@@ -381,7 +381,7 @@ func (d Datasource) GetExternalTransactionsByReconciliationID(ctx context.Contex
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve external transactions", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var transactions []*model.ExternalTransaction
 
@@ -452,7 +452,7 @@ func (d Datasource) GetMatchingRules(ctx context.Context) ([]*model.MatchingRule
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matching rules", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var rules []*model.MatchingRule
 
@@ -634,7 +634,7 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve external transactions", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Iterate through the rows and scan data into the transaction slice
 	for rows.Next() {
@@ -770,7 +770,7 @@ func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploa
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped external transactions", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	groupedTransactions = make(map[string][]*model.Transaction)
 

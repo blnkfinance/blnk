@@ -33,7 +33,7 @@ import (
 func TestCreateLedger_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -60,7 +60,7 @@ func TestCreateLedger_Success(t *testing.T) {
 func TestCreateLedger_UniqueViolation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -88,7 +88,7 @@ func TestCreateLedger_UniqueViolation(t *testing.T) {
 func TestGetAllLedgers_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -114,7 +114,7 @@ func TestGetAllLedgers_Success(t *testing.T) {
 func TestGetLedgerByID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -139,7 +139,7 @@ func TestGetLedgerByID_Success(t *testing.T) {
 func TestGetLedgerByID_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -157,7 +157,7 @@ func TestGetLedgerByID_NotFound(t *testing.T) {
 func TestCreateLedger_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -185,7 +185,7 @@ func TestCreateLedger_QueryError(t *testing.T) {
 func TestGetAllLedgers_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -204,7 +204,7 @@ func TestGetAllLedgers_QueryError(t *testing.T) {
 func TestGetAllLedgers_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -220,7 +220,7 @@ func TestGetAllLedgers_Empty(t *testing.T) {
 func TestGetAllLedgers_InvalidLimit(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -241,7 +241,7 @@ func TestGetAllLedgers_InvalidLimit(t *testing.T) {
 func TestGetLedgerByID_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -259,7 +259,7 @@ func TestGetLedgerByID_QueryError(t *testing.T) {
 func TestUpdateLedger_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -288,7 +288,7 @@ func TestUpdateLedger_Success(t *testing.T) {
 func TestUpdateLedger_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -306,7 +306,7 @@ func TestUpdateLedger_NotFound(t *testing.T) {
 func TestUpdateLedger_UniqueViolation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 

@@ -68,7 +68,7 @@ func (m *mockCache) Delete(ctx context.Context, key string) error {
 func TestRecordTransaction_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestRecordTransaction")
@@ -112,7 +112,7 @@ func TestRecordTransaction_Success(t *testing.T) {
 func TestRecordTransaction_Failure(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestRecordTransactionFailure")
@@ -155,7 +155,7 @@ func TestRecordTransaction_Failure(t *testing.T) {
 func TestGetTransaction_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetTransaction")
@@ -186,7 +186,7 @@ func TestGetTransaction_Success(t *testing.T) {
 func TestGetTransaction_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetTransactionNotFound")
@@ -208,7 +208,7 @@ func TestGetTransaction_NotFound(t *testing.T) {
 func TestTransactionExistsByRef_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestTransactionExistsByRef")
@@ -229,7 +229,7 @@ func TestTransactionExistsByRef_Success(t *testing.T) {
 func TestTransactionExistsByRef_Failure(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestTransactionExistsByRefFailure")
@@ -249,7 +249,7 @@ func TestTransactionExistsByRef_Failure(t *testing.T) {
 func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetInflightTransactionsByParentID")
@@ -329,7 +329,7 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetInflightTransactionsByParentID_NoRows")
@@ -389,7 +389,7 @@ func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
 func TestGetInflightTransactionsByParentID_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetInflightTransactionsByParentID_Error")
@@ -452,7 +452,7 @@ func TestGetInflightTransactionsByParentID_Error(t *testing.T) {
 func TestGetTotalCommittedTransactions_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetTotalCommittedTransactions")
@@ -475,7 +475,7 @@ func TestGetTotalCommittedTransactions_Success(t *testing.T) {
 func TestGetTotalCommittedTransactions_NoRows(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetTotalCommittedTransactions_NoRows")
@@ -497,7 +497,7 @@ func TestGetTotalCommittedTransactions_NoRows(t *testing.T) {
 func TestGetTotalCommittedTransactions_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	tracer := otel.Tracer("transaction.database")
 	ctx, span := tracer.Start(context.Background(), "TestGetTotalCommittedTransactions_Error")
@@ -797,7 +797,7 @@ func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *te
 func TestGetTransactionByRef_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -837,7 +837,7 @@ func TestGetTransactionByRef_Success(t *testing.T) {
 func TestGetTransactionByRef_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -866,7 +866,7 @@ func TestGetTransactionByRef_NotFound(t *testing.T) {
 func TestGetTransactionByRef_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -895,7 +895,7 @@ func TestGetTransactionByRef_QueryError(t *testing.T) {
 func TestUpdateTransactionStatus_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -920,7 +920,7 @@ func TestUpdateTransactionStatus_Success(t *testing.T) {
 func TestUpdateTransactionStatus_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -948,7 +948,7 @@ func TestUpdateTransactionStatus_NotFound(t *testing.T) {
 func TestUpdateTransactionStatus_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -976,7 +976,7 @@ func TestUpdateTransactionStatus_Error(t *testing.T) {
 func TestGetAllTransactions_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1013,7 +1013,7 @@ func TestGetAllTransactions_Success(t *testing.T) {
 func TestGetAllTransactions_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1043,7 +1043,7 @@ func TestGetAllTransactions_Empty(t *testing.T) {
 func TestGetAllTransactions_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1073,7 +1073,7 @@ func TestGetAllTransactions_QueryError(t *testing.T) {
 func TestIsParentTransactionVoid_True(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1102,7 +1102,7 @@ func TestIsParentTransactionVoid_True(t *testing.T) {
 func TestIsParentTransactionVoid_False(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1131,7 +1131,7 @@ func TestIsParentTransactionVoid_False(t *testing.T) {
 func TestIsParentTransactionVoid_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1163,7 +1163,7 @@ func TestIsParentTransactionVoid_QueryError(t *testing.T) {
 func TestGetRefundableTransactionsByParentID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1218,7 +1218,7 @@ func TestGetRefundableTransactionsByParentID_Success(t *testing.T) {
 func TestGetRefundableTransactionsByParentID_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1264,7 +1264,7 @@ func TestGetRefundableTransactionsByParentID_Empty(t *testing.T) {
 func TestGetRefundableTransactionsByParentID_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1309,7 +1309,7 @@ func TestGetRefundableTransactionsByParentID_QueryError(t *testing.T) {
 func TestTransactionExistsByIDOrParentID_True(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1329,7 +1329,7 @@ func TestTransactionExistsByIDOrParentID_True(t *testing.T) {
 func TestTransactionExistsByIDOrParentID_False(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1349,7 +1349,7 @@ func TestTransactionExistsByIDOrParentID_False(t *testing.T) {
 func TestTransactionExistsByIDOrParentID_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1372,7 +1372,7 @@ func TestTransactionExistsByIDOrParentID_Error(t *testing.T) {
 func TestIsTransactionRefunded_True(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1398,7 +1398,7 @@ func TestIsTransactionRefunded_True(t *testing.T) {
 func TestIsTransactionRefunded_False(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1424,7 +1424,7 @@ func TestIsTransactionRefunded_False(t *testing.T) {
 func TestIsTransactionRefunded_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1453,7 +1453,7 @@ func TestIsTransactionRefunded_Error(t *testing.T) {
 func TestGroupTransactions_InvalidCriteria(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	newCache, err := cache.NewCache()
 	assert.NoError(t, err)
@@ -1474,7 +1474,7 @@ func TestGroupTransactions_InvalidCriteria(t *testing.T) {
 func TestGetTransactionsByCriteria_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1503,7 +1503,7 @@ func TestGetTransactionsByCriteria_Success(t *testing.T) {
 func TestGetTransactionsByCriteria_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1522,7 +1522,7 @@ func TestGetTransactionsByCriteria_Error(t *testing.T) {
 func TestGetQueuedAmounts_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1554,7 +1554,7 @@ func TestGetQueuedAmounts_Success(t *testing.T) {
 func TestGetQueuedAmounts_NoTransactions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1584,7 +1584,7 @@ func TestGetQueuedAmounts_NoTransactions(t *testing.T) {
 func TestGetQueuedAmounts_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1612,7 +1612,7 @@ func TestGetQueuedAmounts_QueryError(t *testing.T) {
 func TestGetQueuedAmounts_InvalidAmount(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1641,7 +1641,7 @@ func TestGetQueuedAmounts_InvalidAmount(t *testing.T) {
 func TestGetTransactionsPaginated_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCache()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -1669,7 +1669,7 @@ func TestGetTransactionsPaginated_Success(t *testing.T) {
 func TestGetTransactionsPaginated_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCache()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -1693,7 +1693,7 @@ func TestGetTransactionsPaginated_QueryError(t *testing.T) {
 func TestGetTransactionsByParent_DatabaseSuccess(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCache()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -1725,7 +1725,7 @@ func TestGetTransactionsByParent_DatabaseSuccess(t *testing.T) {
 func TestGetTransactionsByParent_DatabaseError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCache()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -1752,7 +1752,7 @@ func TestGetTransactionsByParent_DatabaseError(t *testing.T) {
 func TestGetTransactionsByParent_EmptyResults(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCache()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -1776,7 +1776,7 @@ func TestGetTransactionsByParent_EmptyResults(t *testing.T) {
 func TestRecordTransactionWithBalances_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1846,7 +1846,7 @@ func TestRecordTransactionWithBalances_Success(t *testing.T) {
 func TestRecordTransactionWithBalances_BeginError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1871,7 +1871,7 @@ func TestRecordTransactionWithBalances_BeginError(t *testing.T) {
 func TestRecordTransactionWithBalances_SourceUpdateError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1905,7 +1905,7 @@ func TestRecordTransactionWithBalances_SourceUpdateError(t *testing.T) {
 func TestRecordTransactionWithBalances_CommitError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()

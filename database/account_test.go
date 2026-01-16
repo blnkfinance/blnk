@@ -15,7 +15,7 @@ import (
 func TestCreateAccount_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -47,7 +47,7 @@ func TestCreateAccount_Success(t *testing.T) {
 func TestGetAccountByID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -84,7 +84,7 @@ func TestGetAccountByID_Success(t *testing.T) {
 func TestGetAllAccounts_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -111,7 +111,7 @@ func TestGetAllAccounts_Success(t *testing.T) {
 func TestGetAccountByNumber_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -137,7 +137,7 @@ func TestGetAccountByNumber_Success(t *testing.T) {
 func TestUpdateAccount_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -165,7 +165,7 @@ func TestUpdateAccount_Success(t *testing.T) {
 func TestDeleteAccount_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -300,7 +300,7 @@ func TestUpdateAccount_QueryError(t *testing.T) {
 func TestDeleteAccount_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 

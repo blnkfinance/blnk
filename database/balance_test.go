@@ -56,7 +56,7 @@ func TestContains_EmptySlice(t *testing.T) {
 func TestCreateBalance_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -88,7 +88,7 @@ func TestCreateBalance_Success(t *testing.T) {
 func TestCreateBalance_UniqueViolation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -121,7 +121,7 @@ func TestCreateBalance_UniqueViolation(t *testing.T) {
 func TestGetBalanceByID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -173,7 +173,7 @@ func TestGetBalanceByID_Success(t *testing.T) {
 func TestGetBalanceByID_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -194,7 +194,7 @@ func TestUpdateBalances_Success(t *testing.T) {
 	// Setup mock database
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -277,7 +277,7 @@ func TestUpdateBalances_Success(t *testing.T) {
 func TestUpdateBalances_BeginTxError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -294,7 +294,7 @@ func TestUpdateBalances_BeginTxError(t *testing.T) {
 func TestUpdateBalances_SourceUpdateError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -330,7 +330,7 @@ func TestUpdateBalances_SourceUpdateError(t *testing.T) {
 func TestUpdateBalances_DestUpdateError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -389,7 +389,7 @@ func TestUpdateBalances_DestUpdateError(t *testing.T) {
 func TestUpdateBalances_CommitError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -452,7 +452,7 @@ func TestUpdateBalances_CommitError(t *testing.T) {
 func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -555,7 +555,7 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 func TestGetBalanceByID_WithoutQueuedTransactions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -625,7 +625,7 @@ func TestGetBalanceByID_WithoutQueuedTransactions(t *testing.T) {
 func TestGetBalanceByID_WithQueuedTransactions_HasAppliedChild(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -705,7 +705,7 @@ func TestGetBalanceByID_WithQueuedTransactions_HasAppliedChild(t *testing.T) {
 func TestGetBalanceByIDLite_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -747,7 +747,7 @@ func TestGetBalanceByIDLite_Success(t *testing.T) {
 func TestGetBalanceByIDLite_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -775,7 +775,7 @@ func TestGetBalanceByIDLite_NotFound(t *testing.T) {
 func TestGetBalanceByIDLite_NullIndicator(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -811,7 +811,7 @@ func TestGetBalanceByIDLite_NullIndicator(t *testing.T) {
 func TestGetBalanceByIndicator_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -850,7 +850,7 @@ func TestGetBalanceByIndicator_Success(t *testing.T) {
 func TestGetBalanceByIndicator_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -877,7 +877,7 @@ func TestGetBalanceByIndicator_NotFound(t *testing.T) {
 func TestGetAllBalances_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -915,7 +915,7 @@ func TestGetAllBalances_Success(t *testing.T) {
 func TestGetAllBalances_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -944,7 +944,7 @@ func TestGetAllBalances_Empty(t *testing.T) {
 func TestGetAllBalances_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -970,7 +970,7 @@ func TestGetAllBalances_QueryError(t *testing.T) {
 func TestGetSourceDestination_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -992,7 +992,7 @@ func TestGetSourceDestination_QueryError(t *testing.T) {
 func TestGetSourceDestination_NoResults(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1013,7 +1013,7 @@ func TestGetSourceDestination_NoResults(t *testing.T) {
 func TestCreateMonitor_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1050,7 +1050,7 @@ func TestCreateMonitor_Success(t *testing.T) {
 func TestCreateMonitor_UniqueViolation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1083,7 +1083,7 @@ func TestCreateMonitor_UniqueViolation(t *testing.T) {
 func TestCreateMonitor_ForeignKeyViolation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1116,7 +1116,7 @@ func TestCreateMonitor_ForeignKeyViolation(t *testing.T) {
 func TestGetMonitorByID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1149,7 +1149,7 @@ func TestGetMonitorByID_Success(t *testing.T) {
 func TestGetMonitorByID_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1176,7 +1176,7 @@ func TestGetMonitorByID_NotFound(t *testing.T) {
 func TestGetAllMonitors_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1205,7 +1205,7 @@ func TestGetAllMonitors_Success(t *testing.T) {
 func TestGetAllMonitors_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1230,7 +1230,7 @@ func TestGetAllMonitors_Empty(t *testing.T) {
 func TestGetBalanceMonitors_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1261,7 +1261,7 @@ func TestGetBalanceMonitors_Success(t *testing.T) {
 func TestGetBalanceMonitors_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1287,7 +1287,7 @@ func TestGetBalanceMonitors_Empty(t *testing.T) {
 func TestUpdateMonitor_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1323,7 +1323,7 @@ func TestUpdateMonitor_Success(t *testing.T) {
 func TestUpdateMonitor_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1361,7 +1361,7 @@ func TestUpdateMonitor_NotFound(t *testing.T) {
 func TestDeleteMonitor_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1383,7 +1383,7 @@ func TestDeleteMonitor_Success(t *testing.T) {
 func TestDeleteMonitor_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1408,7 +1408,7 @@ func TestDeleteMonitor_NotFound(t *testing.T) {
 func TestUpdateBalance_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1456,7 +1456,7 @@ func TestUpdateBalance_Success(t *testing.T) {
 func TestUpdateBalance_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1507,7 +1507,7 @@ func TestUpdateBalance_NotFound(t *testing.T) {
 func TestUpdateBalance_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1558,7 +1558,7 @@ func TestUpdateBalance_QueryError(t *testing.T) {
 func TestUpdateBalanceIdentity_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1582,7 +1582,7 @@ func TestUpdateBalanceIdentity_Success(t *testing.T) {
 func TestUpdateBalanceIdentity_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1609,7 +1609,7 @@ func TestUpdateBalanceIdentity_NotFound(t *testing.T) {
 func TestUpdateBalanceIdentity_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -1636,7 +1636,7 @@ func TestUpdateBalanceIdentity_QueryError(t *testing.T) {
 func TestGetBalanceAtTime_InvalidBalanceID(t *testing.T) {
 	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1652,7 +1652,7 @@ func TestGetBalanceAtTime_InvalidBalanceID(t *testing.T) {
 func TestGetBalanceAtTime_ZeroTime(t *testing.T) {
 	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1668,7 +1668,7 @@ func TestGetBalanceAtTime_ZeroTime(t *testing.T) {
 func TestGetBalanceAtTime_TransactionBeginError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1689,7 +1689,7 @@ func TestGetBalanceAtTime_TransactionBeginError(t *testing.T) {
 func TestGetBalanceAtTime_BalanceNotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1717,7 +1717,7 @@ func TestGetBalanceAtTime_BalanceNotFound(t *testing.T) {
 func TestTakeBalanceSnapshots_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1737,7 +1737,7 @@ func TestTakeBalanceSnapshots_Success(t *testing.T) {
 func TestTakeBalanceSnapshots_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1760,7 +1760,7 @@ func TestTakeBalanceSnapshots_Error(t *testing.T) {
 func TestGetMostRecentSnapshot_Found(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1799,7 +1799,7 @@ func TestGetMostRecentSnapshot_Found(t *testing.T) {
 func TestGetMostRecentSnapshot_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1834,7 +1834,7 @@ func TestGetMostRecentSnapshot_NotFound(t *testing.T) {
 func TestGetMostRecentSnapshot_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -1869,7 +1869,7 @@ func TestGetMostRecentSnapshot_Error(t *testing.T) {
 func TestFetchTransactions_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	balanceID := "bln_test123"
@@ -1901,7 +1901,7 @@ func TestFetchTransactions_Success(t *testing.T) {
 func TestFetchTransactions_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	balanceID := "bln_test123"
@@ -2010,7 +2010,7 @@ func TestApplyTransaction_InvalidAmount(t *testing.T) {
 func TestCalculateBalanceFromTransactions_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -2046,7 +2046,7 @@ func TestCalculateBalanceFromTransactions_Success(t *testing.T) {
 func TestCalculateBalanceFromTransactions_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()

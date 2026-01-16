@@ -95,7 +95,7 @@ func (d Datasource) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, err.Error(), err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	ledgers := []model.Ledger{}
 

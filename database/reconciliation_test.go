@@ -59,7 +59,7 @@ func (m *mockCacheRecon) Delete(ctx context.Context, key string) error {
 func TestRecordReconciliation_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -87,7 +87,7 @@ func TestRecordReconciliation_Success(t *testing.T) {
 func TestRecordReconciliation_Fail(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	completedAt := time.Now()
 
@@ -117,7 +117,7 @@ func TestRecordReconciliation_Fail(t *testing.T) {
 func TestGetReconciliation_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	completedAt := time.Now()
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -148,7 +148,7 @@ func TestGetReconciliation_Success(t *testing.T) {
 func TestGetReconciliation_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -165,7 +165,7 @@ func TestGetReconciliation_NotFound(t *testing.T) {
 func TestUpdateReconciliationStatus_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -181,7 +181,7 @@ func TestUpdateReconciliationStatus_Success(t *testing.T) {
 func TestUpdateReconciliationStatus_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -198,7 +198,7 @@ func TestUpdateReconciliationStatus_NotFound(t *testing.T) {
 func TestUpdateReconciliationStatus_Fail(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -215,7 +215,7 @@ func TestUpdateReconciliationStatus_Fail(t *testing.T) {
 func TestRecordMatches_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -254,7 +254,7 @@ func TestRecordMatches_Success(t *testing.T) {
 func TestRecordMatches_Fail(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -283,7 +283,7 @@ func TestRecordMatches_Fail(t *testing.T) {
 func TestGetReconciliationsByUploadID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -307,7 +307,7 @@ func TestGetReconciliationsByUploadID_Success(t *testing.T) {
 func TestGetReconciliationsByUploadID_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -326,7 +326,7 @@ func TestGetReconciliationsByUploadID_Empty(t *testing.T) {
 func TestGetReconciliationsByUploadID_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -344,7 +344,7 @@ func TestGetReconciliationsByUploadID_QueryError(t *testing.T) {
 func TestRecordUnmatched_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -366,7 +366,7 @@ func TestRecordUnmatched_Success(t *testing.T) {
 func TestRecordUnmatched_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -385,7 +385,7 @@ func TestRecordUnmatched_Error(t *testing.T) {
 func TestRecordMatch_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -409,7 +409,7 @@ func TestRecordMatch_Success(t *testing.T) {
 func TestRecordMatch_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -434,7 +434,7 @@ func TestRecordMatch_Error(t *testing.T) {
 func TestGetMatchesByReconciliationID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -456,7 +456,7 @@ func TestGetMatchesByReconciliationID_Success(t *testing.T) {
 func TestGetMatchesByReconciliationID_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -474,7 +474,7 @@ func TestGetMatchesByReconciliationID_Error(t *testing.T) {
 func TestRecordExternalTransaction_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -501,7 +501,7 @@ func TestRecordExternalTransaction_Success(t *testing.T) {
 func TestRecordExternalTransaction_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -529,7 +529,7 @@ func TestRecordExternalTransaction_Error(t *testing.T) {
 func TestRecordMatchingRule_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -554,7 +554,7 @@ func TestRecordMatchingRule_Success(t *testing.T) {
 func TestRecordMatchingRule_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -580,7 +580,7 @@ func TestRecordMatchingRule_Error(t *testing.T) {
 func TestGetMatchingRules_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -601,7 +601,7 @@ func TestGetMatchingRules_Success(t *testing.T) {
 func TestGetMatchingRules_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -618,7 +618,7 @@ func TestGetMatchingRules_Error(t *testing.T) {
 func TestGetMatchingRule_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -637,7 +637,7 @@ func TestGetMatchingRule_Success(t *testing.T) {
 func TestGetMatchingRule_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -655,7 +655,7 @@ func TestGetMatchingRule_NotFound(t *testing.T) {
 func TestDeleteMatchingRule_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -671,7 +671,7 @@ func TestDeleteMatchingRule_Success(t *testing.T) {
 func TestDeleteMatchingRule_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -688,7 +688,7 @@ func TestDeleteMatchingRule_NotFound(t *testing.T) {
 func TestUpdateMatchingRule_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -711,7 +711,7 @@ func TestUpdateMatchingRule_Success(t *testing.T) {
 func TestUpdateMatchingRule_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -735,7 +735,7 @@ func TestUpdateMatchingRule_NotFound(t *testing.T) {
 func TestGetExternalTransactionsByReconciliationID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -757,7 +757,7 @@ func TestGetExternalTransactionsByReconciliationID_Success(t *testing.T) {
 func TestGetExternalTransactionsByReconciliationID_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -775,7 +775,7 @@ func TestGetExternalTransactionsByReconciliationID_Error(t *testing.T) {
 func TestSaveReconciliationProgress_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -796,7 +796,7 @@ func TestSaveReconciliationProgress_Success(t *testing.T) {
 func TestSaveReconciliationProgress_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -818,7 +818,7 @@ func TestSaveReconciliationProgress_Error(t *testing.T) {
 func TestLoadReconciliationProgress_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -837,7 +837,7 @@ func TestLoadReconciliationProgress_Success(t *testing.T) {
 func TestLoadReconciliationProgress_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -855,7 +855,7 @@ func TestLoadReconciliationProgress_NotFound(t *testing.T) {
 func TestLoadReconciliationProgress_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
@@ -872,7 +872,7 @@ func TestLoadReconciliationProgress_Error(t *testing.T) {
 func TestGetExternalTransactionsPaginated_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCacheRecon()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -900,7 +900,7 @@ func TestGetExternalTransactionsPaginated_Success(t *testing.T) {
 func TestGetExternalTransactionsPaginated_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCacheRecon()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -927,7 +927,7 @@ func TestGetExternalTransactionsPaginated_QueryError(t *testing.T) {
 func TestGetExternalTransactionsPaginated_EmptyResults(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCacheRecon()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -951,7 +951,7 @@ func TestGetExternalTransactionsPaginated_EmptyResults(t *testing.T) {
 func TestFetchAndGroupExternalTransactions_InvalidGroupCriteria(t *testing.T) {
 	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCacheRecon()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -967,7 +967,7 @@ func TestFetchAndGroupExternalTransactions_InvalidGroupCriteria(t *testing.T) {
 func TestFetchAndGroupExternalTransactions_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCacheRecon()
 	ds := Datasource{Conn: db, Cache: mc}
@@ -986,7 +986,7 @@ func TestFetchAndGroupExternalTransactions_QueryError(t *testing.T) {
 func TestFetchAndGroupExternalTransactions_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mc := newMockCacheRecon()
 	ds := Datasource{Conn: db, Cache: mc}

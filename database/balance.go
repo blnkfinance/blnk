@@ -853,7 +853,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 		// Return an internal server error if the query fails
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitors", err)
 	}
-	defer rows.Close() // Ensure rows are closed after processing
+	defer func() { _ = rows.Close() }() // Ensure rows are closed after processing
 
 	// Initialize an empty slice to store the retrieved monitors
 	var monitors []model.BalanceMonitor
@@ -906,7 +906,7 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 		// Return an internal server error if the query fails
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve balance monitors", err)
 	}
-	defer rows.Close() // Ensure rows are closed after processing
+	defer func() { _ = rows.Close() }() // Ensure rows are closed after processing
 
 	// Initialize an empty slice to store the retrieved monitors
 	var monitors []model.BalanceMonitor
@@ -1166,7 +1166,7 @@ func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sq
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Count of processed transactions for debugging
 	transactionCount := 0
