@@ -338,3 +338,97 @@ func TestDeleteIdentity_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, apierror.ErrNotFound, err.(apierror.APIError).Code)
 }
+
+func TestGetIdentityByID_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT identity_id, identity_type, first_name, last_name").
+		WithArgs("idt123").
+		WillReturnError(fmt.Errorf("connection error"))
+	mock.ExpectRollback()
+
+	_, err = ds.GetIdentityByID("idt123")
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrInternalServer, err.(apierror.APIError).Code)
+}
+
+func TestGetAllIdentities_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectQuery("SELECT identity_id, identity_type, first_name, last_name").
+		WillReturnError(fmt.Errorf("database error"))
+
+	identities, err := ds.GetAllIdentities()
+	assert.Error(t, err)
+	assert.Nil(t, identities)
+	assert.Equal(t, apierror.ErrInternalServer, err.(apierror.APIError).Code)
+}
+
+func TestGetAllIdentities_Empty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectQuery("SELECT identity_id, identity_type, first_name, last_name").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"identity_id", "identity_type", "first_name", "last_name", "other_names", "gender",
+			"dob", "email_address", "phone_number", "nationality", "organization_name", "category",
+			"street", "country", "state", "post_code", "city", "created_at", "meta_data",
+		}))
+
+	identities, err := ds.GetAllIdentities()
+	assert.NoError(t, err)
+	assert.Len(t, identities, 0)
+}
+
+func TestUpdateIdentity_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	identity := &model.Identity{
+		IdentityID:   "idt1",
+		FirstName:    "John",
+		EmailAddress: "john@example.com",
+		MetaData:     map[string]interface{}{},
+	}
+
+	metaDataJSON, _ := json.Marshal(identity.MetaData)
+
+	mock.ExpectExec("UPDATE blnk\\.identity SET").
+		WithArgs(identity.FirstName, identity.EmailAddress, metaDataJSON, identity.IdentityID).
+		WillReturnError(fmt.Errorf("database error"))
+
+	err = ds.UpdateIdentity(identity)
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrInternalServer, err.(apierror.APIError).Code)
+}
+
+func TestDeleteIdentity_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectExec("DELETE FROM blnk.identity").
+		WithArgs("idt123").
+		WillReturnError(fmt.Errorf("database error"))
+
+	err = ds.DeleteIdentity("idt123")
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrInternalServer, err.(apierror.APIError).Code)
+}

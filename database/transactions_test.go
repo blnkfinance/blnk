@@ -29,10 +29,41 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/cache"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
 )
+
+type mockCache struct {
+	data map[string]interface{}
+}
+
+func newMockCache() *mockCache {
+	return &mockCache{data: make(map[string]interface{})}
+}
+
+func (m *mockCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	m.data[key] = value
+	return nil
+}
+
+func (m *mockCache) Get(ctx context.Context, key string, data interface{}) error {
+	if v, ok := m.data[key]; ok {
+		// For simplicity, just return the value directly
+		switch d := data.(type) {
+		case *[]*model.Transaction:
+			*d = v.([]*model.Transaction)
+		}
+		return nil
+	}
+	return errors.New("cache miss")
+}
+
+func (m *mockCache) Delete(ctx context.Context, key string) error {
+	delete(m.data, key)
+	return nil
+}
 
 func TestRecordTransaction_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -761,4 +792,1178 @@ func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *te
 		"Destination balance should be unchanged after rollback")
 	assert.Equal(t, destAfterFirst.CreditBalance.String(), finalDest.CreditBalance.String(),
 		"Destination credit balance should be unchanged after rollback")
+}
+
+func TestGetTransactionByRef_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	metaData := map[string]interface{}{"key": "value"}
+	metaDataJSON, _ := json.Marshal(metaData)
+
+	query := `
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		FROM blnk.transactions
+		WHERE reference = $1
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("ref_123").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "precise_amount", "currency",
+			"destination", "description", "status", "created_at", "meta_data", "parent_transaction",
+		}).AddRow(
+			"txn_123", "bln_source", "ref_123", 1000.0, "100000", "USD",
+			"bln_dest", "Test transaction", "APPLIED", time.Now(), metaDataJSON, "",
+		))
+
+	txn, err := ds.GetTransactionByRef(ctx, "ref_123")
+	assert.NoError(t, err)
+	assert.Equal(t, "txn_123", txn.TransactionID)
+	assert.Equal(t, "ref_123", txn.Reference)
+	assert.Equal(t, "bln_source", txn.Source)
+	assert.Equal(t, "bln_dest", txn.Destination)
+	assert.Equal(t, "APPLIED", txn.Status)
+	assert.Equal(t, "100000", txn.PreciseAmount.String())
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetTransactionByRef_NotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		FROM blnk.transactions
+		WHERE reference = $1
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("nonexistent_ref").
+		WillReturnError(sql.ErrNoRows)
+
+	txn, err := ds.GetTransactionByRef(ctx, "nonexistent_ref")
+	assert.Error(t, err)
+	assert.Equal(t, "", txn.TransactionID)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetTransactionByRef_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		FROM blnk.transactions
+		WHERE reference = $1
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("ref_123").
+		WillReturnError(errors.New("database connection error"))
+
+	txn, err := ds.GetTransactionByRef(ctx, "ref_123")
+	assert.Error(t, err)
+	assert.Equal(t, "", txn.TransactionID)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestUpdateTransactionStatus_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		UPDATE blnk.transactions
+		SET status = $2
+		WHERE transaction_id = $1
+	`
+
+	mock.ExpectExec(regexp.QuoteMeta(query)).
+		WithArgs("txn_123", "APPLIED").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err = ds.UpdateTransactionStatus(ctx, "txn_123", "APPLIED")
+	assert.NoError(t, err)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestUpdateTransactionStatus_NotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		UPDATE blnk.transactions
+		SET status = $2
+		WHERE transaction_id = $1
+	`
+
+	mock.ExpectExec(regexp.QuoteMeta(query)).
+		WithArgs("nonexistent_txn", "APPLIED").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	err = ds.UpdateTransactionStatus(ctx, "nonexistent_txn", "APPLIED")
+	assert.Error(t, err)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestUpdateTransactionStatus_Error(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		UPDATE blnk.transactions
+		SET status = $2
+		WHERE transaction_id = $1
+	`
+
+	mock.ExpectExec(regexp.QuoteMeta(query)).
+		WithArgs("txn_123", "APPLIED").
+		WillReturnError(errors.New("database error"))
+
+	err = ds.UpdateTransactionStatus(ctx, "txn_123", "APPLIED")
+	assert.Error(t, err)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetAllTransactions_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	metaData := map[string]interface{}{"key": "value"}
+	metaDataJSON, _ := json.Marshal(metaData)
+
+	query := `
+		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		FROM blnk.transactions
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs(10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "currency",
+			"destination", "description", "status", "hash", "created_at", "meta_data",
+		}).
+			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), metaDataJSON).
+			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), metaDataJSON))
+
+	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 2)
+	assert.Equal(t, "txn_1", transactions[0].TransactionID)
+	assert.Equal(t, "txn_2", transactions[1].TransactionID)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetAllTransactions_Empty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		FROM blnk.transactions
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs(10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "currency",
+			"destination", "description", "status", "hash", "created_at", "meta_data",
+		}))
+
+	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 0)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetAllTransactions_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		FROM blnk.transactions
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs(10, 0).
+		WillReturnError(errors.New("database error"))
+
+	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
+	assert.Error(t, err)
+	assert.Nil(t, transactions)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestIsParentTransactionVoid_True(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM blnk.transactions
+			WHERE parent_transaction = $1
+			AND status = 'VOID'
+		)
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("parent_txn_123").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	isVoid, err := ds.IsParentTransactionVoid(ctx, "parent_txn_123")
+	assert.NoError(t, err)
+	assert.True(t, isVoid)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestIsParentTransactionVoid_False(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM blnk.transactions
+			WHERE parent_transaction = $1
+			AND status = 'VOID'
+		)
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("parent_txn_456").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	isVoid, err := ds.IsParentTransactionVoid(ctx, "parent_txn_456")
+	assert.NoError(t, err)
+	assert.False(t, isVoid)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestIsParentTransactionVoid_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM blnk.transactions
+			WHERE parent_transaction = $1
+			AND status = 'VOID'
+		)
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("parent_txn_123").
+		WillReturnError(errors.New("database error"))
+
+	isVoid, err := ds.IsParentTransactionVoid(ctx, "parent_txn_123")
+	assert.Error(t, err)
+	assert.False(t, isVoid)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetRefundableTransactionsByParentID_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	metaData := map[string]interface{}{"key": "value"}
+	metaDataJSON, _ := json.Marshal(metaData)
+
+	query := `
+		SELECT 
+			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
+			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.meta_data, t.scheduled_for, t.hash
+		FROM 
+			blnk.transactions t
+		WHERE 
+			-- Case 1: The transaction is the parent itself and is APPLIED
+			(t.transaction_id = $1 AND t.status = 'APPLIED')
+			
+			-- Case 2: The transaction is a child and is APPLIED or VOID
+			OR (t.parent_transaction = $1 AND t.status IN ('APPLIED', 'VOID'))
+
+			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
+			OR (t.status = 'APPLIED' AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
+
+		ORDER BY 
+			t.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("parent_txn_123", 100, int64(0)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
+			"precision", "rate", "currency", "destination", "description", "status", "created_at",
+			"meta_data", "scheduled_for", "hash",
+		}).
+			AddRow("txn_1", "parent_txn_123", "bln_src", "ref_1", 1000.0, "100000", 100, 1.0, "USD", "bln_dest", "Desc 1", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1").
+			AddRow("txn_2", "parent_txn_123", "bln_src", "ref_2", 500.0, "50000", 100, 1.0, "USD", "bln_dest", "Desc 2", "VOID", time.Now(), metaDataJSON, time.Now(), "hash2"))
+
+	transactions, err := ds.GetRefundableTransactionsByParentID(ctx, "parent_txn_123", 100, 0)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 2)
+	assert.Equal(t, "txn_1", transactions[0].TransactionID)
+	assert.Equal(t, "APPLIED", transactions[0].Status)
+	assert.Equal(t, "txn_2", transactions[1].TransactionID)
+	assert.Equal(t, "VOID", transactions[1].Status)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetRefundableTransactionsByParentID_Empty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT 
+			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
+			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.meta_data, t.scheduled_for, t.hash
+		FROM 
+			blnk.transactions t
+		WHERE 
+			-- Case 1: The transaction is the parent itself and is APPLIED
+			(t.transaction_id = $1 AND t.status = 'APPLIED')
+			
+			-- Case 2: The transaction is a child and is APPLIED or VOID
+			OR (t.parent_transaction = $1 AND t.status IN ('APPLIED', 'VOID'))
+
+			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
+			OR (t.status = 'APPLIED' AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
+
+		ORDER BY 
+			t.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("nonexistent_parent", 100, int64(0)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
+			"precision", "rate", "currency", "destination", "description", "status", "created_at",
+			"meta_data", "scheduled_for", "hash",
+		}))
+
+	transactions, err := ds.GetRefundableTransactionsByParentID(ctx, "nonexistent_parent", 100, 0)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 0)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetRefundableTransactionsByParentID_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	query := `
+		SELECT 
+			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
+			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.meta_data, t.scheduled_for, t.hash
+		FROM 
+			blnk.transactions t
+		WHERE 
+			-- Case 1: The transaction is the parent itself and is APPLIED
+			(t.transaction_id = $1 AND t.status = 'APPLIED')
+			
+			-- Case 2: The transaction is a child and is APPLIED or VOID
+			OR (t.parent_transaction = $1 AND t.status IN ('APPLIED', 'VOID'))
+
+			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
+			OR (t.status = 'APPLIED' AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
+
+		ORDER BY 
+			t.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("parent_txn_123", 100, int64(0)).
+		WillReturnError(errors.New("database error"))
+
+	transactions, err := ds.GetRefundableTransactionsByParentID(ctx, "parent_txn_123", 100, 0)
+	assert.Error(t, err)
+	assert.Nil(t, transactions)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestTransactionExistsByIDOrParentID_True(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs("txn_123").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	exists, err := ds.TransactionExistsByIDOrParentID(ctx, "txn_123")
+	assert.NoError(t, err)
+	assert.True(t, exists)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestTransactionExistsByIDOrParentID_False(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs("txn_notfound").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	exists, err := ds.TransactionExistsByIDOrParentID(ctx, "txn_notfound")
+	assert.NoError(t, err)
+	assert.False(t, exists)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestTransactionExistsByIDOrParentID_Error(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs("txn_123").
+		WillReturnError(errors.New("database error"))
+
+	exists, err := ds.TransactionExistsByIDOrParentID(ctx, "txn_123")
+	assert.Error(t, err)
+	assert.False(t, exists)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestIsTransactionRefunded_True(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	txn := &model.Transaction{
+		TransactionID: "txn_123",
+		Source:        "bln_source",
+		Destination:   "bln_dest",
+	}
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs(txn.TransactionID, txn.Destination, txn.Source).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	isRefunded, err := ds.IsTransactionRefunded(ctx, txn)
+	assert.NoError(t, err)
+	assert.True(t, isRefunded)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestIsTransactionRefunded_False(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	txn := &model.Transaction{
+		TransactionID: "txn_123",
+		Source:        "bln_source",
+		Destination:   "bln_dest",
+	}
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs(txn.TransactionID, txn.Destination, txn.Source).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	isRefunded, err := ds.IsTransactionRefunded(ctx, txn)
+	assert.NoError(t, err)
+	assert.False(t, isRefunded)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestIsTransactionRefunded_Error(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	txn := &model.Transaction{
+		TransactionID: "txn_123",
+		Source:        "bln_source",
+		Destination:   "bln_dest",
+	}
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs(txn.TransactionID, txn.Destination, txn.Source).
+		WillReturnError(errors.New("database error"))
+
+	isRefunded, err := ds.IsTransactionRefunded(ctx, txn)
+	assert.Error(t, err)
+	assert.False(t, isRefunded)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGroupTransactions_InvalidCriteria(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	newCache, err := cache.NewCache()
+	assert.NoError(t, err)
+	ds := Datasource{Conn: db, Cache: newCache}
+	ctx := context.Background()
+
+	result, err := ds.GroupTransactions(ctx, "invalid_column", 10, 0)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrBadRequest, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetTransactionsByCriteria_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	metaData := map[string]interface{}{"key": "value"}
+	metaDataJSON, _ := json.Marshal(metaData)
+
+	minAmount := 100.0
+	maxAmount := 5000.0
+	currency := "USD"
+
+	mock.ExpectQuery("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash FROM blnk.transactions").
+		WithArgs(minAmount, maxAmount, currency, 10, int64(0)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
+			"precision", "rate", "currency", "destination", "description", "status", "created_at",
+			"meta_data", "scheduled_for", "hash",
+		}).
+			AddRow("txn_1", "", "bln_src", "ref_1", 1000.0, "100000", 100, 1.0, "USD", "bln_dest", "Desc", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1"))
+
+	txns, err := ds.GetTransactionsByCriteria(ctx, &minAmount, &maxAmount, &currency, nil, nil, 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, txns, 1)
+}
+
+func TestGetTransactionsByCriteria_Error(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	mock.ExpectQuery("SELECT transaction_id").
+		WillReturnError(errors.New("database error"))
+
+	txns, err := ds.GetTransactionsByCriteria(ctx, nil, nil, nil, nil, nil, 10, 0)
+	assert.Error(t, err)
+	assert.Nil(t, txns)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestGetQueuedAmounts_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	balanceID := "bln_test123"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
+        FROM blnk.transactions t
+        WHERE (t.source = $1 OR t.destination = $1) 
+        AND t.status = 'QUEUED'
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM blnk.transactions child 
+            WHERE child.parent_transaction = t.transaction_id 
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
+        )`)).
+		WithArgs(balanceID).
+		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination"}).
+			AddRow("1000", balanceID, "dest123").
+			AddRow("500", "src123", balanceID))
+
+	debit, credit, err := ds.GetQueuedAmounts(ctx, balanceID)
+	assert.NoError(t, err)
+	assert.NotNil(t, debit)
+	assert.NotNil(t, credit)
+	assert.Equal(t, int64(1000), debit.Int64())
+	assert.Equal(t, int64(500), credit.Int64())
+}
+
+func TestGetQueuedAmounts_NoTransactions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	balanceID := "bln_test123"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
+        FROM blnk.transactions t
+        WHERE (t.source = $1 OR t.destination = $1) 
+        AND t.status = 'QUEUED'
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM blnk.transactions child 
+            WHERE child.parent_transaction = t.transaction_id 
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
+        )`)).
+		WithArgs(balanceID).
+		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination"}))
+
+	debit, credit, err := ds.GetQueuedAmounts(ctx, balanceID)
+	assert.NoError(t, err)
+	assert.NotNil(t, debit)
+	assert.NotNil(t, credit)
+	assert.Equal(t, int64(0), debit.Int64())
+	assert.Equal(t, int64(0), credit.Int64())
+}
+
+func TestGetQueuedAmounts_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	balanceID := "bln_test123"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
+        FROM blnk.transactions t
+        WHERE (t.source = $1 OR t.destination = $1) 
+        AND t.status = 'QUEUED'
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM blnk.transactions child 
+            WHERE child.parent_transaction = t.transaction_id 
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
+        )`)).
+		WithArgs(balanceID).
+		WillReturnError(sql.ErrConnDone)
+
+	debit, credit, err := ds.GetQueuedAmounts(ctx, balanceID)
+	assert.Error(t, err)
+	assert.Nil(t, debit)
+	assert.Nil(t, credit)
+}
+
+func TestGetQueuedAmounts_InvalidAmount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	balanceID := "bln_test123"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
+        FROM blnk.transactions t
+        WHERE (t.source = $1 OR t.destination = $1) 
+        AND t.status = 'QUEUED'
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM blnk.transactions child 
+            WHERE child.parent_transaction = t.transaction_id 
+            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
+        )`)).
+		WithArgs(balanceID).
+		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination"}).
+			AddRow("invalid_amount", balanceID, "dest123"))
+
+	debit, credit, err := ds.GetQueuedAmounts(ctx, balanceID)
+	assert.Error(t, err)
+	assert.Nil(t, debit)
+	assert.Nil(t, credit)
+}
+
+func TestGetTransactionsPaginated_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	mc := newMockCache()
+	ds := Datasource{Conn: db, Cache: mc}
+	ctx := context.Background()
+
+	createdAt := time.Now()
+	scheduledFor := time.Now().Add(24 * time.Hour)
+	metaData := map[string]interface{}{"key": "value"}
+	metaDataJSON, _ := json.Marshal(metaData)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        ORDER BY created_at ASC
+        LIMIT $1 OFFSET $2`)).
+		WithArgs(10, int64(0)).
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "rate", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
+			AddRow("txn_123", "", "bln_source", "ref_123", 100.0, "10000", 100, 1.0, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
+
+	txns, err := ds.GetTransactionsPaginated(ctx, "", 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, txns, 1)
+	assert.Equal(t, "txn_123", txns[0].TransactionID)
+}
+
+func TestGetTransactionsPaginated_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	mc := newMockCache()
+	ds := Datasource{Conn: db, Cache: mc}
+	ctx := context.Background()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        ORDER BY created_at ASC
+        LIMIT $1 OFFSET $2`)).
+		WithArgs(10, int64(0)).
+		WillReturnError(sql.ErrConnDone)
+
+	txns, err := ds.GetTransactionsPaginated(ctx, "", 10, 0)
+	assert.Error(t, err)
+	assert.Nil(t, txns)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestGetTransactionsByParent_DatabaseSuccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	mc := newMockCache()
+	ds := Datasource{Conn: db, Cache: mc}
+	ctx := context.Background()
+
+	createdAt := time.Now()
+	scheduledFor := time.Now().Add(24 * time.Hour)
+	metaData := map[string]interface{}{"key": "value"}
+	metaDataJSON, _ := json.Marshal(metaData)
+	parentID := "txn_parent_123"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		WHERE parent_transaction = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3`)).
+		WithArgs(parentID, 10, int64(0)).
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "rate", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
+			AddRow("txn_child_123", parentID, "bln_source", "ref_123", 100.0, "10000", 100, 1.0, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
+
+	txns, err := ds.GetTransactionsByParent(ctx, parentID, 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, txns, 1)
+	assert.Equal(t, "txn_child_123", txns[0].TransactionID)
+	assert.Equal(t, parentID, txns[0].ParentTransaction)
+}
+
+func TestGetTransactionsByParent_DatabaseError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	mc := newMockCache()
+	ds := Datasource{Conn: db, Cache: mc}
+	ctx := context.Background()
+	parentID := "txn_parent_123"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		WHERE parent_transaction = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3`)).
+		WithArgs(parentID, 10, int64(0)).
+		WillReturnError(sql.ErrConnDone)
+
+	txns, err := ds.GetTransactionsByParent(ctx, parentID, 10, 0)
+	assert.Error(t, err)
+	assert.Nil(t, txns)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestGetTransactionsByParent_EmptyResults(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	mc := newMockCache()
+	ds := Datasource{Conn: db, Cache: mc}
+	ctx := context.Background()
+	parentID := "txn_parent_123"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
+			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions
+		WHERE parent_transaction = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3`)).
+		WithArgs(parentID, 10, int64(0)).
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "rate", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}))
+
+	txns, err := ds.GetTransactionsByParent(ctx, parentID, 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, txns, 0)
+}
+
+func TestRecordTransactionWithBalances_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	txn := &model.Transaction{
+		TransactionID:     "txn_123",
+		ParentTransaction: "",
+		Source:            "bln_source",
+		Reference:         "ref_123",
+		AmountString:      "100.00",
+		PreciseAmount:     big.NewInt(10000),
+		Precision:         100,
+		Rate:              1.0,
+		Currency:          "USD",
+		Destination:       "bln_dest",
+		Description:       "test transaction",
+		Status:            "APPLIED",
+		CreatedAt:         time.Now(),
+		MetaData:          map[string]interface{}{"key": "value"},
+		Hash:              "hash123",
+	}
+
+	sourceBalance := &model.Balance{
+		BalanceID:             "bln_source",
+		Balance:               big.NewInt(1000),
+		CreditBalance:         big.NewInt(500),
+		DebitBalance:          big.NewInt(500),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Currency:              "USD",
+		CurrencyMultiplier:    100,
+		Version:               1,
+	}
+
+	destBalance := &model.Balance{
+		BalanceID:             "bln_dest",
+		Balance:               big.NewInt(2000),
+		CreditBalance:         big.NewInt(1000),
+		DebitBalance:          big.NewInt(1000),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Currency:              "USD",
+		CurrencyMultiplier:    100,
+		Version:               1,
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE blnk.balances SET").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE blnk.balances SET").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO blnk.transactions").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	result, err := ds.RecordTransactionWithBalances(ctx, txn, sourceBalance, destBalance)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, txn.TransactionID, result.TransactionID)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestRecordTransactionWithBalances_BeginError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	txn := &model.Transaction{
+		TransactionID: "txn_123",
+	}
+
+	sourceBalance := &model.Balance{BalanceID: "bln_source"}
+	destBalance := &model.Balance{BalanceID: "bln_dest"}
+
+	mock.ExpectBegin().WillReturnError(sql.ErrConnDone)
+
+	result, err := ds.RecordTransactionWithBalances(ctx, txn, sourceBalance, destBalance)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestRecordTransactionWithBalances_SourceUpdateError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	txn := &model.Transaction{
+		TransactionID: "txn_123",
+	}
+
+	sourceBalance := &model.Balance{
+		BalanceID:             "bln_source",
+		Balance:               big.NewInt(1000),
+		CreditBalance:         big.NewInt(500),
+		DebitBalance:          big.NewInt(500),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Version:               1,
+	}
+	destBalance := &model.Balance{BalanceID: "bln_dest"}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE blnk.balances SET").
+		WillReturnError(sql.ErrConnDone)
+	mock.ExpectRollback()
+
+	result, err := ds.RecordTransactionWithBalances(ctx, txn, sourceBalance, destBalance)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestRecordTransactionWithBalances_CommitError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	txn := &model.Transaction{
+		TransactionID:     "txn_123",
+		ParentTransaction: "",
+		Source:            "bln_source",
+		Reference:         "ref_123",
+		AmountString:      "100.00",
+		PreciseAmount:     big.NewInt(10000),
+		Precision:         100,
+		Rate:              1.0,
+		Currency:          "USD",
+		Destination:       "bln_dest",
+		Description:       "test transaction",
+		Status:            "APPLIED",
+		CreatedAt:         time.Now(),
+		MetaData:          map[string]interface{}{"key": "value"},
+		Hash:              "hash123",
+	}
+
+	sourceBalance := &model.Balance{
+		BalanceID:             "bln_source",
+		Balance:               big.NewInt(1000),
+		CreditBalance:         big.NewInt(500),
+		DebitBalance:          big.NewInt(500),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Version:               1,
+	}
+
+	destBalance := &model.Balance{
+		BalanceID:             "bln_dest",
+		Balance:               big.NewInt(2000),
+		CreditBalance:         big.NewInt(1000),
+		DebitBalance:          big.NewInt(1000),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Version:               1,
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE blnk.balances SET").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE blnk.balances SET").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO blnk.transactions").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit().WillReturnError(sql.ErrConnDone)
+	mock.ExpectRollback()
+
+	result, err := ds.RecordTransactionWithBalances(ctx, txn, sourceBalance, destBalance)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
 }

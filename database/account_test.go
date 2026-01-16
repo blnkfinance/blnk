@@ -1,7 +1,9 @@
 package database
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -173,4 +175,139 @@ func TestDeleteAccount_Success(t *testing.T) {
 
 	err = ds.DeleteAccount("acc1")
 	assert.NoError(t, err)
+}
+
+func TestCreateAccount_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	account := model.Account{
+		Name:       "Test Account",
+		Number:     "1234567890",
+		BankName:   "Test Bank",
+		Currency:   "USD",
+		LedgerID:   "ldg1",
+		IdentityID: "idt1",
+		BalanceID:  "bal1",
+		MetaData:   map[string]interface{}{},
+	}
+
+	metaDataJSON, err := json.Marshal(account.MetaData)
+	assert.NoError(t, err)
+
+	mock.ExpectExec("INSERT INTO blnk.accounts").
+		WithArgs(sqlmock.AnyArg(), account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, sqlmock.AnyArg(), metaDataJSON).
+		WillReturnError(fmt.Errorf("database connection error"))
+
+	_, err = ds.CreateAccount(account)
+	assert.Error(t, err)
+}
+
+func TestGetAccountByID_NotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT a.account_id, a.name, a.number, a.bank_name").
+		WithArgs("acc_notfound").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	account, err := ds.GetAccountByID("acc_notfound", []string{})
+	assert.Error(t, err)
+	assert.Nil(t, account)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestGetAllAccounts_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectQuery("SELECT account_id, name, number, bank_name").
+		WillReturnError(fmt.Errorf("database error"))
+
+	accounts, err := ds.GetAllAccounts()
+	assert.Error(t, err)
+	assert.Nil(t, accounts)
+}
+
+func TestGetAllAccounts_Empty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectQuery("SELECT account_id, name, number, bank_name").
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "name", "number", "bank_name", "currency", "created_at", "meta_data"}))
+
+	accounts, err := ds.GetAllAccounts()
+	assert.NoError(t, err)
+	assert.Len(t, accounts, 0)
+}
+
+func TestGetAccountByNumber_NotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectQuery("SELECT account_id, name, number, bank_name").
+		WithArgs("0000000000").
+		WillReturnError(sql.ErrNoRows)
+
+	account, err := ds.GetAccountByNumber("0000000000")
+	assert.Error(t, err)
+	assert.Nil(t, account)
+}
+
+func TestUpdateAccount_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	account := &model.Account{
+		AccountID: "acc1",
+		Name:      "Updated Account",
+		Number:    "1234567890",
+		BankName:  "Updated Bank",
+		MetaData:  map[string]interface{}{},
+	}
+
+	metaDataJSON, err := json.Marshal(account.MetaData)
+	assert.NoError(t, err)
+
+	mock.ExpectExec("UPDATE blnk.accounts").
+		WithArgs(account.AccountID, account.Name, account.Number, account.BankName, metaDataJSON).
+		WillReturnError(fmt.Errorf("database error"))
+
+	err = ds.UpdateAccount(account)
+	assert.Error(t, err)
+}
+
+func TestDeleteAccount_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectExec("DELETE FROM blnk.accounts").
+		WithArgs("acc1").
+		WillReturnError(fmt.Errorf("database error"))
+
+	err = ds.DeleteAccount("acc1")
+	assert.Error(t, err)
 }

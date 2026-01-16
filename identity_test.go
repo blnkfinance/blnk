@@ -255,3 +255,260 @@ func TestDeleteIdentity(t *testing.T) {
 		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
 }
+
+func TestTokenizeIdentityField_InvalidField(t *testing.T) {
+	datasource, _, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	err = d.TokenizeIdentityField("idt_123", "invalid_field")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not tokenizable")
+}
+
+func TestTokenizeIdentityField_Success(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "idt_123"
+
+	mock.ExpectBegin()
+	row := sqlmock.NewRows([]string{
+		"identity_id", "identity_type", "first_name", "last_name", "other_names", "gender", "dob",
+		"email_address", "phone_number", "nationality", "organization_name", "category",
+		"street", "country", "state", "post_code", "city", "created_at", "meta_data",
+	}).AddRow(
+		testID, "Individual", "John", "Doe", "Other", "Male", time.Now(),
+		"john@example.com", "1234567890", "US", "Org", "Cat",
+		"Street", "Country", "State", "12345", "City", time.Now(), `{}`,
+	)
+	mock.ExpectQuery("SELECT .* FROM blnk.identity WHERE identity_id =").
+		WithArgs(testID).
+		WillReturnRows(row)
+	mock.ExpectCommit()
+
+	mock.ExpectExec("UPDATE blnk.identity SET").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), testID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = d.TokenizeIdentityField(testID, "EmailAddress")
+	assert.NoError(t, err)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestTokenizeIdentityField_AlreadyTokenized(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "idt_123"
+
+	mock.ExpectBegin()
+	row := sqlmock.NewRows([]string{
+		"identity_id", "identity_type", "first_name", "last_name", "other_names", "gender", "dob",
+		"email_address", "phone_number", "nationality", "organization_name", "category",
+		"street", "country", "state", "post_code", "city", "created_at", "meta_data",
+	}).AddRow(
+		testID, "Individual", "John", "Doe", "Other", "Male", time.Now(),
+		"john@example.com", "1234567890", "US", "Org", "Cat",
+		"Street", "Country", "State", "12345", "City", time.Now(), `{"tokenized_fields":{"EmailAddress":true}}`,
+	)
+	mock.ExpectQuery("SELECT .* FROM blnk.identity WHERE identity_id =").
+		WithArgs(testID).
+		WillReturnRows(row)
+	mock.ExpectCommit()
+
+	err = d.TokenizeIdentityField(testID, "EmailAddress")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already tokenized")
+}
+
+func TestTokenizeIdentity_Success(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "idt_123"
+
+	mock.ExpectBegin()
+	row1 := sqlmock.NewRows([]string{
+		"identity_id", "identity_type", "first_name", "last_name", "other_names", "gender", "dob",
+		"email_address", "phone_number", "nationality", "organization_name", "category",
+		"street", "country", "state", "post_code", "city", "created_at", "meta_data",
+	}).AddRow(
+		testID, "Individual", "John", "Doe", "Other", "Male", time.Now(),
+		"john@example.com", "1234567890", "US", "Org", "Cat",
+		"Street", "Country", "State", "12345", "City", time.Now(), `{}`,
+	)
+	mock.ExpectQuery("SELECT .* FROM blnk.identity WHERE identity_id =").
+		WithArgs(testID).
+		WillReturnRows(row1)
+	mock.ExpectCommit()
+
+	mock.ExpectExec("UPDATE blnk.identity SET").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), testID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = d.TokenizeIdentity(testID, []string{"EmailAddress"})
+	assert.NoError(t, err)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestDetokenizeIdentityField_NotTokenized(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "idt_123"
+
+	mock.ExpectBegin()
+	row := sqlmock.NewRows([]string{
+		"identity_id", "identity_type", "first_name", "last_name", "other_names", "gender", "dob",
+		"email_address", "phone_number", "nationality", "organization_name", "category",
+		"street", "country", "state", "post_code", "city", "created_at", "meta_data",
+	}).AddRow(
+		testID, "Individual", "John", "Doe", "Other", "Male", time.Now(),
+		"john@example.com", "1234567890", "US", "Org", "Cat",
+		"Street", "Country", "State", "12345", "City", time.Now(), `{}`,
+	)
+	mock.ExpectQuery("SELECT .* FROM blnk.identity WHERE identity_id =").
+		WithArgs(testID).
+		WillReturnRows(row)
+	mock.ExpectCommit()
+
+	_, err = d.DetokenizeIdentityField(testID, "email_address")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not tokenized")
+}
+
+func TestDetokenizeIdentity_Empty(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "idt_123"
+
+	mock.ExpectBegin()
+	row := sqlmock.NewRows([]string{
+		"identity_id", "identity_type", "first_name", "last_name", "other_names", "gender", "dob",
+		"email_address", "phone_number", "nationality", "organization_name", "category",
+		"street", "country", "state", "post_code", "city", "created_at", "meta_data",
+	}).AddRow(
+		testID, "Individual", "John", "Doe", "Other", "Male", time.Now(),
+		"john@example.com", "1234567890", "US", "Org", "Cat",
+		"Street", "Country", "State", "12345", "City", time.Now(), `{}`,
+	)
+	mock.ExpectQuery("SELECT .* FROM blnk.identity WHERE identity_id =").
+		WithArgs(testID).
+		WillReturnRows(row)
+	mock.ExpectCommit()
+
+	result, err := d.DetokenizeIdentity(testID)
+	assert.NoError(t, err)
+	assert.Empty(t, result)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestTokenizeAllPII(t *testing.T) {
+	datasource, mock, err := newTestDataSource()
+	if err != nil {
+		t.Fatalf("Error creating test data source: %s", err)
+	}
+
+	d, err := NewBlnk(datasource)
+	if err != nil {
+		t.Fatalf("Error creating Blnk instance: %s", err)
+	}
+
+	testID := "idt_123"
+
+	for i := 0; i < 10; i++ {
+		mock.ExpectBegin()
+		row := sqlmock.NewRows([]string{
+			"identity_id", "identity_type", "first_name", "last_name", "other_names", "gender", "dob",
+			"email_address", "phone_number", "nationality", "organization_name", "category",
+			"street", "country", "state", "post_code", "city", "created_at", "meta_data",
+		}).AddRow(
+			testID, "Individual", "John", "Doe", "Other", "Male", time.Now(),
+			"john@example.com", "1234567890", "US", "Org", "Cat",
+			"Street", "Country", "State", "12345", "City", time.Now(), `{}`,
+		)
+		mock.ExpectQuery("SELECT .* FROM blnk.identity WHERE identity_id =").
+			WithArgs(testID).
+			WillReturnRows(row)
+		mock.ExpectCommit()
+
+		mock.ExpectExec("UPDATE blnk.identity SET").
+			WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), testID).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+
+	err = d.TokenizeAllPII(testID)
+	assert.NoError(t, err)
+}
+
+func TestConvertToStructFieldName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"email_address", "Email_address"},
+		{"first_name", "First_name"},
+		{"phone_number", "Phone_number"},
+		{"EmailAddress", "EmailAddress"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := convertToStructFieldName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
