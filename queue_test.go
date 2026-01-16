@@ -82,11 +82,7 @@ func TestEnqueueScheduledTransaction(t *testing.T) {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 
-	q := NewQueue(&config.Configuration{
-		Redis: config.RedisConfig{
-			Dns: "localhost:6379",
-		},
-	})
+	q := NewQueue(conf)
 	q.Client = client
 	q.Inspector = inspector
 
@@ -119,11 +115,7 @@ func TestEnqueueWithAsynqClientEnqueueError(t *testing.T) {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 
-	q := NewQueue(&config.Configuration{
-		Redis: config.RedisConfig{
-			Dns: "localhost:6379",
-		},
-	})
+	q := NewQueue(conf)
 	q.Client = client
 	q.Inspector = inspector
 

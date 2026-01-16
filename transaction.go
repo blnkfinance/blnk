@@ -27,7 +27,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blnkfinance/blnk/config"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/search"
@@ -104,13 +103,7 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 
 	var sourceBalance, destinationBalance *model.Balance
 
-	// Get configuration to check if queued checks are enabled
-	cfg, err := config.Fetch()
-	if err != nil {
-		span.RecordError(err)
-		logrus.Errorf("failed to fetch config: %v", err)
-		return nil, nil, err
-	}
+	cfg := l.config
 
 	// Check if Source starts with "@"
 	if strings.HasPrefix(transaction.Source, "@") {
@@ -179,13 +172,8 @@ func (l *Blnk) acquireLock(ctx context.Context, transaction *model.Transaction) 
 	ctx, span := tracer.Start(ctx, "Acquiring Lock")
 	defer span.End()
 
-	config, err := config.Fetch()
-	if err != nil {
-		return nil, err
-	}
-
 	locker := redlock.NewLocker(l.redis, transaction.Source, model.GenerateUUIDWithSuffix("loc"))
-	err = locker.Lock(ctx, config.Transaction.LockDuration)
+	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -244,12 +232,6 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 	_, span := tracer.Start(ctx, "Post Transaction Actions")
 	defer span.End()
 
-	cfg, err := config.Fetch()
-	if err != nil {
-		span.RecordError(err)
-		return
-	}
-
 	go func() {
 		// Create an index batch to ensure balances are indexed before the transaction
 		batch := search.NewIndexBatch(transaction.TransactionID)
@@ -263,7 +245,7 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 		}
 
 		// Set transaction as the primary item (indexed after dependencies)
-		batch.SetPrimary(cfg.Transaction.IndexQueuePrefix, transaction.TransactionID, transaction)
+		batch.SetPrimary(l.Config().Transaction.IndexQueuePrefix, transaction.TransactionID, transaction)
 
 		// Queue the batch for indexing
 		err := l.queue.queueIndexBatch(batch)
@@ -307,21 +289,9 @@ func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBal
 		return err
 	}
 
-	// Check balance monitors in parallel
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		l.checkBalanceMonitors(ctx, sourceBalance)
-	}()
-
-	go func() {
-		defer wg.Done()
-		l.checkBalanceMonitors(ctx, destinationBalance)
-	}()
-
-	wg.Wait()
+	// Check balance monitors asynchronously (fire and forget - not on critical path)
+	go l.checkBalanceMonitors(ctx, sourceBalance)
+	go l.checkBalanceMonitors(ctx, destinationBalance)
 
 	span.AddEvent("Balances updated")
 	return nil
@@ -474,14 +444,8 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 	ctx, span := tracer.Start(ctx, "ProcessTransactionInBatches")
 	defer span.End()
 
-	config, err := config.Fetch()
-	if err != nil {
-		return nil, err
-	}
-
-	// Use configuration values
-	batchSize := config.Transaction.BatchSize
-	maxQueueSize := config.Transaction.MaxQueueSize
+	batchSize := l.Config().Transaction.BatchSize
+	maxQueueSize := l.Config().Transaction.MaxQueueSize
 
 	// Slice to collect all processed transactions and errors
 	var allTxns []*model.Transaction
@@ -935,21 +899,9 @@ func (l *Blnk) finalizeTransaction(ctx context.Context, transaction *model.Trans
 		return nil, l.logAndRecordError(span, "failed to persist transaction with balances", err)
 	}
 
-	// Check balance monitors after the atomic transaction completes successfully
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		l.checkBalanceMonitors(ctx, sourceBalance)
-	}()
-
-	go func() {
-		defer wg.Done()
-		l.checkBalanceMonitors(ctx, destinationBalance)
-	}()
-
-	wg.Wait()
+	// Check balance monitors asynchronously (fire and forget - not on critical path)
+	go l.checkBalanceMonitors(ctx, sourceBalance)
+	go l.checkBalanceMonitors(ctx, destinationBalance)
 
 	span.AddEvent("Transaction and balances persisted atomically", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
@@ -1056,15 +1008,8 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 	lockKey := fmt.Sprintf("inflight-commit:%s", transactionID)
 	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
 
-	// Get lock duration from config
-	config, err := config.Fetch()
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	// Acquire the lock
-	err = locker.Lock(ctx, config.Transaction.LockDuration)
+	// Acquire the lock using cached config
+	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock for inflight commit: %w", err)
@@ -1098,15 +1043,8 @@ func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transacti
 	lockKey := fmt.Sprintf("inflight-commit:%s", transactionID)
 	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
 
-	// Get lock duration from config
-	config, err := config.Fetch()
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	// Acquire the lock
-	err = locker.Lock(ctx, config.Transaction.LockDuration)
+	// Acquire the lock using cached config
+	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock for inflight commit: %w", err)
@@ -1319,15 +1257,8 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 	lockKey := fmt.Sprintf("inflight-commit:%s", transactionID)
 	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
 
-	// Get lock duration from config
-	config, err := config.Fetch()
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	// Acquire the lock
-	err = locker.Lock(ctx, config.Transaction.LockDuration)
+	// Acquire the lock using cached config
+	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock for inflight void: %w", err)

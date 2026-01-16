@@ -25,6 +25,7 @@ import (
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/cache"
 	"github.com/blnkfinance/blnk/internal/hooks"
 	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
@@ -46,6 +47,8 @@ type Blnk struct {
 	tokenizer   *tokenization.TokenizationService
 	httpClient  *http.Client
 	Hooks       hooks.HookManager
+	config      *config.Configuration
+	cache       cache.Cache
 }
 
 const (
@@ -126,6 +129,11 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	tokenizer := initializeTokenizationService(configuration)
 	httpClient := initializeHTTPClient()
 
+	newCache, err := cache.NewCache()
+	if err != nil {
+		return nil, err
+	}
+
 	b := &Blnk{
 		datasource:  db,
 		bt:          bt,
@@ -136,6 +144,8 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 		tokenizer:   tokenizer,
 		httpClient:  httpClient,
 		Hooks:       hookManager,
+		config:      configuration,
+		cache:       newCache,
 	}
 
 	notification.RegisterWebhookSender(func(event string, payload interface{}) error {
@@ -154,4 +164,17 @@ func (b *Blnk) Close() error {
 		return b.asynqClient.Close()
 	}
 	return nil
+}
+
+// Config returns the cached configuration for the Blnk instance.
+// Falls back to config.Fetch() if not initialized (for backward compatibility with tests).
+func (b *Blnk) Config() *config.Configuration {
+	if b.config != nil {
+		return b.config
+	}
+	cfg, err := config.Fetch()
+	if err != nil {
+		return &config.Configuration{}
+	}
+	return cfg
 }

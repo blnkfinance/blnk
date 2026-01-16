@@ -396,3 +396,174 @@ func TestToTransaction(t *testing.T) {
 	assert.Equal(t, recordTransaction.Rate, transaction.Rate)
 	assert.Equal(t, recordTransaction.SkipQueue, transaction.SkipQueue)
 }
+
+func TestValidateCreateBalanceMonitor(t *testing.T) {
+	tests := []struct {
+		name    string
+		monitor CreateBalanceMonitor
+		wantErr bool
+	}{
+		{
+			name: "Valid balance monitor",
+			monitor: CreateBalanceMonitor{
+				BalanceId: "bln_123",
+				Condition: MonitorCondition{
+					Field:     "balance",
+					Operator:  ">",
+					Value:     100,
+					Precision: 100,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Missing balance ID",
+			monitor: CreateBalanceMonitor{
+				Condition: MonitorCondition{
+					Field:     "balance",
+					Operator:  ">",
+					Value:     100,
+					Precision: 100,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Missing condition",
+			monitor: CreateBalanceMonitor{
+				BalanceId: "bln_123",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.monitor.ValidateCreateBalanceMonitor()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateMonitorCondition(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition MonitorCondition
+		wantErr   bool
+	}{
+		{
+			name: "Valid condition - balance",
+			condition: MonitorCondition{
+				Field:     "balance",
+				Operator:  ">",
+				Value:     100,
+				Precision: 100,
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid condition - credit_balance",
+			condition: MonitorCondition{
+				Field:     "credit_balance",
+				Operator:  "<",
+				Value:     500,
+				Precision: 100,
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid condition - debit_balance",
+			condition: MonitorCondition{
+				Field:     "debit_balance",
+				Operator:  ">=",
+				Value:     1,
+				Precision: 100,
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid condition - inflight_balance",
+			condition: MonitorCondition{
+				Field:     "inflight_balance",
+				Operator:  "<=",
+				Value:     1000,
+				Precision: 100,
+			},
+			wantErr: false,
+		},
+		{
+			name: "Invalid field",
+			condition: MonitorCondition{
+				Field:     "invalid_field",
+				Operator:  ">",
+				Value:     100,
+				Precision: 100,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Missing field",
+			condition: MonitorCondition{
+				Operator:  ">",
+				Value:     100,
+				Precision: 100,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Missing operator",
+			condition: MonitorCondition{
+				Field:     "balance",
+				Value:     100,
+				Precision: 100,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Missing precision",
+			condition: MonitorCondition{
+				Field:    "balance",
+				Operator: ">",
+				Value:    100,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.condition.ValidateMonitorCondition()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestToBalanceMonitor(t *testing.T) {
+	createMonitor := CreateBalanceMonitor{
+		BalanceId:   "bln_test_123",
+		CallBackURL: "https://example.com/webhook",
+		Condition: MonitorCondition{
+			Field:     "balance",
+			Operator:  ">",
+			Value:     1000,
+			Precision: 100,
+		},
+	}
+
+	monitor := createMonitor.ToBalanceMonitor()
+
+	assert.Equal(t, createMonitor.BalanceId, monitor.BalanceID)
+	assert.Equal(t, createMonitor.CallBackURL, monitor.CallBackURL)
+	assert.Equal(t, createMonitor.Condition.Field, monitor.Condition.Field)
+	assert.Equal(t, createMonitor.Condition.Operator, monitor.Condition.Operator)
+	assert.Equal(t, createMonitor.Condition.Value, monitor.Condition.Value)
+	assert.Equal(t, createMonitor.Condition.Precision, monitor.Condition.Precision)
+}

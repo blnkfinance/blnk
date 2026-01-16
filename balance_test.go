@@ -470,6 +470,12 @@ func TestDeleteMonitor(t *testing.T) {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
 	monitorID := "test-monitor"
+	balanceID := "test-balance"
+
+	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "precision", "precise_value", "description", "call_back_url", "created_at"}).
+		AddRow(monitorID, balanceID, "balance", ">", 100.0, 100.0, int64(10000), "test", "http://test.com", time.Now())
+	mock.ExpectQuery("SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at FROM blnk.balance_monitors WHERE monitor_id =").
+		WithArgs(monitorID).WillReturnRows(rows)
 
 	mock.ExpectExec("DELETE FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnResult(sqlmock.NewResult(1, 1))
 
