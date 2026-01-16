@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -581,5 +582,359 @@ func TestApplyPrecisionWithEmptyAmount(t *testing.T) {
 			expectedAmountString := "92233720.3684775808"
 			assert.Equal(t, expectedAmountString, txn.AmountString)
 		}
+	})
+}
+
+func TestGenerateKey(t *testing.T) {
+	key, err := GenerateKey()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, key)
+	assert.Greater(t, len(key), 20)
+
+	key2, err := GenerateKey()
+	assert.NoError(t, err)
+	assert.NotEqual(t, key, key2)
+}
+
+func TestNewAPIKey(t *testing.T) {
+	name := "Test Key"
+	ownerID := "owner_123"
+	scopes := []string{"read", "write"}
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	apiKey, err := NewAPIKey(name, ownerID, scopes, expiresAt)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, apiKey)
+	assert.Contains(t, apiKey.APIKeyID, "api_key_")
+	assert.NotEmpty(t, apiKey.Key)
+	assert.Equal(t, name, apiKey.Name)
+	assert.Equal(t, ownerID, apiKey.OwnerID)
+	assert.Equal(t, scopes, apiKey.Scopes)
+	assert.Equal(t, expiresAt, apiKey.ExpiresAt)
+	assert.False(t, apiKey.IsRevoked)
+}
+
+func TestAPIKey_IsValid(t *testing.T) {
+	t.Run("Valid key - not revoked and not expired", func(t *testing.T) {
+		apiKey := &APIKey{
+			IsRevoked: false,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		}
+		assert.True(t, apiKey.IsValid())
+	})
+
+	t.Run("Invalid key - revoked", func(t *testing.T) {
+		apiKey := &APIKey{
+			IsRevoked: true,
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+		}
+		assert.False(t, apiKey.IsValid())
+	})
+
+	t.Run("Invalid key - expired", func(t *testing.T) {
+		apiKey := &APIKey{
+			IsRevoked: false,
+			ExpiresAt: time.Now().Add(-24 * time.Hour),
+		}
+		assert.False(t, apiKey.IsValid())
+	})
+
+	t.Run("Invalid key - revoked and expired", func(t *testing.T) {
+		apiKey := &APIKey{
+			IsRevoked: true,
+			ExpiresAt: time.Now().Add(-24 * time.Hour),
+		}
+		assert.False(t, apiKey.IsValid())
+	})
+}
+
+func TestAPIKey_HasScope(t *testing.T) {
+	apiKey := &APIKey{
+		Scopes: []string{"read", "write", "admin"},
+	}
+
+	t.Run("Has scope - read", func(t *testing.T) {
+		assert.True(t, apiKey.HasScope("read"))
+	})
+
+	t.Run("Has scope - admin", func(t *testing.T) {
+		assert.True(t, apiKey.HasScope("admin"))
+	})
+
+	t.Run("Does not have scope", func(t *testing.T) {
+		assert.False(t, apiKey.HasScope("delete"))
+	})
+
+	t.Run("Empty scopes", func(t *testing.T) {
+		emptyKey := &APIKey{Scopes: []string{}}
+		assert.False(t, emptyKey.HasScope("read"))
+	})
+}
+
+func TestConvertToStructFieldName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"firstName", "FirstName"},
+		{"email", "Email"},
+		{"First_name", "First_name"},
+		{"", ""},
+		{"a", "A"},
+		{"ABC", "ABC"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			result := convertToStructFieldName(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestIdentity_IsFieldTokenized(t *testing.T) {
+	t.Run("Nil metadata", func(t *testing.T) {
+		identity := &Identity{MetaData: nil}
+		assert.False(t, identity.IsFieldTokenized("email"))
+	})
+
+	t.Run("No tokenized_fields key", func(t *testing.T) {
+		identity := &Identity{MetaData: map[string]interface{}{}}
+		assert.False(t, identity.IsFieldTokenized("email"))
+	})
+
+	t.Run("Field is tokenized - map[string]bool", func(t *testing.T) {
+		identity := &Identity{
+			MetaData: map[string]interface{}{
+				"tokenized_fields": map[string]bool{"Email": true},
+			},
+		}
+		assert.True(t, identity.IsFieldTokenized("email"))
+		assert.True(t, identity.IsFieldTokenized("Email"))
+	})
+
+	t.Run("Field is tokenized - map[string]interface{}", func(t *testing.T) {
+		identity := &Identity{
+			MetaData: map[string]interface{}{
+				"tokenized_fields": map[string]interface{}{"Email": true},
+			},
+		}
+		assert.True(t, identity.IsFieldTokenized("email"))
+	})
+
+	t.Run("Field is not tokenized", func(t *testing.T) {
+		identity := &Identity{
+			MetaData: map[string]interface{}{
+				"tokenized_fields": map[string]bool{"Phone": true},
+			},
+		}
+		assert.False(t, identity.IsFieldTokenized("email"))
+	})
+}
+
+func TestIdentity_MarkFieldAsTokenized(t *testing.T) {
+	t.Run("Nil metadata - creates new", func(t *testing.T) {
+		identity := &Identity{MetaData: nil}
+		identity.MarkFieldAsTokenized("email")
+
+		assert.NotNil(t, identity.MetaData)
+		tokenizedFields := identity.MetaData["tokenized_fields"].(map[string]bool)
+		assert.True(t, tokenizedFields["Email"])
+	})
+
+	t.Run("Existing metadata - adds field", func(t *testing.T) {
+		identity := &Identity{
+			MetaData: map[string]interface{}{
+				"tokenized_fields": map[string]bool{"Phone": true},
+			},
+		}
+		identity.MarkFieldAsTokenized("email")
+
+		tokenizedFields := identity.MetaData["tokenized_fields"].(map[string]bool)
+		assert.True(t, tokenizedFields["Email"])
+		assert.True(t, tokenizedFields["Phone"])
+	})
+
+	t.Run("Handle map[string]interface{} conversion", func(t *testing.T) {
+		identity := &Identity{
+			MetaData: map[string]interface{}{
+				"tokenized_fields": map[string]interface{}{"Phone": true},
+			},
+		}
+		identity.MarkFieldAsTokenized("email")
+
+		tokenizedFields := identity.MetaData["tokenized_fields"].(map[string]bool)
+		assert.True(t, tokenizedFields["Email"])
+		assert.True(t, tokenizedFields["Phone"])
+	})
+}
+
+func TestTransaction_ToJSON(t *testing.T) {
+	txn := &Transaction{
+		TransactionID: "txn_123",
+		Amount:        100.50,
+		Currency:      "USD",
+		Reference:     "ref_abc",
+		Source:        "src_123",
+		Destination:   "dst_456",
+		Status:        "APPLIED",
+	}
+
+	jsonBytes, err := txn.ToJSON()
+
+	assert.NoError(t, err)
+	assert.NotNil(t, jsonBytes)
+	assert.Contains(t, string(jsonBytes), "txn_123")
+	assert.Contains(t, string(jsonBytes), "100.5")
+	assert.Contains(t, string(jsonBytes), "USD")
+}
+
+func TestPrecisionBankersRound(t *testing.T) {
+	tests := []struct {
+		name      string
+		num       float64
+		precision float64
+		expected  float64
+	}{
+		{"Round down", 1.234, 100, 1.23},
+		{"Round up", 1.236, 100, 1.24},
+		{"Banker's round even - round down", 1.225, 100, 1.22},
+		{"Banker's round odd - round up", 1.235, 100, 1.24},
+		{"No rounding needed", 1.50, 100, 1.50},
+		{"Higher precision", 1.23456, 10000, 1.2346},
+		{"Whole number", 5.0, 100, 5.0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := PrecisionBankersRound(tc.num, tc.precision)
+			assert.InDelta(t, tc.expected, result, 0.0001)
+		})
+	}
+}
+
+func TestFindLargestDecimal(t *testing.T) {
+	t.Run("Find largest", func(t *testing.T) {
+		amounts := map[string]decimal.Decimal{
+			"a": decimal.NewFromFloat(100.50),
+			"b": decimal.NewFromFloat(200.75),
+			"c": decimal.NewFromFloat(50.25),
+		}
+		key, amount := findLargestDecimal(amounts)
+		assert.Equal(t, "b", key)
+		assert.True(t, amount.Equal(decimal.NewFromFloat(200.75)))
+	})
+
+	t.Run("Single element", func(t *testing.T) {
+		amounts := map[string]decimal.Decimal{
+			"only": decimal.NewFromFloat(123.45),
+		}
+		key, amount := findLargestDecimal(amounts)
+		assert.Equal(t, "only", key)
+		assert.True(t, amount.Equal(decimal.NewFromFloat(123.45)))
+	})
+
+	t.Run("Empty map", func(t *testing.T) {
+		amounts := map[string]decimal.Decimal{}
+		key, amount := findLargestDecimal(amounts)
+		assert.Equal(t, "", key)
+		assert.True(t, amount.IsZero())
+	})
+}
+
+func TestHandleZeroAmount(t *testing.T) {
+	t.Run("Multiple distributions", func(t *testing.T) {
+		distributions := []Distribution{
+			{Identifier: "id1"},
+			{Identifier: "id2"},
+			{Identifier: "id3"},
+		}
+		result := handleZeroAmount(distributions)
+
+		assert.Len(t, result, 3)
+		assert.Equal(t, big.NewInt(0), result["id1"])
+		assert.Equal(t, big.NewInt(0), result["id2"])
+		assert.Equal(t, big.NewInt(0), result["id3"])
+	})
+
+	t.Run("Single distribution", func(t *testing.T) {
+		distributions := []Distribution{
+			{Identifier: "single"},
+		}
+		result := handleZeroAmount(distributions)
+
+		assert.Len(t, result, 1)
+		assert.Equal(t, big.NewInt(0), result["single"])
+	})
+
+	t.Run("Empty distributions", func(t *testing.T) {
+		distributions := []Distribution{}
+		result := handleZeroAmount(distributions)
+
+		assert.Len(t, result, 0)
+	})
+}
+
+func TestCheckCondition_Extended(t *testing.T) {
+	balance := &Balance{
+		Balance:       big.NewInt(10000),
+		CreditBalance: big.NewInt(15000),
+		DebitBalance:  big.NewInt(5000),
+	}
+
+	t.Run("Balance greater than - using BalanceMonitor", func(t *testing.T) {
+		monitor := &BalanceMonitor{
+			Condition: AlertCondition{
+				Field:        "balance",
+				Operator:     ">",
+				Value:        50,
+				Precision:    100,
+				PreciseValue: big.NewInt(5000),
+			},
+		}
+		result := monitor.CheckCondition(balance)
+		assert.True(t, result)
+	})
+
+	t.Run("Credit balance less than", func(t *testing.T) {
+		monitor := &BalanceMonitor{
+			Condition: AlertCondition{
+				Field:        "credit_balance",
+				Operator:     "<",
+				Value:        200,
+				Precision:    100,
+				PreciseValue: big.NewInt(20000),
+			},
+		}
+		result := monitor.CheckCondition(balance)
+		assert.True(t, result)
+	})
+
+	t.Run("Debit balance equals", func(t *testing.T) {
+		monitor := &BalanceMonitor{
+			Condition: AlertCondition{
+				Field:        "debit_balance",
+				Operator:     "==",
+				Value:        50,
+				Precision:    100,
+				PreciseValue: big.NewInt(5000),
+			},
+		}
+		result := monitor.CheckCondition(balance)
+		assert.True(t, result)
+	})
+
+	t.Run("Unknown field returns false", func(t *testing.T) {
+		monitor := &BalanceMonitor{
+			Condition: AlertCondition{
+				Field:        "unknown_field",
+				Operator:     ">",
+				Value:        0,
+				PreciseValue: big.NewInt(0),
+			},
+		}
+		result := monitor.CheckCondition(balance)
+		assert.False(t, result)
 	})
 }

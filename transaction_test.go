@@ -30,6 +30,7 @@ import (
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/database/mocks"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
@@ -39,6 +40,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -201,17 +203,6 @@ func TestRecordTransaction(t *testing.T) {
 	// Commit atomic transaction (balance updates + transaction insert)
 	mock.ExpectCommit()
 
-	// Balance monitor queries happen after the atomic transaction completes
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
-
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
-
 	// Execute the function being tested
 	result, err := d.RecordTransaction(context.Background(), txn)
 
@@ -358,18 +349,6 @@ func TestRecordTransactionWithRate(t *testing.T) {
 
 	// Commit atomic transaction (balance updates + transaction insert)
 	mock.ExpectCommit()
-
-	// Balance monitor queries happen after the atomic transaction completes
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
-
-	// Add a second monitor query for destination if needed (based on your implementation)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
 	// Execute the function being tested
 	_, err = d.RecordTransaction(context.Background(), txn)
@@ -5999,4 +5978,871 @@ func TestCreateBulkTransactionsNonAtomicPartialFailure(t *testing.T) {
 		"Source balance should reflect only the first transaction (non-atomic)")
 	require.Equal(t, 0, updatedDest1.Balance.Cmp(expectedDest1Credit),
 		"Destination 1 balance should reflect only the first transaction (non-atomic)")
+}
+
+func TestGetTransaction_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		txnID := "txn_123"
+		expectedTxn := &model.Transaction{
+			TransactionID: txnID,
+			Amount:        100.0,
+			Reference:     "ref_123",
+			Status:        "APPLIED",
+			PreciseAmount: big.NewInt(10000),
+		}
+
+		mockDS.On("GetTransaction", mock.Anything, txnID).Return(expectedTxn, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetTransaction(context.Background(), txnID)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, txnID, result.TransactionID)
+		assert.Equal(t, "APPLIED", result.Status)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Not Found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		txnID := "txn_nonexistent"
+		mockDS.On("GetTransaction", mock.Anything, txnID).Return((*model.Transaction)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetTransaction(context.Background(), txnID)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetAllTransactions_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		expectedTxns := []model.Transaction{
+			{TransactionID: "txn_1", Amount: 100.0, Status: "APPLIED"},
+			{TransactionID: "txn_2", Amount: 200.0, Status: "APPLIED"},
+		}
+
+		mockDS.On("GetAllTransactions", 10, 0).Return(expectedTxns, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAllTransactions(10, 0)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "txn_1", result[0].TransactionID)
+		assert.Equal(t, "txn_2", result[1].TransactionID)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Empty Result", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		mockDS.On("GetAllTransactions", 10, 100).Return([]model.Transaction{}, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAllTransactions(10, 100)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 0)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Database Error", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		mockDS.On("GetAllTransactions", 10, 0).Return([]model.Transaction(nil), fmt.Errorf("database error"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAllTransactions(10, 0)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetTransactionByRef_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		reference := "ref_unique_123"
+		expectedTxn := model.Transaction{
+			TransactionID: "txn_found",
+			Reference:     reference,
+			Amount:        500.0,
+			Status:        "APPLIED",
+		}
+
+		mockDS.On("GetTransactionByRef", mock.Anything, reference).Return(expectedTxn, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetTransactionByRef(context.Background(), reference)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "txn_found", result.TransactionID)
+		assert.Equal(t, reference, result.Reference)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Not Found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		reference := "ref_nonexistent"
+		mockDS.On("GetTransactionByRef", mock.Anything, reference).Return(model.Transaction{}, fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetTransactionByRef(context.Background(), reference)
+
+		assert.Error(t, err)
+		assert.Equal(t, model.Transaction{}, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestUpdateTransactionStatus_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		txnID := "txn_to_update"
+		newStatus := "VOID"
+
+		mockDS.On("UpdateTransactionStatus", mock.Anything, txnID, newStatus).Return(nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateTransactionStatus(context.Background(), txnID, newStatus)
+
+		assert.NoError(t, err)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Error", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		txnID := "txn_nonexistent"
+		newStatus := "VOID"
+
+		mockDS.On("UpdateTransactionStatus", mock.Anything, txnID, newStatus).Return(fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateTransactionStatus(context.Background(), txnID, newStatus)
+
+		assert.Error(t, err)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetRefundableTransactionsByParentID_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success with transactions", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		parentID := "bulk_parent_123"
+		expectedTxns := []*model.Transaction{
+			{TransactionID: "txn_child_1", ParentTransaction: parentID, Status: "APPLIED"},
+			{TransactionID: "txn_child_2", ParentTransaction: parentID, Status: "APPLIED"},
+		}
+
+		mockDS.On("GetRefundableTransactionsByParentID", mock.Anything, parentID, 100, int64(0)).Return(expectedTxns, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetRefundableTransactionsByParentID(context.Background(), parentID, 100, 0)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		assert.Equal(t, parentID, result[0].ParentTransaction)
+		assert.Equal(t, parentID, result[1].ParentTransaction)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("No refundable transactions", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		parentID := "bulk_no_children"
+		mockDS.On("GetRefundableTransactionsByParentID", mock.Anything, parentID, 100, int64(0)).Return([]*model.Transaction{}, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetRefundableTransactionsByParentID(context.Background(), parentID, 100, 0)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 0)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Database Error", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		parentID := "bulk_error"
+		mockDS.On("GetRefundableTransactionsByParentID", mock.Anything, parentID, 100, int64(0)).Return(([]*model.Transaction)(nil), fmt.Errorf("db error"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetRefundableTransactionsByParentID(context.Background(), parentID, 100, 0)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestLogRollbackResult_Blnk(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	mockDS := new(mocks.MockDataSource)
+	blnk := &Blnk{datasource: mockDS, config: cnf}
+
+	t.Run("Log Success", func(t *testing.T) {
+		blnk.logRollbackResult("batch_123", "voided", nil)
+	})
+
+	t.Run("Log Failure", func(t *testing.T) {
+		blnk.logRollbackResult("batch_456", "voided", fmt.Errorf("rollback failed"))
+	})
+}
+
+func TestContains(t *testing.T) {
+	t.Run("Item exists", func(t *testing.T) {
+		slice := []string{"apple", "banana", "cherry"}
+		assert.True(t, contains(slice, "banana"))
+	})
+
+	t.Run("Item does not exist", func(t *testing.T) {
+		slice := []string{"apple", "banana", "cherry"}
+		assert.False(t, contains(slice, "grape"))
+	})
+
+	t.Run("Empty slice", func(t *testing.T) {
+		slice := []string{}
+		assert.False(t, contains(slice, "anything"))
+	})
+
+	t.Run("First element", func(t *testing.T) {
+		slice := []string{"first", "second", "third"}
+		assert.True(t, contains(slice, "first"))
+	})
+
+	t.Run("Last element", func(t *testing.T) {
+		slice := []string{"first", "second", "last"}
+		assert.True(t, contains(slice, "last"))
+	})
+}
+
+func TestGetAccountByNumber_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		accountNumber := "1234567890"
+		expectedAccount := &model.Account{
+			AccountID: "acc_123",
+			Number:    accountNumber,
+			Name:      "Test Account",
+		}
+
+		mockDS.On("GetAccountByNumber", accountNumber).Return(expectedAccount, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAccountByNumber(accountNumber)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, accountNumber, result.Number)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Not Found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		accountNumber := "nonexistent"
+
+		mockDS.On("GetAccountByNumber", accountNumber).Return((*model.Account)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAccountByNumber(accountNumber)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestConvertToStructFieldName_Blnk(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"firstName", "FirstName"},
+		{"email", "Email"},
+		{"phone", "Phone"},
+		{"", ""},
+		{"A", "A"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			result := convertToStructFieldName(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestUpdateBalanceIdentity_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		balanceID := "bln_123"
+		identityID := "idt_456"
+
+		mockDS.On("GetIdentityByID", identityID).Return(&model.Identity{IdentityID: identityID}, nil)
+		mockDS.On("GetBalanceByIDLite", balanceID).Return(&model.Balance{BalanceID: balanceID}, nil)
+		mockDS.On("UpdateBalanceIdentity", balanceID, identityID).Return(nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateBalanceIdentity(balanceID, identityID)
+
+		assert.NoError(t, err)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Identity not found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		balanceID := "bln_123"
+		identityID := "idt_nonexistent"
+
+		mockDS.On("GetIdentityByID", identityID).Return((*model.Identity)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateBalanceIdentity(balanceID, identityID)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "identity validation failed")
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Balance not found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		balanceID := "bln_nonexistent"
+		identityID := "idt_456"
+
+		mockDS.On("GetIdentityByID", identityID).Return(&model.Identity{IdentityID: identityID}, nil)
+		mockDS.On("GetBalanceByIDLite", balanceID).Return((*model.Balance)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateBalanceIdentity(balanceID, identityID)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "balance validation failed")
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Update fails", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		balanceID := "bln_123"
+		identityID := "idt_456"
+
+		mockDS.On("GetIdentityByID", identityID).Return(&model.Identity{IdentityID: identityID}, nil)
+		mockDS.On("GetBalanceByIDLite", balanceID).Return(&model.Balance{BalanceID: balanceID}, nil)
+		mockDS.On("UpdateBalanceIdentity", balanceID, identityID).Return(fmt.Errorf("update failed"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateBalanceIdentity(balanceID, identityID)
+
+		assert.Error(t, err)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetInflightTransactionsByParentID_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success with transactions", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		parentID := "bulk_parent_123"
+		expectedTxns := []*model.Transaction{
+			{TransactionID: "txn_child_1", ParentTransaction: parentID, Status: StatusInflight},
+			{TransactionID: "txn_child_2", ParentTransaction: parentID, Status: StatusInflight},
+		}
+
+		mockDS.On("GetInflightTransactionsByParentID", mock.Anything, parentID, 100, int64(0)).Return(expectedTxns, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetInflightTransactionsByParentID(context.Background(), parentID, 100, 0)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Empty result", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		parentID := "bulk_no_inflight"
+
+		mockDS.On("GetInflightTransactionsByParentID", mock.Anything, parentID, 100, int64(0)).Return([]*model.Transaction{}, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetInflightTransactionsByParentID(context.Background(), parentID, 100, 0)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 0)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetBalanceByID_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		balanceID := "bln_test_123"
+		expectedBalance := &model.Balance{
+			BalanceID: balanceID,
+			Currency:  "USD",
+			Balance:   big.NewInt(10000),
+		}
+
+		mockDS.On("GetBalanceByID", balanceID, []string(nil), false).Return(expectedBalance, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetBalanceByID(context.Background(), balanceID, nil, false)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, balanceID, result.BalanceID)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		balanceID := "bln_nonexistent"
+
+		mockDS.On("GetBalanceByID", balanceID, []string(nil), false).Return((*model.Balance)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetBalanceByID(context.Background(), balanceID, nil, false)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetAllBalances_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		expectedBalances := []model.Balance{
+			{BalanceID: "bln_1", Currency: "USD"},
+			{BalanceID: "bln_2", Currency: "EUR"},
+		}
+
+		mockDS.On("GetAllBalances", 10, 0).Return(expectedBalances, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAllBalances(context.Background(), 10, 0)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestCreateAPIKey_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		name := "Test Key"
+		ownerID := "owner_123"
+		scopes := []string{"read", "write"}
+		expiresAt := time.Now().Add(24 * time.Hour)
+
+		expectedKey := &model.APIKey{
+			APIKeyID:  "api_key_123",
+			Name:      name,
+			OwnerID:   ownerID,
+			Scopes:    scopes,
+			ExpiresAt: expiresAt,
+		}
+
+		mockDS.On("CreateAPIKey", mock.Anything, name, ownerID, scopes, expiresAt).Return(expectedKey, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.CreateAPIKey(context.Background(), name, ownerID, scopes, expiresAt)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, name, result.Name)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Error", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("CreateAPIKey", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return((*model.APIKey)(nil), fmt.Errorf("creation failed"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.CreateAPIKey(context.Background(), "name", "owner", []string{}, time.Now())
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestListAPIKeys_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		ownerID := "owner_123"
+		expectedKeys := []*model.APIKey{
+			{APIKeyID: "key_1", Name: "Key 1"},
+			{APIKeyID: "key_2", Name: "Key 2"},
+		}
+
+		mockDS.On("ListAPIKeys", mock.Anything, ownerID).Return(expectedKeys, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.ListAPIKeys(context.Background(), ownerID)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Empty result", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("ListAPIKeys", mock.Anything, "owner_empty").Return([]*model.APIKey{}, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.ListAPIKeys(context.Background(), "owner_empty")
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 0)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestRevokeAPIKey_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		keyID := "key_123"
+		ownerID := "owner_123"
+
+		mockDS.On("RevokeAPIKey", mock.Anything, keyID, ownerID).Return(nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.RevokeAPIKey(context.Background(), keyID, ownerID)
+
+		assert.NoError(t, err)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Key not found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("RevokeAPIKey", mock.Anything, "nonexistent", "owner").Return(fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.RevokeAPIKey(context.Background(), "nonexistent", "owner")
+
+		assert.Error(t, err)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetAPIKeyByKey_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		keyString := "abc123xyz"
+		expectedKey := &model.APIKey{
+			APIKeyID: "key_123",
+			Key:      keyString,
+			Name:     "Test Key",
+		}
+
+		mockDS.On("GetAPIKey", mock.Anything, keyString).Return(expectedKey, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAPIKeyByKey(context.Background(), keyString)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, keyString, result.Key)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("GetAPIKey", mock.Anything, "invalid").Return((*model.APIKey)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetAPIKeyByKey(context.Background(), "invalid")
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestUpdateLastUsed_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		keyID := "key_123"
+
+		mockDS.On("UpdateLastUsed", mock.Anything, keyID).Return(nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateLastUsed(context.Background(), keyID)
+
+		assert.NoError(t, err)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Error", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("UpdateLastUsed", mock.Anything, "invalid").Return(fmt.Errorf("update failed"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		err := blnk.UpdateLastUsed(context.Background(), "invalid")
+
+		assert.Error(t, err)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetReconciliation_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		reconciliationID := "recon_123"
+		expected := &model.Reconciliation{
+			ReconciliationID: reconciliationID,
+			Status:           "completed",
+		}
+
+		mockDS.On("GetReconciliation", mock.Anything, reconciliationID).Return(expected, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetReconciliation(context.Background(), reconciliationID)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, reconciliationID, result.ReconciliationID)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("GetReconciliation", mock.Anything, "nonexistent").Return((*model.Reconciliation)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetReconciliation(context.Background(), "nonexistent")
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestGetBalanceAtTime_Mock(t *testing.T) {
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: "localhost:6379"},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue",
+			TransactionQueue: "transaction_queue",
+			NumberOfQueues:   1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	t.Run("Success", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		balanceID := "bln_123"
+		targetTime := time.Now().Add(-24 * time.Hour)
+		expected := &model.Balance{
+			BalanceID: balanceID,
+			Balance:   big.NewInt(5000),
+		}
+
+		mockDS.On("GetBalanceAtTime", mock.Anything, balanceID, targetTime, false).Return(expected, nil)
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetBalanceAtTime(context.Background(), balanceID, targetTime, false)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, balanceID, result.BalanceID)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Error", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		targetTime := time.Now()
+		mockDS.On("GetBalanceAtTime", mock.Anything, "invalid", targetTime, false).Return((*model.Balance)(nil), fmt.Errorf("not found"))
+
+		blnk := &Blnk{datasource: mockDS, config: cnf}
+		result, err := blnk.GetBalanceAtTime(context.Background(), "invalid", targetTime, false)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		mockDS.AssertExpectations(t)
+	})
 }

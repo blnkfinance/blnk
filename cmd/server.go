@@ -101,7 +101,7 @@ func getOrCreateHeartbeatID() string {
 		log.Printf("Failed to open SQLite DB: %v", err)
 		return uuid.New().String() // fallback to temp UUID
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)`)
 	if err != nil {

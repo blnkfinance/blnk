@@ -60,7 +60,7 @@ func TestConnectDB_Success(t *testing.T) {
 
 	// Ensure that db is not nil before calling Close
 	if db != nil {
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -738,6 +739,55 @@ func TestHasPermission(t *testing.T) {
 			method:   "CUSTOM",
 			expected: false,
 		},
+		{
+			name:     "Wildcard resource with matching action",
+			scopes:   []string{"*:read"},
+			resource: ResourceLedgers,
+			method:   "GET",
+			expected: true,
+		},
+		{
+			name:     "Wildcard resource with all actions",
+			scopes:   []string{"*:*"},
+			resource: ResourceTransactions,
+			method:   "DELETE",
+			expected: true,
+		},
+		{
+			name:     "Wildcard resource with wrong action",
+			scopes:   []string{"*:read"},
+			resource: ResourceLedgers,
+			method:   "DELETE",
+			expected: false,
+		},
+		{
+			name:     "Resource with wildcard action",
+			scopes:   []string{"ledgers:*"},
+			resource: ResourceLedgers,
+			method:   "DELETE",
+			expected: true,
+		},
+		{
+			name:     "HEAD method maps to read",
+			scopes:   []string{"ledgers:read"},
+			resource: ResourceLedgers,
+			method:   "HEAD",
+			expected: true,
+		},
+		{
+			name:     "PUT method maps to write",
+			scopes:   []string{"accounts:write"},
+			resource: ResourceAccounts,
+			method:   "PUT",
+			expected: true,
+		},
+		{
+			name:     "PATCH method maps to write",
+			scopes:   []string{"accounts:write"},
+			resource: ResourceAccounts,
+			method:   "PATCH",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -746,4 +796,192 @@ func TestHasPermission(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestBuildScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		resource Resource
+		action   Action
+		expected string
+	}{
+		{
+			name:     "ledgers read",
+			resource: ResourceLedgers,
+			action:   ActionRead,
+			expected: "ledgers:read",
+		},
+		{
+			name:     "accounts write",
+			resource: ResourceAccounts,
+			action:   ActionWrite,
+			expected: "accounts:write",
+		},
+		{
+			name:     "transactions delete",
+			resource: ResourceTransactions,
+			action:   ActionDelete,
+			expected: "transactions:delete",
+		},
+		{
+			name:     "wildcard resource with all actions",
+			resource: ResourceAll,
+			action:   ActionAll,
+			expected: "*:*",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildScope(tt.resource, tt.action)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestParseScope(t *testing.T) {
+	tests := []struct {
+		name             string
+		scope            string
+		expectedResource Resource
+		expectedAction   Action
+	}{
+		{
+			name:             "Valid scope ledgers:read",
+			scope:            "ledgers:read",
+			expectedResource: ResourceLedgers,
+			expectedAction:   ActionRead,
+		},
+		{
+			name:             "Valid scope accounts:write",
+			scope:            "accounts:write",
+			expectedResource: ResourceAccounts,
+			expectedAction:   ActionWrite,
+		},
+		{
+			name:             "Invalid scope - no colon",
+			scope:            "ledgersread",
+			expectedResource: "",
+			expectedAction:   "",
+		},
+		{
+			name:             "Invalid scope - too many parts",
+			scope:            "ledgers:read:extra",
+			expectedResource: "",
+			expectedAction:   "",
+		},
+		{
+			name:             "Empty scope",
+			scope:            "",
+			expectedResource: "",
+			expectedAction:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource, action := ParseScope(tt.scope)
+			assert.Equal(t, tt.expectedResource, resource)
+			assert.Equal(t, tt.expectedAction, action)
+		})
+	}
+}
+
+func TestRateLimitMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Rate limiting disabled when config is nil", func(t *testing.T) {
+		conf := &config.Configuration{
+			RateLimit: config.RateLimitConfig{
+				RequestsPerSecond: nil,
+				Burst:             nil,
+			},
+		}
+
+		router := gin.New()
+		router.Use(RateLimitMiddleware(conf))
+		router.GET("/test", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/test", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("Rate limiting enabled", func(t *testing.T) {
+		rps := 100.0
+		burst := 10
+		cleanup := 60
+
+		conf := &config.Configuration{
+			RateLimit: config.RateLimitConfig{
+				RequestsPerSecond:  &rps,
+				Burst:              &burst,
+				CleanupIntervalSec: &cleanup,
+			},
+		}
+
+		router := gin.New()
+		router.Use(RateLimitMiddleware(conf))
+		router.GET("/test", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/test", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestInjectAPIKeyToMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Non-POST request skips injection", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("GET", "/", nil)
+
+		err := injectAPIKeyToMetadata(c, "api_key_123")
+		assert.NoError(t, err)
+	})
+
+	t.Run("Nil body skips injection", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("POST", "/", nil)
+		c.Request.Body = nil
+
+		err := injectAPIKeyToMetadata(c, "api_key_123")
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid JSON returns error", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		body := strings.NewReader("not valid json")
+		c.Request = httptest.NewRequest("POST", "/", body)
+
+		err := injectAPIKeyToMetadata(c, "api_key_123")
+		assert.Error(t, err)
+	})
+
+	t.Run("Valid JSON without meta_data creates it", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		body := strings.NewReader(`{"name": "test"}`)
+		c.Request = httptest.NewRequest("POST", "/", body)
+
+		err := injectAPIKeyToMetadata(c, "api_key_123")
+		assert.NoError(t, err)
+	})
+
+	t.Run("Valid JSON with existing meta_data updates it", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		body := strings.NewReader(`{"name": "test", "meta_data": {"existing": "value"}}`)
+		c.Request = httptest.NewRequest("POST", "/", body)
+
+		err := injectAPIKeyToMetadata(c, "api_key_123")
+		assert.NoError(t, err)
+	})
 }

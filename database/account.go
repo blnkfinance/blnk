@@ -256,7 +256,7 @@ func (d Datasource) GetAllAccounts() ([]model.Account, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Create a slice to store the account results
 	var accounts []model.Account

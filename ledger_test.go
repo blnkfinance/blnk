@@ -47,7 +47,8 @@ func newTestDataSource() (database.IDataSource, sqlmock.Sqlmock, error) {
 			IndexQueue:       "index_queue",
 			NumberOfQueues:   1,
 		},
-		Server: config.ServerConfig{SecretKey: "some-secret"},
+		Server:             config.ServerConfig{SecretKey: "some-secret"},
+		TokenizationSecret: "12345678901234567890123456789012",
 		AccountNumberGeneration: config.AccountNumberGenerationConfig{
 			HttpService: config.AccountGenerationHttpService{
 				Url: "http://example.com/generateAccount",

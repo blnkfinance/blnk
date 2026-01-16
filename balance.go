@@ -59,8 +59,8 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 	_, span := balanceTracer.Start(ctx, "CheckBalanceMonitors")
 	defer span.End()
 
-	// Fetch monitors for this balance using datasource
-	monitors, err := l.datasource.GetBalanceMonitors(updatedBalance.BalanceID)
+	// Fetch monitors using cache (avoids DB query on every transaction)
+	monitors, err := l.getBalanceMonitorsCached(ctx, updatedBalance.BalanceID)
 	if err != nil {
 		span.RecordError(err)
 		notification.NotifyError(err)
@@ -82,6 +82,39 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 			}(monitor)
 		}
 	}
+}
+
+// getBalanceMonitorsCached retrieves balance monitors with caching.
+// It first checks the cache for monitors, and if not found, fetches from the database
+// and caches the result with a 5-minute TTL.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balanceID string: The ID of the balance to get monitors for.
+//
+// Returns:
+// - []model.BalanceMonitor: A slice of monitors for the balance.
+// - error: An error if the monitors could not be retrieved.
+func (l *Blnk) getBalanceMonitorsCached(ctx context.Context, balanceID string) ([]model.BalanceMonitor, error) {
+	cacheKey := "monitors:" + balanceID
+
+	var monitors []model.BalanceMonitor
+	err := l.cache.Get(ctx, cacheKey, &monitors)
+	if err == nil && monitors != nil {
+		return monitors, nil
+	}
+
+	monitors, err = l.datasource.GetBalanceMonitors(balanceID)
+	if err != nil {
+		return nil, err
+	}
+
+	if monitors == nil {
+		monitors = []model.BalanceMonitor{}
+	}
+
+	_ = l.cache.Set(ctx, cacheKey, monitors, 5*time.Minute)
+	return monitors, nil
 }
 
 // getOrCreateBalanceByIndicator retrieves a balance by its indicator and currency.
@@ -275,6 +308,9 @@ func (l *Blnk) CreateMonitor(ctx context.Context, monitor model.BalanceMonitor) 
 		span.RecordError(err)
 		return model.BalanceMonitor{}, err
 	}
+
+	_ = l.cache.Delete(ctx, "monitors:"+monitor.BalanceID)
+
 	span.AddEvent("Monitor created", trace.WithAttributes(attribute.String("monitor.id", monitor.MonitorID)))
 	return monitor, nil
 }
@@ -365,6 +401,9 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 		span.RecordError(err)
 		return err
 	}
+
+	_ = l.cache.Delete(ctx, "monitors:"+monitor.BalanceID)
+
 	span.AddEvent("Monitor updated", trace.WithAttributes(attribute.String("monitor.id", monitor.MonitorID)))
 	return nil
 }
@@ -382,11 +421,20 @@ func (l *Blnk) DeleteMonitor(ctx context.Context, id string) error {
 	_, span := balanceTracer.Start(ctx, "DeleteMonitor")
 	defer span.End()
 
-	err := l.datasource.DeleteMonitor(id)
+	monitor, err := l.datasource.GetMonitorByID(id)
 	if err != nil {
 		span.RecordError(err)
 		return err
 	}
+
+	err = l.datasource.DeleteMonitor(id)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	_ = l.cache.Delete(ctx, "monitors:"+monitor.BalanceID)
+
 	span.AddEvent("Monitor deleted", trace.WithAttributes(attribute.String("monitor.id", id)))
 	return nil
 }

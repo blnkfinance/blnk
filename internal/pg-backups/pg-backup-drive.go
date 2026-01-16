@@ -97,7 +97,7 @@ func (bm *BackupManager) BackupToDisk(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "failed to open database connection")
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Ensure the database connection is working.
 	if err := db.PingContext(ctx); err != nil {

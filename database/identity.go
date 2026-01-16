@@ -133,7 +133,7 @@ func (d Datasource) GetAllIdentities() ([]model.Identity, error) {
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve identities", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var identities []model.Identity
 

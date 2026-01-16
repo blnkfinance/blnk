@@ -35,6 +35,7 @@ import (
 type Queue struct {
 	Client    *asynq.Client
 	Inspector *asynq.Inspector
+	config    *config.Configuration
 }
 
 // TransactionTypePayload represents the payload for a transaction type.
@@ -61,6 +62,7 @@ func NewQueue(conf *config.Configuration) *Queue {
 	return &Queue{
 		Client:    client,
 		Inspector: inspector,
+		config:    conf,
 	}
 }
 
@@ -73,21 +75,16 @@ func NewQueue(conf *config.Configuration) *Queue {
 // Returns:
 // - error: An error if the task could not be enqueued.
 func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) error {
-	cfg, err := config.Fetch()
-	if err != nil {
-		return err
-	}
-
 	IPayload, err := json.Marshal(transactionID)
 	if err != nil {
 		return err
 	}
 	taskOptions := []asynq.Option{
 		asynq.TaskID(transactionID),
-		asynq.Queue(cfg.Queue.InflightExpiryQueue),
+		asynq.Queue(q.config.Queue.InflightExpiryQueue),
 		asynq.ProcessIn(time.Until(expiresAt)),
 	}
-	task := asynq.NewTask(cfg.Queue.InflightExpiryQueue, IPayload, taskOptions...)
+	task := asynq.NewTask(q.config.Queue.InflightExpiryQueue, IPayload, taskOptions...)
 	info, err := q.Client.Enqueue(task)
 	if err != nil {
 		log.Println(err, info)
@@ -107,12 +104,7 @@ func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) e
 // Returns:
 // - error: An error if the task could not be enqueued.
 func (q *Queue) queueIndexBatch(batch interface{}) error {
-	cfg, err := config.Fetch()
-	if err != nil {
-		return err
-	}
-
-	if cfg.TypeSense.Dns == "" {
+	if q.config.TypeSense.Dns == "" {
 		return nil
 	}
 
@@ -121,8 +113,7 @@ func (q *Queue) queueIndexBatch(batch interface{}) error {
 		return err
 	}
 
-	// Use same queue but different task type for batch indexing
-	taskOptions := []asynq.Option{asynq.Queue(cfg.Queue.IndexQueue)}
+	taskOptions := []asynq.Option{asynq.Queue(q.config.Queue.IndexQueue)}
 	task := asynq.NewTask("new:index:batch", payload, taskOptions...)
 	_, err = q.Client.Enqueue(task)
 	if err != nil {
@@ -143,12 +134,7 @@ func (q *Queue) queueIndexBatch(batch interface{}) error {
 // Returns:
 // - error: An error if the task could not be enqueued.
 func (q *Queue) queueIndexData(id string, collection string, data interface{}) error {
-	cfg, err := config.Fetch()
-	if err != nil {
-		return err
-	}
-
-	if cfg.TypeSense.Dns == "" {
+	if q.config.TypeSense.Dns == "" {
 		return nil
 	}
 
@@ -162,8 +148,8 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 		return err
 	}
 
-	taskOptions := []asynq.Option{asynq.Queue(cfg.Queue.IndexQueue)}
-	task := asynq.NewTask(cfg.Queue.IndexQueue, IPayload, taskOptions...)
+	taskOptions := []asynq.Option{asynq.Queue(q.config.Queue.IndexQueue)}
+	task := asynq.NewTask(q.config.Queue.IndexQueue, IPayload, taskOptions...)
 	info, err := q.Client.Enqueue(task)
 	if err != nil {
 		log.Println("here", err, info)
@@ -228,32 +214,8 @@ func (q *Queue) QueueInflightExpiry(ctx context.Context, transaction *model.Tran
 // Returns:
 // - *asynq.Task: The generated task ready to be enqueued.
 func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Task {
-	cnf, err := config.Fetch()
-	if err != nil {
-		log.Printf("Error fetching config: %v", err)
-		// Use default values if config fetch fails
-		return q.geTaskWithDefaults(transaction, payload)
-	}
-	queueIndex := hashBalanceID(transaction.Source) % cnf.Queue.NumberOfQueues
-	queueName := fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, queueIndex+1)
-
-	taskOptions := []asynq.Option{asynq.TaskID(transaction.TransactionID), asynq.Queue(queueName)}
-	if !transaction.ScheduledFor.IsZero() {
-		taskOptions = append(taskOptions, asynq.ProcessIn(time.Until(transaction.ScheduledFor)))
-	}
-
-	return asynq.NewTask(queueName, payload, taskOptions...)
-}
-
-// Fallback function for when config fetch fails
-func (q *Queue) geTaskWithDefaults(transaction *model.Transaction, payload []byte) *asynq.Task {
-	conf, err := config.Fetch()
-	if err != nil {
-		log.Printf("Error fetching config: %v", err)
-		return nil
-	}
-	queueIndex := hashBalanceID(transaction.Source) % conf.Queue.NumberOfQueues
-	queueName := fmt.Sprintf("new:transaction_%d", queueIndex+1) // Default prefix
+	queueIndex := hashBalanceID(transaction.Source) % q.config.Queue.NumberOfQueues
+	queueName := fmt.Sprintf("%s_%d", q.config.Queue.TransactionQueue, queueIndex+1)
 
 	taskOptions := []asynq.Option{asynq.TaskID(transaction.TransactionID), asynq.Queue(queueName)}
 	if !transaction.ScheduledFor.IsZero() {
@@ -285,14 +247,8 @@ func hashBalanceID(balanceID string) int {
 // - *model.Transaction: A pointer to the Transaction model if found.
 // - error: An error if the transaction could not be retrieved.
 func (q *Queue) GetTransactionFromQueue(transactionID string) (*model.Transaction, error) {
-	cfg, err := config.Fetch()
-	if err != nil {
-		return nil, err
-	}
-
-	// Iterate over all specific transaction queues
-	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
-		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
+	for i := 1; i <= q.config.Queue.NumberOfQueues; i++ {
+		queueName := fmt.Sprintf("%s_%d", q.config.Queue.TransactionQueue, i)
 		task, err := q.Inspector.GetTaskInfo(queueName, transactionID)
 		if err == nil && task != nil {
 			var txn model.Transaction

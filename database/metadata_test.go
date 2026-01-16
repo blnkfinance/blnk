@@ -12,7 +12,7 @@ import (
 func TestUpdateLedgerMetadata(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	metadata := map[string]interface{}{
@@ -33,7 +33,7 @@ func TestUpdateLedgerMetadata(t *testing.T) {
 func TestUpdateTransactionMetadata(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -57,7 +57,7 @@ func TestUpdateTransactionMetadata(t *testing.T) {
 func TestUpdateBalanceMetadata(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
@@ -79,7 +79,7 @@ func TestUpdateBalanceMetadata(t *testing.T) {
 func TestUpdateIdentityMetadata(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	metadata := map[string]interface{}{
@@ -100,7 +100,7 @@ func TestUpdateIdentityMetadata(t *testing.T) {
 func TestUpdateMetadata_Error(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 	metadata := map[string]interface{}{
