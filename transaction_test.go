@@ -134,7 +134,7 @@ func TestRecordTransaction(t *testing.T) {
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(destination).WillReturnRows(destinationBalanceRows)
 
-	// Start transaction
+	// Start atomic transaction for balance updates AND transaction insert
 	mock.ExpectBegin()
 
 	// Update source and destination balances (order doesn't matter since MatchExpectationsInOrder is false)
@@ -176,21 +176,7 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(), // version
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	// Commit transaction
-	mock.ExpectCommit()
-
-	// Add expectations for balance monitor queries (can happen in any order)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
-
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
-
-	// Expect transaction insertion (placed last, but can happen in any order due to MatchExpectationsInOrder=false)
+	// Expect transaction insertion within the same atomic transaction
 	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(), // transaction_id
@@ -211,6 +197,20 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(), // hash
 		sqlmock.AnyArg(), // effective_date
 	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Commit atomic transaction (balance updates + transaction insert)
+	mock.ExpectCommit()
+
+	// Balance monitor queries happen after the atomic transaction completes
+	mock.ExpectQuery(regexp.QuoteMeta(`
+    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+    FROM blnk.balance_monitors WHERE balance_id = $1
+`)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+    FROM blnk.balance_monitors WHERE balance_id = $1
+`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
 	// Execute the function being tested
 	result, err := d.RecordTransaction(context.Background(), txn)
@@ -291,7 +291,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(destination).WillReturnRows(destinationBalanceRows)
 
-	// Start transaction
+	// Start atomic transaction for balance updates AND transaction insert
 	mock.ExpectBegin()
 
 	// Update source balance
@@ -334,22 +334,7 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		0,                                 // $12
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	// Commit transaction
-	mock.ExpectCommit()
-
-	// Add expectations for balance monitor queries (can happen in any order)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
-
-	// Add a second monitor query for destination if needed (based on your implementation)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
-    FROM blnk.balance_monitors WHERE balance_id = $1
-`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
-
-	// Expect transaction insertion
+	// Expect transaction insertion within the same atomic transaction
 	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(), // transaction_id
@@ -370,6 +355,21 @@ func TestRecordTransactionWithRate(t *testing.T) {
 		sqlmock.AnyArg(), // hash
 		sqlmock.AnyArg(), // effective_date
 	).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	// Commit atomic transaction (balance updates + transaction insert)
+	mock.ExpectCommit()
+
+	// Balance monitor queries happen after the atomic transaction completes
+	mock.ExpectQuery(regexp.QuoteMeta(`
+    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+    FROM blnk.balance_monitors WHERE balance_id = $1
+`)).WithArgs(source).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
+
+	// Add a second monitor query for destination if needed (based on your implementation)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+    SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+    FROM blnk.balance_monitors WHERE balance_id = $1
+`)).WithArgs(destination).WillReturnRows(sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value"}))
 
 	// Execute the function being tested
 	_, err = d.RecordTransaction(context.Background(), txn)

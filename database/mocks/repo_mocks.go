@@ -36,6 +36,11 @@ func (m *MockDataSource) RecordTransaction(ctx context.Context, txn *model.Trans
 	return args.Get(0).(*model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error) {
+	args := m.Called(ctx, txn, sourceBalance, destinationBalance)
+	return args.Get(0).(*model.Transaction), args.Error(1)
+}
+
 func (m *MockDataSource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
 	args := m.Called(ctx, id)
 	return args.Get(0).(*model.Transaction), args.Error(1)
