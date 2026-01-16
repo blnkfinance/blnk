@@ -1895,7 +1895,7 @@ func TestFetchTransactions_Success(t *testing.T) {
 	rows, err := fetchTransactions(ctx, tx, balanceID, startTime, targetTime)
 	assert.NoError(t, err)
 	assert.NotNil(t, rows)
-	rows.Close()
+	_ = rows.Close()
 }
 
 func TestFetchTransactions_Error(t *testing.T) {
