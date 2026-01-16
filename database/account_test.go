@@ -243,7 +243,7 @@ func TestGetAllAccounts_QueryError(t *testing.T) {
 func TestGetAllAccounts_Empty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -258,7 +258,7 @@ func TestGetAllAccounts_Empty(t *testing.T) {
 func TestGetAccountByNumber_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
@@ -274,7 +274,7 @@ func TestGetAccountByNumber_NotFound(t *testing.T) {
 func TestUpdateAccount_QueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
 
