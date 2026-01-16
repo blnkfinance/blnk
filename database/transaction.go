@@ -77,6 +77,90 @@ func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transactio
 	return txn, nil
 }
 
+// recordTransactionInTx inserts a transaction record within an existing database transaction.
+// This is a helper function used by RecordTransactionWithBalances for atomic operations.
+func recordTransactionInTx(ctx context.Context, tx *sql.Tx, txn *model.Transaction) error {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "recordTransactionInTx")
+	defer span.End()
+
+	metaDataJSON, err := json.Marshal(txn.MetaData)
+	if err != nil {
+		span.RecordError(err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) 
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, txn.AmountString, txn.PreciseAmount.String(), txn.Precision, txn.Rate, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt, metaDataJSON, txn.ScheduledFor, txn.Hash, txn.EffectiveDate,
+	)
+	if err != nil {
+		span.RecordError(err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record transaction", err)
+	}
+
+	span.AddEvent("Transaction recorded in transaction", trace.WithAttributes(
+		attribute.String("transaction.id", txn.TransactionID),
+	))
+
+	return nil
+}
+
+// RecordTransactionWithBalances atomically records a transaction and updates both source and destination balances
+// within a single database transaction. This ensures that either all operations succeed together,
+// or none of them are committed, preventing inconsistent ledger states.
+//
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - txn: The transaction object containing details to be recorded.
+// - sourceBalance: The source balance to be updated.
+// - destinationBalance: The destination balance to be updated.
+//
+// Returns:
+// - The recorded transaction if successful, or an error if any operation fails.
+func (d Datasource) RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "RecordTransactionWithBalances")
+	defer span.End()
+
+	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
+	}
+
+	defer func(tx *sql.Tx) {
+		_ = tx.Rollback()
+	}(tx)
+
+	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := updateBalance(ctx, tx, destinationBalance); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := recordTransactionInTx(ctx, tx, txn); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
+	}
+
+	span.AddEvent("Transaction and balances recorded atomically", trace.WithAttributes(
+		attribute.String("transaction.id", txn.TransactionID),
+		attribute.String("source.balance_id", sourceBalance.BalanceID),
+		attribute.String("destination.balance_id", destinationBalance.BalanceID),
+	))
+
+	return txn, nil
+}
+
 // GetTransaction retrieves a transaction by its ID from the database.
 // It logs the transaction retrieval using OpenTelemetry tracing.
 // Parameters:

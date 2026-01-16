@@ -39,6 +39,7 @@ type IDataSource interface {
 // transaction defines methods for handling transactions.
 type transaction interface {
 	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                      // Records a new transaction
+	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error) // Records a transaction with balance updates atomically
 	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                      // Retrieves a transaction by ID
 	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                     // Checks if a parent transaction is void
 	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                           // Retrieves a transaction by reference

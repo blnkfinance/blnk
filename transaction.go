@@ -231,39 +231,6 @@ func (l *Blnk) updateTransactionDetails(ctx context.Context, transaction *model.
 	return &newTransaction
 }
 
-// persistTransaction persists a transaction to the database.
-// It starts a tracing span, records the transaction, and handles any errors that occur during the process.
-// If the transaction's PreciseAmount is 0, it will be discarded (not persisted) without an error.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction to be persisted.
-//
-// Returns:
-//   - *model.Transaction: A pointer to the persisted Transaction model. If the transaction was discarded due to zero amount,
-//     it returns the original transaction object that was passed in.
-//   - error: An error if the transaction could not be persisted (and was not discarded due to zero amount).
-func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
-	ctx, span := tracer.Start(ctx, "Persisting Transaction")
-	defer span.End()
-
-	// Discard transaction if amount is 0
-	if transaction.PreciseAmount != nil && transaction.PreciseAmount.Cmp(big.NewInt(0)) == 0 {
-		span.AddEvent("Transaction with zero amount discarded, not persisted", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
-		return transaction, nil
-	}
-
-	persistedTxn, err := l.datasource.RecordTransaction(ctx, transaction)
-	if err != nil {
-		span.RecordError(err)
-		logrus.Errorf("ERROR saving transaction to db. %s", err)
-		return nil, err
-	}
-	span.SetAttributes(attribute.String("transaction.id", persistedTxn.TransactionID))
-	span.AddEvent("Transaction persisted")
-	return persistedTxn, nil
-}
-
 // postTransactionActions performs post-processing actions for a transaction.
 // It starts a tracing span, queues the transaction and balance data for indexing in dependency order,
 // and sends a webhook notification.
@@ -908,8 +875,10 @@ func (l *Blnk) validateAndPrepareTransaction(ctx context.Context, transaction *m
 	return &newTransaction, sourceBalance, destinationBalance, nil
 }
 
-// processBalances processes the source and destination balances by applying the transaction and updating the balances.
-// It starts a tracing span, applies the transaction to the balances, updates the balances, and records relevant events and errors.
+// processBalances processes the source and destination balances by applying the transaction in-memory.
+// It starts a tracing span, applies the transaction to the balances, and records relevant events and errors.
+// Note: The actual database update of balances is done atomically with the transaction persistence
+// in finalizeTransaction to ensure consistency.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -918,29 +887,24 @@ func (l *Blnk) validateAndPrepareTransaction(ctx context.Context, transaction *m
 // - destinationBalance *model.Balance: The destination balance to be updated.
 //
 // Returns:
-// - error: An error if the transaction could not be applied to the balances or if the balances could not be updated.
+// - error: An error if the transaction could not be applied to the balances.
 func (l *Blnk) processBalances(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) error {
 	ctx, span := tracer.Start(ctx, "ProcessBalances")
 	defer span.End()
 
-	// Apply the transaction to the source and destination balances
+	// Apply the transaction to the source and destination balances (in-memory only)
 	if err := l.applyTransactionToBalances(ctx, []*model.Balance{sourceBalance, destinationBalance}, transaction); err != nil {
 		span.RecordError(err)
 		return l.logAndRecordError(span, "failed to apply transaction to balances", err)
 	}
 
-	// Update the source and destination balances in the datasource
-	if err := l.updateBalances(ctx, sourceBalance, destinationBalance); err != nil {
-		span.RecordError(err)
-		return l.logAndRecordError(span, "failed to update balances", err)
-	}
-
-	span.AddEvent("Balances processed")
+	span.AddEvent("Balances calculated")
 	return nil
 }
 
-// finalizeTransaction finalizes the transaction by updating its details and persisting it to the database.
-// It starts a tracing span, updates the transaction details, persists the transaction, and records relevant events and errors.
+// finalizeTransaction finalizes the transaction by updating its details and atomically persisting
+// both the transaction and balance updates to the database in a single database transaction.
+// This ensures that either both operations succeed together, or neither is committed,
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -958,14 +922,36 @@ func (l *Blnk) finalizeTransaction(ctx context.Context, transaction *model.Trans
 	// Update the transaction details with the source and destination balances
 	transaction = l.updateTransactionDetails(ctx, transaction, sourceBalance, destinationBalance)
 
-	// Persist the transaction to the database
-	transaction, err := l.persistTransaction(ctx, transaction)
-	if err != nil {
-		span.RecordError(err)
-		return nil, l.logAndRecordError(span, "failed to persist transaction", err)
+	// Discard transaction if amount is 0
+	if transaction.PreciseAmount != nil && transaction.PreciseAmount.Cmp(big.NewInt(0)) == 0 {
+		span.AddEvent("Transaction with zero amount discarded, not persisted", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
+		return transaction, nil
 	}
 
-	span.AddEvent("Transaction processed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
+	// Atomically persist the transaction and update balances in a single database transaction
+	transaction, err := l.datasource.RecordTransactionWithBalances(ctx, transaction, sourceBalance, destinationBalance)
+	if err != nil {
+		span.RecordError(err)
+		return nil, l.logAndRecordError(span, "failed to persist transaction with balances", err)
+	}
+
+	// Check balance monitors after the atomic transaction completes successfully
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		l.checkBalanceMonitors(ctx, sourceBalance)
+	}()
+
+	go func() {
+		defer wg.Done()
+		l.checkBalanceMonitors(ctx, destinationBalance)
+	}()
+
+	wg.Wait()
+
+	span.AddEvent("Transaction and balances persisted atomically", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
 	return transaction, nil
 }

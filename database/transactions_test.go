@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
@@ -486,4 +487,263 @@ func TestGetTotalCommittedTransactions_Error(t *testing.T) {
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
 	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestRecordTransactionWithBalances_AtomicSuccess_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := NewDataSource(cnf)
+	if err != nil {
+		t.Skipf("Skipping test: could not connect to database: %v", err)
+	}
+
+	ledger, err := ds.CreateLedger(model.Ledger{Name: "test-ledger-atomicity-" + model.GenerateUUIDWithSuffix("ldg")})
+	if err != nil {
+		t.Fatalf("Failed to create ledger: %v", err)
+	}
+
+	sourceBalance := model.Balance{
+		Currency: "USD",
+		LedgerID: ledger.LedgerID,
+	}
+	destBalance := model.Balance{
+		Currency: "USD",
+		LedgerID: ledger.LedgerID,
+	}
+
+	createdSource, err := ds.CreateBalance(sourceBalance)
+	if err != nil {
+		t.Fatalf("Failed to create source balance: %v", err)
+	}
+
+	createdDest, err := ds.CreateBalance(destBalance)
+	if err != nil {
+		t.Fatalf("Failed to create destination balance: %v", err)
+	}
+
+	source, err := ds.GetBalanceByIDLite(createdSource.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get source balance: %v", err)
+	}
+	dest, err := ds.GetBalanceByIDLite(createdDest.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get destination balance: %v", err)
+	}
+
+	transferAmount := big.NewInt(50000)
+	source.DebitBalance = new(big.Int).Add(source.DebitBalance, transferAmount)
+	source.Balance = new(big.Int).Sub(source.Balance, transferAmount)
+	dest.CreditBalance = new(big.Int).Add(dest.CreditBalance, transferAmount)
+	dest.Balance = new(big.Int).Add(dest.Balance, transferAmount)
+
+	txn := &model.Transaction{
+		TransactionID: model.GenerateUUIDWithSuffix("txn"),
+		Reference:     "atomic-success-test-" + model.GenerateUUIDWithSuffix("ref"),
+		Source:        source.BalanceID,
+		Destination:   dest.BalanceID,
+		Amount:        500,
+		AmountString:  "500",
+		PreciseAmount: transferAmount,
+		Precision:     100,
+		Rate:          1,
+		Currency:      "USD",
+		Status:        "APPLIED",
+		CreatedAt:     time.Now(),
+		ScheduledFor:  time.Now(),
+		MetaData:      map[string]interface{}{"test": "atomicity"},
+	}
+
+	result, err := ds.RecordTransactionWithBalances(ctx, txn, source, dest)
+	assert.NoError(t, err, "RecordTransactionWithBalances should succeed")
+	assert.NotNil(t, result)
+
+	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	assert.NoError(t, err)
+	finalDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 0, finalSource.DebitBalance.Cmp(transferAmount),
+		"Source debit balance should be updated")
+	assert.Equal(t, 0, finalDest.CreditBalance.Cmp(transferAmount),
+		"Destination credit balance should be updated")
+
+	savedTxn, err := ds.GetTransaction(ctx, txn.TransactionID)
+	assert.NoError(t, err, "Transaction should be saved")
+	assert.Equal(t, txn.TransactionID, savedTxn.TransactionID)
+	assert.Equal(t, "APPLIED", savedTxn.Status)
+}
+
+func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := NewDataSource(cnf)
+	if err != nil {
+		t.Skipf("Skipping test: could not connect to database: %v", err)
+	}
+
+	ledger, err := ds.CreateLedger(model.Ledger{Name: "test-ledger-rollback-" + model.GenerateUUIDWithSuffix("ldg")})
+	if err != nil {
+		t.Fatalf("Failed to create ledger: %v", err)
+	}
+
+	sourceBalance := model.Balance{
+		Currency: "USD",
+		LedgerID: ledger.LedgerID,
+	}
+	destBalance := model.Balance{
+		Currency: "USD",
+		LedgerID: ledger.LedgerID,
+	}
+
+	source, err := ds.CreateBalance(sourceBalance)
+	if err != nil {
+		t.Fatalf("Failed to create source balance: %v", err)
+	}
+
+	dest, err := ds.CreateBalance(destBalance)
+	if err != nil {
+		t.Fatalf("Failed to create destination balance: %v", err)
+	}
+
+	duplicateTxnID := model.GenerateUUIDWithSuffix("txn")
+	firstTxn := &model.Transaction{
+		TransactionID: duplicateTxnID,
+		Reference:     "first-txn-" + duplicateTxnID,
+		Source:        source.BalanceID,
+		Destination:   dest.BalanceID,
+		Amount:        100,
+		AmountString:  "100",
+		PreciseAmount: big.NewInt(10000),
+		Precision:     100,
+		Rate:          1,
+		Currency:      "USD",
+		Status:        "APPLIED",
+		CreatedAt:     time.Now(),
+		ScheduledFor:  time.Now(),
+		MetaData:      map[string]interface{}{"test": "first"},
+	}
+
+	firstSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get first source balance: %v", err)
+	}
+	firstDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get first dest balance: %v", err)
+	}
+
+	firstSource.DebitBalance = new(big.Int).Add(firstSource.DebitBalance, big.NewInt(10000))
+	firstSource.Balance = new(big.Int).Sub(firstSource.Balance, big.NewInt(10000))
+	firstDest.CreditBalance = new(big.Int).Add(firstDest.CreditBalance, big.NewInt(10000))
+	firstDest.Balance = new(big.Int).Add(firstDest.Balance, big.NewInt(10000))
+
+	_, err = ds.RecordTransactionWithBalances(ctx, firstTxn, firstSource, firstDest)
+	if err != nil {
+		t.Fatalf("First transaction should succeed: %v", err)
+	}
+
+	balanceAfterFirst, err := ds.GetBalanceByIDLite(source.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get balance after first: %v", err)
+	}
+	destAfterFirst, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get dest after first: %v", err)
+	}
+
+	secondTxn := &model.Transaction{
+		TransactionID: duplicateTxnID,
+		Reference:     "second-txn-" + duplicateTxnID,
+		Source:        source.BalanceID,
+		Destination:   dest.BalanceID,
+		Amount:        200,
+		AmountString:  "200",
+		PreciseAmount: big.NewInt(20000),
+		Precision:     100,
+		Rate:          1,
+		Currency:      "USD",
+		Status:        "APPLIED",
+		CreatedAt:     time.Now(),
+		ScheduledFor:  time.Now(),
+		MetaData:      map[string]interface{}{"test": "second-should-fail"},
+	}
+
+	secondSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get second source balance: %v", err)
+	}
+	secondDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	if err != nil {
+		t.Fatalf("Failed to get second dest balance: %v", err)
+	}
+
+	secondSource.DebitBalance = new(big.Int).Add(secondSource.DebitBalance, big.NewInt(20000))
+	secondSource.Balance = new(big.Int).Sub(secondSource.Balance, big.NewInt(20000))
+	secondDest.CreditBalance = new(big.Int).Add(secondDest.CreditBalance, big.NewInt(20000))
+	secondDest.Balance = new(big.Int).Add(secondDest.Balance, big.NewInt(20000))
+
+	_, err = ds.RecordTransactionWithBalances(ctx, secondTxn, secondSource, secondDest)
+	assert.Error(t, err, "Second transaction with duplicate ID should fail")
+
+	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	assert.NoError(t, err)
+	finalDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	assert.NoError(t, err)
+
+	t.Logf("Rollback test: attempted source balance %s, actual %s (unchanged = rollback worked)",
+		secondSource.Balance.String(), finalSource.Balance.String())
+
+	assert.Equal(t, balanceAfterFirst.Balance.String(), finalSource.Balance.String(),
+		"Source balance should be unchanged after rollback (expected: %s, got: %s)",
+		balanceAfterFirst.Balance.String(), finalSource.Balance.String())
+	assert.Equal(t, balanceAfterFirst.DebitBalance.String(), finalSource.DebitBalance.String(),
+		"Source debit balance should be unchanged after rollback")
+	assert.Equal(t, destAfterFirst.Balance.String(), finalDest.Balance.String(),
+		"Destination balance should be unchanged after rollback")
+	assert.Equal(t, destAfterFirst.CreditBalance.String(), finalDest.CreditBalance.String(),
+		"Destination credit balance should be unchanged after rollback")
 }
