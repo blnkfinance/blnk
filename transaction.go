@@ -231,39 +231,6 @@ func (l *Blnk) updateTransactionDetails(ctx context.Context, transaction *model.
 	return &newTransaction
 }
 
-// persistTransaction persists a transaction to the database.
-// It starts a tracing span, records the transaction, and handles any errors that occur during the process.
-// If the transaction's PreciseAmount is 0, it will be discarded (not persisted) without an error.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction to be persisted.
-//
-// Returns:
-//   - *model.Transaction: A pointer to the persisted Transaction model. If the transaction was discarded due to zero amount,
-//     it returns the original transaction object that was passed in.
-//   - error: An error if the transaction could not be persisted (and was not discarded due to zero amount).
-func (l *Blnk) persistTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
-	ctx, span := tracer.Start(ctx, "Persisting Transaction")
-	defer span.End()
-
-	// Discard transaction if amount is 0
-	if transaction.PreciseAmount != nil && transaction.PreciseAmount.Cmp(big.NewInt(0)) == 0 {
-		span.AddEvent("Transaction with zero amount discarded, not persisted", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
-		return transaction, nil
-	}
-
-	persistedTxn, err := l.datasource.RecordTransaction(ctx, transaction)
-	if err != nil {
-		span.RecordError(err)
-		logrus.Errorf("ERROR saving transaction to db. %s", err)
-		return nil, err
-	}
-	span.SetAttributes(attribute.String("transaction.id", persistedTxn.TransactionID))
-	span.AddEvent("Transaction persisted")
-	return persistedTxn, nil
-}
-
 // postTransactionActions performs post-processing actions for a transaction.
 // It starts a tracing span, queues the transaction and balance data for indexing in dependency order,
 // and sends a webhook notification.
