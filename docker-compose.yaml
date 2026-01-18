@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 version: "3.8"
-
+networks:
+  shared_net:
+    external: true
 services:
   server:
     image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.11.5}
@@ -30,10 +32,11 @@ services:
       - "443:443"
     depends_on:
       - redis
-      - postgres
       - jaeger
     volumes:
       - ./blnk.json:/blnk.json
+    networks:
+      - shared_net
 
   worker:
     image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.11.5}
@@ -46,35 +49,19 @@ services:
       - "5004:5004"
     depends_on:
       - redis
-      - postgres
       - jaeger
     volumes:
       - ./blnk.json:/blnk.json
+    networks:
+      - shared_net
 
   redis:
     image: redis:7.2.4
     container_name: redis
     restart: on-failure
-
-  postgres:
-    image: ${POSTGRES_IMAGE:-postgres:16}
-    container_name: ${POSTGRES_CONTAINER:-postgres}
-    restart: on-failure
-    ports:
-      - "${POSTGRES_OUTER_PORT:-5432}:5432"
-    environment:
-      TZ: ${TZ:-Etc/UTC}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-      POSTGRES_DB: ${POSTGRES_DB:-blnk}
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-postgres}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
+    networks:
+      - shared_net
+  
   typesense:
     image: typesense/typesense:29.0
     container_name: typesense
@@ -89,7 +76,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
+    networks:
+      - shared_net
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
@@ -104,7 +92,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-
+    networks:
+      - shared_net
+  
 volumes:
-  pg_data:
   typesense_data:

@@ -1,0 +1,15 @@
+{
+  "project_name": "Blnk",
+  "data_source": {
+    "dns": "postgres://blnk:blnk@postgres:5432/blnk?sslmode=disable"
+  },
+  "redis": {
+    "dns": "redis:6379"
+  },
+  "typesense": {
+    "dns": "http://typesense:8108"
+  },
+  "server": {
+    "port": "5001"
+  }
+}
