@@ -98,17 +98,26 @@ func (l *Blnk) processLineageCredit(ctx context.Context, txn *model.Transaction,
 		return fmt.Errorf("destination balance %s has no identity_id for lineage tracking", destBalance.BalanceID)
 	}
 
+	locker, err := l.acquireLineageCreditLock(ctx, identityID, provider, txn.Currency)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	defer l.releaseLock(ctx, locker)
+
 	shadowBalance, aggregateBalance, err := l.getOrCreateLineageBalances(ctx, identityID, provider, txn.Currency)
 	if err != nil {
 		return err
 	}
 
-	if err := l.upsertCreditLineageMapping(ctx, destBalance, provider, shadowBalance, aggregateBalance, identityID); err != nil {
+	if err := l.queueShadowCreditTransaction(ctx, txn, destBalance, provider, shadowBalance, aggregateBalance, identityID); err != nil {
 		return err
 	}
 
-	if err := l.queueShadowCreditTransaction(ctx, txn, destBalance, provider, shadowBalance, aggregateBalance, identityID); err != nil {
-		return err
+	if err := l.upsertCreditLineageMapping(ctx, destBalance, provider, shadowBalance, aggregateBalance, identityID); err != nil {
+		logrus.Errorf("failed to create lineage mapping after shadow transaction: %v (txn: %s, provider: %s)", err, txn.TransactionID, provider)
+		span.RecordError(err)
+		// Don't return error - shadow transaction succeeded, mapping is for optimization
 	}
 
 	span.AddEvent("Lineage credit processed", trace.WithAttributes(
@@ -238,6 +247,30 @@ func (l *Blnk) acquireLineageDebitLock(ctx context.Context, balanceID string) (*
 	return locker, nil
 }
 
+func (l *Blnk) acquireLineageCreditLock(ctx context.Context, identityID, provider, currency string) (*redlock.Locker, error) {
+	lockKey := fmt.Sprintf("lineage-credit:%s:%s:%s", identityID, provider, currency)
+	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+
+	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire lock for lineage credit: %w", err)
+	}
+
+	return locker, nil
+}
+
+func (l *Blnk) acquireDestinationLineageLock(ctx context.Context, identityID, provider, currency string) (*redlock.Locker, error) {
+	lockKey := fmt.Sprintf("lineage-dest:%s:%s:%s", identityID, provider, currency)
+	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+
+	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire lock for destination lineage: %w", err)
+	}
+
+	return locker, nil
+}
+
 func (l *Blnk) getSourceAggregateBalance(ctx context.Context, sourceBalance *model.Balance) (*model.Balance, error) {
 	sourceIdentity, err := l.datasource.GetIdentityByID(sourceBalance.IdentityID)
 	if err != nil {
@@ -313,9 +346,21 @@ func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transac
 		return
 	}
 
+	locker, err := l.acquireDestinationLineageLock(ctx, destinationBalance.IdentityID, mapping.Provider, destinationBalance.Currency)
+	if err != nil {
+		logrus.Errorf("failed to acquire destination lineage lock: %v", err)
+		return
+	}
+	defer l.releaseLock(ctx, locker)
+
 	destShadowBalance, destAggBalance, err := l.getOrCreateDestinationLineageBalances(ctx, mapping.Provider, destinationBalance)
 	if err != nil {
 		logrus.Errorf("failed to create destination lineage balances: %v", err)
+		return
+	}
+
+	if err := l.queueReceiveTransaction(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance, allocAmount, index); err != nil {
+		logrus.Errorf("failed to queue receive transaction: %v", err)
 		return
 	}
 
@@ -326,10 +371,8 @@ func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transac
 		AggregateBalanceID: destAggBalance.BalanceID,
 		IdentityID:         destinationBalance.IdentityID,
 	}
-	_ = l.datasource.UpsertLineageMapping(ctx, destMapping)
-
-	if err := l.queueReceiveTransaction(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance, allocAmount, index); err != nil {
-		logrus.Errorf("failed to queue receive transaction: %v", err)
+	if err := l.datasource.UpsertLineageMapping(ctx, destMapping); err != nil {
+		logrus.Errorf("failed to create destination lineage mapping after receive transaction: %v (txn: %s, provider: %s)", err, txn.TransactionID, mapping.Provider)
 	}
 }
 
