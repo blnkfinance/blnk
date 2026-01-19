@@ -16,11 +16,13 @@ limitations under the License.
 package model
 
 type CreateBalance struct {
-	LedgerId   string                 `json:"ledger_id"`
-	IdentityId string                 `json:"identity_id"`
-	Currency   string                 `json:"currency"`
-	Precision  float64                `json:"precision"`
-	MetaData   map[string]interface{} `json:"meta_data"`
+	LedgerId           string                 `json:"ledger_id"`
+	IdentityId         string                 `json:"identity_id"`
+	Currency           string                 `json:"currency"`
+	Precision          float64                `json:"precision"`
+	MetaData           map[string]interface{} `json:"meta_data"`
+	TrackFundLineage   bool                   `json:"track_fund_lineage"`
+	AllocationStrategy string                 `json:"allocation_strategy"`
 }
 
 type CreateBalanceMonitor struct {

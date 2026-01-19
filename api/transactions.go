@@ -369,3 +369,19 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 		})
 	}
 }
+
+func (a Api) GetTransactionLineage(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	lineage, err := a.blnk.GetTransactionLineage(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, lineage)
+}

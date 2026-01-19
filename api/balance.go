@@ -435,3 +435,19 @@ func (a Api) UpdateBalanceIdentity(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Balance identity updated successfully"})
 }
+
+func (a Api) GetBalanceLineage(c *gin.Context) {
+	id, passed := c.Params.Get("id")
+	if !passed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		return
+	}
+
+	lineage, err := a.blnk.GetBalanceLineage(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, lineage)
+}
