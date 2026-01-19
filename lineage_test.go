@@ -848,10 +848,10 @@ func TestLineageE2E_DebitFlow_ToLineageEnabledBalance(t *testing.T) {
 
 	t.Run("Bob should inherit stripe provider from Alice", func(t *testing.T) {
 		bobIdentifier := blnkInstance.getIdentityIdentifier(bobIdentity)
-		assert.Equal(t, "bob_jones", bobIdentifier)
+		assert.Equal(t, "bob_jones_idt_bob_", bobIdentifier)
 
-		expectedBobStripeShadow := "@stripe_bob_jones_lineage"
-		expectedBobAggregate := "@bob_jones_lineage"
+		expectedBobStripeShadow := "@stripe_bob_jones_idt_bob__lineage"
+		expectedBobAggregate := "@bob_jones_idt_bob__lineage"
 
 		assert.Contains(t, expectedBobStripeShadow, "stripe")
 		assert.Contains(t, expectedBobStripeShadow, "bob_jones")

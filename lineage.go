@@ -530,6 +530,12 @@ func (l *Blnk) calculateAllocation(sources []LineageSource, amount *big.Int, str
 
 func (l *Blnk) sequentialAllocation(sources []LineageSource, amount *big.Int) []Allocation {
 	var allocations []Allocation
+
+	// Skip if amount is zero or negative
+	if amount.Cmp(big.NewInt(0)) <= 0 {
+		return nil
+	}
+
 	remaining := new(big.Int).Set(amount)
 
 	for _, source := range sources {
@@ -544,6 +550,11 @@ func (l *Blnk) sequentialAllocation(sources []LineageSource, amount *big.Int) []
 			alloc.Set(source.Balance)
 		}
 
+		// Skip zero allocations
+		if alloc.Cmp(big.NewInt(0)) <= 0 {
+			continue
+		}
+
 		allocations = append(allocations, Allocation{
 			BalanceID: source.BalanceID,
 			Amount:    alloc,
@@ -552,11 +563,21 @@ func (l *Blnk) sequentialAllocation(sources []LineageSource, amount *big.Int) []
 		remaining.Sub(remaining, alloc)
 	}
 
+	// Log warning if we couldn't allocate the full amount
+	if remaining.Cmp(big.NewInt(0)) > 0 {
+		logrus.Warnf("sequential allocation: could not allocate full amount, %s remaining unallocated", remaining.String())
+	}
+
 	return allocations
 }
 
 func (l *Blnk) proportionalAllocation(sources []LineageSource, amount *big.Int) []Allocation {
 	var allocations []Allocation
+
+	// Skip if amount is zero or negative
+	if amount.Cmp(big.NewInt(0)) <= 0 {
+		return nil
+	}
 
 	total := big.NewInt(0)
 	for _, source := range sources {
@@ -567,20 +588,35 @@ func (l *Blnk) proportionalAllocation(sources []LineageSource, amount *big.Int) 
 		return nil
 	}
 
-	remaining := new(big.Int).Set(amount)
+	// Cap amount at total available to prevent over-allocation
+	effectiveAmount := new(big.Int).Set(amount)
+	if effectiveAmount.Cmp(total) > 0 {
+		logrus.Warnf("proportional allocation: requested amount %s exceeds total available %s, capping at available", amount.String(), total.String())
+		effectiveAmount.Set(total)
+	}
+
+	remaining := new(big.Int).Set(effectiveAmount)
 
 	for i, source := range sources {
 		var alloc *big.Int
 
 		if i == len(sources)-1 {
+			// Last source gets the remainder to handle rounding
 			alloc = new(big.Int).Set(remaining)
 		} else {
-			proportion := new(big.Int).Mul(amount, source.Balance)
+			// Calculate proportional share: (effectiveAmount * source.Balance) / total
+			proportion := new(big.Int).Mul(effectiveAmount, source.Balance)
 			alloc = new(big.Int).Div(proportion, total)
 		}
 
+		// Cap at source's available balance
 		if alloc.Cmp(source.Balance) > 0 {
 			alloc.Set(source.Balance)
+		}
+
+		// Skip zero allocations
+		if alloc.Cmp(big.NewInt(0)) <= 0 {
+			continue
 		}
 
 		allocations = append(allocations, Allocation{
