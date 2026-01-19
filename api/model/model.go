@@ -86,6 +86,8 @@ func (b *CreateBalance) ValidateCreateBalance() error {
 	return validation.ValidateStruct(b,
 		validation.Field(&b.LedgerId, validation.Required),
 		validation.Field(&b.Currency, validation.Required),
+		validation.Field(&b.IdentityId, validation.When(b.TrackFundLineage, validation.Required.Error("identity_id is required when track_fund_lineage is enabled"))),
+		validation.Field(&b.AllocationStrategy, validation.When(b.AllocationStrategy != "", validation.In("FIFO", "LIFO", "PROPORTIONAL").Error("allocation_strategy must be one of: FIFO, LIFO, PROPORTIONAL"))),
 	)
 }
 
@@ -196,7 +198,11 @@ func (l *CreateLedger) ToLedger() model.Ledger {
 }
 
 func (b *CreateBalance) ToBalance() model.Balance {
-	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, CurrencyMultiplier: b.Precision}
+	allocationStrategy := b.AllocationStrategy
+	if allocationStrategy == "" {
+		allocationStrategy = "FIFO"
+	}
+	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, CurrencyMultiplier: b.Precision, TrackFundLineage: b.TrackFundLineage, AllocationStrategy: allocationStrategy}
 }
 
 func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {

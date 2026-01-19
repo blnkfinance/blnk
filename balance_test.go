@@ -163,7 +163,7 @@ func TestCreateBalance(t *testing.T) {
 	// Convert metadata to JSON for mocking
 	metaDataJSON, _ := json.Marshal(balance.MetaData)
 	mock.ExpectExec("INSERT INTO blnk.balances").
-		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON).
+		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, false, "FIFO").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := d.CreateBalance(context.Background(), balance)
@@ -190,8 +190,8 @@ func TestGetBalanceByID(t *testing.T) {
 	mock.ExpectBegin()
 
 	// Adjust the expected SQL to match the actual SQL output.
-	expectedSQL := `SELECT b\.balance_id, b\.balance, b\.credit_balance, b\.debit_balance, b\.currency, b\.currency_multiplier, b\.ledger_id, COALESCE\(b\.identity_id, ''\) as identity_id, b\.created_at, b\.meta_data, b\.inflight_balance, b\.inflight_credit_balance, b\.inflight_debit_balance, b\.version, b\.indicator FROM \( SELECT \* FROM blnk\.balances WHERE balance_id = \$1 \) AS b`
-	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator"}).
+	expectedSQL := `SELECT b\.balance_id, b\.balance, b\.credit_balance, b\.debit_balance, b\.currency, b\.currency_multiplier, b\.ledger_id, COALESCE\(b\.identity_id, ''\) as identity_id, b\.created_at, b\.meta_data, b\.inflight_balance, b\.inflight_credit_balance, b\.inflight_debit_balance, b\.version, b\.indicator, b\.track_fund_lineage, COALESCE\(b\.allocation_strategy, 'FIFO'\) as allocation_strategy FROM \( SELECT \* FROM blnk\.balances WHERE balance_id = \$1 \) AS b`
+	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator", "track_fund_lineage", "allocation_strategy"}).
 		AddRow(balanceID,
 			BigIntString{big.NewInt(100)},
 			BigIntString{big.NewInt(50)},
@@ -202,7 +202,9 @@ func TestGetBalanceByID(t *testing.T) {
 			BigIntString{big.NewInt(0)},
 			BigIntString{big.NewInt(0)},
 			0,
-			"test-indicator")
+			"test-indicator",
+			false,
+			"FIFO")
 
 	mock.ExpectQuery(expectedSQL).
 		WithArgs(balanceID).

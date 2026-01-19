@@ -221,7 +221,7 @@ func (l *Blnk) updateTransactionDetails(ctx context.Context, transaction *model.
 
 // postTransactionActions performs post-processing actions for a transaction.
 // It starts a tracing span, queues the transaction and balance data for indexing in dependency order,
-// and sends a webhook notification.
+// sends a webhook notification, and processes fund lineage if applicable.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -263,38 +263,15 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 			span.RecordError(err)
 			notification.NotifyError(err)
 		}
+
+		// Process fund lineage asynchronously if applicable
+		// Use a background context since the HTTP request context may be cancelled
+		if transaction.Status == StatusApplied || transaction.Status == StatusInflight {
+			l.processLineage(context.Background(), transaction, sourceBalance, destinationBalance)
+		}
+
 		span.AddEvent("Post-transaction actions completed")
 	}()
-}
-
-// updateBalances updates the source and destination balances in the database.
-// It starts a tracing span, updates the balances, and checks balance monitors.
-// Note: Balance indexing is now handled by postTransactionActions via batch indexing
-// to ensure proper ordering (balances indexed before transactions).
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - sourceBalance *model.Balance: The source balance to be updated.
-// - destinationBalance *model.Balance: The destination balance to be updated.
-//
-// Returns:
-// - error: An error if the balances could not be updated.
-func (l *Blnk) updateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error {
-	ctx, span := tracer.Start(ctx, "Updating Balances")
-	defer span.End()
-
-	// Update the balances in the datasource
-	if err := l.datasource.UpdateBalances(ctx, sourceBalance, destinationBalance); err != nil {
-		span.RecordError(err)
-		return err
-	}
-
-	// Check balance monitors asynchronously (fire and forget - not on critical path)
-	go l.checkBalanceMonitors(ctx, sourceBalance)
-	go l.checkBalanceMonitors(ctx, destinationBalance)
-
-	span.AddEvent("Balances updated")
-	return nil
 }
 
 // validateTxn validates a transaction by checking if its reference has already been used.
@@ -1032,7 +1009,17 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 	span.AddEvent("Inflight transaction committed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
 	// Finalize the commitment of the transaction
-	return l.finalizeCommitment(ctx, transaction, false)
+	committedTxn, err := l.finalizeCommitment(ctx, transaction, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// Commit any shadow transactions created for lineage tracking
+	if err := l.commitShadowTransactions(ctx, transactionID, amount); err != nil {
+		logrus.Errorf("failed to commit shadow transactions for %s: %v", transactionID, err)
+	}
+
+	return committedTxn, nil
 }
 
 func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transactionID string, amount *big.Int) (*model.Transaction, error) {
@@ -1067,7 +1054,17 @@ func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transacti
 	span.AddEvent("Inflight transaction committed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
 	// Finalize the commitment of the transaction
-	return l.finalizeCommitment(ctx, transaction, true)
+	committedTxn, err := l.finalizeCommitment(ctx, transaction, true)
+	if err != nil {
+		return nil, err
+	}
+
+	// Commit any shadow transactions created for lineage tracking
+	if err := l.commitShadowTransactions(ctx, transactionID, amount); err != nil {
+		logrus.Errorf("failed to commit shadow transactions for %s: %v", transactionID, err)
+	}
+
+	return committedTxn, nil
 }
 
 // validateAndUpdateAmount validates the amount to be committed for a transaction and updates the transaction's amount.
@@ -1287,7 +1284,17 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 	span.AddEvent("Inflight transaction voided", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
 	// Finalize the void transaction
-	return l.finalizeVoidTransaction(ctx, transaction, amountLeft)
+	voidedTxn, err := l.finalizeVoidTransaction(ctx, transaction, amountLeft)
+	if err != nil {
+		return nil, err
+	}
+
+	// Void any shadow transactions created for lineage tracking
+	if err := l.voidShadowTransactions(ctx, transactionID); err != nil {
+		logrus.Errorf("failed to void shadow transactions for %s: %v", transactionID, err)
+	}
+
+	return voidedTxn, nil
 }
 
 // fetchAndValidateInflightTransaction fetches and validates an inflight transaction by its ID.

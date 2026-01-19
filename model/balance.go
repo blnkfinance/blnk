@@ -43,6 +43,8 @@ type Balance struct {
 	CreatedAt             time.Time              `json:"created_at"`
 	InflightExpiresAt     time.Time              `json:"inflight_expires_at"`
 	MetaData              map[string]interface{} `json:"meta_data"`
+	TrackFundLineage      bool                   `json:"track_fund_lineage"`
+	AllocationStrategy    string                 `json:"allocation_strategy,omitempty"`
 }
 
 type BalanceMonitor struct {
@@ -52,6 +54,16 @@ type BalanceMonitor struct {
 	CallBackURL string         `json:"-"`
 	CreatedAt   time.Time      `json:"created_at"`
 	Condition   AlertCondition `json:"condition"`
+}
+
+type LineageMapping struct {
+	ID                 int64     `json:"id"`
+	BalanceID          string    `json:"balance_id"`
+	Provider           string    `json:"provider"`
+	ShadowBalanceID    string    `json:"shadow_balance_id"`
+	AggregateBalanceID string    `json:"aggregate_balance_id"`
+	IdentityID         string    `json:"identity_id"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type BalanceFilter struct {

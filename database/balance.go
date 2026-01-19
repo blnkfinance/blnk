@@ -51,7 +51,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	selectFields = append(selectFields,
 		"b.balance_id", "b.balance", "b.credit_balance", "b.debit_balance",
 		"b.currency", "b.currency_multiplier", "b.ledger_id",
-		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data", "b.inflight_balance", "b.inflight_credit_balance", "b.inflight_debit_balance", "b.version", "b.indicator")
+		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data", "b.inflight_balance", "b.inflight_credit_balance", "b.inflight_debit_balance", "b.version", "b.indicator", "b.track_fund_lineage", "COALESCE(b.allocation_strategy, 'FIFO') as allocation_strategy")
 
 	// Conditionally include identity fields
 	if contains(include, "identity") {
@@ -109,7 +109,7 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 	scanArgs = append(scanArgs, &balance.BalanceID, &balanceStr, &creditBalanceStr,
 		&debitBalanceStr, &balance.Currency, &balance.CurrencyMultiplier,
 		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON,
-		&inflightBalanceStr, &inflightCreditBalanceStr, &inflightDebitBalanceStr, &balance.Version, &indicator)
+		&inflightBalanceStr, &inflightCreditBalanceStr, &inflightDebitBalanceStr, &balance.Version, &indicator, &balance.TrackFundLineage, &balance.AllocationStrategy)
 
 	// Conditionally scan for identity fields
 	if contains(include, "identity") {
@@ -218,11 +218,17 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 		balance.InflightDebitBalance = big.NewInt(0)
 	}
 
+	// Default allocation strategy to FIFO if not set
+	allocationStrategy := balance.AllocationStrategy
+	if allocationStrategy == "" {
+		allocationStrategy = "FIFO"
+	}
+
 	// Insert the balance into the database
 	_, err = d.Conn.Exec(`
-		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11)
-	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON)
+		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data, track_fund_lineage, allocation_strategy)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON, balance.TrackFundLineage, allocationStrategy)
 	if err != nil {
 		// Handle specific PostgreSQL errors (e.g., unique or foreign key violations)
 		pqErr, ok := err.(*pq.Error)
@@ -327,10 +333,11 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	var balanceValue, creditBalanceValue, debitBalanceValue string
 	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
 	var indicator sql.NullString
+	var allocationStrategy sql.NullString
 
 	// Execute the query
 	row := d.Conn.QueryRow(`
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE balance_id = $1
     `, id)
@@ -350,6 +357,9 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 		&inflightDebitBalanceValue,
 		&balance.CreatedAt,
 		&balance.Version,
+		&balance.TrackFundLineage,
+		&allocationStrategy,
+		&balance.IdentityID,
 	)
 
 	// Handle null indicator field
@@ -357,6 +367,13 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 		balance.Indicator = indicator.String
 	} else {
 		balance.Indicator = ""
+	}
+
+	// Handle null allocation_strategy field
+	if allocationStrategy.Valid {
+		balance.AllocationStrategy = allocationStrategy.String
+	} else {
+		balance.AllocationStrategy = "FIFO"
 	}
 
 	if err != nil {
@@ -403,10 +420,11 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 	// Change to string variables to handle large numbers
 	var balanceValue, creditBalanceValue, debitBalanceValue string
 	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
+	var allocationStrategy sql.NullString
 
 	// Execute query to find the balance with the given indicator and currency
 	row := d.Conn.QueryRow(`
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE indicator = $1 AND currency = $2
     `, indicator, currency)
@@ -426,6 +444,9 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 		&inflightDebitBalanceValue,
 		&balance.CreatedAt,
 		&balance.Version,
+		&balance.TrackFundLineage,
+		&allocationStrategy,
+		&balance.IdentityID,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -434,6 +455,13 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 		}
 		// Return other types of errors, such as query execution failures
 		return nil, err
+	}
+
+	// Handle null allocation_strategy field
+	if allocationStrategy.Valid {
+		balance.AllocationStrategy = allocationStrategy.String
+	} else {
+		balance.AllocationStrategy = "FIFO"
 	}
 
 	// Initialize big.Int values

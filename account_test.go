@@ -53,8 +53,8 @@ func TestCreateAccount(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	rows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
-		AddRow(account.BalanceID, "", "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
+	rows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
+		AddRow(account.BalanceID, "", "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).
@@ -104,8 +104,8 @@ func TestCreateAccountWithExternalGenerator(t *testing.T) {
 	}
 	metaDataJSON, _ := json.Marshal(account.MetaData)
 
-	rows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version"}).
-		AddRow(account.BalanceID, "", "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0)
+	rows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
+		AddRow(account.BalanceID, "", "NGN", 1, account.LedgerID, 100, 50, 50, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balances WHERE balance_id =").
 		WithArgs(account.BalanceID).
