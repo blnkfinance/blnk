@@ -109,7 +109,7 @@ func TestGetIdentityIdentifier(t *testing.T) {
 				FirstName:  "Alice",
 				LastName:   "Smith",
 			},
-			expected: "alice_smith",
+			expected: "alice_smith_idt_123",
 		},
 		{
 			name: "Organization",
@@ -117,7 +117,7 @@ func TestGetIdentityIdentifier(t *testing.T) {
 				IdentityID:       "idt_456",
 				OrganizationName: "Acme Corp",
 			},
-			expected: "acme_corp",
+			expected: "acme_corp_idt_456",
 		},
 		{
 			name: "Fallback to ID",
