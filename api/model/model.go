@@ -83,6 +83,11 @@ func validateDateFormat(format, value string) error {
 }
 
 func (b *CreateBalance) ValidateCreateBalance() error {
+	// Normalize allocation strategy: trim and uppercase
+	if b.AllocationStrategy != "" {
+		b.AllocationStrategy = strings.TrimSpace(strings.ToUpper(b.AllocationStrategy))
+	}
+
 	return validation.ValidateStruct(b,
 		validation.Field(&b.LedgerId, validation.Required),
 		validation.Field(&b.Currency, validation.Required),
