@@ -981,7 +981,73 @@ func TestLineageInflightCommit(t *testing.T) {
 	assert.Equal(t, 0, aggregateBalance.CreditBalance.Cmp(big.NewInt(5000)),
 		"Aggregate credit balance should be 5000 after commit")
 
-	t.Log("=== Inflight commit test completed ===")
+	t.Log("=== Phase 2: Spend to merchant ===")
+
+	// Create a merchant balance (non-lineage)
+	merchantBalance, err := ds.CreateBalance(model.Balance{
+		Currency:         "USD",
+		LedgerID:         GeneralLedgerID,
+		TrackFundLineage: false,
+	})
+	require.NoError(t, err)
+	t.Logf("Created merchant balance: %s", merchantBalance.BalanceID)
+
+	// Spend $30 (3000 precise) from main balance to merchant
+	spendTxn, err := blnk.QueueTransaction(ctx, &model.Transaction{
+		Reference:   fmt.Sprintf("spend_to_merchant_%s", suffix),
+		Source:      balance.BalanceID,
+		Destination: merchantBalance.BalanceID,
+		Amount:      30,
+		Currency:    "USD",
+		Precision:   100,
+		SkipQueue:   true,
+	})
+	require.NoError(t, err)
+	t.Logf("Spend transaction: %s (status: %s)", spendTxn.TransactionID, spendTxn.Status)
+	require.Equal(t, StatusApplied, spendTxn.Status, "Spend transaction should be APPLIED")
+
+	// Check main balance after spend
+	mainBalanceAfterSpend, err := ds.GetBalanceByIDLite(balance.BalanceID)
+	require.NoError(t, err)
+	t.Logf("Main balance after spend: Balance=%s", mainBalanceAfterSpend.Balance.String())
+	assert.Equal(t, 0, mainBalanceAfterSpend.Balance.Cmp(big.NewInt(2000)),
+		"Main balance should be 2000 after spending 3000")
+
+	// Check merchant balance received the funds
+	merchantBalanceAfter, err := ds.GetBalanceByIDLite(merchantBalance.BalanceID)
+	require.NoError(t, err)
+	t.Logf("Merchant balance after spend: Balance=%s", merchantBalanceAfter.Balance.String())
+	assert.Equal(t, 0, merchantBalanceAfter.Balance.Cmp(big.NewInt(3000)),
+		"Merchant balance should be 3000 after receiving spend")
+
+	// Check shadow balance after spend - should have released the spent amount
+	shadowBalanceAfterSpend, err := ds.GetBalanceByIDLite(mappings[0].ShadowBalanceID)
+	require.NoError(t, err)
+	t.Logf("Shadow balance after spend: Balance=%s, DebitBalance=%s, CreditBalance=%s",
+		shadowBalanceAfterSpend.Balance.String(),
+		shadowBalanceAfterSpend.DebitBalance.String(),
+		shadowBalanceAfterSpend.CreditBalance.String())
+	// Shadow: DebitBalance=5000 (allocated), CreditBalance=3000 (released)
+	// Remaining from provider = DebitBalance - CreditBalance = 2000
+	assert.Equal(t, 0, shadowBalanceAfterSpend.DebitBalance.Cmp(big.NewInt(5000)),
+		"Shadow debit balance should still be 5000 (total allocated)")
+	assert.Equal(t, 0, shadowBalanceAfterSpend.CreditBalance.Cmp(big.NewInt(3000)),
+		"Shadow credit balance should be 3000 (released/spent)")
+
+	// Check aggregate balance after spend
+	aggregateBalanceAfterSpend, err := ds.GetBalanceByIDLite(mappings[0].AggregateBalanceID)
+	require.NoError(t, err)
+	t.Logf("Aggregate balance after spend: Balance=%s, CreditBalance=%s, DebitBalance=%s",
+		aggregateBalanceAfterSpend.Balance.String(),
+		aggregateBalanceAfterSpend.CreditBalance.String(),
+		aggregateBalanceAfterSpend.DebitBalance.String())
+	// Aggregate mirrors shadow: CreditBalance=5000 (received), DebitBalance=3000 (released)
+	assert.Equal(t, 0, aggregateBalanceAfterSpend.CreditBalance.Cmp(big.NewInt(5000)),
+		"Aggregate credit balance should still be 5000 (total received)")
+	assert.Equal(t, 0, aggregateBalanceAfterSpend.DebitBalance.Cmp(big.NewInt(3000)),
+		"Aggregate debit balance should be 3000 (released/spent)")
+
+	t.Log("=== Inflight commit and spend test completed ===")
 }
 
 func TestLineageInflightVoid(t *testing.T) {
