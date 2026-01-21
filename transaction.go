@@ -232,9 +232,12 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 	_, span := tracer.Start(ctx, "Post Transaction Actions")
 	defer span.End()
 
+	// Skip lineage processing for commits of inflight transactions - lineage was already created for the original inflight
+	isInflightCommit := transaction.ParentTransaction != "" && transaction.MetaData != nil && transaction.MetaData["inflight"] == true
+
 	// Process fund lineage synchronously for SkipQueue transactions to ensure
 	// lineage mappings exist before returning response to client
-	if transaction.SkipQueue && (transaction.Status == StatusApplied || transaction.Status == StatusInflight) {
+	if transaction.SkipQueue && !isInflightCommit && (transaction.Status == StatusApplied || transaction.Status == StatusInflight) {
 		l.processLineage(ctx, transaction, sourceBalance, destinationBalance)
 	}
 
@@ -272,7 +275,7 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 
 		// Process fund lineage asynchronously for queued transactions
 		// Use a background context since the HTTP request context may be cancelled
-		if !transaction.SkipQueue && (transaction.Status == StatusApplied || transaction.Status == StatusInflight) {
+		if !transaction.SkipQueue && !isInflightCommit && (transaction.Status == StatusApplied || transaction.Status == StatusInflight) {
 			l.processLineage(context.Background(), transaction, sourceBalance, destinationBalance)
 		}
 
