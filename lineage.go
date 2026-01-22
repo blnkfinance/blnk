@@ -145,7 +145,7 @@ func (l *Blnk) processLineageCredit(ctx context.Context, txn *model.Transaction,
 		span.RecordError(err)
 		return err
 	}
-	defer l.releaseLock(ctx, locker)
+	defer l.releaseSingleLock(ctx, locker)
 
 	shadowBalance, aggregateBalance, err := l.getOrCreateLineageBalances(ctx, identityID, provider, txn.Currency)
 	if err != nil {
@@ -295,7 +295,7 @@ func (l *Blnk) processLineageDebit(ctx context.Context, txn *model.Transaction, 
 		span.RecordError(err)
 		return err
 	}
-	defer l.releaseLock(ctx, locker)
+	defer l.releaseSingleLock(ctx, locker)
 
 	mappings, err := l.datasource.GetLineageMappings(ctx, sourceBalance.BalanceID)
 	if err != nil {
@@ -524,7 +524,7 @@ func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transac
 		logrus.Errorf("failed to acquire destination lineage lock: %v", err)
 		return
 	}
-	defer l.releaseLock(ctx, locker)
+	defer l.releaseSingleLock(ctx, locker)
 
 	destShadowBalance, destAggBalance, err := l.getOrCreateDestinationLineageBalances(ctx, mapping.Provider, destinationBalance)
 	if err != nil {

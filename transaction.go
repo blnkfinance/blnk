@@ -158,27 +158,79 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 	return sourceBalance, destinationBalance, nil
 }
 
-// acquireLock acquires a distributed lock for a transaction to ensure exclusive access to the source balance.
-// It starts a tracing span, attempts to acquire the lock, and records relevant events and errors.
+// resolveBalanceIDs resolves source and destination to actual balance IDs.
+// If the source or destination starts with "@", it indicates a balance indicator (like @world)
+// that needs to be resolved to an actual balance ID. This function creates the balance if needed.
+// This should be called BEFORE acquiring locks to ensure we lock on the correct balance IDs.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction for which to acquire the lock.
+// - transaction *model.Transaction: The transaction containing source and destination.
 //
 // Returns:
-// - *redlock.Locker: A pointer to the acquired Locker if successful.
-// - error: An error if the lock could not be acquired.
-func (l *Blnk) acquireLock(ctx context.Context, transaction *model.Transaction) (*redlock.Locker, error) {
+// - sourceBalanceID string: The resolved source balance ID.
+// - destinationBalanceID string: The resolved destination balance ID.
+// - error: An error if the balance IDs could not be resolved.
+func (l *Blnk) resolveBalanceIDs(ctx context.Context, transaction *model.Transaction) (string, string, error) {
+	ctx, span := tracer.Start(ctx, "ResolveBalanceIDs")
+	defer span.End()
+
+	sourceID := transaction.Source
+	destID := transaction.Destination
+
+	// Resolve source if it's an indicator (starts with "@")
+	if strings.HasPrefix(transaction.Source, "@") {
+		sourceBalance, err := l.getOrCreateBalanceByIndicator(ctx, transaction.Source, transaction.Currency)
+		if err != nil {
+			span.RecordError(err)
+			return "", "", fmt.Errorf("failed to resolve source balance indicator: %w", err)
+		}
+		sourceID = sourceBalance.BalanceID
+		span.SetAttributes(attribute.String("source.resolved_id", sourceID))
+	}
+
+	// Resolve destination if it's an indicator (starts with "@")
+	if strings.HasPrefix(transaction.Destination, "@") {
+		destBalance, err := l.getOrCreateBalanceByIndicator(ctx, transaction.Destination, transaction.Currency)
+		if err != nil {
+			span.RecordError(err)
+			return "", "", fmt.Errorf("failed to resolve destination balance indicator: %w", err)
+		}
+		destID = destBalance.BalanceID
+		span.SetAttributes(attribute.String("destination.resolved_id", destID))
+	}
+
+	span.AddEvent("Balance IDs resolved")
+	return sourceID, destID, nil
+}
+
+// acquireLock acquires distributed locks for a transaction to ensure exclusive access to both
+// source and destination balances. It uses a MultiLocker with deterministic ordering to prevent
+// deadlocks when multiple transactions target the same balances.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - sourceBalanceID string: The ID of the source balance to lock.
+// - destinationBalanceID string: The ID of the destination balance to lock.
+//
+// Returns:
+// - *redlock.MultiLocker: A pointer to the acquired MultiLocker if successful.
+// - error: An error if the locks could not be acquired.
+func (l *Blnk) acquireLock(ctx context.Context, sourceBalanceID, destinationBalanceID string) (*redlock.MultiLocker, error) {
 	ctx, span := tracer.Start(ctx, "Acquiring Lock")
 	defer span.End()
 
-	locker := redlock.NewLocker(l.redis, transaction.Source, model.GenerateUUIDWithSuffix("loc"))
+	// Create a MultiLocker with both balance IDs
+	// MultiLocker handles deduplication (if source == destination) and sorts keys lexicographically
+	locker := redlock.NewMultiLocker(l.redis, []string{sourceBalanceID, destinationBalanceID}, model.GenerateUUIDWithSuffix("loc"))
 	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
-	span.AddEvent("Lock acquired")
+	span.AddEvent("Locks acquired", trace.WithAttributes(
+		attribute.StringSlice("locked.keys", locker.Keys()),
+	))
 	return locker, nil
 }
 
@@ -756,30 +808,45 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	})
 }
 
-// executeWithLock executes a function with a distributed lock to ensure exclusive access to the transaction.
-// It starts a tracing span, acquires the lock, executes the provided function, and releases the lock.
+// executeWithLock executes a function with distributed locks to ensure exclusive access to both
+// source and destination balances. It resolves balance IDs first (handling @world indicators),
+// then acquires locks in deterministic order to prevent deadlocks.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction for which to acquire the lock.
-// - fn func(context.Context) (*model.Transaction, error): The function to execute with the lock.
+// - transaction *model.Transaction: The transaction for which to acquire the locks.
+// - fn func(context.Context) (*model.Transaction, error): The function to execute with the locks.
 //
 // Returns:
 // - *model.Transaction: A pointer to the Transaction model returned by the function.
-// - error: An error if the lock could not be acquired or if the function execution fails.
+// - error: An error if the locks could not be acquired or if the function execution fails.
 func (l *Blnk) executeWithLock(ctx context.Context, transaction *model.Transaction, fn func(context.Context) (*model.Transaction, error)) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "ExecuteWithLock")
 	defer span.End()
 
-	// Acquire a distributed lock for the transaction
-	locker, err := l.acquireLock(ctx, transaction)
+	// First resolve balance IDs (handle @ indicators) BEFORE acquiring locks
+	// This ensures we lock on the correct balance IDs
+	sourceID, destID, err := l.resolveBalanceIDs(ctx, transaction)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to resolve balance IDs: %w", err)
+	}
+
+	// Update transaction with resolved IDs
+	transaction.Source = sourceID
+	transaction.Destination = destID
+
+	// Acquire distributed locks for both source and destination balances
+	// MultiLocker handles deduplication (if source == destination) and sorts keys lexicographically
+	locker, err := l.acquireLock(ctx, sourceID, destID)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
-
 	defer l.releaseLock(ctx, locker)
-	// Execute the provided function with the lock
+
+	// Execute the provided function with the locks held
+	// The function will re-fetch balances to get fresh state after lock acquisition
 	return fn(ctx)
 }
 
@@ -894,14 +961,32 @@ func (l *Blnk) finalizeTransaction(ctx context.Context, transaction *model.Trans
 	return transaction, nil
 }
 
-// releaseLock releases the distributed lock acquired for a transaction.
-// It starts a tracing span, attempts to release the lock, and records relevant events and errors.
+// releaseLock releases the distributed locks acquired for a transaction.
+// It starts a tracing span, attempts to release all locks, and records relevant events and errors.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
-// - locker *redlock.Locker: The locker object representing the acquired lock.
-func (l *Blnk) releaseLock(ctx context.Context, locker *redlock.Locker) {
+// - locker *redlock.MultiLocker: The MultiLocker object representing the acquired locks.
+func (l *Blnk) releaseLock(ctx context.Context, locker *redlock.MultiLocker) {
 	ctx, span := tracer.Start(ctx, "ReleaseLock")
+	defer span.End()
+
+	// Attempt to release all locks
+	if err := locker.Unlock(ctx); err != nil {
+		span.RecordError(err)
+		logrus.Error("failed to release lock: ", err)
+	}
+	span.AddEvent("Locks released")
+}
+
+// releaseSingleLock releases a single distributed lock.
+// This is used for operations that lock on a single key (e.g., inflight transaction operations).
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - locker *redlock.Locker: The Locker object representing the acquired lock.
+func (l *Blnk) releaseSingleLock(ctx context.Context, locker *redlock.Locker) {
+	ctx, span := tracer.Start(ctx, "ReleaseSingleLock")
 	defer span.End()
 
 	// Attempt to release the lock
@@ -1000,7 +1085,7 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock for inflight commit: %w", err)
 	}
-	defer l.releaseLock(ctx, locker)
+	defer l.releaseSingleLock(ctx, locker)
 
 	// Fetch and validate the inflight transaction
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
@@ -1045,7 +1130,7 @@ func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transacti
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock for inflight commit: %w", err)
 	}
-	defer l.releaseLock(ctx, locker)
+	defer l.releaseSingleLock(ctx, locker)
 
 	// Fetch and validate the inflight transaction
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
@@ -1269,7 +1354,7 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock for inflight void: %w", err)
 	}
-	defer l.releaseLock(ctx, locker)
+	defer l.releaseSingleLock(ctx, locker)
 
 	// Fetch and validate the inflight transaction
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)

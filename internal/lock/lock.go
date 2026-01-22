@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -32,6 +33,16 @@ type Locker struct {
 	client redis.UniversalClient // Redis client for interacting with Redis.
 	key    string                // The unique key for the lock in Redis.
 	value  string                // A unique value to ensure only the holder can release/extend the lock.
+}
+
+// MultiLocker manages multiple distributed locks with deterministic ordering.
+// It acquires locks in lexicographic order to prevent deadlocks when multiple
+// transactions need to lock the same set of keys in different orders.
+type MultiLocker struct {
+	client  redis.UniversalClient
+	lockers []*Locker
+	keys    []string
+	value   string
 }
 
 // NewLocker initializes a new Locker instance with a Redis client, a key, and a value.
@@ -122,4 +133,119 @@ func (l *Locker) WaitLock(ctx context.Context, lockTimeout, waitTimeout time.Dur
 		time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
 	}
 	return fmt.Errorf("failed to acquire lock for key %s within the wait timeout", l.key)
+}
+
+// NewMultiLocker creates a new MultiLocker instance that manages locks for multiple keys.
+// Keys are deduplicated and sorted lexicographically to ensure consistent lock ordering
+// across all callers, preventing deadlocks.
+// Parameters:
+// - client: A Redis universal client to interact with Redis.
+// - keys: The keys to lock (duplicates are removed, order is normalized).
+// - value: A unique value to associate with all locks (ensures lock ownership).
+// Returns a pointer to a new MultiLocker instance.
+func NewMultiLocker(client redis.UniversalClient, keys []string, value string) *MultiLocker {
+	// Deduplicate keys
+	seen := make(map[string]bool)
+	uniqueKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key != "" && !seen[key] {
+			seen[key] = true
+			uniqueKeys = append(uniqueKeys, key)
+		}
+	}
+
+	// Sort keys lexicographically to ensure consistent ordering
+	sort.Strings(uniqueKeys)
+
+	// Create lockers for each key
+	lockers := make([]*Locker, len(uniqueKeys))
+	for i, key := range uniqueKeys {
+		lockers[i] = NewLocker(client, key, value)
+	}
+
+	return &MultiLocker{
+		client:  client,
+		lockers: lockers,
+		keys:    uniqueKeys,
+		value:   value,
+	}
+}
+
+// Lock attempts to acquire all locks in deterministic order.
+// If any lock acquisition fails, all previously acquired locks are released (rollback).
+// Parameters:
+// - ctx: The context for managing the lock request lifecycle.
+// - timeout: The time-to-live (TTL) for each lock.
+// Returns an error if any lock could not be acquired.
+func (m *MultiLocker) Lock(ctx context.Context, timeout time.Duration) error {
+	acquiredCount := 0
+
+	for _, locker := range m.lockers {
+		err := locker.Lock(ctx, timeout)
+		if err != nil {
+			// Rollback: release all previously acquired locks in reverse order
+			m.rollback(ctx, acquiredCount)
+			return fmt.Errorf("failed to acquire lock for key %s: %w", locker.key, err)
+		}
+		acquiredCount++
+	}
+
+	return nil
+}
+
+// WaitLock tries to acquire all locks within a specified waiting period.
+// It will attempt to acquire locks with exponential backoff if any lock is held.
+// If lock acquisition fails after the wait timeout, all acquired locks are released.
+// Parameters:
+// - ctx: The context for managing the wait request lifecycle.
+// - lockTimeout: The TTL to set for each lock when acquired.
+// - waitTimeout: The maximum time to wait for all locks to become available.
+// Returns an error if all locks could not be acquired within the wait timeout.
+func (m *MultiLocker) WaitLock(ctx context.Context, lockTimeout, waitTimeout time.Duration) error {
+	deadline := time.Now().Add(waitTimeout)
+
+	for time.Now().Before(deadline) {
+		err := m.Lock(ctx, lockTimeout)
+		if err == nil {
+			return nil
+		}
+		// Implementing exponential backoff to avoid busy-waiting.
+		time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
+	}
+
+	return fmt.Errorf("failed to acquire all locks within the wait timeout")
+}
+
+// Unlock releases all locks in reverse order of acquisition.
+// Releasing in reverse order is a best practice for multi-lock scenarios.
+// Parameters:
+// - ctx: The context for managing the unlock request lifecycle.
+// Returns an error if any unlock operation fails.
+func (m *MultiLocker) Unlock(ctx context.Context) error {
+	var lastErr error
+
+	// Release locks in reverse order
+	for i := len(m.lockers) - 1; i >= 0; i-- {
+		if err := m.lockers[i].Unlock(ctx); err != nil {
+			lastErr = err
+		}
+	}
+
+	return lastErr
+}
+
+// rollback releases locks that were successfully acquired before a failure.
+// Parameters:
+// - ctx: The context for managing the unlock request lifecycle.
+// - count: The number of locks to release (from the beginning of the slice).
+func (m *MultiLocker) rollback(ctx context.Context, count int) {
+	// Release in reverse order of acquisition
+	for i := count - 1; i >= 0; i-- {
+		_ = m.lockers[i].Unlock(ctx)
+	}
+}
+
+// Keys returns the deduplicated and sorted keys that this MultiLocker manages.
+func (m *MultiLocker) Keys() []string {
+	return m.keys
 }
