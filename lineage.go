@@ -32,25 +32,49 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// LineageProviderKey is the metadata key used to identify the provider of funds in a transaction.
+const LineageProviderKey = "BLNK_LINEAGE_PROVIDER"
+
+// LineageFundAllocation is the metadata key used to store fund allocation details in a transaction.
+const LineageFundAllocation = "BLNK_FUND_ALLOCATION"
+
+// Allocation strategies for fund lineage debit processing.
 const (
-	LineageProviderKey    = "BLNK_LINEAGE_PROVIDER"
-	LineageFundAllocation = "BLNK_FUND_ALLOCATION"
-	AllocationFIFO        = "FIFO"
-	AllocationLIFO        = "LIFO"
-	AllocationProp        = "PROPORTIONAL"
+	AllocationFIFO = "FIFO"
+	AllocationLIFO = "LIFO"
+	AllocationProp = "PROPORTIONAL"
 )
 
+// LineageSource represents a source of funds available for allocation during lineage debit processing.
+//
+// Fields:
+// - BalanceID string: The ID of the shadow balance holding the funds.
+// - Balance *big.Int: The available balance amount.
+// - CreatedAt time.Time: The creation time of the lineage mapping, used for FIFO/LIFO ordering.
 type LineageSource struct {
 	BalanceID string
 	Balance   *big.Int
 	CreatedAt time.Time
 }
 
+// Allocation represents the amount allocated from a specific shadow balance during debit processing.
+//
+// Fields:
+// - BalanceID string: The ID of the shadow balance from which funds are allocated.
+// - Amount *big.Int: The amount allocated from this balance.
 type Allocation struct {
 	BalanceID string
 	Amount    *big.Int
 }
 
+// processLineage handles fund lineage tracking for a transaction.
+// It processes both credit (incoming funds with provider tracking) and debit (fund allocation from shadow balances).
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The transaction being processed.
+// - sourceBalance *model.Balance: The source balance for the transaction.
+// - destinationBalance *model.Balance: The destination balance for the transaction.
 func (l *Blnk) processLineage(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) {
 	ctx, span := tracer.Start(ctx, "ProcessLineage")
 	defer span.End()
@@ -78,6 +102,13 @@ func (l *Blnk) processLineage(ctx context.Context, txn *model.Transaction, sourc
 	span.AddEvent("Lineage processing completed")
 }
 
+// getLineageProvider extracts the fund provider from the transaction metadata.
+//
+// Parameters:
+// - txn *model.Transaction: The transaction to extract the provider from.
+//
+// Returns:
+// - string: The provider identifier, or empty string if not set.
 func (l *Blnk) getLineageProvider(txn *model.Transaction) string {
 	if txn.MetaData == nil {
 		return ""
@@ -89,6 +120,17 @@ func (l *Blnk) getLineageProvider(txn *model.Transaction) string {
 	return provider
 }
 
+// processLineageCredit processes a credit transaction for fund lineage tracking.
+// It creates shadow balances and queues a shadow transaction to track the provider's funds.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The credit transaction being processed.
+// - destBalance *model.Balance: The destination balance receiving the funds.
+// - provider string: The identifier of the fund provider.
+//
+// Returns:
+// - error: An error if the credit processing fails.
 func (l *Blnk) processLineageCredit(ctx context.Context, txn *model.Transaction, destBalance *model.Balance, provider string) error {
 	ctx, span := tracer.Start(ctx, "ProcessLineageCredit")
 	defer span.End()
@@ -127,6 +169,18 @@ func (l *Blnk) processLineageCredit(ctx context.Context, txn *model.Transaction,
 	return nil
 }
 
+// getOrCreateLineageBalances retrieves or creates the shadow and aggregate balances for lineage tracking.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - identityID string: The identity ID associated with the balance.
+// - provider string: The fund provider identifier.
+// - currency string: The currency for the balances.
+//
+// Returns:
+// - *model.Balance: The shadow balance for the provider.
+// - *model.Balance: The aggregate balance for all providers.
+// - error: An error if the balances could not be retrieved or created.
 func (l *Blnk) getOrCreateLineageBalances(ctx context.Context, identityID, provider, currency string) (*model.Balance, *model.Balance, error) {
 	identity, err := l.datasource.GetIdentityByID(identityID)
 	if err != nil {
@@ -150,6 +204,18 @@ func (l *Blnk) getOrCreateLineageBalances(ctx context.Context, identityID, provi
 	return shadowBalance, aggregateBalance, nil
 }
 
+// upsertCreditLineageMapping creates or updates the lineage mapping for a credit transaction.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - destBalance *model.Balance: The destination balance.
+// - provider string: The fund provider identifier.
+// - shadowBalance *model.Balance: The shadow balance for the provider.
+// - aggregateBalance *model.Balance: The aggregate balance.
+// - identityID string: The identity ID associated with the balance.
+//
+// Returns:
+// - error: An error if the mapping could not be created.
 func (l *Blnk) upsertCreditLineageMapping(ctx context.Context, destBalance *model.Balance, provider string, shadowBalance, aggregateBalance *model.Balance, identityID string) error {
 	mapping := model.LineageMapping{
 		BalanceID:          destBalance.BalanceID,
@@ -166,6 +232,19 @@ func (l *Blnk) upsertCreditLineageMapping(ctx context.Context, destBalance *mode
 	return nil
 }
 
+// queueShadowCreditTransaction queues a shadow transaction to track credited funds from a provider.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The original credit transaction.
+// - destBalance *model.Balance: The destination balance.
+// - provider string: The fund provider identifier.
+// - shadowBalance *model.Balance: The shadow balance for the provider.
+// - aggregateBalance *model.Balance: The aggregate balance.
+// - identityID string: The identity ID associated with the balance.
+//
+// Returns:
+// - error: An error if the shadow transaction could not be queued.
 func (l *Blnk) queueShadowCreditTransaction(ctx context.Context, txn *model.Transaction, destBalance *model.Balance, provider string, shadowBalance, aggregateBalance *model.Balance, identityID string) error {
 	shadowTxn := &model.Transaction{
 		Source:        shadowBalance.BalanceID,
@@ -196,6 +275,17 @@ func (l *Blnk) queueShadowCreditTransaction(ctx context.Context, txn *model.Tran
 	return nil
 }
 
+// processLineageDebit processes a debit transaction for fund lineage tracking.
+// It allocates funds from shadow balances based on the configured allocation strategy.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The debit transaction being processed.
+// - sourceBalance *model.Balance: The source balance being debited.
+// - destinationBalance *model.Balance: The destination balance receiving the funds.
+//
+// Returns:
+// - error: An error if the debit processing fails.
 func (l *Blnk) processLineageDebit(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) error {
 	ctx, span := tracer.Start(ctx, "ProcessLineageDebit")
 	defer span.End()
@@ -235,6 +325,15 @@ func (l *Blnk) processLineageDebit(ctx context.Context, txn *model.Transaction, 
 	return nil
 }
 
+// acquireLineageDebitLock acquires a distributed lock for lineage debit processing.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balanceID string: The balance ID to lock.
+//
+// Returns:
+// - *redlock.Locker: The acquired lock.
+// - error: An error if the lock could not be acquired.
 func (l *Blnk) acquireLineageDebitLock(ctx context.Context, balanceID string) (*redlock.Locker, error) {
 	lockKey := fmt.Sprintf("lineage-debit:%s", balanceID)
 	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
@@ -247,6 +346,17 @@ func (l *Blnk) acquireLineageDebitLock(ctx context.Context, balanceID string) (*
 	return locker, nil
 }
 
+// acquireLineageCreditLock acquires a distributed lock for lineage credit processing.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - identityID string: The identity ID.
+// - provider string: The fund provider identifier.
+// - currency string: The currency.
+//
+// Returns:
+// - *redlock.Locker: The acquired lock.
+// - error: An error if the lock could not be acquired.
 func (l *Blnk) acquireLineageCreditLock(ctx context.Context, identityID, provider, currency string) (*redlock.Locker, error) {
 	lockKey := fmt.Sprintf("lineage-credit:%s:%s:%s", identityID, provider, currency)
 	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
@@ -259,6 +369,17 @@ func (l *Blnk) acquireLineageCreditLock(ctx context.Context, identityID, provide
 	return locker, nil
 }
 
+// acquireDestinationLineageLock acquires a distributed lock for destination lineage processing.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - identityID string: The identity ID.
+// - provider string: The fund provider identifier.
+// - currency string: The currency.
+//
+// Returns:
+// - *redlock.Locker: The acquired lock.
+// - error: An error if the lock could not be acquired.
 func (l *Blnk) acquireDestinationLineageLock(ctx context.Context, identityID, provider, currency string) (*redlock.Locker, error) {
 	lockKey := fmt.Sprintf("lineage-dest:%s:%s:%s", identityID, provider, currency)
 	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
@@ -271,6 +392,15 @@ func (l *Blnk) acquireDestinationLineageLock(ctx context.Context, identityID, pr
 	return locker, nil
 }
 
+// getSourceAggregateBalance retrieves or creates the aggregate balance for the source identity.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - sourceBalance *model.Balance: The source balance.
+//
+// Returns:
+// - *model.Balance: The aggregate balance.
+// - error: An error if the balance could not be retrieved or created.
 func (l *Blnk) getSourceAggregateBalance(ctx context.Context, sourceBalance *model.Balance) (*model.Balance, error) {
 	sourceIdentity, err := l.datasource.GetIdentityByID(sourceBalance.IdentityID)
 	if err != nil {
@@ -288,6 +418,16 @@ func (l *Blnk) getSourceAggregateBalance(ctx context.Context, sourceBalance *mod
 	return sourceAggBalance, nil
 }
 
+// processAllocations processes fund allocations by queuing release and receive transactions.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The original transaction.
+// - allocations []Allocation: The calculated allocations.
+// - mappings []model.LineageMapping: The lineage mappings.
+// - sourceBalance *model.Balance: The source balance.
+// - destinationBalance *model.Balance: The destination balance.
+// - sourceAggBalance *model.Balance: The source aggregate balance.
 func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, allocations []Allocation, mappings []model.LineageMapping, sourceBalance, destinationBalance, sourceAggBalance *model.Balance) {
 	for i, alloc := range allocations {
 		if alloc.Amount.Cmp(big.NewInt(0)) == 0 {
@@ -310,11 +450,33 @@ func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, a
 	}
 }
 
+// preciseAmountToFloat converts a precise amount to a float based on the precision.
+//
+// Parameters:
+// - amount *big.Int: The precise amount.
+// - precision float64: The precision multiplier.
+//
+// Returns:
+// - float64: The converted float amount.
 func (l *Blnk) preciseAmountToFloat(amount *big.Int, precision float64) float64 {
 	floatAmount, _ := new(big.Float).SetInt(amount).Float64()
 	return floatAmount / precision
 }
 
+// queueReleaseTransaction queues a transaction to release funds from the aggregate balance back to a shadow balance.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The original transaction.
+// - alloc Allocation: The allocation details.
+// - mapping *model.LineageMapping: The lineage mapping for the provider.
+// - sourceBalance *model.Balance: The source balance.
+// - sourceAggBalance *model.Balance: The source aggregate balance.
+// - allocAmount float64: The allocation amount as a float.
+// - index int: The allocation index for reference uniqueness.
+//
+// Returns:
+// - error: An error if the transaction could not be queued.
 func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, sourceAggBalance *model.Balance, allocAmount float64, index int) error {
 	releaseTxn := &model.Transaction{
 		Source:        sourceAggBalance.BalanceID,
@@ -341,6 +503,17 @@ func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transacti
 	return err
 }
 
+// processDestinationLineage processes lineage tracking for the destination balance when it also tracks fund lineage.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The original transaction.
+// - alloc Allocation: The allocation details.
+// - mapping *model.LineageMapping: The lineage mapping for the provider.
+// - sourceBalance *model.Balance: The source balance.
+// - destinationBalance *model.Balance: The destination balance.
+// - allocAmount float64: The allocation amount as a float.
+// - index int: The allocation index for reference uniqueness.
 func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance *model.Balance, allocAmount float64, index int) {
 	if destinationBalance == nil || !destinationBalance.TrackFundLineage || destinationBalance.IdentityID == "" {
 		return
@@ -376,6 +549,17 @@ func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transac
 	}
 }
 
+// getOrCreateDestinationLineageBalances retrieves or creates shadow and aggregate balances for the destination.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - provider string: The fund provider identifier.
+// - destinationBalance *model.Balance: The destination balance.
+//
+// Returns:
+// - *model.Balance: The destination shadow balance.
+// - *model.Balance: The destination aggregate balance.
+// - error: An error if the balances could not be retrieved or created.
 func (l *Blnk) getOrCreateDestinationLineageBalances(ctx context.Context, provider string, destinationBalance *model.Balance) (*model.Balance, *model.Balance, error) {
 	destIdentity, err := l.datasource.GetIdentityByID(destinationBalance.IdentityID)
 	if err != nil {
@@ -399,6 +583,22 @@ func (l *Blnk) getOrCreateDestinationLineageBalances(ctx context.Context, provid
 	return destShadowBalance, destAggBalance, nil
 }
 
+// queueReceiveTransaction queues a transaction to receive funds into the destination's shadow balance.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The original transaction.
+// - alloc Allocation: The allocation details.
+// - mapping *model.LineageMapping: The lineage mapping for the provider.
+// - sourceBalance *model.Balance: The source balance.
+// - destinationBalance *model.Balance: The destination balance.
+// - destShadowBalance *model.Balance: The destination shadow balance.
+// - destAggBalance *model.Balance: The destination aggregate balance.
+// - allocAmount float64: The allocation amount as a float.
+// - index int: The allocation index for reference uniqueness.
+//
+// Returns:
+// - error: An error if the transaction could not be queued.
 func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance *model.Balance, allocAmount float64, index int) error {
 	receiveTxn := &model.Transaction{
 		Source:        destShadowBalance.BalanceID,
@@ -425,6 +625,13 @@ func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transacti
 	return err
 }
 
+// updateFundAllocationMetadata updates the transaction metadata with fund allocation details.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The transaction to update.
+// - allocations []Allocation: The calculated allocations.
+// - mappings []model.LineageMapping: The lineage mappings.
 func (l *Blnk) updateFundAllocationMetadata(ctx context.Context, txn *model.Transaction, allocations []Allocation, mappings []model.LineageMapping) {
 	if len(allocations) == 0 {
 		return
@@ -443,6 +650,15 @@ func (l *Blnk) updateFundAllocationMetadata(ctx context.Context, txn *model.Tran
 	}
 }
 
+// buildFundAllocationList builds a list of fund allocations for metadata storage.
+//
+// Parameters:
+// - allocations []Allocation: The calculated allocations.
+// - mappings []model.LineageMapping: The lineage mappings.
+// - precision float64: The precision multiplier.
+//
+// Returns:
+// - []map[string]interface{}: The fund allocation list for metadata.
 func (l *Blnk) buildFundAllocationList(allocations []Allocation, mappings []model.LineageMapping, precision float64) []map[string]interface{} {
 	fundAllocation := make([]map[string]interface{}, 0, len(allocations))
 
@@ -462,6 +678,14 @@ func (l *Blnk) buildFundAllocationList(allocations []Allocation, mappings []mode
 	return fundAllocation
 }
 
+// getIdentityIdentifier generates a unique identifier string for an identity.
+// It uses the identity's name (first/last or organization) combined with a portion of the ID.
+//
+// Parameters:
+// - identity *model.Identity: The identity to generate an identifier for.
+//
+// Returns:
+// - string: The generated identifier.
 func (l *Blnk) getIdentityIdentifier(identity *model.Identity) string {
 	var namePart string
 
@@ -483,6 +707,15 @@ func (l *Blnk) getIdentityIdentifier(identity *model.Identity) string {
 	return fmt.Sprintf("%s_%s", namePart, idPart)
 }
 
+// getLineageSources retrieves the available fund sources from shadow balances for allocation.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - mappings []model.LineageMapping: The lineage mappings to get sources from.
+//
+// Returns:
+// - []LineageSource: The available fund sources.
+// - error: An error if the sources could not be retrieved.
 func (l *Blnk) getLineageSources(ctx context.Context, mappings []model.LineageMapping) ([]LineageSource, error) {
 	var sources []LineageSource
 
@@ -507,6 +740,16 @@ func (l *Blnk) getLineageSources(ctx context.Context, mappings []model.LineageMa
 	return sources, nil
 }
 
+// calculateAllocation calculates fund allocations based on the specified strategy.
+// Supported strategies are FIFO, LIFO, and PROPORTIONAL.
+//
+// Parameters:
+// - sources []LineageSource: The available fund sources.
+// - amount *big.Int: The amount to allocate.
+// - strategy string: The allocation strategy (FIFO, LIFO, or PROPORTIONAL).
+//
+// Returns:
+// - []Allocation: The calculated allocations.
 func (l *Blnk) calculateAllocation(sources []LineageSource, amount *big.Int, strategy string) []Allocation {
 	if len(sources) == 0 {
 		return nil
@@ -528,6 +771,14 @@ func (l *Blnk) calculateAllocation(sources []LineageSource, amount *big.Int, str
 	}
 }
 
+// sequentialAllocation allocates funds sequentially from sources (used for FIFO/LIFO).
+//
+// Parameters:
+// - sources []LineageSource: The available fund sources in order.
+// - amount *big.Int: The amount to allocate.
+//
+// Returns:
+// - []Allocation: The calculated allocations.
 func (l *Blnk) sequentialAllocation(sources []LineageSource, amount *big.Int) []Allocation {
 	var allocations []Allocation
 
@@ -571,6 +822,14 @@ func (l *Blnk) sequentialAllocation(sources []LineageSource, amount *big.Int) []
 	return allocations
 }
 
+// proportionalAllocation allocates funds proportionally across all sources.
+//
+// Parameters:
+// - sources []LineageSource: The available fund sources.
+// - amount *big.Int: The amount to allocate.
+//
+// Returns:
+// - []Allocation: The calculated allocations.
 func (l *Blnk) proportionalAllocation(sources []LineageSource, amount *big.Int) []Allocation {
 	var allocations []Allocation
 
@@ -630,6 +889,14 @@ func (l *Blnk) proportionalAllocation(sources []LineageSource, amount *big.Int) 
 	return allocations
 }
 
+// findMappingByShadowID finds a lineage mapping by its shadow balance ID.
+//
+// Parameters:
+// - mappings []model.LineageMapping: The lineage mappings to search.
+// - shadowBalanceID string: The shadow balance ID to find.
+//
+// Returns:
+// - *model.LineageMapping: The matching mapping, or nil if not found.
 func (l *Blnk) findMappingByShadowID(mappings []model.LineageMapping, shadowBalanceID string) *model.LineageMapping {
 	for _, mapping := range mappings {
 		if mapping.ShadowBalanceID == shadowBalanceID {
@@ -639,6 +906,14 @@ func (l *Blnk) findMappingByShadowID(mappings []model.LineageMapping, shadowBala
 	return nil
 }
 
+// ProviderBreakdown represents the fund breakdown for a specific provider in a balance's lineage.
+//
+// Fields:
+// - Provider string: The name/identifier of the fund provider.
+// - Amount *big.Int: The total amount received from this provider.
+// - Available *big.Int: The amount still available (not yet spent).
+// - Spent *big.Int: The amount that has been debited.
+// - BalanceID string: The ID of the shadow balance tracking this provider's funds.
 type ProviderBreakdown struct {
 	Provider  string   `json:"provider"`
 	Amount    *big.Int `json:"amount"`
@@ -647,6 +922,13 @@ type ProviderBreakdown struct {
 	BalanceID string   `json:"shadow_balance_id"`
 }
 
+// BalanceLineage represents the complete fund lineage for a balance.
+//
+// Fields:
+// - BalanceID string: The ID of the balance being queried.
+// - TotalWithLineage *big.Int: The total funds tracked across all providers.
+// - AggregateBalanceID string: The ID of the aggregate shadow balance.
+// - Providers []ProviderBreakdown: The breakdown of funds by provider.
 type BalanceLineage struct {
 	BalanceID          string              `json:"balance_id"`
 	TotalWithLineage   *big.Int            `json:"total_with_lineage"`
@@ -654,6 +936,16 @@ type BalanceLineage struct {
 	Providers          []ProviderBreakdown `json:"providers"`
 }
 
+// GetBalanceLineage retrieves the fund lineage for a balance.
+// It returns a breakdown of funds by provider, showing how much was received and spent from each source.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - balanceID string: The ID of the balance to get lineage for.
+//
+// Returns:
+// - *BalanceLineage: The lineage information for the balance.
+// - error: An error if the lineage could not be retrieved.
 func (l *Blnk) GetBalanceLineage(ctx context.Context, balanceID string) (*BalanceLineage, error) {
 	ctx, span := tracer.Start(ctx, "GetBalanceLineage")
 	defer span.End()
@@ -683,6 +975,11 @@ func (l *Blnk) GetBalanceLineage(ctx context.Context, balanceID string) (*Balanc
 	return lineage, nil
 }
 
+// populateLineageProviders populates the provider breakdown in a balance lineage.
+//
+// Parameters:
+// - lineage *BalanceLineage: The lineage to populate.
+// - mappings []model.LineageMapping: The lineage mappings.
 func (l *Blnk) populateLineageProviders(lineage *BalanceLineage, mappings []model.LineageMapping) {
 	for _, mapping := range mappings {
 		breakdown, err := l.calculateProviderBreakdown(mapping)
@@ -699,6 +996,14 @@ func (l *Blnk) populateLineageProviders(lineage *BalanceLineage, mappings []mode
 	}
 }
 
+// calculateProviderBreakdown calculates the fund breakdown for a provider.
+//
+// Parameters:
+// - mapping model.LineageMapping: The lineage mapping for the provider.
+//
+// Returns:
+// - *ProviderBreakdown: The calculated breakdown.
+// - error: An error if the breakdown could not be calculated.
 func (l *Blnk) calculateProviderBreakdown(mapping model.LineageMapping) (*ProviderBreakdown, error) {
 	shadowBalance, err := l.datasource.GetBalanceByIDLite(mapping.ShadowBalanceID)
 	if err != nil {
@@ -726,12 +1031,28 @@ func (l *Blnk) calculateProviderBreakdown(mapping model.LineageMapping) (*Provid
 	}, nil
 }
 
+// TransactionLineage represents the lineage information for a specific transaction.
+//
+// Fields:
+// - TransactionID string: The ID of the transaction being queried.
+// - FundAllocation []map[string]interface{}: The allocation of funds by provider for debit transactions.
+// - ShadowTransactions []model.Transaction: The shadow transactions created for this transaction.
 type TransactionLineage struct {
 	TransactionID      string                   `json:"transaction_id"`
 	FundAllocation     []map[string]interface{} `json:"fund_allocation,omitempty"`
 	ShadowTransactions []model.Transaction      `json:"shadow_transactions"`
 }
 
+// GetTransactionLineage retrieves the lineage information for a transaction.
+// It returns the fund allocation details and any shadow transactions created for the transaction.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - transactionID string: The ID of the transaction to get lineage for.
+//
+// Returns:
+// - *TransactionLineage: The lineage information for the transaction.
+// - error: An error if the lineage could not be retrieved.
 func (l *Blnk) GetTransactionLineage(ctx context.Context, transactionID string) (*TransactionLineage, error) {
 	ctx, span := tracer.Start(ctx, "GetTransactionLineage")
 	defer span.End()
@@ -755,6 +1076,13 @@ func (l *Blnk) GetTransactionLineage(ctx context.Context, transactionID string) 
 	return lineage, nil
 }
 
+// extractFundAllocation extracts fund allocation data from transaction metadata.
+//
+// Parameters:
+// - metadata map[string]interface{}: The transaction metadata.
+//
+// Returns:
+// - []map[string]interface{}: The fund allocation data, or nil if not present.
 func (l *Blnk) extractFundAllocation(metadata map[string]interface{}) []map[string]interface{} {
 	if metadata == nil {
 		return nil
@@ -780,6 +1108,15 @@ func (l *Blnk) extractFundAllocation(metadata map[string]interface{}) []map[stri
 	return result
 }
 
+// commitShadowTransactions commits all inflight shadow transactions for a parent transaction.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - parentTransactionID string: The parent transaction ID.
+// - amount *big.Int: The amount to commit (unused, shadow transactions use their own amounts).
+//
+// Returns:
+// - error: An error if shadow transactions could not be retrieved.
 func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID string, amount *big.Int) error {
 	ctx, span := tracer.Start(ctx, "CommitShadowTransactions")
 	defer span.End()
@@ -808,6 +1145,14 @@ func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID
 	return nil
 }
 
+// voidShadowTransactions voids all inflight shadow transactions for a parent transaction.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - parentTransactionID string: The parent transaction ID.
+//
+// Returns:
+// - error: An error if shadow transactions could not be retrieved.
 func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID string) error {
 	ctx, span := tracer.Start(ctx, "VoidShadowTransactions")
 	defer span.End()
