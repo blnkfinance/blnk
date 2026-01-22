@@ -42,6 +42,16 @@ func contains(slice []string, val string) bool {
 	return false
 }
 
+// parseBigInt parses a string into a *big.Int, returning an error if parsing fails.
+// This ensures we don't silently get nil values when database returns malformed data.
+func parseBigInt(s string) (*big.Int, error) {
+	n, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid big.Int value: %q", s)
+	}
+	return n, nil
+}
+
 // Prepares a dynamic SQL query based on the fields to be included.
 // This query fetches balance details, including optional joins for identity and ledger.
 func prepareQueries(queryBuilder strings.Builder, include []string) string {
@@ -133,12 +143,36 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 	}
 
 	// Convert string representations to big.Int
-	balance.Balance, _ = new(big.Int).SetString(balanceStr, 10)
-	balance.CreditBalance, _ = new(big.Int).SetString(creditBalanceStr, 10)
-	balance.DebitBalance, _ = new(big.Int).SetString(debitBalanceStr, 10)
-	balance.InflightBalance, _ = new(big.Int).SetString(inflightBalanceStr, 10)
-	balance.InflightCreditBalance, _ = new(big.Int).SetString(inflightCreditBalanceStr, 10)
-	balance.InflightDebitBalance, _ = new(big.Int).SetString(inflightDebitBalanceStr, 10)
+	balance.Balance, err = parseBigInt(balanceStr)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("failed to parse balance: %w", err)
+	}
+	balance.CreditBalance, err = parseBigInt(creditBalanceStr)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("failed to parse credit_balance: %w", err)
+	}
+	balance.DebitBalance, err = parseBigInt(debitBalanceStr)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("failed to parse debit_balance: %w", err)
+	}
+	balance.InflightBalance, err = parseBigInt(inflightBalanceStr)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("failed to parse inflight_balance: %w", err)
+	}
+	balance.InflightCreditBalance, err = parseBigInt(inflightCreditBalanceStr)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("failed to parse inflight_credit_balance: %w", err)
+	}
+	balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceStr)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
+	}
 
 	// Handle null indicator field
 	if indicator.Valid {
@@ -368,21 +402,31 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 		}
 	}
 
-	// Initialize big.Int values
-	balance.Balance = new(big.Int)
-	balance.CreditBalance = new(big.Int)
-	balance.DebitBalance = new(big.Int)
-	balance.InflightBalance = new(big.Int)
-	balance.InflightCreditBalance = new(big.Int)
-	balance.InflightDebitBalance = new(big.Int)
-
 	// Parse string values to big.Int
-	balance.Balance.SetString(balanceValue, 10)
-	balance.CreditBalance.SetString(creditBalanceValue, 10)
-	balance.DebitBalance.SetString(debitBalanceValue, 10)
-	balance.InflightBalance.SetString(inflightBalanceValue, 10)
-	balance.InflightCreditBalance.SetString(inflightCreditBalanceValue, 10)
-	balance.InflightDebitBalance.SetString(inflightDebitBalanceValue, 10)
+	balance.Balance, err = parseBigInt(balanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse balance: %w", err)
+	}
+	balance.CreditBalance, err = parseBigInt(creditBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse credit_balance: %w", err)
+	}
+	balance.DebitBalance, err = parseBigInt(debitBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse debit_balance: %w", err)
+	}
+	balance.InflightBalance, err = parseBigInt(inflightBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inflight_balance: %w", err)
+	}
+	balance.InflightCreditBalance, err = parseBigInt(inflightCreditBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inflight_credit_balance: %w", err)
+	}
+	balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
+	}
 
 	return &balance, nil
 }
@@ -436,21 +480,31 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 		return nil, err
 	}
 
-	// Initialize big.Int values
-	balance.Balance = new(big.Int)
-	balance.CreditBalance = new(big.Int)
-	balance.DebitBalance = new(big.Int)
-	balance.InflightBalance = new(big.Int)
-	balance.InflightCreditBalance = new(big.Int)
-	balance.InflightDebitBalance = new(big.Int)
-
 	// Parse string values to big.Int
-	balance.Balance.SetString(balanceValue, 10)
-	balance.CreditBalance.SetString(creditBalanceValue, 10)
-	balance.DebitBalance.SetString(debitBalanceValue, 10)
-	balance.InflightBalance.SetString(inflightBalanceValue, 10)
-	balance.InflightCreditBalance.SetString(inflightCreditBalanceValue, 10)
-	balance.InflightDebitBalance.SetString(inflightDebitBalanceValue, 10)
+	balance.Balance, err = parseBigInt(balanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse balance: %w", err)
+	}
+	balance.CreditBalance, err = parseBigInt(creditBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse credit_balance: %w", err)
+	}
+	balance.DebitBalance, err = parseBigInt(debitBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse debit_balance: %w", err)
+	}
+	balance.InflightBalance, err = parseBigInt(inflightBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inflight_balance: %w", err)
+	}
+	balance.InflightCreditBalance, err = parseBigInt(inflightCreditBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inflight_credit_balance: %w", err)
+	}
+	balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
+	}
 
 	// Return the populated Balance object
 	return &balance, nil
@@ -520,14 +574,19 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 			balance.Indicator = ""
 		}
 
-		// Initialize and convert string values to big.Int
-		balance.Balance = new(big.Int)
-		balance.CreditBalance = new(big.Int)
-		balance.DebitBalance = new(big.Int)
-
-		balance.Balance.SetString(balanceValue, 10)
-		balance.CreditBalance.SetString(creditBalanceValue, 10)
-		balance.DebitBalance.SetString(debitBalanceValue, 10)
+		// Parse string values to big.Int
+		balance.Balance, err = parseBigInt(balanceValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse balance: %w", err)
+		}
+		balance.CreditBalance, err = parseBigInt(creditBalanceValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse credit_balance: %w", err)
+		}
+		balance.DebitBalance, err = parseBigInt(debitBalanceValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse debit_balance: %w", err)
+		}
 
 		// Parse the metadata JSON into the MetaData map field
 		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
@@ -1095,8 +1154,14 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 
 	if err == nil {
 		// Snapshot found, use it as starting point
-		creditBalance, _ = new(big.Int).SetString(snapshotCredit, 10)
-		debitBalance, _ = new(big.Int).SetString(snapshotDebit, 10)
+		creditBalance, err = parseBigInt(snapshotCredit)
+		if err != nil {
+			return nil, nil, time.Time{}, fmt.Errorf("failed to parse snapshot credit_balance: %w", err)
+		}
+		debitBalance, err = parseBigInt(snapshotDebit)
+		if err != nil {
+			return nil, nil, time.Time{}, fmt.Errorf("failed to parse snapshot debit_balance: %w", err)
+		}
 		logrus.Debugf("Found snapshot for balance %s at %v with credit=%s, debit=%s",
 			balanceID, snapshotTime, snapshotCredit, snapshotDebit)
 		return creditBalance, debitBalance, snapshotTime, nil
