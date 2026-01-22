@@ -202,7 +202,11 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
-	txn.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+	txn.PreciseAmount, err = parseBigInt(preciseAmountStr)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+	}
 
 	// Log the successful transaction retrieval as an event in the tracing span
 	span.AddEvent("Transaction retrieved", trace.WithAttributes(
@@ -327,7 +331,11 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 		return model.Transaction{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 	}
 
-	txn.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+	txn.PreciseAmount, err = parseBigInt(preciseAmountStr)
+	if err != nil {
+		span.RecordError(err)
+		return model.Transaction{}, fmt.Errorf("failed to parse precise_amount: %w", err)
+	}
 
 	// Log the successful transaction retrieval in the tracing span
 	span.AddEvent("Transaction retrieved by reference", trace.WithAttributes(
@@ -595,7 +603,11 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
 
 		transactions = append(transactions, transaction)
 	}
@@ -715,7 +727,11 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
 
 		groupedTransactions[groupKey] = append(groupedTransactions[groupKey], transaction)
 	}
@@ -838,7 +854,11 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
 
 		transactions = append(transactions, &transaction)
 	}
@@ -935,7 +955,11 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
 
 		transactions = append(transactions, &transaction)
 	}
@@ -1119,7 +1143,11 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
 		transactions = append(transactions, transaction)
 	}
 
@@ -1272,7 +1300,11 @@ func (d Datasource) GetTransactionsByCriteria(ctx context.Context, minAmount, ma
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
 		transactions = append(transactions, transaction)
 	}
 
