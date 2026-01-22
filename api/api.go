@@ -60,6 +60,7 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/balances/:id/at", a.GetBalanceAtTime)
 	router.POST("/balances-snapshots", a.TakeBalanceSnapshots)
 	router.PUT("/balances/:id/identity", a.UpdateBalanceIdentity)
+	router.GET("/balances/:id/lineage", a.GetBalanceLineage)
 
 	// Balance Monitor routes
 	router.POST("/balance-monitors", a.CreateBalanceMonitor)
@@ -75,6 +76,7 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/transactions/:id", a.GetTransaction)
 	router.GET("/transactions/reference/:reference", a.GetTransactionByRef)
 	router.PUT("/transactions/inflight/:txID", a.UpdateInflightStatus)
+	router.GET("/transactions/:id/lineage", a.GetTransactionLineage)
 
 	// Identity routes
 	router.POST("/identities", a.CreateIdentity)

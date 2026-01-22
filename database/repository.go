@@ -34,23 +34,24 @@ type IDataSource interface {
 	account        // Interface for account-related operations
 	reconciliation // Interface for reconciliation-related operations
 	apikey         // Interface for API key operations
+	lineage        // Interface for fund lineage operations
 }
 
 // transaction defines methods for handling transactions.
 type transaction interface {
-	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                      // Records a new transaction
+	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                               // Records a new transaction
 	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error) // Records a transaction with balance updates atomically
-	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                      // Retrieves a transaction by ID
-	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                     // Checks if a parent transaction is void
-	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                           // Retrieves a transaction by reference
-	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)                                                                     // Checks if a transaction exists by reference
-	UpdateTransactionStatus(cxt context.Context, id string, status string) error                                                                    // Updates the status of a transaction
-	GetAllTransactions(cxt context.Context, limit, offset int) ([]model.Transaction, error)                                                         // Retrieves all transactions
-	GetTotalCommittedTransactions(cxt context.Context, parentID string) (*big.Int, error)                                                           // Gets the total count of committed transactions for a parent
-	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)                             // Retrieves transactions in a paginated manner
-	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)   // Retrieves inflight transactions by parent ID
-	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) // Retrieves refundable transactions by parent ID
-	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)              // Groups transactions based on specified criteria
+	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                               // Retrieves a transaction by ID
+	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                              // Checks if a parent transaction is void
+	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                                    // Retrieves a transaction by reference
+	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)                                                                              // Checks if a transaction exists by reference
+	UpdateTransactionStatus(cxt context.Context, id string, status string) error                                                                             // Updates the status of a transaction
+	GetAllTransactions(cxt context.Context, limit, offset int) ([]model.Transaction, error)                                                                  // Retrieves all transactions
+	GetTotalCommittedTransactions(cxt context.Context, parentID string) (*big.Int, error)                                                                    // Gets the total count of committed transactions for a parent
+	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)                                      // Retrieves transactions in a paginated manner
+	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)            // Retrieves inflight transactions by parent ID
+	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)          // Retrieves refundable transactions by parent ID
+	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)                       // Groups transactions based on specified criteria
 	UpdateLedgerMetadata(id string, metadata map[string]interface{}) error
 	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
@@ -59,6 +60,7 @@ type transaction interface {
 	GetTransactionsByParent(ctx context.Context, parentID string, limit int, offset int64) ([]*model.Transaction, error) // Retrieves transactions by parent ID with pagination
 	IsTransactionRefunded(ctx context.Context, transaction *model.Transaction) (bool, error)                             // Checks if a transaction has already been refunded
 	GetTransactionsByCriteria(ctx context.Context, minAmount, maxAmount *float64, currency *string, minDate, maxDate *time.Time, limit int, offset int64) ([]*model.Transaction, error)
+	GetTransactionsByShadowFor(ctx context.Context, parentTransactionID string) ([]model.Transaction, error) // Retrieves shadow transactions by parent transaction ID
 }
 
 // ledger defines methods for handling ledgers.
@@ -141,4 +143,12 @@ type apikey interface {
 	RevokeAPIKey(ctx context.Context, id, ownerID string) error                                                          // Revokes an API key
 	ListAPIKeys(ctx context.Context, ownerID string) ([]*model.APIKey, error)                                            // Lists all API keys for a specific owner
 	UpdateLastUsed(ctx context.Context, id string) error                                                                 // Updates the last_used_at timestamp for an API key
+}
+
+// lineage defines methods for fund lineage tracking operations.
+type lineage interface {
+	UpsertLineageMapping(ctx context.Context, mapping model.LineageMapping) error                               // Creates or updates a lineage mapping
+	GetLineageMappings(ctx context.Context, balanceID string) ([]model.LineageMapping, error)                   // Retrieves all lineage mappings for a balance
+	GetLineageMappingByProvider(ctx context.Context, balanceID, provider string) (*model.LineageMapping, error) // Retrieves a specific lineage mapping
+	DeleteLineageMapping(ctx context.Context, id int64) error                                                   // Deletes a lineage mapping
 }

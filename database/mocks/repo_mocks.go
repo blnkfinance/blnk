@@ -101,6 +101,11 @@ func (m *MockDataSource) GetTransactionsByParent(ctx context.Context, parentID s
 	return args.Get(0).([]*model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) GetTransactionsByShadowFor(ctx context.Context, parentTransactionID string) ([]model.Transaction, error) {
+	args := m.Called(ctx, parentTransactionID)
+	return args.Get(0).([]model.Transaction), args.Error(1)
+}
+
 // Ledger methods
 
 func (m *MockDataSource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
@@ -422,4 +427,29 @@ func (m *MockDataSource) UpdateBalanceIdentity(balanceID string, identityID stri
 func (m *MockDataSource) GetTransactionsByCriteria(ctx context.Context, minAmount, maxAmount *float64, currency *string, minDate, maxDate *time.Time, limit int, offset int64) ([]*model.Transaction, error) {
 	args := m.Called(ctx, minAmount, maxAmount, currency, minDate, maxDate, limit, offset)
 	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
+// Lineage methods
+
+func (m *MockDataSource) UpsertLineageMapping(ctx context.Context, mapping model.LineageMapping) error {
+	args := m.Called(ctx, mapping)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) GetLineageMappings(ctx context.Context, balanceID string) ([]model.LineageMapping, error) {
+	args := m.Called(ctx, balanceID)
+	return args.Get(0).([]model.LineageMapping), args.Error(1)
+}
+
+func (m *MockDataSource) GetLineageMappingByProvider(ctx context.Context, balanceID, provider string) (*model.LineageMapping, error) {
+	args := m.Called(ctx, balanceID, provider)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.LineageMapping), args.Error(1)
+}
+
+func (m *MockDataSource) DeleteLineageMapping(ctx context.Context, id int64) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
 }

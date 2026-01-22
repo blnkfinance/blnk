@@ -76,7 +76,7 @@ func TestCreateBalance_Success(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.balances").
-		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON).
+		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, false, "FIFO").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	createdBalance, err := ds.CreateBalance(balance)
@@ -108,7 +108,7 @@ func TestCreateBalance_UniqueViolation(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.balances").
-		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON).
+		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, false, "FIFO").
 		WillReturnError(&pq.Error{Code: "23505", Message: "unique_violation"})
 
 	_, err = ds.CreateBalance(balance)
@@ -147,7 +147,7 @@ func TestGetBalanceByID_Success(t *testing.T) {
 
 	// Use the exact query in your code and fix the typo for 'indicator'
 	query := `
-		SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator
+		SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator, b.track_fund_lineage, COALESCE(b.allocation_strategy, 'FIFO') as allocation_strategy
 		FROM ( SELECT * FROM blnk.balances WHERE balance_id = $1 ) AS b
 	`
 
@@ -155,8 +155,8 @@ func TestGetBalanceByID_Success(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("bln1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator",
-		}).AddRow(balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator))
+			"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator", "track_fund_lineage", "allocation_strategy",
+		}).AddRow(balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO"))
 
 	// Mock the transaction commit call
 	mock.ExpectCommit()
@@ -477,19 +477,19 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 
 	// First, expect the balance query
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator
+        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator, b.track_fund_lineage, COALESCE(b.allocation_strategy, 'FIFO') as allocation_strategy
         FROM ( SELECT * FROM blnk.balances WHERE balance_id = $1 ) AS b
     `)).WithArgs("bln1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"balance_id", "balance", "credit_balance", "debit_balance", "currency",
 			"currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
-			"version", "indicator",
+			"version", "indicator", "track_fund_lineage", "allocation_strategy",
 		}).AddRow(
 			balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(),
 			balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier,
 			balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(),
-			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator,
+			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO",
 		))
 
 	// Then expect the queued transactions query with the correct SQL
@@ -583,19 +583,19 @@ func TestGetBalanceByID_WithoutQueuedTransactions(t *testing.T) {
 
 	// Only expect the balance query, not the queued transactions query
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator
+        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator, b.track_fund_lineage, COALESCE(b.allocation_strategy, 'FIFO') as allocation_strategy
         FROM ( SELECT * FROM blnk.balances WHERE balance_id = $1 ) AS b
     `)).WithArgs("bln1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"balance_id", "balance", "credit_balance", "debit_balance", "currency",
 			"currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
-			"version", "indicator",
+			"version", "indicator", "track_fund_lineage", "allocation_strategy",
 		}).AddRow(
 			balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(),
 			balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier,
 			balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(),
-			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator,
+			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO",
 		))
 
 	mock.ExpectCommit()
@@ -650,19 +650,19 @@ func TestGetBalanceByID_WithQueuedTransactions_HasAppliedChild(t *testing.T) {
 
 	// Expect the balance query
 	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator
+        SELECT b.balance_id, b.balance, b.credit_balance, b.debit_balance, b.currency, b.currency_multiplier, b.ledger_id, COALESCE(b.identity_id, '') as identity_id, b.created_at, b.meta_data, b.inflight_balance, b.inflight_credit_balance, b.inflight_debit_balance, b.version, b.indicator, b.track_fund_lineage, COALESCE(b.allocation_strategy, 'FIFO') as allocation_strategy
         FROM ( SELECT * FROM blnk.balances WHERE balance_id = $1 ) AS b
     `)).WithArgs("bln1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"balance_id", "balance", "credit_balance", "debit_balance", "currency",
 			"currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
-			"version", "indicator",
+			"version", "indicator", "track_fund_lineage", "allocation_strategy",
 		}).AddRow(
 			balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(),
 			balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier,
 			balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(),
-			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator,
+			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO",
 		))
 
 	// Set up the queued transactions query that checks for applied children
@@ -710,7 +710,7 @@ func TestGetBalanceByIDLite_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE balance_id = $1
     `
@@ -721,12 +721,12 @@ func TestGetBalanceByIDLite_Success(t *testing.T) {
 			"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id",
 			"balance", "credit_balance", "debit_balance",
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
-			"created_at", "version",
+			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
 			"bln_123", "ACC001", "USD", 100, "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
-			time.Now(), 1,
+			time.Now(), 1, false, "FIFO", "",
 		))
 
 	balance, err := ds.GetBalanceByIDLite("bln_123")
@@ -752,7 +752,7 @@ func TestGetBalanceByIDLite_NotFound(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE balance_id = $1
     `
@@ -780,7 +780,7 @@ func TestGetBalanceByIDLite_NullIndicator(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE balance_id = $1
     `
@@ -791,12 +791,12 @@ func TestGetBalanceByIDLite_NullIndicator(t *testing.T) {
 			"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id",
 			"balance", "credit_balance", "debit_balance",
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
-			"created_at", "version",
+			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
 			"bln_123", nil, "USD", 100, "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
-			time.Now(), 1,
+			time.Now(), 1, false, "FIFO", "",
 		))
 
 	balance, err := ds.GetBalanceByIDLite("bln_123")
@@ -816,7 +816,7 @@ func TestGetBalanceByIndicator_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE indicator = $1 AND currency = $2
     `
@@ -827,12 +827,12 @@ func TestGetBalanceByIndicator_Success(t *testing.T) {
 			"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id",
 			"balance", "credit_balance", "debit_balance",
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
-			"created_at", "version",
+			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
 			"bln_123", "ACC001", "USD", 100, "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
-			time.Now(), 1,
+			time.Now(), 1, false, "FIFO", "",
 		))
 
 	balance, err := ds.GetBalanceByIndicator("ACC001", "USD")
@@ -855,7 +855,7 @@ func TestGetBalanceByIndicator_NotFound(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version
+       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE indicator = $1 AND currency = $2
     `
