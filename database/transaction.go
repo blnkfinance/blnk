@@ -1301,7 +1301,7 @@ func (d Datasource) GetTransactionsByShadowFor(ctx context.Context, parentTransa
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve shadow transactions", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var transactions []model.Transaction
 	for rows.Next() {
