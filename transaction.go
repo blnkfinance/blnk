@@ -27,11 +27,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blnkfinance/blnk/internal/apierror"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/search"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
@@ -50,6 +52,8 @@ const (
 	StatusCommit    = "COMMIT"
 	StatusRejected  = "REJECTED"
 )
+
+var asyncBulkSemaphore = semaphore.NewWeighted(100) // max 100 concurrent
 
 // getTxns is a function type that retrieves a batch of transactions based on the parent transaction ID, batch size, and offset.
 //
@@ -2230,10 +2234,20 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 
 	// Check if this should be run asynchronously
 	if req.RunAsync {
+		if !asyncBulkSemaphore.TryAcquire(1) {
+			return nil, apierror.NewAPIError(
+				apierror.ErrRateLimited,
+				"too many async bulk operations in progress, try again later",
+				nil,
+			)
+		}
+
 		// Start processing in background
 		go func() {
+			defer asyncBulkSemaphore.Release(1)
+
 			// Create a background context with timeout
-			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute) // TODO: Make timeout configurable
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 
 			logrus.Infof("Starting async bulk transaction batch %s with %d transactions (atomic: %v, inflight: %v)",

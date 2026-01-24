@@ -27,6 +27,7 @@ import (
 	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -38,6 +39,7 @@ const (
 type redisHookManager struct {
 	client redis.UniversalClient
 	queue  *asynq.Client
+	config *config.Configuration
 }
 
 // NewHookManager creates a new Redis-based hook manager.
@@ -50,9 +52,14 @@ type redisHookManager struct {
 // Returns:
 // - HookManager: A new instance of the hook manager.
 func NewHookManager(redisClient redis.UniversalClient, queue *asynq.Client) HookManager {
+	config, err := config.Fetch()
+	if err != nil {
+		logrus.Errorf("failed to fetch config: %v", err)
+	}
 	return &redisHookManager{
 		client: redisClient,
 		queue:  queue,
+		config: config,
 	}
 }
 

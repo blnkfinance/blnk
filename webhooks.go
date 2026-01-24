@@ -16,13 +16,15 @@ package blnk
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
-
-	"github.com/sirupsen/logrus"
+	"time"
 
 	"github.com/blnkfinance/blnk/config"
 
@@ -73,22 +75,35 @@ func getEventFromStatus(status string) string {
 func processHTTP(data NewWebhook, client *http.Client) error {
 	conf, err := config.Fetch()
 	if err != nil {
-		log.Println("Error fetching config:", err)
 		return err
 	}
 
-	jsonData, err := json.Marshal(data)
+	payloadBytes, err := json.Marshal(data)
 	if err != nil {
-		log.Println("Error marshaling data:", err)
 		return err
 	}
-	payload := bytes.NewBuffer(jsonData)
 
-	req, err := http.NewRequest("POST", conf.Notification.Webhook.Url, payload)
+	secret := conf.Server.SecretKey
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+
+	signatureData := timestamp + "." + string(payloadBytes)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(signatureData))
+	signature := hex.EncodeToString(mac.Sum(nil))
+
+	req, err := http.NewRequest(
+		"POST",
+		conf.Notification.Webhook.Url,
+		bytes.NewBuffer(payloadBytes),
+	)
 	if err != nil {
-		log.Println("Error creating request:", err)
 		return err
 	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Blnk-Signature", signature)
+	req.Header.Set("X-Blnk-Timestamp", timestamp)
 
 	for key, value := range conf.Notification.Webhook.Headers {
 		req.Header.Set(key, value)
@@ -96,37 +111,15 @@ func processHTTP(data NewWebhook, client *http.Client) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("Error sending request:", err)
 		return err
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			logrus.Error(err)
-		}
-	}(resp.Body)
+	defer func() { _ = resp.Body.Close() }()
 
-	// Check if the status code is not in the 2XX success range
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("Request failed with status code: %d\n", resp.StatusCode)
+		log.Printf("Webhook failed with status %d", resp.StatusCode)
 		return nil
 	}
 
-	// Read the response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Println("Error reading response body:", err)
-		return err
-	}
-
-	// Try to decode JSON response, but don't fail if it's not JSON
-	var response map[string]interface{}
-	if err := json.Unmarshal(body, &response); err != nil {
-		log.Printf("Response is not JSON (this is OK): %s\n", string(body))
-		return nil
-	}
-
-	log.Println("Webhook notification sent successfully:", response)
 	return nil
 }
 

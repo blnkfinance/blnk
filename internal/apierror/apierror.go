@@ -33,6 +33,7 @@ const (
 	ErrBadRequest     ErrorCode = "BAD_REQUEST"           // Used when a request contains invalid data or parameters.
 	ErrInvalidInput   ErrorCode = "INVALID_INPUT"         // Used when the provided input does not meet the expected format or constraints.
 	ErrInternalServer ErrorCode = "INTERNAL_SERVER_ERROR" // Used for general server errors that are not client-related.
+	ErrRateLimited    ErrorCode = "RATE_LIMITED"          // Used when a request is rate limited.
 )
 
 // APIError represents a custom error structure for the API.
@@ -73,6 +74,8 @@ func MapErrorToHTTPStatus(err error) int {
 			return http.StatusBadRequest // HTTP 400 Bad Request for invalid inputs.
 		case ErrInternalServer:
 			return http.StatusInternalServerError // HTTP 500 Internal Server Error for server issues.
+		case ErrRateLimited:
+			return http.StatusTooManyRequests // HTTP 429 Too Many Requests for rate limiting.
 		default:
 			return http.StatusInternalServerError
 		}

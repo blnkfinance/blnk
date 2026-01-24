@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/blnkfinance/blnk/api"
@@ -33,6 +36,7 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/posthog/posthog-go"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -46,7 +50,12 @@ func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
 	certmagic.DefaultACME.Agreed = true      // Agree to ACME TOS
 	certmagic.DefaultACME.Email = conf.Email // Set email for certificate recovery/notifications
 	cfg := certmagic.NewDefault()
-	cfg.Storage = &certmagic.FileStorage{Path: "path/to/certmagic/storage"} // Define storage for certificates
+
+	certPath := conf.CertStoragePath
+	if certPath == "" {
+		certPath = "/var/lib/blnk/certs"
+	}
+	cfg.Storage = &certmagic.FileStorage{Path: certPath}
 
 	// Define domain(s) for the certificate
 	domains := []string{conf.Domain}
@@ -202,12 +211,38 @@ func initializePostHog() (posthog.Client, string) {
 	return client, heartbeatID
 }
 
-func startServer(router *gin.Engine, cfg config.ServerConfig) error {
-	if cfg.SSL {
-		return serveTLS(router, cfg)
+func startServer(router *gin.Engine, port string) error {
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
 	}
-	log.Printf("Starting server on http://localhost:%s", cfg.Port)
-	return router.Run(":" + cfg.Port)
+
+	// Start server in goroutine
+	go func() {
+		logrus.Infof("Server started on port %s", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logrus.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logrus.Info("Shutting down server...")
+
+	// Give outstanding requests 30 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		logrus.Errorf("Server forced to shutdown: %v", err)
+		return err
+	}
+
+	logrus.Info("Server exited gracefully")
+	return nil
 }
 
 // Renamed from initializeObservability to better reflect its purpose
@@ -276,7 +311,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			// Start server
-			if err := startServer(router, cfg.Server); err != nil {
+			if err := startServer(router, cfg.Server.Port); err != nil {
 				log.Fatal(err)
 			}
 		},
