@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -36,7 +37,19 @@ var TokenizableFields = []string{
 
 // TokenizationService handles converting PII to tokens and back
 type TokenizationService struct {
-	key []byte // Encryption key for tokenization
+	key     []byte
+	enabled bool
+}
+
+var ErrTokenizationDisabled = errors.New(
+	"tokenization is disabled: BLNK_TOKENIZATION_SECRET or tokenization_secret in your blnk.json file must be set to a 32-byte value",
+)
+
+func (s *TokenizationService) ensureEnabled() error {
+	if !s.enabled {
+		return ErrTokenizationDisabled
+	}
+	return nil
 }
 
 // NewTokenizationService creates a new tokenization service.
@@ -47,8 +60,11 @@ type TokenizationService struct {
 // Returns:
 // - *TokenizationService: A new instance of TokenizationService.
 func NewTokenizationService(encryptionKey []byte) *TokenizationService {
+	enabled := len(encryptionKey) == 32
+
 	return &TokenizationService{
-		key: encryptionKey,
+		key:     encryptionKey,
+		enabled: enabled,
 	}
 }
 
@@ -74,6 +90,10 @@ func (s *TokenizationService) Tokenize(value string) (string, error) {
 // - string: The tokenized value.
 // - error: An error if tokenization fails.
 func (s *TokenizationService) TokenizeWithMode(value string, mode TokenizationMode) (string, error) {
+	if err := s.ensureEnabled(); err != nil {
+		return "", err
+	}
+
 	if mode == FormatPreservingMode {
 		return s.formatPreservingTokenize(value)
 	}

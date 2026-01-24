@@ -279,12 +279,6 @@ func (cnf *Configuration) setDefaultValues() {
 		cnf.TypeSenseKey = DEFAULT_TYPESENSE_KEY
 	}
 
-	// Tokenization defaults
-	if cnf.TokenizationSecret == "" {
-		cnf.TokenizationSecret = "blnk-default-tokenization-key!!!!"
-		log.Println("Warning: No tokenization secret provided. Using default key. This is NOT recommended for production.")
-	}
-
 	// Set module defaults
 	cnf.setDatabaseDefaults()
 	cnf.setTransactionDefaults()
@@ -391,6 +385,21 @@ func (cnf *Configuration) trimWhitespace() {
 }
 
 func (cnf *Configuration) setupRateLimiting() {
+
+	if cnf.RateLimit.RequestsPerSecond == nil && cnf.RateLimit.Burst == nil {
+		defaultRPS := 500.0
+		defaultBurst := 2000
+
+		cnf.RateLimit.RequestsPerSecond = &defaultRPS
+		cnf.RateLimit.Burst = &defaultBurst
+
+		log.Printf(
+			"Info: Rate limiting not configured. Using defaults: RPS=%.2f, Burst=%d",
+			defaultRPS,
+			defaultBurst,
+		)
+	}
+
 	if cnf.RateLimit.RequestsPerSecond != nil && cnf.RateLimit.Burst == nil {
 		defaultBurst := 2 * int(*cnf.RateLimit.RequestsPerSecond)
 		cnf.RateLimit.Burst = &defaultBurst

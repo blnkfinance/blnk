@@ -82,12 +82,12 @@ func initializeRedisClients(config *config.Configuration) (redis.UniversalClient
 
 // initializeTokenizationService creates and configures the tokenization service
 func initializeTokenizationService(config *config.Configuration) *tokenization.TokenizationService {
-	tokenizationKey := []byte(config.TokenizationSecret)
-	if len(tokenizationKey) != 32 {
-		tokenizationKey = make([]byte, 32)
-		copy(tokenizationKey, config.TokenizationSecret)
+	if config.TokenizationSecret == "" {
+		return tokenization.NewTokenizationService(nil)
 	}
-	return tokenization.NewTokenizationService(tokenizationKey)
+
+	key := []byte(config.TokenizationSecret)
+	return tokenization.NewTokenizationService(key)
 }
 
 // initializeHTTPClient creates and configures the HTTP client for webhook requests
