@@ -22,7 +22,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -246,8 +249,9 @@ func initializeWebhookWorkerServer(conf *config.Configuration, queues map[string
 			TLSConfig: redisOption.TLSConfig,
 		},
 		asynq.Config{
-			Concurrency: conf.Queue.WebhookConcurrency,
-			Queues:      queues,
+			Concurrency:     conf.Queue.WebhookConcurrency,
+			Queues:          queues,
+			ShutdownTimeout: 30 * time.Second,
 		},
 	), nil
 }
@@ -266,8 +270,9 @@ func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (
 			TLSConfig: redisOption.TLSConfig,
 		},
 		asynq.Config{
-			Concurrency: 1,
-			Queues:      queues,
+			Concurrency:     1,
+			Queues:          queues,
+			ShutdownTimeout: 30 * time.Second,
 		},
 	), nil
 }
@@ -285,7 +290,6 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 		mux.HandleFunc(queueName, b.processTransaction)
 	}
 	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
-
 }
 
 func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
@@ -307,9 +311,10 @@ func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 func workerCommands(b *blnkInstance) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workers",
-		Short: "start blnk workers", // Short description of the command
+		Short: "start blnk workers",
 		Run: func(cmd *cobra.Command, args []string) {
-			ctx := context.Background()
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
 
 			// Load configuration
 			conf, err := config.Fetch()
@@ -318,13 +323,15 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			// Initialize observability (tracing and PostHog)
-			phClient, shutdown, err := initializeTelemetryAndObservability(ctx, conf)
+			phClient, shutdown, err := initializeTelemetryAndObservability(context.Background(), conf)
 			if err != nil {
 				log.Fatal(err)
 			}
 			if shutdown != nil {
 				defer func() {
-					if err := shutdown(ctx); err != nil {
+					tctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					if err := shutdown(tctx); err != nil {
 						log.Printf("Error during shutdown: %v", err)
 					}
 				}()
@@ -339,18 +346,37 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				log.Fatal(err)
 			}
 
-			startMonitoringServer(conf)
+			monitoringSrv := startMonitoringServer(conf)
 
-			// Start worker server
+			// Start worker servers
 			if err := srv.Start(mux); err != nil {
 				log.Fatalf("could not start transaction worker server: %v", err)
 			}
-			// Ensure transaction server shuts down gracefully when the webhook server (blocking) exits
-			defer srv.Shutdown()
-
-			if err := webhookSrv.Run(webhookMux); err != nil {
-				log.Fatalf("could not run webhook worker server: %v", err)
+			if err := webhookSrv.Start(webhookMux); err != nil {
+				log.Fatalf("could not start webhook worker server: %v", err)
 			}
+
+			logrus.Info("Workers started.")
+
+			// Wait for SIGINT/SIGTERM.
+			<-ctx.Done()
+
+			log.Printf("Shutdown signal received. Shutting down...")
+
+			// Stop monitoring HTTP server first
+			if monitoringSrv != nil {
+				sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := monitoringSrv.Shutdown(sctx); err != nil {
+					log.Printf("monitoring shutdown error: %v", err)
+				}
+			}
+
+			// Gracefully stop both worker servers.
+			webhookSrv.Shutdown()
+			srv.Shutdown()
+
+			log.Printf("Shutdown complete.")
 		},
 	}
 
@@ -380,11 +406,11 @@ func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Ser
 	return srv, webhookSrv, mux, webhookMux, nil
 }
 
-func startMonitoringServer(conf *config.Configuration) {
-	// Start monitoring server with health check and asynqmon dashboard
+// startMonitoringServer now returns the server so it can be gracefully shut down.
+func startMonitoringServer(conf *config.Configuration) *http.Server {
 	redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 	asynqmonHandler := asynqmon.New(asynqmon.Options{
-		RootPath: "/monitoring", //  Optional: if you want to serve asynqmon under a sub-path.
+		RootPath: "/monitoring",
 		RedisConnOpt: asynq.RedisClientOpt{
 			Addr:      redisOption.Addr,
 			Password:  redisOption.Password,
@@ -393,25 +419,28 @@ func startMonitoringServer(conf *config.Configuration) {
 		},
 	})
 
-	// Create a custom HTTP mux for monitoring port
 	monitoringMux := http.NewServeMux()
 
-	// Add worker health check endpoint
 	monitoringMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
 	})
 
-	// Mount asynqmon dashboard at /monitoring
 	monitoringMux.Handle("/monitoring/", asynqmonHandler)
 
-	// Start monitoring HTTP server in a new goroutine
+	monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
+	srv := &http.Server{
+		Addr:    monitoringAddr,
+		Handler: monitoringMux,
+	}
+
 	go func() {
-		monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
 		log.Printf("Worker monitoring server listening on %s (health: /health, dashboard: /monitoring)", monitoringAddr)
-		if err := http.ListenAndServe(monitoringAddr, monitoringMux); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("could not start monitoring server: %v", err)
 		}
 	}()
+
+	return srv
 }

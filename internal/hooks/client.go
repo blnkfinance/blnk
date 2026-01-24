@@ -19,10 +19,14 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -69,12 +73,26 @@ func (m *redisHookManager) executeHook(ctx context.Context, hook *Hook, payload 
 		"hook_type": hook.Type,
 	}).Info("Executing webhook")
 
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+
+	if m.config == nil {
+		return fmt.Errorf("config is not initialized")
+	}
+	secret := m.config.Server.SecretKey
+	// Create signature: HMAC-SHA256(timestamp + "." + payload)
+	signatureData := timestamp + "." + string(payloadBytes)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(signatureData))
+	signature := hex.EncodeToString(mac.Sum(nil))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", hook.URL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Blnk-Signature", signature)
+	req.Header.Set("X-Blnk-Timestamp", timestamp)
 	req.Header.Set("X-Hook-ID", hook.ID)
 	req.Header.Set("X-Hook-Type", string(hook.Type))
 

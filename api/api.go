@@ -146,6 +146,7 @@ func NewAPI(b *blnk.Blnk) *Api {
 	r := gin.Default()
 	auth := middleware.NewAuthMiddleware(b)
 	r.Use(middleware.RateLimitMiddleware(conf))
+	r.Use(middleware.SecurityHeaders())
 	r.Use(otelgin.Middleware("BLNK"))
 
 	r.GET("/", func(c *gin.Context) {

@@ -17,6 +17,7 @@ limitations under the License.
 package middleware
 
 import (
+	"strings"
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
@@ -59,7 +60,39 @@ func RateLimitMiddleware(conf *config.Configuration) gin.HandlerFunc {
 			c.AbortWithStatusJSON(httpError.StatusCode, gin.H{"error": httpError.Message})
 			return
 		}
-		// Continue to the next handler if the request is within the limit.
+		c.Next()
+	}
+}
+
+// SecurityHeaders sets security headers to the response.
+// It sets the following headers:
+// - X-Content-Type-Options: nosniff
+// - X-Frame-Options: DENY
+// - Referrer-Policy: strict-origin-when-cross-origin
+// - Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
+// - Cache-Control: no-store
+// - Strict-Transport-Security: max-age=31536000; includeSubDomains
+//
+// Returns:
+// - gin.HandlerFunc: A middleware function that sets security headers to the response.
+func SecurityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		c.Header("Cache-Control", "no-store")
+		isTLS := c.Request.TLS != nil
+		if !isTLS {
+			xfp := strings.ToLower(c.GetHeader("X-Forwarded-Proto"))
+			if xfp == "https" {
+				isTLS = true
+			}
+		}
+		if isTLS {
+			c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+
 		c.Next()
 	}
 }
