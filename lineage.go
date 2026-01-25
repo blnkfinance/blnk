@@ -1283,7 +1283,7 @@ func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID s
 // Returns:
 // - *model.LineageOutbox: The outbox entry to insert, or nil if no lineage processing needed.
 func (l *Blnk) PrepareLineageOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.LineageOutbox {
-	ctx, span := tracer.Start(ctx, "PrepareLineageOutbox")
+	_, span := tracer.Start(ctx, "PrepareLineageOutbox")
 	defer span.End()
 
 	provider := l.getLineageProvider(txn)
