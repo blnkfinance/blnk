@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/api"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/search"
@@ -309,6 +310,13 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			if err != nil {
 				log.Printf("TypeSense initialization error: %v", err)
 			}
+
+			// Start lineage outbox processor
+			// This worker processes pending lineage entries that were captured atomically with transactions
+			lineageProcessor := blnk.NewLineageOutboxProcessor(b.blnk)
+			lineageProcessor.Start(ctx)
+			defer lineageProcessor.Stop()
+			logrus.Info("Lineage outbox processor started")
 
 			// Start server
 			if err := startServer(router, cfg.Server.Port); err != nil {

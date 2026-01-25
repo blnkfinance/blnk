@@ -347,13 +347,14 @@ func TestTokenizableFields(t *testing.T) {
 	}
 }
 
-// TestKeySize ensures the service works with different key sizes
+// TestKeySize ensures the service works with the required 32-byte key size (AES-256)
+// and rejects other key sizes
 func TestKeySize(t *testing.T) {
-	testKeySizes := []int{16, 24, 32} // AES-128, AES-192, AES-256
 	testValue := "Test value"
 
-	for _, size := range testKeySizes {
-		key := make([]byte, size)
+	// Test that 32-byte key works (AES-256 - the only supported size)
+	t.Run("32-byte key should work", func(t *testing.T) {
+		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		if err != nil {
 			t.Fatalf("Failed to generate random key: %v", err)
@@ -362,19 +363,37 @@ func TestKeySize(t *testing.T) {
 		service := NewTokenizationService(key)
 		token, err := service.Tokenize(testValue)
 		if err != nil {
-			t.Errorf("Tokenize with %d-byte key error: %v", size, err)
-			continue
+			t.Errorf("Tokenize with 32-byte key error: %v", err)
+			return
 		}
 
 		decrypted, err := service.Detokenize(token)
 		if err != nil {
-			t.Errorf("Detokenize with %d-byte key error: %v", size, err)
-			continue
+			t.Errorf("Detokenize with 32-byte key error: %v", err)
+			return
 		}
 
 		if decrypted != testValue {
-			t.Errorf("Expected %q, got %q with %d-byte key", testValue, decrypted, size)
+			t.Errorf("Expected %q, got %q with 32-byte key", testValue, decrypted)
 		}
+	})
+
+	// Test that non-32-byte keys are rejected (tokenization disabled)
+	invalidSizes := []int{16, 24} // AES-128 and AES-192 are not supported
+	for _, size := range invalidSizes {
+		t.Run(fmt.Sprintf("%d-byte key should be rejected", size), func(t *testing.T) {
+			key := make([]byte, size)
+			_, err := rand.Read(key)
+			if err != nil {
+				t.Fatalf("Failed to generate random key: %v", err)
+			}
+
+			service := NewTokenizationService(key)
+			_, err = service.Tokenize(testValue)
+			if err == nil {
+				t.Errorf("Expected error with %d-byte key, but got none", size)
+			}
+		})
 	}
 }
 

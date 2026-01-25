@@ -287,16 +287,6 @@ func (l *Blnk) updateTransactionDetails(ctx context.Context, transaction *model.
 func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) {
 	_, span := tracer.Start(ctx, "Post Transaction Actions")
 	defer span.End()
-
-	// Skip lineage processing for commits of inflight transactions - lineage was already created for the original inflight
-	isInflightCommit := transaction.ParentTransaction != "" && transaction.MetaData != nil && transaction.MetaData["inflight"] == true
-
-	// Process fund lineage synchronously for SkipQueue transactions to ensure
-	// lineage mappings exist before returning response to client
-	if transaction.SkipQueue && !isInflightCommit && (transaction.Status == StatusApplied || transaction.Status == StatusInflight) {
-		l.processLineage(ctx, transaction, sourceBalance, destinationBalance)
-	}
-
 	go func() {
 		// Create an index batch to ensure balances are indexed before the transaction
 		batch := search.NewIndexBatch(transaction.TransactionID)
@@ -327,12 +317,6 @@ func (l *Blnk) postTransactionActions(ctx context.Context, transaction *model.Tr
 		if err != nil {
 			span.RecordError(err)
 			notification.NotifyError(err)
-		}
-
-		// Process fund lineage asynchronously for queued transactions
-		// Use a background context since the HTTP request context may be cancelled
-		if !transaction.SkipQueue && !isInflightCommit && (transaction.Status == StatusApplied || transaction.Status == StatusInflight) {
-			l.processLineage(context.Background(), transaction, sourceBalance, destinationBalance)
 		}
 
 		span.AddEvent("Post-transaction actions completed")
@@ -949,8 +933,19 @@ func (l *Blnk) finalizeTransaction(ctx context.Context, transaction *model.Trans
 		return transaction, nil
 	}
 
-	// Atomically persist the transaction and update balances in a single database transaction
-	transaction, err := l.datasource.RecordTransactionWithBalances(ctx, transaction, sourceBalance, destinationBalance)
+	// Prepare lineage outbox entry for atomic insertion with transaction
+	// This ensures lineage processing intent is captured even if later async operations fail
+	var outbox *model.LineageOutbox
+	if transaction.Status == StatusApplied || transaction.Status == StatusInflight {
+		// Skip lineage for commits of inflight transactions - lineage was already created for the original
+		isInflightCommit := transaction.ParentTransaction != "" && transaction.MetaData != nil && transaction.MetaData["inflight"] == true
+		if !isInflightCommit {
+			outbox = l.PrepareLineageOutbox(ctx, transaction, sourceBalance, destinationBalance)
+		}
+	}
+
+	// Atomically persist the transaction, update balances, and insert lineage outbox in a single database transaction
+	transaction, err := l.datasource.RecordTransactionWithBalancesAndOutbox(ctx, transaction, sourceBalance, destinationBalance, outbox)
 	if err != nil {
 		span.RecordError(err)
 		return nil, l.logAndRecordError(span, "failed to persist transaction with balances", err)
@@ -960,7 +955,10 @@ func (l *Blnk) finalizeTransaction(ctx context.Context, transaction *model.Trans
 	go l.checkBalanceMonitors(ctx, sourceBalance)
 	go l.checkBalanceMonitors(ctx, destinationBalance)
 
-	span.AddEvent("Transaction and balances persisted atomically", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
+	span.AddEvent("Transaction and balances persisted atomically", trace.WithAttributes(
+		attribute.String("transaction.id", transaction.TransactionID),
+		attribute.Bool("lineage.outbox_created", outbox != nil),
+	))
 
 	return transaction, nil
 }

@@ -18,6 +18,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"math/big"
 	"time"
 
@@ -39,8 +40,9 @@ type IDataSource interface {
 
 // transaction defines methods for handling transactions.
 type transaction interface {
-	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                               // Records a new transaction
-	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error) // Records a transaction with balance updates atomically
+	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                                                               // Records a new transaction
+	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error)                                 // Records a transaction with balance updates atomically
+	RecordTransactionWithBalancesAndOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance, outbox *model.LineageOutbox) (*model.Transaction, error) // Records a transaction with balance updates and optional lineage outbox atomically
 	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                               // Retrieves a transaction by ID
 	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                              // Checks if a parent transaction is void
 	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                                    // Retrieves a transaction by reference
@@ -76,6 +78,7 @@ type balance interface {
 	CreateBalance(balance model.Balance) (model.Balance, error)                                                            // Creates a new balance
 	GetBalanceByID(id string, include []string, withQueued bool) (*model.Balance, error)                                   // Retrieves a balance by ID with additional data and queued status
 	GetBalanceByIDLite(id string) (*model.Balance, error)                                                                  // Retrieves a balance by ID with minimal data
+	GetBalancesByIDsLite(ctx context.Context, ids []string) (map[string]*model.Balance, error)                             // Retrieves multiple balances by IDs with minimal data (batch query)
 	GetAllBalances(limit, offset int) ([]model.Balance, error)                                                             // Retrieves all balances
 	UpdateBalance(balance *model.Balance) error                                                                            // Updates a balance
 	GetBalanceByIndicator(indicator, currency string) (*model.Balance, error)                                              // Retrieves a balance by indicator and currency
@@ -151,4 +154,11 @@ type lineage interface {
 	GetLineageMappings(ctx context.Context, balanceID string) ([]model.LineageMapping, error)                   // Retrieves all lineage mappings for a balance
 	GetLineageMappingByProvider(ctx context.Context, balanceID, provider string) (*model.LineageMapping, error) // Retrieves a specific lineage mapping
 	DeleteLineageMapping(ctx context.Context, id int64) error                                                   // Deletes a lineage mapping
+
+	// Outbox methods for atomic lineage processing
+	InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, outbox *model.LineageOutbox) error                        // Inserts outbox entry within a transaction
+	ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) // Claims pending entries for processing
+	MarkOutboxCompleted(ctx context.Context, id int64) error                                                            // Marks an outbox entry as completed
+	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error                                                // Marks an outbox entry as failed
+	GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error)                   // Gets outbox entry by transaction ID
 }

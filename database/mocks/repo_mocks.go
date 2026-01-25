@@ -17,6 +17,7 @@ package mocks
 
 import (
 	"context"
+	"database/sql"
 	"math/big"
 	"time"
 
@@ -38,6 +39,14 @@ func (m *MockDataSource) RecordTransaction(ctx context.Context, txn *model.Trans
 
 func (m *MockDataSource) RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error) {
 	args := m.Called(ctx, txn, sourceBalance, destinationBalance)
+	return args.Get(0).(*model.Transaction), args.Error(1)
+}
+
+func (m *MockDataSource) RecordTransactionWithBalancesAndOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance, outbox *model.LineageOutbox) (*model.Transaction, error) {
+	args := m.Called(ctx, txn, sourceBalance, destinationBalance, outbox)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*model.Transaction), args.Error(1)
 }
 
@@ -164,6 +173,14 @@ func (m *MockDataSource) GetBalanceByID(id string, include []string, withQueued 
 func (m *MockDataSource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	args := m.Called(id)
 	return args.Get(0).(*model.Balance), args.Error(1)
+}
+
+func (m *MockDataSource) GetBalancesByIDsLite(ctx context.Context, ids []string) (map[string]*model.Balance, error) {
+	args := m.Called(ctx, ids)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]*model.Balance), args.Error(1)
 }
 
 func (m *MockDataSource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
@@ -452,4 +469,37 @@ func (m *MockDataSource) GetLineageMappingByProvider(ctx context.Context, balanc
 func (m *MockDataSource) DeleteLineageMapping(ctx context.Context, id int64) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
+}
+
+// Lineage Outbox methods
+
+func (m *MockDataSource) InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, outbox *model.LineageOutbox) error {
+	args := m.Called(ctx, tx, outbox)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) {
+	args := m.Called(ctx, batchSize, lockDuration)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.LineageOutbox), args.Error(1)
+}
+
+func (m *MockDataSource) MarkOutboxCompleted(ctx context.Context, id int64) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error {
+	args := m.Called(ctx, id, errMsg)
+	return args.Error(0)
+}
+
+func (m *MockDataSource) GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error) {
+	args := m.Called(ctx, transactionID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.LineageOutbox), args.Error(1)
 }

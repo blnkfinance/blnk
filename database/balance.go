@@ -448,6 +448,91 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	return &balance, nil
 }
 
+// GetBalancesByIDsLite retrieves multiple balances by their IDs in a single query.
+// Returns a map of balance_id to Balance for easy lookup.
+// Balances that are not found are simply not included in the result map.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - ids []string: The list of balance IDs to retrieve.
+//
+// Returns:
+// - map[string]*model.Balance: A map of balance_id to Balance.
+// - error: Returns an error in case of database failures.
+func (d Datasource) GetBalancesByIDsLite(ctx context.Context, ids []string) (map[string]*model.Balance, error) {
+	if len(ids) == 0 {
+		return make(map[string]*model.Balance), nil
+	}
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
+		FROM blnk.balances
+		WHERE balance_id = ANY($1)
+	`, pq.Array(ids))
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to query balances", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]*model.Balance)
+
+	for rows.Next() {
+		var balance model.Balance
+		var balanceValue, creditBalanceValue, debitBalanceValue string
+		var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
+		var indicator sql.NullString
+		var allocationStrategy sql.NullString
+
+		err := rows.Scan(
+			&balance.BalanceID,
+			&indicator,
+			&balance.Currency,
+			&balance.CurrencyMultiplier,
+			&balance.LedgerID,
+			&balanceValue,
+			&creditBalanceValue,
+			&debitBalanceValue,
+			&inflightBalanceValue,
+			&inflightCreditBalanceValue,
+			&inflightDebitBalanceValue,
+			&balance.CreatedAt,
+			&balance.Version,
+			&balance.TrackFundLineage,
+			&allocationStrategy,
+			&balance.IdentityID,
+		)
+		if err != nil {
+			logrus.Errorf("balance batch scan error: %v", err)
+			continue
+		}
+
+		if indicator.Valid {
+			balance.Indicator = indicator.String
+		}
+		if allocationStrategy.Valid {
+			balance.AllocationStrategy = allocationStrategy.String
+		} else {
+			balance.AllocationStrategy = "FIFO"
+		}
+
+		// Parse big.Int values
+		balance.Balance, _ = parseBigInt(balanceValue)
+		balance.CreditBalance, _ = parseBigInt(creditBalanceValue)
+		balance.DebitBalance, _ = parseBigInt(debitBalanceValue)
+		balance.InflightBalance, _ = parseBigInt(inflightBalanceValue)
+		balance.InflightCreditBalance, _ = parseBigInt(inflightCreditBalanceValue)
+		balance.InflightDebitBalance, _ = parseBigInt(inflightDebitBalanceValue)
+
+		result[balance.BalanceID] = &balance
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error iterating over balances", err)
+	}
+
+	return result, nil
+}
+
 // GetBalanceByIndicator retrieves a balance from the database using the specified indicator and currency.
 // The function scans the query result into a Balance object and converts various fields from int64 to big.Int.
 // It returns the balance if found, or an error if the balance does not exist.

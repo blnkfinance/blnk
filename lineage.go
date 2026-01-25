@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"sort"
@@ -67,6 +68,17 @@ type Allocation struct {
 	Amount    *big.Int
 }
 
+// LineageOutboxPayload contains the transaction data needed for deferred lineage processing.
+type LineageOutboxPayload struct {
+	Amount        float64 `json:"amount"`
+	PreciseAmount string  `json:"precise_amount"`
+	Currency      string  `json:"currency"`
+	Precision     float64 `json:"precision"`
+	Reference     string  `json:"reference"`
+	SkipQueue     bool    `json:"skip_queue"`
+	Inflight      bool    `json:"inflight"`
+}
+
 // processLineage handles fund lineage tracking for a transaction.
 // It processes both credit (incoming funds with provider tracking) and debit (fund allocation from shadow balances).
 //
@@ -81,9 +93,26 @@ func (l *Blnk) processLineage(ctx context.Context, txn *model.Transaction, sourc
 
 	provider := l.getLineageProvider(txn)
 
-	// Credit processing requires a provider to know the source of funds
-	if provider != "" && destinationBalance != nil && destinationBalance.TrackFundLineage {
-		if err := l.processLineageCredit(ctx, txn, destinationBalance, provider); err != nil {
+	// Validate provider against source balance
+	// If source tracks lineage but doesn't have the provider, ignore it
+	validatedProvider, err := l.validateLineageProvider(ctx, provider, sourceBalance)
+	if err != nil {
+		span.RecordError(err)
+		logrus.Errorf("lineage provider validation failed: %v", err)
+		notification.NotifyError(err)
+		validatedProvider = ""
+	}
+
+	if provider != "" && validatedProvider == "" && sourceBalance != nil {
+		span.AddEvent("Provider validation failed", trace.WithAttributes(
+			attribute.String("requested_provider", provider),
+			attribute.String("source_balance_id", sourceBalance.BalanceID),
+		))
+	}
+
+	// Credit processing requires a validated provider to know the source of funds
+	if validatedProvider != "" && destinationBalance != nil && destinationBalance.TrackFundLineage {
+		if err := l.processLineageCredit(ctx, txn, destinationBalance, validatedProvider); err != nil {
 			span.RecordError(err)
 			logrus.Errorf("lineage credit processing failed: %v", err)
 			notification.NotifyError(err)
@@ -118,6 +147,44 @@ func (l *Blnk) getLineageProvider(txn *model.Transaction) string {
 		return ""
 	}
 	return provider
+}
+
+// validateLineageProvider checks if the specified provider exists on the source balance.
+// If the source tracks fund lineage but doesn't have the specified provider,
+// returns empty string (provider should be ignored).
+// If the source doesn't track lineage (e.g., @world), any provider is valid.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - provider string: The provider specified in transaction metadata.
+// - sourceBalance *model.Balance: The source balance (may be nil or not track lineage).
+//
+// Returns:
+// - string: The validated provider name (empty if invalid/should be ignored).
+// - error: An error if validation fails (database errors only, not for invalid providers).
+func (l *Blnk) validateLineageProvider(ctx context.Context, provider string, sourceBalance *model.Balance) (string, error) {
+	if provider == "" {
+		return "", nil
+	}
+
+	// Source is nil or doesn't track lineage - provider is valid
+	if sourceBalance == nil || !sourceBalance.TrackFundLineage {
+		return provider, nil
+	}
+
+	// Source tracks lineage - verify provider exists
+	mapping, err := l.datasource.GetLineageMappingByProvider(ctx, sourceBalance.BalanceID, provider)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate provider on source: %w", err)
+	}
+
+	if mapping == nil {
+		logrus.Warnf("lineage provider validation: provider %q does not exist on source balance %s - ignoring provider",
+			provider, sourceBalance.BalanceID)
+		return "", nil
+	}
+
+	return provider, nil
 }
 
 // processLineageCredit processes a credit transaction for fund lineage tracking.
@@ -263,7 +330,7 @@ func (l *Blnk) queueShadowCreditTransaction(ctx context.Context, txn *model.Tran
 			"_main_balance": destBalance.BalanceID,
 		},
 		AllowOverdraft: true,
-		SkipQueue:      txn.SkipQueue,
+		SkipQueue:      true,
 		Inflight:       txn.Inflight,
 	}
 
@@ -495,7 +562,7 @@ func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transacti
 			"_allocation":   sourceBalance.AllocationStrategy,
 		},
 		AllowOverdraft: true,
-		SkipQueue:      txn.SkipQueue,
+		SkipQueue:      true,
 		Inflight:       txn.Inflight,
 	}
 
@@ -617,7 +684,7 @@ func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transacti
 			"_from_balance": sourceBalance.BalanceID,
 		},
 		AllowOverdraft: true,
-		SkipQueue:      txn.SkipQueue,
+		SkipQueue:      true, // Shadow transactions always process synchronously
 		Inflight:       txn.Inflight,
 	}
 
@@ -708,6 +775,7 @@ func (l *Blnk) getIdentityIdentifier(identity *model.Identity) string {
 }
 
 // getLineageSources retrieves the available fund sources from shadow balances for allocation.
+// Uses a single batch query to fetch all shadow balances instead of N individual queries.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -717,11 +785,27 @@ func (l *Blnk) getIdentityIdentifier(identity *model.Identity) string {
 // - []LineageSource: The available fund sources.
 // - error: An error if the sources could not be retrieved.
 func (l *Blnk) getLineageSources(ctx context.Context, mappings []model.LineageMapping) ([]LineageSource, error) {
-	var sources []LineageSource
+	if len(mappings) == 0 {
+		return nil, nil
+	}
 
+	// Collect all shadow balance IDs for batch query
+	shadowBalanceIDs := make([]string, 0, len(mappings))
 	for _, mapping := range mappings {
-		balance, err := l.datasource.GetBalanceByIDLite(mapping.ShadowBalanceID)
-		if err != nil {
+		shadowBalanceIDs = append(shadowBalanceIDs, mapping.ShadowBalanceID)
+	}
+
+	// Fetch all shadow balances in a single query
+	balances, err := l.datasource.GetBalancesByIDsLite(ctx, shadowBalanceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch shadow balances: %w", err)
+	}
+
+	// Build sources from the fetched balances
+	var sources []LineageSource
+	for _, mapping := range mappings {
+		balance, exists := balances[mapping.ShadowBalanceID]
+		if !exists {
 			continue
 		}
 
@@ -898,9 +982,9 @@ func (l *Blnk) proportionalAllocation(sources []LineageSource, amount *big.Int) 
 // Returns:
 // - *model.LineageMapping: The matching mapping, or nil if not found.
 func (l *Blnk) findMappingByShadowID(mappings []model.LineageMapping, shadowBalanceID string) *model.LineageMapping {
-	for _, mapping := range mappings {
-		if mapping.ShadowBalanceID == shadowBalanceID {
-			return &mapping
+	for i := range mappings {
+		if mappings[i].ShadowBalanceID == shadowBalanceID {
+			return &mappings[i]
 		}
 	}
 	return nil
@@ -1178,5 +1262,138 @@ func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID s
 		))
 	}
 
+	return nil
+}
+
+// PrepareLineageOutbox creates a LineageOutbox entry for atomic insertion with the transaction.
+// This ensures lineage processing intent is captured in the same database transaction,
+// guaranteeing no lineage work is lost even if subsequent async operations fail.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The transaction being processed.
+// - sourceBalance *model.Balance: The source balance (may be nil).
+// - destinationBalance *model.Balance: The destination balance (may be nil).
+//
+// Returns:
+// - *model.LineageOutbox: The outbox entry to insert, or nil if no lineage processing needed.
+func (l *Blnk) PrepareLineageOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.LineageOutbox {
+	ctx, span := tracer.Start(ctx, "PrepareLineageOutbox")
+	defer span.End()
+
+	provider := l.getLineageProvider(txn)
+
+	// Determine what type of lineage processing is needed
+	needsCredit := provider != "" && destinationBalance != nil && destinationBalance.TrackFundLineage
+	needsDebit := sourceBalance != nil && sourceBalance.TrackFundLineage
+
+	if !needsCredit && !needsDebit {
+		span.AddEvent("No lineage processing needed")
+		return nil
+	}
+
+	lineageType := "both"
+	if needsCredit && !needsDebit {
+		lineageType = "credit"
+	} else if needsDebit && !needsCredit {
+		lineageType = "debit"
+	}
+
+	// Build the payload with transaction data needed for processing
+	payload := LineageOutboxPayload{
+		Amount:        txn.Amount,
+		PreciseAmount: txn.PreciseAmount.String(),
+		Currency:      txn.Currency,
+		Precision:     txn.Precision,
+		Reference:     txn.Reference,
+		SkipQueue:     true,
+		Inflight:      txn.Inflight,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logrus.Errorf("failed to marshal lineage outbox payload: %v", err)
+		span.RecordError(err)
+		return nil
+	}
+
+	var srcID, dstID string
+	if sourceBalance != nil {
+		srcID = sourceBalance.BalanceID
+	}
+	if destinationBalance != nil {
+		dstID = destinationBalance.BalanceID
+	}
+
+	outbox := &model.LineageOutbox{
+		TransactionID:        txn.TransactionID,
+		SourceBalanceID:      srcID,
+		DestinationBalanceID: dstID,
+		Provider:             provider,
+		LineageType:          lineageType,
+		Payload:              payloadBytes,
+		MaxAttempts:          5,
+	}
+
+	span.AddEvent("Lineage outbox entry prepared", trace.WithAttributes(
+		attribute.String("transaction_id", txn.TransactionID),
+		attribute.String("lineage_type", lineageType),
+		attribute.String("provider", provider),
+	))
+
+	return outbox
+}
+
+// ProcessLineageFromOutbox processes a lineage outbox entry.
+// This is called by the outbox worker to perform deferred lineage processing.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - entry model.LineageOutbox: The outbox entry to process.
+//
+// Returns:
+// - error: An error if processing fails.
+func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.LineageOutbox) error {
+	ctx, span := tracer.Start(ctx, "ProcessLineageFromOutbox")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("outbox.id", fmt.Sprintf("%d", entry.ID)),
+		attribute.String("outbox.transaction_id", entry.TransactionID),
+		attribute.String("outbox.lineage_type", entry.LineageType),
+	)
+
+	// Fetch the transaction
+	txn, err := l.GetTransaction(ctx, entry.TransactionID)
+	if err != nil {
+		return fmt.Errorf("failed to get transaction: %w", err)
+	}
+
+	// Restore runtime flags from payload (not persisted in DB)
+	if len(entry.Payload) > 0 {
+		var payload LineageOutboxPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err == nil {
+			txn.Inflight = payload.Inflight
+		}
+	}
+
+	// Fetch balances
+	var sourceBalance, destinationBalance *model.Balance
+	if entry.SourceBalanceID != "" {
+		sourceBalance, err = l.datasource.GetBalanceByIDLite(entry.SourceBalanceID)
+		if err != nil {
+			logrus.Warnf("failed to get source balance %s for lineage processing: %v", entry.SourceBalanceID, err)
+		}
+	}
+	if entry.DestinationBalanceID != "" {
+		destinationBalance, err = l.datasource.GetBalanceByIDLite(entry.DestinationBalanceID)
+		if err != nil {
+			logrus.Warnf("failed to get destination balance %s for lineage processing: %v", entry.DestinationBalanceID, err)
+		}
+	}
+
+	// Process lineage using the existing logic
+	l.processLineage(ctx, txn, sourceBalance, destinationBalance)
+
+	span.AddEvent("Lineage processing completed from outbox")
 	return nil
 }

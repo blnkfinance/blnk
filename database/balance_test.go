@@ -808,6 +808,112 @@ func TestGetBalanceByIDLite_NullIndicator(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestGetBalancesByIDsLite_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	query := `
+		SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
+		FROM blnk.balances
+		WHERE balance_id = ANY($1)
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs(pq.Array([]string{"bln_123", "bln_456"})).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id",
+			"balance", "credit_balance", "debit_balance",
+			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
+			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
+		}).AddRow(
+			"bln_123", "ACC001", "USD", 100, "ldg_001",
+			"100000", "60000", "40000",
+			"5000", "3000", "2000",
+			time.Now(), 1, false, "FIFO", "",
+		).AddRow(
+			"bln_456", "ACC002", "USD", 100, "ldg_001",
+			"200000", "120000", "80000",
+			"10000", "6000", "4000",
+			time.Now(), 2, true, "LIFO", "idt_001",
+		))
+
+	ctx := context.Background()
+	balances, err := ds.GetBalancesByIDsLite(ctx, []string{"bln_123", "bln_456"})
+	assert.NoError(t, err)
+	assert.Len(t, balances, 2)
+
+	// Verify first balance
+	assert.NotNil(t, balances["bln_123"])
+	assert.Equal(t, "bln_123", balances["bln_123"].BalanceID)
+	assert.Equal(t, "ACC001", balances["bln_123"].Indicator)
+	assert.Equal(t, int64(100000), balances["bln_123"].Balance.Int64())
+
+	// Verify second balance
+	assert.NotNil(t, balances["bln_456"])
+	assert.Equal(t, "bln_456", balances["bln_456"].BalanceID)
+	assert.Equal(t, "LIFO", balances["bln_456"].AllocationStrategy)
+	assert.True(t, balances["bln_456"].TrackFundLineage)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetBalancesByIDsLite_EmptyInput(t *testing.T) {
+	db, _, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	ctx := context.Background()
+	balances, err := ds.GetBalancesByIDsLite(ctx, []string{})
+	assert.NoError(t, err)
+	assert.NotNil(t, balances)
+	assert.Len(t, balances, 0)
+}
+
+func TestGetBalancesByIDsLite_PartialResults(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	query := `
+		SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
+		FROM blnk.balances
+		WHERE balance_id = ANY($1)
+	`
+
+	// Only return one balance even though two were requested
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs(pq.Array([]string{"bln_123", "bln_nonexistent"})).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"balance_id", "indicator", "currency", "currency_multiplier", "ledger_id",
+			"balance", "credit_balance", "debit_balance",
+			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
+			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
+		}).AddRow(
+			"bln_123", "ACC001", "USD", 100, "ldg_001",
+			"100000", "60000", "40000",
+			"5000", "3000", "2000",
+			time.Now(), 1, false, "FIFO", "",
+		))
+
+	ctx := context.Background()
+	balances, err := ds.GetBalancesByIDsLite(ctx, []string{"bln_123", "bln_nonexistent"})
+	assert.NoError(t, err)
+	assert.Len(t, balances, 1)
+	assert.NotNil(t, balances["bln_123"])
+	assert.Nil(t, balances["bln_nonexistent"])
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
 func TestGetBalanceByIndicator_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
