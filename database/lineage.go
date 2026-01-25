@@ -137,3 +137,184 @@ func (d Datasource) DeleteLineageMapping(ctx context.Context, id int64) error {
 
 	return nil
 }
+
+// InsertLineageOutboxInTx inserts a lineage outbox entry within an existing database transaction.
+// This ensures the outbox entry is committed atomically with the main transaction.
+func (d Datasource) InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, outbox *model.LineageOutbox) error {
+	query := `
+		INSERT INTO blnk.lineage_outbox
+		(transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, max_attempts, created_at, inflight)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id
+	`
+	err := tx.QueryRowContext(ctx, query,
+		outbox.TransactionID,
+		outbox.SourceBalanceID,
+		outbox.DestinationBalanceID,
+		outbox.Provider,
+		outbox.LineageType,
+		outbox.Payload,
+		model.OutboxStatusPending,
+		outbox.MaxAttempts,
+		time.Now(),
+		outbox.Inflight,
+	).Scan(&outbox.ID)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to insert lineage outbox entry", err)
+	}
+	return nil
+}
+
+// ClaimPendingOutboxEntries claims a batch of pending outbox entries for processing.
+// It uses SELECT FOR UPDATE SKIP LOCKED to allow concurrent processors.
+func (d Datasource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) {
+	lockedUntil := time.Now().Add(lockDuration)
+
+	query := `
+		UPDATE blnk.lineage_outbox
+		SET status = $1, locked_until = $2
+		WHERE id IN (
+			SELECT id FROM blnk.lineage_outbox
+			WHERE status = 'pending'
+			  AND (locked_until IS NULL OR locked_until < NOW())
+			  AND attempts < max_attempts
+			ORDER BY created_at ASC
+			LIMIT $3
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until, inflight
+	`
+
+	rows, err := d.Conn.QueryContext(ctx, query, model.OutboxStatusProcessing, lockedUntil, batchSize)
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to claim pending outbox entries", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var entries []model.LineageOutbox
+	for rows.Next() {
+		var entry model.LineageOutbox
+		var sourceBalanceID, destinationBalanceID, provider, lastError sql.NullString
+		var processedAt, lockedUntilVal sql.NullTime
+
+		err := rows.Scan(
+			&entry.ID,
+			&entry.TransactionID,
+			&sourceBalanceID,
+			&destinationBalanceID,
+			&provider,
+			&entry.LineageType,
+			&entry.Payload,
+			&entry.Status,
+			&entry.Attempts,
+			&entry.MaxAttempts,
+			&lastError,
+			&entry.CreatedAt,
+			&processedAt,
+			&lockedUntilVal,
+			&entry.Inflight,
+		)
+		if err != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan outbox entry", err)
+		}
+
+		entry.SourceBalanceID = sourceBalanceID.String
+		entry.DestinationBalanceID = destinationBalanceID.String
+		entry.Provider = provider.String
+		entry.LastError = lastError.String
+		if processedAt.Valid {
+			entry.ProcessedAt = &processedAt.Time
+		}
+		if lockedUntilVal.Valid {
+			entry.LockedUntil = &lockedUntilVal.Time
+		}
+
+		entries = append(entries, entry)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error iterating over outbox entries", err)
+	}
+
+	return entries, nil
+}
+
+// MarkOutboxCompleted marks an outbox entry as completed.
+func (d Datasource) MarkOutboxCompleted(ctx context.Context, id int64) error {
+	_, err := d.Conn.ExecContext(ctx, `
+		UPDATE blnk.lineage_outbox
+		SET status = $1, processed_at = NOW(), locked_until = NULL
+		WHERE id = $2
+	`, model.OutboxStatusCompleted, id)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to mark outbox entry as completed", err)
+	}
+	return nil
+}
+
+// MarkOutboxFailed marks an outbox entry as failed and increments the attempt counter.
+// If attempts exceed max_attempts, the status becomes 'failed', otherwise it returns to 'pending' for retry.
+func (d Datasource) MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error {
+	_, err := d.Conn.ExecContext(ctx, `
+		UPDATE blnk.lineage_outbox
+		SET status = CASE WHEN attempts + 1 >= max_attempts THEN $1 ELSE $2 END,
+			attempts = attempts + 1,
+			last_error = $3,
+			locked_until = NULL
+		WHERE id = $4
+	`, model.OutboxStatusFailed, model.OutboxStatusPending, errMsg, id)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to mark outbox entry as failed", err)
+	}
+	return nil
+}
+
+// GetOutboxByTransactionID retrieves an outbox entry by its transaction ID.
+func (d Datasource) GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error) {
+	row := d.Conn.QueryRowContext(ctx, `
+		SELECT id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until, inflight
+		FROM blnk.lineage_outbox
+		WHERE transaction_id = $1
+	`, transactionID)
+
+	var entry model.LineageOutbox
+	var sourceBalanceID, destinationBalanceID, provider, lastError sql.NullString
+	var processedAt, lockedUntil sql.NullTime
+
+	err := row.Scan(
+		&entry.ID,
+		&entry.TransactionID,
+		&sourceBalanceID,
+		&destinationBalanceID,
+		&provider,
+		&entry.LineageType,
+		&entry.Payload,
+		&entry.Status,
+		&entry.Attempts,
+		&entry.MaxAttempts,
+		&lastError,
+		&entry.CreatedAt,
+		&processedAt,
+		&lockedUntil,
+		&entry.Inflight,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve outbox entry", err)
+	}
+
+	entry.SourceBalanceID = sourceBalanceID.String
+	entry.DestinationBalanceID = destinationBalanceID.String
+	entry.Provider = provider.String
+	entry.LastError = lastError.String
+	if processedAt.Valid {
+		entry.ProcessedAt = &processedAt.Time
+	}
+	if lockedUntil.Valid {
+		entry.LockedUntil = &lockedUntil.Time
+	}
+
+	return &entry, nil
+}

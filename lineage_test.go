@@ -86,6 +86,92 @@ func TestGetLineageProvider(t *testing.T) {
 	}
 }
 
+func TestValidateLineageProvider(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name           string
+		provider       string
+		sourceBalance  *model.Balance
+		mockSetup      func(*mocks.MockDataSource)
+		expectedResult string
+		expectError    bool
+	}{
+		{
+			name:           "Empty provider returns empty",
+			provider:       "",
+			sourceBalance:  nil,
+			mockSetup:      func(m *mocks.MockDataSource) {},
+			expectedResult: "",
+			expectError:    false,
+		},
+		{
+			name:           "Nil source allows any provider",
+			provider:       "stripe",
+			sourceBalance:  nil,
+			mockSetup:      func(m *mocks.MockDataSource) {},
+			expectedResult: "stripe",
+			expectError:    false,
+		},
+		{
+			name:     "Source without lineage tracking allows any provider",
+			provider: "stripe",
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: false,
+			},
+			mockSetup:      func(m *mocks.MockDataSource) {},
+			expectedResult: "stripe",
+			expectError:    false,
+		},
+		{
+			name:     "Valid provider on source is accepted",
+			provider: "stripe",
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: true,
+			},
+			mockSetup: func(m *mocks.MockDataSource) {
+				m.On("GetLineageMappingByProvider", mock.Anything, "bln_source", "stripe").
+					Return(&model.LineageMapping{Provider: "stripe"}, nil)
+			},
+			expectedResult: "stripe",
+			expectError:    false,
+		},
+		{
+			name:     "Invalid provider on source is ignored",
+			provider: "invalid_provider",
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: true,
+			},
+			mockSetup: func(m *mocks.MockDataSource) {
+				m.On("GetLineageMappingByProvider", mock.Anything, "bln_source", "invalid_provider").
+					Return(nil, nil)
+			},
+			expectedResult: "",
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDS := new(mocks.MockDataSource)
+			tt.mockSetup(mockDS)
+			blnkInstance := &Blnk{datasource: mockDS}
+
+			result, err := blnkInstance.validateLineageProvider(ctx, tt.provider, tt.sourceBalance)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.expectedResult, result)
+		})
+	}
+}
+
 func TestGetIdentityIdentifier(t *testing.T) {
 	datasource, _, err := newTestDataSource()
 	if err != nil {
@@ -740,9 +826,16 @@ func TestLineageE2E_DebitFlow_FIFO_ToNonLineageBalance(t *testing.T) {
 
 	mappings := []model.LineageMapping{stripeMapping, paypalMapping}
 
+	// Batch query result for shadow balances
+	shadowBalancesMap := map[string]*model.Balance{
+		"bln_stripe_shadow": stripeShadow,
+		"bln_paypal_shadow": paypalShadow,
+	}
+
 	mockDS.On("GetBalanceByID", "bln_alice_main", mock.Anything, mock.Anything).Return(aliceMainBalance, nil)
 	mockDS.On("GetBalanceByID", "bln_merchant", mock.Anything, mock.Anything).Return(merchantBalance, nil)
 	mockDS.On("GetLineageMappings", mock.Anything, "bln_alice_main").Return(mappings, nil)
+	mockDS.On("GetBalancesByIDsLite", mock.Anything, mock.Anything).Return(shadowBalancesMap, nil)
 	mockDS.On("GetBalanceByIDLite", "bln_stripe_shadow").Return(stripeShadow, nil)
 	mockDS.On("GetBalanceByIDLite", "bln_paypal_shadow").Return(paypalShadow, nil)
 	mockDS.On("GetIdentityByID", "idt_alice_123").Return(aliceIdentity, nil)
@@ -1009,5 +1102,315 @@ func TestLineageE2E_GetTransactionLineage_API(t *testing.T) {
 		assert.Len(t, lineage.ShadowTransactions, 2)
 		assert.Equal(t, "txn_shadow_1", lineage.ShadowTransactions[0].TransactionID)
 		assert.Equal(t, "txn_shadow_2", lineage.ShadowTransactions[1].TransactionID)
+	})
+}
+
+func TestPrepareLineageOutbox(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name               string
+		txn                *model.Transaction
+		sourceBalance      *model.Balance
+		destinationBalance *model.Balance
+		expectOutbox       bool
+		expectedType       string
+		expectedProvider   string
+	}{
+		{
+			name: "No lineage tracking - returns nil",
+			txn: &model.Transaction{
+				TransactionID: "txn_123",
+				PreciseAmount: big.NewInt(10000),
+			},
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: false,
+			},
+			destinationBalance: &model.Balance{
+				BalanceID:        "bln_dest",
+				TrackFundLineage: false,
+			},
+			expectOutbox: false,
+		},
+		{
+			name: "Credit only - destination tracks lineage with provider",
+			txn: &model.Transaction{
+				TransactionID: "txn_123",
+				PreciseAmount: big.NewInt(10000),
+				Currency:      "USD",
+				Precision:     100,
+				Reference:     "ref_123",
+				MetaData: map[string]interface{}{
+					"BLNK_LINEAGE_PROVIDER": "stripe",
+				},
+			},
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: false,
+			},
+			destinationBalance: &model.Balance{
+				BalanceID:        "bln_dest",
+				TrackFundLineage: true,
+			},
+			expectOutbox:     true,
+			expectedType:     "credit",
+			expectedProvider: "stripe",
+		},
+		{
+			name: "Debit only - source tracks lineage",
+			txn: &model.Transaction{
+				TransactionID: "txn_123",
+				PreciseAmount: big.NewInt(10000),
+				Currency:      "USD",
+			},
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: true,
+			},
+			destinationBalance: &model.Balance{
+				BalanceID:        "bln_dest",
+				TrackFundLineage: false,
+			},
+			expectOutbox:     true,
+			expectedType:     "debit",
+			expectedProvider: "",
+		},
+		{
+			name: "Both credit and debit - both track lineage with provider",
+			txn: &model.Transaction{
+				TransactionID: "txn_123",
+				PreciseAmount: big.NewInt(10000),
+				Currency:      "USD",
+				MetaData: map[string]interface{}{
+					"BLNK_LINEAGE_PROVIDER": "paypal",
+				},
+			},
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: true,
+			},
+			destinationBalance: &model.Balance{
+				BalanceID:        "bln_dest",
+				TrackFundLineage: true,
+			},
+			expectOutbox:     true,
+			expectedType:     "both",
+			expectedProvider: "paypal",
+		},
+		{
+			name: "No provider for credit - only debit processed",
+			txn: &model.Transaction{
+				TransactionID: "txn_123",
+				PreciseAmount: big.NewInt(10000),
+			},
+			sourceBalance: &model.Balance{
+				BalanceID:        "bln_source",
+				TrackFundLineage: true,
+			},
+			destinationBalance: &model.Balance{
+				BalanceID:        "bln_dest",
+				TrackFundLineage: true,
+			},
+			expectOutbox:     true,
+			expectedType:     "debit",
+			expectedProvider: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDS := new(mocks.MockDataSource)
+			blnkInstance := &Blnk{datasource: mockDS}
+
+			outbox := blnkInstance.PrepareLineageOutbox(ctx, tt.txn, tt.sourceBalance, tt.destinationBalance)
+
+			if tt.expectOutbox {
+				assert.NotNil(t, outbox)
+				assert.Equal(t, tt.txn.TransactionID, outbox.TransactionID)
+				assert.Equal(t, tt.expectedType, outbox.LineageType)
+				assert.Equal(t, tt.expectedProvider, outbox.Provider)
+				assert.Equal(t, 5, outbox.MaxAttempts)
+
+				if tt.sourceBalance != nil {
+					assert.Equal(t, tt.sourceBalance.BalanceID, outbox.SourceBalanceID)
+				}
+				if tt.destinationBalance != nil {
+					assert.Equal(t, tt.destinationBalance.BalanceID, outbox.DestinationBalanceID)
+				}
+			} else {
+				assert.Nil(t, outbox)
+			}
+		})
+	}
+}
+
+func TestProcessLineageFromOutbox(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Successfully processes outbox entry", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		txn := &model.Transaction{
+			TransactionID: "txn_123",
+			Source:        "bln_source",
+			Destination:   "bln_dest",
+			PreciseAmount: big.NewInt(10000),
+			Currency:      "USD",
+			MetaData:      map[string]interface{}{},
+		}
+
+		sourceBalance := &model.Balance{
+			BalanceID:        "bln_source",
+			TrackFundLineage: false,
+		}
+		destBalance := &model.Balance{
+			BalanceID:        "bln_dest",
+			TrackFundLineage: false,
+		}
+
+		entry := model.LineageOutbox{
+			ID:                   1,
+			TransactionID:        "txn_123",
+			SourceBalanceID:      "bln_source",
+			DestinationBalanceID: "bln_dest",
+			LineageType:          "debit",
+			Payload:              []byte(`{"amount":100,"currency":"USD"}`),
+		}
+
+		mockDS.On("GetTransaction", mock.Anything, "txn_123").Return(txn, nil)
+		mockDS.On("GetBalanceByIDLite", "bln_source").Return(sourceBalance, nil)
+		mockDS.On("GetBalanceByIDLite", "bln_dest").Return(destBalance, nil)
+
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		err := blnkInstance.ProcessLineageFromOutbox(ctx, entry)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Handles missing source balance gracefully", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		txn := &model.Transaction{
+			TransactionID: "txn_123",
+			PreciseAmount: big.NewInt(10000),
+			MetaData:      map[string]interface{}{},
+		}
+
+		destBalance := &model.Balance{
+			BalanceID:        "bln_dest",
+			TrackFundLineage: false,
+		}
+
+		entry := model.LineageOutbox{
+			ID:                   1,
+			TransactionID:        "txn_123",
+			SourceBalanceID:      "bln_missing",
+			DestinationBalanceID: "bln_dest",
+			LineageType:          "credit",
+		}
+
+		mockDS.On("GetTransaction", mock.Anything, "txn_123").Return(txn, nil)
+		mockDS.On("GetBalanceByIDLite", "bln_missing").Return((*model.Balance)(nil), assert.AnError)
+		mockDS.On("GetBalanceByIDLite", "bln_dest").Return(destBalance, nil)
+
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		// Should not return error - just logs warning and continues
+		err := blnkInstance.ProcessLineageFromOutbox(ctx, entry)
+		assert.NoError(t, err)
+	})
+}
+
+func TestLineageOutboxProcessor(t *testing.T) {
+	t.Run("Creates processor with default values", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		processor := NewLineageOutboxProcessor(blnkInstance)
+
+		assert.NotNil(t, processor)
+		assert.Equal(t, 100, processor.batchSize)
+		assert.Equal(t, 1*time.Second, processor.pollInterval)
+		assert.Equal(t, 30*time.Second, processor.lockDuration)
+		assert.False(t, processor.IsRunning())
+	})
+
+	t.Run("Configures processor with custom values", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		processor := NewLineageOutboxProcessor(blnkInstance).
+			WithBatchSize(50).
+			WithPollInterval(5 * time.Second).
+			WithLockDuration(60 * time.Second)
+
+		assert.Equal(t, 50, processor.batchSize)
+		assert.Equal(t, 5*time.Second, processor.pollInterval)
+		assert.Equal(t, 60*time.Second, processor.lockDuration)
+	})
+
+	t.Run("Start and stop processor", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		// Mock ClaimPendingOutboxEntries to return empty slice
+		mockDS.On("ClaimPendingOutboxEntries", mock.Anything, mock.Anything, mock.Anything).
+			Return([]model.LineageOutbox{}, nil).Maybe()
+
+		processor := NewLineageOutboxProcessor(blnkInstance).
+			WithPollInterval(100 * time.Millisecond)
+
+		ctx := context.Background()
+
+		// Start processor
+		processor.Start(ctx)
+		assert.True(t, processor.IsRunning())
+
+		// Wait a bit for at least one poll cycle
+		time.Sleep(150 * time.Millisecond)
+
+		// Stop processor
+		processor.Stop()
+		assert.False(t, processor.IsRunning())
+	})
+
+	t.Run("Processes batch of entries", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+
+		txn := &model.Transaction{
+			TransactionID: "txn_batch_1",
+			PreciseAmount: big.NewInt(10000),
+			MetaData:      map[string]interface{}{},
+		}
+
+		entries := []model.LineageOutbox{
+			{
+				ID:            1,
+				TransactionID: "txn_batch_1",
+				LineageType:   "debit",
+			},
+		}
+
+		mockDS.On("ClaimPendingOutboxEntries", mock.Anything, 100, 30*time.Second).
+			Return(entries, nil).Once()
+		mockDS.On("ClaimPendingOutboxEntries", mock.Anything, mock.Anything, mock.Anything).
+			Return([]model.LineageOutbox{}, nil).Maybe()
+		mockDS.On("GetTransaction", mock.Anything, "txn_batch_1").Return(txn, nil)
+		mockDS.On("GetBalanceByIDLite", mock.Anything).Return((*model.Balance)(nil), nil).Maybe()
+		mockDS.On("MarkOutboxCompleted", mock.Anything, int64(1)).Return(nil)
+
+		blnkInstance := &Blnk{datasource: mockDS}
+		processor := NewLineageOutboxProcessor(blnkInstance).
+			WithPollInterval(50 * time.Millisecond)
+
+		ctx := context.Background()
+		processor.Start(ctx)
+
+		// Wait for processing
+		time.Sleep(200 * time.Millisecond)
+		processor.Stop()
+
+		mockDS.AssertCalled(t, "MarkOutboxCompleted", mock.Anything, int64(1))
 	})
 }

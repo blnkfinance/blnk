@@ -99,7 +99,7 @@ func setupMockDataSource() *mocks.MockDataSource {
 	mockDS.On("GetBalanceByIDLite", "source-balance-001").Return(sourceBalance, nil)
 	mockDS.On("GetBalanceByIDLite", "dest-balance-001").Return(destBalance, nil)
 	mockDS.On("GetBalanceByID", mock.Anything, mock.Anything, mock.Anything).Return(sourceBalance, nil)
-	mockDS.On("RecordTransactionWithBalances", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	mockDS.On("RecordTransactionWithBalancesAndOutbox", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(&model.Transaction{TransactionID: "txn-001", Status: "APPLIED"}, nil)
 	mockDS.On("RecordTransaction", mock.Anything, mock.Anything).
 		Return(&model.Transaction{TransactionID: "txn-001", Status: "QUEUED"}, nil)

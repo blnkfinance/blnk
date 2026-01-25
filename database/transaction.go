@@ -161,6 +161,76 @@ func (d Datasource) RecordTransactionWithBalances(ctx context.Context, txn *mode
 	return txn, nil
 }
 
+// RecordTransactionWithBalancesAndOutbox atomically records a transaction, updates balances,
+// and optionally inserts a lineage outbox entry within a single database transaction.
+// This ensures that the lineage processing intent is captured atomically with the main transaction,
+// guaranteeing no lineage work is lost even if subsequent async operations fail.
+//
+// Parameters:
+// - ctx: Context for managing the request and tracing.
+// - txn: The transaction object containing details to be recorded.
+// - sourceBalance: The source balance to be updated.
+// - destinationBalance: The destination balance to be updated.
+// - outbox: Optional lineage outbox entry to insert atomically (can be nil if no lineage processing needed).
+//
+// Returns:
+// - The recorded transaction if successful, or an error if any operation fails.
+func (d Datasource) RecordTransactionWithBalancesAndOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance, outbox *model.LineageOutbox) (*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "RecordTransactionWithBalancesAndOutbox")
+	defer span.End()
+
+	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
+	}
+
+	defer func(tx *sql.Tx) {
+		_ = tx.Rollback()
+	}(tx)
+
+	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := updateBalance(ctx, tx, destinationBalance); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := recordTransactionInTx(ctx, tx, txn); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	// Insert lineage outbox entry atomically if provided
+	if outbox != nil {
+		if err := d.InsertLineageOutboxInTx(ctx, tx, outbox); err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to insert lineage outbox: %w", err)
+		}
+		span.AddEvent("Lineage outbox entry inserted", trace.WithAttributes(
+			attribute.String("outbox.transaction_id", outbox.TransactionID),
+			attribute.String("outbox.lineage_type", outbox.LineageType),
+		))
+	}
+
+	if err := tx.Commit(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
+	}
+
+	span.AddEvent("Transaction, balances, and outbox recorded atomically", trace.WithAttributes(
+		attribute.String("transaction.id", txn.TransactionID),
+		attribute.String("source.balance_id", sourceBalance.BalanceID),
+		attribute.String("destination.balance_id", destinationBalance.BalanceID),
+		attribute.Bool("outbox.included", outbox != nil),
+	))
+
+	return txn, nil
+}
+
 // GetTransaction retrieves a transaction by its ID from the database.
 // It logs the transaction retrieval using OpenTelemetry tracing.
 // Parameters:

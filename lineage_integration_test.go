@@ -62,6 +62,93 @@ func pollForBalance(ctx context.Context, ds database.IDataSource, balanceID stri
 	}
 }
 
+// pollForShadowCreditBalance polls until the shadow balance's CreditBalance reaches the expected value
+func pollForShadowCreditBalance(ctx context.Context, ds database.IDataSource, balanceID string, expectedCredit *big.Int, pollInterval, timeout time.Duration) (*model.Balance, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	var lastBalance *model.Balance
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			if lastBalance != nil {
+				return nil, fmt.Errorf("timed out waiting for shadow balance %s CreditBalance to reach %s (got %s): %w",
+					balanceID, expectedCredit.String(), lastBalance.CreditBalance.String(), timeoutCtx.Err())
+			}
+			return nil, fmt.Errorf("timed out waiting for shadow balance %s CreditBalance to reach %s: %w",
+				balanceID, expectedCredit.String(), timeoutCtx.Err())
+		case <-ticker.C:
+			balance, err := ds.GetBalanceByIDLite(balanceID)
+			if err != nil {
+				continue
+			}
+			lastBalance = balance
+			if balance.CreditBalance.Cmp(expectedCredit) == 0 {
+				return balance, nil
+			}
+		}
+	}
+}
+
+// pollForAggregateDebitBalance polls until the aggregate balance's DebitBalance reaches the expected value
+func pollForAggregateDebitBalance(ctx context.Context, ds database.IDataSource, balanceID string, expectedDebit *big.Int, pollInterval, timeout time.Duration) (*model.Balance, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	var lastBalance *model.Balance
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			if lastBalance != nil {
+				return nil, fmt.Errorf("timed out waiting for aggregate balance %s DebitBalance to reach %s (got %s): %w",
+					balanceID, expectedDebit.String(), lastBalance.DebitBalance.String(), timeoutCtx.Err())
+			}
+			return nil, fmt.Errorf("timed out waiting for aggregate balance %s DebitBalance to reach %s: %w",
+				balanceID, expectedDebit.String(), timeoutCtx.Err())
+		case <-ticker.C:
+			balance, err := ds.GetBalanceByIDLite(balanceID)
+			if err != nil {
+				continue
+			}
+			lastBalance = balance
+			if balance.DebitBalance.Cmp(expectedDebit) == 0 {
+				return balance, nil
+			}
+		}
+	}
+}
+
+// pollForTransactionFundAllocation polls until the transaction has fund allocation metadata populated
+func pollForTransactionFundAllocation(ctx context.Context, blnk *Blnk, transactionID string, expectedCount int, pollInterval, timeout time.Duration) (*TransactionLineage, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, fmt.Errorf("timed out waiting for transaction %s to have %d fund allocations: %w",
+				transactionID, expectedCount, timeoutCtx.Err())
+		case <-ticker.C:
+			lineage, err := blnk.GetTransactionLineage(ctx, transactionID)
+			if err != nil {
+				continue
+			}
+			if len(lineage.FundAllocation) >= expectedCount {
+				return lineage, nil
+			}
+		}
+	}
+}
+
 func TestLineageFullFlow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping lineage integration test in short mode")
@@ -101,6 +188,11 @@ func TestLineageFullFlow(t *testing.T) {
 
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Start the lineage outbox processor to process lineage entries asynchronously
+	processor := NewLineageOutboxProcessor(blnk).WithPollInterval(100 * time.Millisecond)
+	processor.Start(ctx)
+	defer processor.Stop()
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 
@@ -144,6 +236,8 @@ func TestLineageFullFlow(t *testing.T) {
 
 	mappings, err := pollForLineageMappings(ctx, ds, createdAlice.BalanceID, 1, pollInterval, pollTimeout)
 	require.NoError(t, err, "Failed to poll for stripe lineage mapping")
+	assert.Equal(t, 1, len(mappings), "Should have 1 stripe lineage mapping")
+	assert.Equal(t, "stripe", mappings[0].Provider, "Stripe lineage mapping provider should be stripe")
 	t.Logf("Stripe lineage mapping created: %s", mappings[0].Provider)
 
 	paypalTxn := &model.Transaction{
@@ -166,6 +260,8 @@ func TestLineageFullFlow(t *testing.T) {
 
 	mappings, err = pollForLineageMappings(ctx, ds, createdAlice.BalanceID, 2, pollInterval, pollTimeout)
 	require.NoError(t, err, "Failed to poll for paypal lineage mapping")
+	assert.Equal(t, 2, len(mappings), "Should have 2 lineage mappings")
+	assert.Equal(t, "paypal", mappings[1].Provider, "Paypal lineage mapping provider should be paypal")
 	t.Logf("Lineage mappings count: %d", len(mappings))
 	for _, m := range mappings {
 		t.Logf("  Provider: %s, ShadowID: %s, AggregateID: %s", m.Provider, m.ShadowBalanceID, m.AggregateBalanceID)
@@ -289,6 +385,11 @@ func TestLineageToLineageTransfer(t *testing.T) {
 
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
+
+	// Start the lineage outbox processor to process lineage entries asynchronously
+	processor := NewLineageOutboxProcessor(blnk).WithPollInterval(100 * time.Millisecond)
+	processor.Start(ctx)
+	defer processor.Stop()
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 
@@ -489,6 +590,11 @@ func TestLineageAllocationStrategies(t *testing.T) {
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
 
+	// Start the lineage outbox processor to process lineage entries asynchronously
+	processor := NewLineageOutboxProcessor(blnk).WithPollInterval(100 * time.Millisecond)
+	processor.Start(ctx)
+	defer processor.Stop()
+
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	t.Run("LIFO Allocation", func(t *testing.T) {
@@ -564,8 +670,9 @@ func TestLineageAllocationStrategies(t *testing.T) {
 		_, err = pollForBalance(ctx, ds, balance.BalanceID, big.NewInt(4500), pollInterval, pollTimeout)
 		require.NoError(t, err)
 
-		lineage, err := blnk.GetTransactionLineage(ctx, txn.TransactionID)
-		require.NoError(t, err)
+		// Poll for fund allocation (debit lineage is processed asynchronously)
+		lineage, err := pollForTransactionFundAllocation(ctx, blnk, txn.TransactionID, 1, pollInterval, pollTimeout)
+		require.NoError(t, err, "Failed to poll for transaction fund allocation")
 		t.Logf("LIFO allocation for $25 spend:")
 		for _, alloc := range lineage.FundAllocation {
 			t.Logf("  %v", alloc)
@@ -680,8 +787,9 @@ func TestLineageAllocationStrategies(t *testing.T) {
 		_, err = pollForBalance(ctx, ds, balance.BalanceID, big.NewInt(5000), pollInterval, pollTimeout)
 		require.NoError(t, err)
 
-		lineage, err := blnk.GetTransactionLineage(ctx, txn.TransactionID)
-		require.NoError(t, err)
+		// Poll for fund allocation (debit lineage is processed asynchronously)
+		lineage, err := pollForTransactionFundAllocation(ctx, blnk, txn.TransactionID, 2, pollInterval, pollTimeout)
+		require.NoError(t, err, "Failed to poll for transaction fund allocation")
 		t.Logf("PROPORTIONAL allocation for $50 spend:")
 		for _, alloc := range lineage.FundAllocation {
 			t.Logf("  %v", alloc)
@@ -772,6 +880,11 @@ func TestLineageInflightHold(t *testing.T) {
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
 
+	// Start the lineage outbox processor to process lineage entries asynchronously
+	processor := NewLineageOutboxProcessor(blnk).WithPollInterval(100 * time.Millisecond)
+	processor.Start(ctx)
+	defer processor.Stop()
+
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	identity, err := ds.CreateIdentity(model.Identity{
@@ -806,12 +919,11 @@ func TestLineageInflightHold(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("Created inflight transaction: %s (status: %s)", inflightTxn.TransactionID, inflightTxn.Status)
 
-	// With SkipQueue=true, everything is synchronous - check immediately
 	require.Equal(t, StatusInflight, inflightTxn.Status, "Main transaction should be INFLIGHT")
 
-	// Lineage mapping should exist immediately (synchronous processing)
-	mappings, err := ds.GetLineageMappings(ctx, balance.BalanceID)
-	require.NoError(t, err, "Failed to get lineage mappings")
+	// Poll for lineage mapping (processed asynchronously by outbox worker)
+	mappings, err := pollForLineageMappings(ctx, ds, balance.BalanceID, 1, 100*time.Millisecond, 10*time.Second)
+	require.NoError(t, err, "Failed to poll for lineage mappings")
 	require.Len(t, mappings, 1, "Should have 1 lineage mapping")
 	assert.Equal(t, "stripe", mappings[0].Provider)
 	t.Logf("Lineage mapping created: provider=%s, shadow=%s", mappings[0].Provider, mappings[0].ShadowBalanceID)
@@ -900,6 +1012,11 @@ func TestLineageInflightCommit(t *testing.T) {
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
 
+	// Start the lineage outbox processor to process lineage entries asynchronously
+	processor := NewLineageOutboxProcessor(blnk).WithPollInterval(100 * time.Millisecond)
+	processor.Start(ctx)
+	defer processor.Stop()
+
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	identity, err := ds.CreateIdentity(model.Identity{
@@ -934,9 +1051,9 @@ func TestLineageInflightCommit(t *testing.T) {
 	t.Logf("Created inflight transaction: %s (status: %s)", inflightTxn.TransactionID, inflightTxn.Status)
 	require.Equal(t, StatusInflight, inflightTxn.Status, "Transaction should be INFLIGHT")
 
-	// With SkipQueue=true, lineage mapping exists immediately
-	mappings, err := ds.GetLineageMappings(ctx, balance.BalanceID)
-	require.NoError(t, err)
+	// Poll for lineage mapping (processed asynchronously by outbox worker)
+	mappings, err := pollForLineageMappings(ctx, ds, balance.BalanceID, 1, 100*time.Millisecond, 10*time.Second)
+	require.NoError(t, err, "Failed to poll for lineage mappings")
 	require.Len(t, mappings, 1, "Should have 1 lineage mapping")
 
 	// Shadow transactions exist immediately
@@ -1020,28 +1137,28 @@ func TestLineageInflightCommit(t *testing.T) {
 	assert.Equal(t, 0, merchantBalanceAfter.Balance.Cmp(big.NewInt(3000)),
 		"Merchant balance should be 3000 after receiving spend")
 
-	// Check shadow balance after spend - should have released the spent amount
-	shadowBalanceAfterSpend, err := ds.GetBalanceByIDLite(mappings[0].ShadowBalanceID)
-	require.NoError(t, err)
+	// Poll for shadow balance after spend - debit lineage is processed asynchronously
+	// Shadow: DebitBalance=5000 (allocated), CreditBalance=3000 (released)
+	// Remaining from provider = DebitBalance - CreditBalance = 2000
+	shadowBalanceAfterSpend, err := pollForShadowCreditBalance(ctx, ds, mappings[0].ShadowBalanceID, big.NewInt(3000), 100*time.Millisecond, 10*time.Second)
+	require.NoError(t, err, "Failed to poll for shadow credit balance update")
 	t.Logf("Shadow balance after spend: Balance=%s, DebitBalance=%s, CreditBalance=%s",
 		shadowBalanceAfterSpend.Balance.String(),
 		shadowBalanceAfterSpend.DebitBalance.String(),
 		shadowBalanceAfterSpend.CreditBalance.String())
-	// Shadow: DebitBalance=5000 (allocated), CreditBalance=3000 (released)
-	// Remaining from provider = DebitBalance - CreditBalance = 2000
 	assert.Equal(t, 0, shadowBalanceAfterSpend.DebitBalance.Cmp(big.NewInt(5000)),
 		"Shadow debit balance should still be 5000 (total allocated)")
 	assert.Equal(t, 0, shadowBalanceAfterSpend.CreditBalance.Cmp(big.NewInt(3000)),
 		"Shadow credit balance should be 3000 (released/spent)")
 
-	// Check aggregate balance after spend
-	aggregateBalanceAfterSpend, err := ds.GetBalanceByIDLite(mappings[0].AggregateBalanceID)
-	require.NoError(t, err)
+	// Poll for aggregate balance after spend - debit lineage is processed asynchronously
+	// Aggregate mirrors shadow: CreditBalance=5000 (received), DebitBalance=3000 (released)
+	aggregateBalanceAfterSpend, err := pollForAggregateDebitBalance(ctx, ds, mappings[0].AggregateBalanceID, big.NewInt(3000), 100*time.Millisecond, 10*time.Second)
+	require.NoError(t, err, "Failed to poll for aggregate debit balance update")
 	t.Logf("Aggregate balance after spend: Balance=%s, CreditBalance=%s, DebitBalance=%s",
 		aggregateBalanceAfterSpend.Balance.String(),
 		aggregateBalanceAfterSpend.CreditBalance.String(),
 		aggregateBalanceAfterSpend.DebitBalance.String())
-	// Aggregate mirrors shadow: CreditBalance=5000 (received), DebitBalance=3000 (released)
 	assert.Equal(t, 0, aggregateBalanceAfterSpend.CreditBalance.Cmp(big.NewInt(5000)),
 		"Aggregate credit balance should still be 5000 (total received)")
 	assert.Equal(t, 0, aggregateBalanceAfterSpend.DebitBalance.Cmp(big.NewInt(3000)),
@@ -1088,6 +1205,11 @@ func TestLineageInflightVoid(t *testing.T) {
 	blnk, err := NewBlnk(ds)
 	require.NoError(t, err, "Failed to create Blnk instance")
 
+	// Start the lineage outbox processor to process lineage entries asynchronously
+	processor := NewLineageOutboxProcessor(blnk).WithPollInterval(100 * time.Millisecond)
+	processor.Start(ctx)
+	defer processor.Stop()
+
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	identity, err := ds.CreateIdentity(model.Identity{
@@ -1122,9 +1244,9 @@ func TestLineageInflightVoid(t *testing.T) {
 	t.Logf("Created inflight transaction: %s (status: %s)", inflightTxn.TransactionID, inflightTxn.Status)
 	require.Equal(t, StatusInflight, inflightTxn.Status, "Transaction should be INFLIGHT")
 
-	// With SkipQueue=true, lineage mapping exists immediately
-	mappings, err := ds.GetLineageMappings(ctx, balance.BalanceID)
-	require.NoError(t, err)
+	// Poll for lineage mapping (processed asynchronously by outbox worker)
+	mappings, err := pollForLineageMappings(ctx, ds, balance.BalanceID, 1, 100*time.Millisecond, 10*time.Second)
+	require.NoError(t, err, "Failed to poll for lineage mappings")
 	require.Len(t, mappings, 1, "Should have 1 lineage mapping")
 
 	// Check shadow balance before void
