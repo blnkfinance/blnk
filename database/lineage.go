@@ -143,8 +143,8 @@ func (d Datasource) DeleteLineageMapping(ctx context.Context, id int64) error {
 func (d Datasource) InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, outbox *model.LineageOutbox) error {
 	query := `
 		INSERT INTO blnk.lineage_outbox
-		(transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, max_attempts, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		(transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, max_attempts, created_at, inflight)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id
 	`
 	err := tx.QueryRowContext(ctx, query,
@@ -157,6 +157,7 @@ func (d Datasource) InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, out
 		model.OutboxStatusPending,
 		outbox.MaxAttempts,
 		time.Now(),
+		outbox.Inflight,
 	).Scan(&outbox.ID)
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to insert lineage outbox entry", err)
@@ -181,7 +182,7 @@ func (d Datasource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int
 			LIMIT $3
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until
+		RETURNING id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until, inflight
 	`
 
 	rows, err := d.Conn.QueryContext(ctx, query, model.OutboxStatusProcessing, lockedUntil, batchSize)
@@ -211,6 +212,7 @@ func (d Datasource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int
 			&entry.CreatedAt,
 			&processedAt,
 			&lockedUntilVal,
+			&entry.Inflight,
 		)
 		if err != nil {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan outbox entry", err)
@@ -270,7 +272,7 @@ func (d Datasource) MarkOutboxFailed(ctx context.Context, id int64, errMsg strin
 // GetOutboxByTransactionID retrieves an outbox entry by its transaction ID.
 func (d Datasource) GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error) {
 	row := d.Conn.QueryRowContext(ctx, `
-		SELECT id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until
+		SELECT id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until, inflight
 		FROM blnk.lineage_outbox
 		WHERE transaction_id = $1
 	`, transactionID)
@@ -294,6 +296,7 @@ func (d Datasource) GetOutboxByTransactionID(ctx context.Context, transactionID 
 		&entry.CreatedAt,
 		&processedAt,
 		&lockedUntil,
+		&entry.Inflight,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {

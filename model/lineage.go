@@ -30,4 +30,5 @@ type LineageOutbox struct {
 	CreatedAt            time.Time       `json:"created_at"`
 	ProcessedAt          *time.Time      `json:"processed_at,omitempty"`
 	LockedUntil          *time.Time      `json:"locked_until,omitempty"`
+	Inflight             bool            `json:"inflight"`
 }

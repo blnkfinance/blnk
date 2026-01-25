@@ -40,20 +40,20 @@ type IDataSource interface {
 
 // transaction defines methods for handling transactions.
 type transaction interface {
-	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                                                               // Records a new transaction
-	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error)                                 // Records a transaction with balance updates atomically
+	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                                                                     // Records a new transaction
+	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error)                                       // Records a transaction with balance updates atomically
 	RecordTransactionWithBalancesAndOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance, outbox *model.LineageOutbox) (*model.Transaction, error) // Records a transaction with balance updates and optional lineage outbox atomically
-	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                               // Retrieves a transaction by ID
-	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                              // Checks if a parent transaction is void
-	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                                    // Retrieves a transaction by reference
-	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)                                                                              // Checks if a transaction exists by reference
-	UpdateTransactionStatus(cxt context.Context, id string, status string) error                                                                             // Updates the status of a transaction
-	GetAllTransactions(cxt context.Context, limit, offset int) ([]model.Transaction, error)                                                                  // Retrieves all transactions
-	GetTotalCommittedTransactions(cxt context.Context, parentID string) (*big.Int, error)                                                                    // Gets the total count of committed transactions for a parent
-	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)                                      // Retrieves transactions in a paginated manner
-	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)            // Retrieves inflight transactions by parent ID
-	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)          // Retrieves refundable transactions by parent ID
-	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)                       // Groups transactions based on specified criteria
+	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                                                                     // Retrieves a transaction by ID
+	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                                                                    // Checks if a parent transaction is void
+	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                                                                          // Retrieves a transaction by reference
+	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)                                                                                                                    // Checks if a transaction exists by reference
+	UpdateTransactionStatus(cxt context.Context, id string, status string) error                                                                                                                   // Updates the status of a transaction
+	GetAllTransactions(cxt context.Context, limit, offset int) ([]model.Transaction, error)                                                                                                        // Retrieves all transactions
+	GetTotalCommittedTransactions(cxt context.Context, parentID string) (*big.Int, error)                                                                                                          // Gets the total count of committed transactions for a parent
+	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)                                                                            // Retrieves transactions in a paginated manner
+	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)                                                  // Retrieves inflight transactions by parent ID
+	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)                                                // Retrieves refundable transactions by parent ID
+	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)                                                             // Groups transactions based on specified criteria
 	UpdateLedgerMetadata(id string, metadata map[string]interface{}) error
 	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
@@ -156,9 +156,9 @@ type lineage interface {
 	DeleteLineageMapping(ctx context.Context, id int64) error                                                   // Deletes a lineage mapping
 
 	// Outbox methods for atomic lineage processing
-	InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, outbox *model.LineageOutbox) error                        // Inserts outbox entry within a transaction
+	InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, outbox *model.LineageOutbox) error                              // Inserts outbox entry within a transaction
 	ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) // Claims pending entries for processing
-	MarkOutboxCompleted(ctx context.Context, id int64) error                                                            // Marks an outbox entry as completed
-	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error                                                // Marks an outbox entry as failed
-	GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error)                   // Gets outbox entry by transaction ID
+	MarkOutboxCompleted(ctx context.Context, id int64) error                                                                 // Marks an outbox entry as completed
+	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error                                                     // Marks an outbox entry as failed
+	GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error)                        // Gets outbox entry by transaction ID
 }

@@ -513,7 +513,10 @@ func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, a
 			continue
 		}
 
-		l.processDestinationLineage(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, allocAmount, i)
+		if err := l.processDestinationLineage(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, allocAmount, i); err != nil {
+			logrus.Errorf("failed to process destination lineage: %v", err)
+			// Continue processing other allocations even if one fails
+		}
 	}
 }
 
@@ -581,27 +584,27 @@ func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transacti
 // - destinationBalance *model.Balance: The destination balance.
 // - allocAmount float64: The allocation amount as a float.
 // - index int: The allocation index for reference uniqueness.
-func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance *model.Balance, allocAmount float64, index int) {
+//
+// Returns:
+// - error: An error if destination lineage processing fails.
+func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance *model.Balance, allocAmount float64, index int) error {
 	if destinationBalance == nil || !destinationBalance.TrackFundLineage || destinationBalance.IdentityID == "" {
-		return
+		return nil
 	}
 
 	locker, err := l.acquireDestinationLineageLock(ctx, destinationBalance.IdentityID, mapping.Provider, destinationBalance.Currency)
 	if err != nil {
-		logrus.Errorf("failed to acquire destination lineage lock: %v", err)
-		return
+		return fmt.Errorf("failed to acquire destination lineage lock: %w", err)
 	}
 	defer l.releaseSingleLock(ctx, locker)
 
 	destShadowBalance, destAggBalance, err := l.getOrCreateDestinationLineageBalances(ctx, mapping.Provider, destinationBalance)
 	if err != nil {
-		logrus.Errorf("failed to create destination lineage balances: %v", err)
-		return
+		return fmt.Errorf("failed to create destination lineage balances: %w", err)
 	}
 
 	if err := l.queueReceiveTransaction(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance, allocAmount, index); err != nil {
-		logrus.Errorf("failed to queue receive transaction: %v", err)
-		return
+		return fmt.Errorf("failed to queue receive transaction: %w", err)
 	}
 
 	destMapping := model.LineageMapping{
@@ -612,8 +615,10 @@ func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transac
 		IdentityID:         destinationBalance.IdentityID,
 	}
 	if err := l.datasource.UpsertLineageMapping(ctx, destMapping); err != nil {
-		logrus.Errorf("failed to create destination lineage mapping after receive transaction: %v (txn: %s, provider: %s)", err, txn.TransactionID, mapping.Provider)
+		return fmt.Errorf("failed to upsert destination lineage mapping: %w", err)
 	}
+
+	return nil
 }
 
 // getOrCreateDestinationLineageBalances retrieves or creates shadow and aggregate balances for the destination.
@@ -1332,6 +1337,7 @@ func (l *Blnk) PrepareLineageOutbox(ctx context.Context, txn *model.Transaction,
 		LineageType:          lineageType,
 		Payload:              payloadBytes,
 		MaxAttempts:          5,
+		Inflight:             txn.Inflight, // explicit column, don't rely on JSON payload
 	}
 
 	span.AddEvent("Lineage outbox entry prepared", trace.WithAttributes(
@@ -1368,13 +1374,7 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 		return fmt.Errorf("failed to get transaction: %w", err)
 	}
 
-	// Restore runtime flags from payload (not persisted in DB)
-	if len(entry.Payload) > 0 {
-		var payload LineageOutboxPayload
-		if err := json.Unmarshal(entry.Payload, &payload); err == nil {
-			txn.Inflight = payload.Inflight
-		}
-	}
+	txn.Inflight = entry.Inflight
 
 	// Fetch balances
 	var sourceBalance, destinationBalance *model.Balance
