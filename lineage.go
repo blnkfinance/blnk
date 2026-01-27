@@ -79,6 +79,41 @@ type LineageOutboxPayload struct {
 	Inflight      bool    `json:"inflight"`
 }
 
+// ProviderBreakdown represents the fund breakdown for a specific provider in a balance's lineage.
+//
+// Fields:
+// - Provider string: The name/identifier of the fund provider.
+// - Amount *big.Int: The total amount received from this provider.
+// - Available *big.Int: The amount still available (not yet spent).
+// - Spent *big.Int: The amount that has been debited.
+// - BalanceID string: The ID of the shadow balance tracking this provider's funds.
+type ProviderBreakdown struct {
+	Provider  string   `json:"provider"`
+	Amount    *big.Int `json:"amount"`
+	Available *big.Int `json:"available"`
+	Spent     *big.Int `json:"spent"`
+	BalanceID string   `json:"shadow_balance_id"`
+}
+
+// BalanceLineage represents the complete fund lineage for a balance.
+//
+// Fields:
+// - BalanceID string: The ID of the balance being queried.
+// - TotalWithLineage *big.Int: The total funds tracked across all providers.
+// - AggregateBalanceID string: The ID of the aggregate shadow balance.
+// - Providers []ProviderBreakdown: The breakdown of funds by provider.
+type BalanceLineage struct {
+	BalanceID          string              `json:"balance_id"`
+	TotalWithLineage   *big.Int            `json:"total_with_lineage"`
+	AggregateBalanceID string              `json:"aggregate_balance_id"`
+	Providers          []ProviderBreakdown `json:"providers"`
+}
+
+type destinationLineageInfo struct {
+	shadowBalance    *model.Balance
+	aggregateBalance *model.Balance
+}
+
 // processLineage handles fund lineage tracking for a transaction.
 // It processes both credit (incoming funds with provider tracking) and debit (fund allocation from shadow balances).
 //
@@ -207,17 +242,19 @@ func (l *Blnk) processLineageCredit(ctx context.Context, txn *model.Transaction,
 		return fmt.Errorf("destination balance %s has no identity_id for lineage tracking", destBalance.BalanceID)
 	}
 
-	locker, err := l.acquireLineageCreditLock(ctx, identityID, provider, txn.Currency)
-	if err != nil {
-		span.RecordError(err)
-		return err
-	}
-	defer l.releaseSingleLock(ctx, locker)
-
+	// Get or create the shadow and aggregate balances first (before locking)
 	shadowBalance, aggregateBalance, err := l.getOrCreateLineageBalances(ctx, identityID, provider, txn.Currency)
 	if err != nil {
 		return err
 	}
+
+	// Use MultiLocker to lock both shadow and aggregate balances
+	locker, err := l.acquireLineageLocks(ctx, []string{shadowBalance.BalanceID, aggregateBalance.BalanceID})
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	defer l.releaseLock(ctx, locker)
 
 	if err := l.queueShadowCreditTransaction(ctx, txn, destBalance, provider, shadowBalance, aggregateBalance, identityID); err != nil {
 		return err
@@ -344,6 +381,8 @@ func (l *Blnk) queueShadowCreditTransaction(ctx context.Context, txn *model.Tran
 
 // processLineageDebit processes a debit transaction for fund lineage tracking.
 // It allocates funds from shadow balances based on the configured allocation strategy.
+// Uses MultiLocker to lock ALL involved shadow balances (source AND destination) atomically,
+// preventing both race conditions and deadlocks from nested lock acquisition.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -357,21 +396,53 @@ func (l *Blnk) processLineageDebit(ctx context.Context, txn *model.Transaction, 
 	ctx, span := tracer.Start(ctx, "ProcessLineageDebit")
 	defer span.End()
 
-	locker, err := l.acquireLineageDebitLock(ctx, sourceBalance.BalanceID)
-	if err != nil {
-		span.RecordError(err)
-		return err
-	}
-	defer l.releaseSingleLock(ctx, locker)
-
+	// Get mappings first (before locking) to know which shadow balances we need
 	mappings, err := l.datasource.GetLineageMappings(ctx, sourceBalance.BalanceID)
 	if err != nil {
 		return fmt.Errorf("failed to get lineage mappings: %w", err)
 	}
 
 	if len(mappings) == 0 {
+		// Check if there are pending credit outbox entries for this balance
+		// If so, retry later after those credits are processed
+		hasPending, err := l.datasource.HasPendingCreditOutbox(ctx, sourceBalance.BalanceID)
+		if err != nil {
+			logrus.Warnf("failed to check pending credit outbox for balance %s: %v", sourceBalance.BalanceID, err)
+			return nil
+		}
+		if hasPending {
+			return fmt.Errorf("pending credit outbox entries exist for balance %s, retry later", sourceBalance.BalanceID)
+		}
 		return nil
 	}
+
+	// Collect all balance IDs for locking - source shadows + source aggregate
+	lockKeys := make([]string, 0, len(mappings)+1)
+	for _, m := range mappings {
+		lockKeys = append(lockKeys, m.ShadowBalanceID)
+	}
+	lockKeys = append(lockKeys, mappings[0].AggregateBalanceID)
+
+	// Pre-create destination lineage balances (if destination tracks lineage) BEFORE acquiring locks
+	var destLineageBalances map[string]*destinationLineageInfo
+	if destinationBalance != nil && destinationBalance.TrackFundLineage && destinationBalance.IdentityID != "" {
+		destLineageBalances, err = l.prepareDestinationLineageBalances(ctx, mappings, destinationBalance)
+		if err != nil {
+			logrus.Warnf("failed to prepare destination lineage balances: %v", err)
+		} else {
+			for _, info := range destLineageBalances {
+				lockKeys = append(lockKeys, info.shadowBalance.BalanceID)
+				lockKeys = append(lockKeys, info.aggregateBalance.BalanceID)
+			}
+		}
+	}
+
+	locker, err := l.acquireLineageLocks(ctx, lockKeys)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	defer l.releaseLock(ctx, locker)
 
 	sources, err := l.getLineageSources(ctx, mappings)
 	if err != nil {
@@ -385,75 +456,65 @@ func (l *Blnk) processLineageDebit(ctx context.Context, txn *model.Transaction, 
 		return err
 	}
 
-	l.processAllocations(ctx, txn, allocations, mappings, sourceBalance, destinationBalance, sourceAggBalance)
+	l.processAllocations(ctx, txn, allocations, mappings, sourceBalance, destinationBalance, sourceAggBalance, destLineageBalances)
 	l.updateFundAllocationMetadata(ctx, txn, allocations, mappings)
 
 	span.AddEvent("Lineage debit processed", trace.WithAttributes(attribute.Int("allocations", len(allocations))))
 	return nil
 }
 
-// acquireLineageDebitLock acquires a distributed lock for lineage debit processing.
+// prepareDestinationLineageBalances pre-creates destination shadow and aggregate balances for all providers.
+// This is called BEFORE acquiring locks to avoid nested lock acquisition deadlocks.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
-// - balanceID string: The balance ID to lock.
+// - mappings []model.LineageMapping: The source lineage mappings (one per provider).
+// - destinationBalance *model.Balance: The destination balance.
 //
 // Returns:
-// - *redlock.Locker: The acquired lock.
-// - error: An error if the lock could not be acquired.
-func (l *Blnk) acquireLineageDebitLock(ctx context.Context, balanceID string) (*redlock.Locker, error) {
-	lockKey := fmt.Sprintf("lineage-debit:%s", balanceID)
-	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+// - map[string]*destinationLineageInfo: Map of provider to destination lineage balances.
+// - error: An error if any balance could not be created.
+func (l *Blnk) prepareDestinationLineageBalances(ctx context.Context, mappings []model.LineageMapping, destinationBalance *model.Balance) (map[string]*destinationLineageInfo, error) {
+	result := make(map[string]*destinationLineageInfo, len(mappings))
 
-	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
-	if err != nil {
-		return nil, fmt.Errorf("failed to acquire lock for lineage debit: %w", err)
+	for _, mapping := range mappings {
+		shadowBalance, aggBalance, err := l.getOrCreateDestinationLineageBalances(ctx, mapping.Provider, destinationBalance)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare destination lineage for provider %s: %w", mapping.Provider, err)
+		}
+		result[mapping.Provider] = &destinationLineageInfo{
+			shadowBalance:    shadowBalance,
+			aggregateBalance: aggBalance,
+		}
 	}
 
-	return locker, nil
+	return result, nil
 }
 
-// acquireLineageCreditLock acquires a distributed lock for lineage credit processing.
+// acquireLineageLocks acquires distributed locks for multiple shadow balances using MultiLocker.
+// MultiLocker handles sorting (prevents deadlock) and deduplication automatically.
+// This is used for both credit and debit lineage processing to prevent race conditions.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
-// - identityID string: The identity ID.
-// - provider string: The fund provider identifier.
-// - currency string: The currency.
+// - balanceIDs []string: The balance IDs to lock.
 //
 // Returns:
-// - *redlock.Locker: The acquired lock.
-// - error: An error if the lock could not be acquired.
-func (l *Blnk) acquireLineageCreditLock(ctx context.Context, identityID, provider, currency string) (*redlock.Locker, error) {
-	lockKey := fmt.Sprintf("lineage-credit:%s:%s:%s", identityID, provider, currency)
-	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
-
-	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
-	if err != nil {
-		return nil, fmt.Errorf("failed to acquire lock for lineage credit: %w", err)
+// - *redlock.MultiLocker: The acquired multi-lock.
+// - error: An error if the locks could not be acquired.
+func (l *Blnk) acquireLineageLocks(ctx context.Context, balanceIDs []string) (*redlock.MultiLocker, error) {
+	// Prefix all keys to avoid collision with main transaction locks
+	lockKeys := make([]string, 0, len(balanceIDs))
+	for _, id := range balanceIDs {
+		lockKeys = append(lockKeys, fmt.Sprintf("lineage:%s", id))
 	}
 
-	return locker, nil
-}
-
-// acquireDestinationLineageLock acquires a distributed lock for destination lineage processing.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - identityID string: The identity ID.
-// - provider string: The fund provider identifier.
-// - currency string: The currency.
-//
-// Returns:
-// - *redlock.Locker: The acquired lock.
-// - error: An error if the lock could not be acquired.
-func (l *Blnk) acquireDestinationLineageLock(ctx context.Context, identityID, provider, currency string) (*redlock.Locker, error) {
-	lockKey := fmt.Sprintf("lineage-dest:%s:%s:%s", identityID, provider, currency)
-	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+	// MultiLocker handles deduplication and sorts keys lexicographically
+	locker := redlock.NewMultiLocker(l.redis, lockKeys, model.GenerateUUIDWithSuffix("loc"))
 
 	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
 	if err != nil {
-		return nil, fmt.Errorf("failed to acquire lock for destination lineage: %w", err)
+		return nil, fmt.Errorf("failed to acquire lineage locks: %w", err)
 	}
 
 	return locker, nil
@@ -495,7 +556,8 @@ func (l *Blnk) getSourceAggregateBalance(ctx context.Context, sourceBalance *mod
 // - sourceBalance *model.Balance: The source balance.
 // - destinationBalance *model.Balance: The destination balance.
 // - sourceAggBalance *model.Balance: The source aggregate balance.
-func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, allocations []Allocation, mappings []model.LineageMapping, sourceBalance, destinationBalance, sourceAggBalance *model.Balance) {
+// - destLineageBalances map[string]*destinationLineageInfo: Pre-created destination lineage balances (may be nil).
+func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, allocations []Allocation, mappings []model.LineageMapping, sourceBalance, destinationBalance, sourceAggBalance *model.Balance, destLineageBalances map[string]*destinationLineageInfo) {
 	for i, alloc := range allocations {
 		if alloc.Amount.Cmp(big.NewInt(0)) == 0 {
 			continue
@@ -506,31 +568,16 @@ func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, a
 			continue
 		}
 
-		allocAmount := l.preciseAmountToFloat(alloc.Amount, txn.Precision)
-
-		if err := l.queueReleaseTransaction(ctx, txn, alloc, mapping, sourceBalance, sourceAggBalance, allocAmount, i); err != nil {
+		if err := l.queueReleaseTransaction(ctx, txn, alloc, mapping, sourceBalance, sourceAggBalance, i); err != nil {
 			logrus.Errorf("failed to queue release transaction: %v", err)
 			continue
 		}
 
-		if err := l.processDestinationLineage(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, allocAmount, i); err != nil {
+		if err := l.processDestinationLineage(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destLineageBalances, i); err != nil {
 			logrus.Errorf("failed to process destination lineage: %v", err)
 			// Continue processing other allocations even if one fails
 		}
 	}
-}
-
-// preciseAmountToFloat converts a precise amount to a float based on the precision.
-//
-// Parameters:
-// - amount *big.Int: The precise amount.
-// - precision float64: The precision multiplier.
-//
-// Returns:
-// - float64: The converted float amount.
-func (l *Blnk) preciseAmountToFloat(amount *big.Int, precision float64) float64 {
-	floatAmount, _ := new(big.Float).SetInt(amount).Float64()
-	return floatAmount / precision
 }
 
 // queueReleaseTransaction queues a transaction to release funds from the aggregate balance back to a shadow balance.
@@ -542,16 +589,14 @@ func (l *Blnk) preciseAmountToFloat(amount *big.Int, precision float64) float64 
 // - mapping *model.LineageMapping: The lineage mapping for the provider.
 // - sourceBalance *model.Balance: The source balance.
 // - sourceAggBalance *model.Balance: The source aggregate balance.
-// - allocAmount float64: The allocation amount as a float.
 // - index int: The allocation index for reference uniqueness.
 //
 // Returns:
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, sourceAggBalance *model.Balance, allocAmount float64, index int) error {
+func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, sourceAggBalance *model.Balance, index int) error {
 	releaseTxn := &model.Transaction{
 		Source:        sourceAggBalance.BalanceID,
 		Destination:   alloc.BalanceID,
-		Amount:        allocAmount,
 		PreciseAmount: new(big.Int).Set(alloc.Amount),
 		Currency:      sourceBalance.Currency,
 		Precision:     txn.Precision,
@@ -564,9 +609,8 @@ func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transacti
 			"_main_balance": sourceBalance.BalanceID,
 			"_allocation":   sourceBalance.AllocationStrategy,
 		},
-		AllowOverdraft: true,
-		SkipQueue:      true,
-		Inflight:       txn.Inflight,
+		SkipQueue: true,
+		Inflight:  txn.Inflight,
 	}
 
 	_, err := l.QueueTransaction(ctx, releaseTxn)
@@ -574,6 +618,7 @@ func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transacti
 }
 
 // processDestinationLineage processes lineage tracking for the destination balance when it also tracks fund lineage.
+// Uses pre-created destination balances to avoid nested lock acquisition (locks are already held by caller).
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -582,28 +627,30 @@ func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transacti
 // - mapping *model.LineageMapping: The lineage mapping for the provider.
 // - sourceBalance *model.Balance: The source balance.
 // - destinationBalance *model.Balance: The destination balance.
-// - allocAmount float64: The allocation amount as a float.
+// - destLineageBalances map[string]*destinationLineageInfo: Pre-created destination lineage balances (may be nil).
 // - index int: The allocation index for reference uniqueness.
 //
 // Returns:
 // - error: An error if destination lineage processing fails.
-func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance *model.Balance, allocAmount float64, index int) error {
+func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance *model.Balance, destLineageBalances map[string]*destinationLineageInfo, index int) error {
 	if destinationBalance == nil || !destinationBalance.TrackFundLineage || destinationBalance.IdentityID == "" {
 		return nil
 	}
 
-	locker, err := l.acquireDestinationLineageLock(ctx, destinationBalance.IdentityID, mapping.Provider, destinationBalance.Currency)
-	if err != nil {
-		return fmt.Errorf("failed to acquire destination lineage lock: %w", err)
-	}
-	defer l.releaseSingleLock(ctx, locker)
-
-	destShadowBalance, destAggBalance, err := l.getOrCreateDestinationLineageBalances(ctx, mapping.Provider, destinationBalance)
-	if err != nil {
-		return fmt.Errorf("failed to create destination lineage balances: %w", err)
+	// Use pre-created destination balances (locks already held by caller)
+	if destLineageBalances == nil {
+		return nil
 	}
 
-	if err := l.queueReceiveTransaction(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance, allocAmount, index); err != nil {
+	destInfo, ok := destLineageBalances[mapping.Provider]
+	if !ok || destInfo == nil {
+		return nil
+	}
+
+	destShadowBalance := destInfo.shadowBalance
+	destAggBalance := destInfo.aggregateBalance
+
+	if err := l.queueReceiveTransaction(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance, index); err != nil {
 		return fmt.Errorf("failed to queue receive transaction: %w", err)
 	}
 
@@ -671,11 +718,10 @@ func (l *Blnk) getOrCreateDestinationLineageBalances(ctx context.Context, provid
 //
 // Returns:
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance *model.Balance, allocAmount float64, index int) error {
+func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance *model.Balance, index int) error {
 	receiveTxn := &model.Transaction{
 		Source:        destShadowBalance.BalanceID,
 		Destination:   destAggBalance.BalanceID,
-		Amount:        allocAmount,
 		PreciseAmount: new(big.Int).Set(alloc.Amount),
 		Currency:      destinationBalance.Currency,
 		Precision:     txn.Precision,
@@ -689,7 +735,7 @@ func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transacti
 			"_from_balance": sourceBalance.BalanceID,
 		},
 		AllowOverdraft: true,
-		SkipQueue:      true, // Shadow transactions always process synchronously
+		SkipQueue:      true,
 		Inflight:       txn.Inflight,
 	}
 
@@ -740,10 +786,9 @@ func (l *Blnk) buildFundAllocationList(allocations []Allocation, mappings []mode
 			continue
 		}
 
-		allocAmount := l.preciseAmountToFloat(alloc.Amount, precision)
 		fundAllocation = append(fundAllocation, map[string]interface{}{
 			"provider": mapping.Provider,
-			"amount":   allocAmount,
+			"amount":   alloc.Amount,
 		})
 	}
 
@@ -814,7 +859,7 @@ func (l *Blnk) getLineageSources(ctx context.Context, mappings []model.LineageMa
 			continue
 		}
 
-		if balance.DebitBalance != nil && balance.DebitBalance.Cmp(big.NewInt(0)) > 0 {
+		if balance.DebitBalance != nil && balance.CreditBalance != nil && balance.DebitBalance.Cmp(big.NewInt(0)) > 0 {
 			available := new(big.Int).Sub(balance.DebitBalance, balance.CreditBalance)
 			if available.Cmp(big.NewInt(0)) > 0 {
 				sources = append(sources, LineageSource{
@@ -995,36 +1040,6 @@ func (l *Blnk) findMappingByShadowID(mappings []model.LineageMapping, shadowBala
 	return nil
 }
 
-// ProviderBreakdown represents the fund breakdown for a specific provider in a balance's lineage.
-//
-// Fields:
-// - Provider string: The name/identifier of the fund provider.
-// - Amount *big.Int: The total amount received from this provider.
-// - Available *big.Int: The amount still available (not yet spent).
-// - Spent *big.Int: The amount that has been debited.
-// - BalanceID string: The ID of the shadow balance tracking this provider's funds.
-type ProviderBreakdown struct {
-	Provider  string   `json:"provider"`
-	Amount    *big.Int `json:"amount"`
-	Available *big.Int `json:"available"`
-	Spent     *big.Int `json:"spent"`
-	BalanceID string   `json:"shadow_balance_id"`
-}
-
-// BalanceLineage represents the complete fund lineage for a balance.
-//
-// Fields:
-// - BalanceID string: The ID of the balance being queried.
-// - TotalWithLineage *big.Int: The total funds tracked across all providers.
-// - AggregateBalanceID string: The ID of the aggregate shadow balance.
-// - Providers []ProviderBreakdown: The breakdown of funds by provider.
-type BalanceLineage struct {
-	BalanceID          string              `json:"balance_id"`
-	TotalWithLineage   *big.Int            `json:"total_with_lineage"`
-	AggregateBalanceID string              `json:"aggregate_balance_id"`
-	Providers          []ProviderBreakdown `json:"providers"`
-}
-
 // GetBalanceLineage retrieves the fund lineage for a balance.
 // It returns a breakdown of funds by provider, showing how much was received and spent from each source.
 //
@@ -1198,6 +1213,8 @@ func (l *Blnk) extractFundAllocation(metadata map[string]interface{}) []map[stri
 }
 
 // commitShadowTransactions commits all inflight shadow transactions for a parent transaction.
+// It attempts to commit all shadows and returns an error if any fail (for outbox retry).
+// Already-committed shadows return "already committed" error which is treated as success.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -1205,7 +1222,7 @@ func (l *Blnk) extractFundAllocation(metadata map[string]interface{}) []map[stri
 // - amount *big.Int: The amount to commit (unused, shadow transactions use their own amounts).
 //
 // Returns:
-// - error: An error if shadow transactions could not be retrieved.
+// - error: An error if any shadow transaction failed to commit (excluding already-committed).
 func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID string, amount *big.Int) error {
 	ctx, span := tracer.Start(ctx, "CommitShadowTransactions")
 	defer span.End()
@@ -1215,14 +1232,19 @@ func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID
 		return fmt.Errorf("failed to get shadow transactions: %w", err)
 	}
 
+	var failedShadows []string
 	for _, shadow := range shadowTxns {
-		if shadow.Status != StatusInflight {
-			continue
-		}
-
 		_, err := l.CommitInflightTransaction(ctx, shadow.TransactionID, shadow.PreciseAmount)
 		if err != nil {
+			if strings.Contains(err.Error(), "already committed") ||
+				strings.Contains(err.Error(), "not in inflight status") {
+				span.AddEvent("Shadow transaction already processed, skipping", trace.WithAttributes(
+					attribute.String("shadow.id", shadow.TransactionID),
+				))
+				continue
+			}
 			logrus.Errorf("failed to commit shadow transaction %s: %v", shadow.TransactionID, err)
+			failedShadows = append(failedShadows, shadow.TransactionID)
 			continue
 		}
 		span.AddEvent("Shadow transaction committed", trace.WithAttributes(
@@ -1231,17 +1253,23 @@ func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID
 		))
 	}
 
+	if len(failedShadows) > 0 {
+		return fmt.Errorf("failed to commit %d shadow transactions: %v", len(failedShadows), failedShadows)
+	}
+
 	return nil
 }
 
 // voidShadowTransactions voids all inflight shadow transactions for a parent transaction.
+// It attempts to void all shadows and returns an error if any fail (for outbox retry).
+// Already-voided/committed shadows return "already committed" error which is treated as success.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
 // - parentTransactionID string: The parent transaction ID.
 //
 // Returns:
-// - error: An error if shadow transactions could not be retrieved.
+// - error: An error if any shadow transaction failed to void (excluding already-processed).
 func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID string) error {
 	ctx, span := tracer.Start(ctx, "VoidShadowTransactions")
 	defer span.End()
@@ -1251,14 +1279,19 @@ func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID s
 		return fmt.Errorf("failed to get shadow transactions: %w", err)
 	}
 
+	var failedShadows []string
 	for _, shadow := range shadowTxns {
-		if shadow.Status != StatusInflight {
-			continue
-		}
-
 		_, err := l.VoidInflightTransaction(ctx, shadow.TransactionID)
 		if err != nil {
+			if strings.Contains(err.Error(), "already committed") ||
+				strings.Contains(err.Error(), "not in inflight status") {
+				span.AddEvent("Shadow transaction already processed, skipping", trace.WithAttributes(
+					attribute.String("shadow.id", shadow.TransactionID),
+				))
+				continue
+			}
 			logrus.Errorf("failed to void shadow transaction %s: %v", shadow.TransactionID, err)
+			failedShadows = append(failedShadows, shadow.TransactionID)
 			continue
 		}
 		span.AddEvent("Shadow transaction voided", trace.WithAttributes(
@@ -1267,7 +1300,75 @@ func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID s
 		))
 	}
 
+	if len(failedShadows) > 0 {
+		return fmt.Errorf("failed to void %d shadow transactions: %v", len(failedShadows), failedShadows)
+	}
+
 	return nil
+}
+
+// queueShadowWork processes shadow commit or void work synchronously first, and queues
+// to outbox for retry only if there are failures. This provides both immediate processing
+// and guaranteed delivery for failed operations.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - parentTransactionID string: The parent transaction ID whose shadows need processing.
+// - lineageType string: Either LineageTypeShadowCommit or LineageTypeShadowVoid.
+//
+// Returns:
+// - error: An error if all processing attempts failed.
+func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, lineageType string) error {
+	ctx, span := tracer.Start(ctx, "QueueShadowWork")
+	defer span.End()
+
+	var processingErr error
+
+	// Try to process shadows synchronously first
+	switch lineageType {
+	case model.LineageTypeShadowCommit:
+		processingErr = l.commitShadowTransactions(ctx, parentTransactionID, nil)
+	case model.LineageTypeShadowVoid:
+		processingErr = l.voidShadowTransactions(ctx, parentTransactionID)
+	}
+
+	// If synchronous processing succeeded, we're done
+	if processingErr == nil {
+		span.AddEvent("Shadow work processed synchronously", trace.WithAttributes(
+			attribute.String("parent.id", parentTransactionID),
+			attribute.String("lineage.type", lineageType),
+		))
+		return nil
+	}
+
+	// Synchronous processing failed - queue to outbox for retry
+	logrus.Warnf("Shadow %s failed for %s, queueing for retry: %v", lineageType, parentTransactionID, processingErr)
+
+	// Create outbox entry for shadow work retry
+	// Use a distinct ID to avoid conflict with regular lineage entries for same transaction
+	shadowWorkID := fmt.Sprintf("%s_%s", parentTransactionID, lineageType)
+	outbox := &model.LineageOutbox{
+		TransactionID: shadowWorkID,
+		LineageType:   lineageType,
+		Payload:       []byte(fmt.Sprintf(`{"parent_transaction_id":"%s"}`, parentTransactionID)),
+		MaxAttempts:   5,
+	}
+
+	if err := l.datasource.InsertLineageOutbox(ctx, outbox); err != nil {
+		span.RecordError(err)
+		// Log but don't fail - the original error is more important
+		logrus.Errorf("failed to queue shadow work for retry: %v", err)
+		return processingErr
+	}
+
+	span.AddEvent("Shadow work queued for retry via outbox", trace.WithAttributes(
+		attribute.String("parent.id", parentTransactionID),
+		attribute.String("lineage.type", lineageType),
+		attribute.String("original.error", processingErr.Error()),
+	))
+
+	// Return original error since processing failed
+	return processingErr
 }
 
 // PrepareLineageOutbox creates a LineageOutbox entry for atomic insertion with the transaction.
@@ -1368,6 +1469,42 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 		attribute.String("outbox.lineage_type", entry.LineageType),
 	)
 
+	// Handle shadow commit/void operations
+	switch entry.LineageType {
+	case model.LineageTypeShadowCommit, model.LineageTypeShadowVoid:
+		// Extract parent transaction ID from payload
+		var payload struct {
+			ParentTransactionID string `json:"parent_transaction_id"`
+		}
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			return fmt.Errorf("failed to unmarshal shadow work payload: %w", err)
+		}
+		parentTxnID := payload.ParentTransactionID
+		if parentTxnID == "" {
+			return fmt.Errorf("parent_transaction_id missing in shadow work payload")
+		}
+
+		if entry.LineageType == model.LineageTypeShadowCommit {
+			span.AddEvent("Processing shadow commit from outbox", trace.WithAttributes(
+				attribute.String("parent.transaction_id", parentTxnID),
+			))
+			if err := l.commitShadowTransactions(ctx, parentTxnID, nil); err != nil {
+				return fmt.Errorf("failed to commit shadow transactions: %w", err)
+			}
+			span.AddEvent("Shadow commit completed from outbox")
+		} else {
+			span.AddEvent("Processing shadow void from outbox", trace.WithAttributes(
+				attribute.String("parent.transaction_id", parentTxnID),
+			))
+			if err := l.voidShadowTransactions(ctx, parentTxnID); err != nil {
+				return fmt.Errorf("failed to void shadow transactions: %w", err)
+			}
+			span.AddEvent("Shadow void completed from outbox")
+		}
+		return nil
+	}
+
+	// Handle regular lineage processing (credit, debit, both)
 	// Fetch the transaction
 	txn, err := l.GetTransaction(ctx, entry.TransactionID)
 	if err != nil {
