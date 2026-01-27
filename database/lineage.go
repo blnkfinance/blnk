@@ -165,6 +165,33 @@ func (d Datasource) InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, out
 	return nil
 }
 
+// InsertLineageOutbox inserts a lineage outbox entry directly (not within a transaction).
+// Use this for queueing work like shadow commit/void that happens after the main transaction commits.
+func (d Datasource) InsertLineageOutbox(ctx context.Context, outbox *model.LineageOutbox) error {
+	query := `
+		INSERT INTO blnk.lineage_outbox
+		(transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, max_attempts, created_at, inflight)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id
+	`
+	err := d.Conn.QueryRowContext(ctx, query,
+		outbox.TransactionID,
+		outbox.SourceBalanceID,
+		outbox.DestinationBalanceID,
+		outbox.Provider,
+		outbox.LineageType,
+		outbox.Payload,
+		model.OutboxStatusPending,
+		outbox.MaxAttempts,
+		time.Now(),
+		outbox.Inflight,
+	).Scan(&outbox.ID)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to insert lineage outbox entry", err)
+	}
+	return nil
+}
+
 // ClaimPendingOutboxEntries claims a batch of pending outbox entries for processing.
 // It uses SELECT FOR UPDATE SKIP LOCKED to allow concurrent processors.
 func (d Datasource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) {
@@ -317,4 +344,20 @@ func (d Datasource) GetOutboxByTransactionID(ctx context.Context, transactionID 
 	}
 
 	return &entry, nil
+}
+
+// HasPendingCreditOutbox checks if there are pending credit outbox entries for a given balance.
+// This is used to detect race conditions where a debit is being processed before credits are complete.
+func (d Datasource) HasPendingCreditOutbox(ctx context.Context, balanceID string) (bool, error) {
+	var count int
+	err := d.Conn.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM blnk.lineage_outbox
+		WHERE destination_balance_id = $1
+		  AND lineage_type IN ('credit', 'both')
+		  AND status IN ('pending', 'processing')
+	`, balanceID).Scan(&count)
+	if err != nil {
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check pending credit outbox", err)
+	}
+	return count > 0, nil
 }

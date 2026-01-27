@@ -484,6 +484,10 @@ func TestLineageToLineageTransfer(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("Receiver balance after transfer: %s", receiverAfterTransfer.Balance.String())
 
+	// Wait for lineage outbox processing to complete by polling for fund allocation
+	_, err = pollForTransactionFundAllocation(ctx, blnk, transferTxn.TransactionID, 1, pollInterval, pollTimeout)
+	require.NoError(t, err, "Lineage debit processing should complete and populate fund allocation")
+
 	senderLineage, err := blnk.GetBalanceLineage(ctx, senderBalance.BalanceID)
 	require.NoError(t, err)
 	t.Logf("Sender lineage after transfer:")
@@ -539,8 +543,13 @@ func TestLineageToLineageTransfer(t *testing.T) {
 	if len(txnLineage.FundAllocation) > 0 {
 		alloc := txnLineage.FundAllocation[0]
 		assert.Equal(t, "stripe", alloc["provider"], "Fund allocation provider should be stripe")
-		if amount, ok := alloc["amount"].(float64); ok {
-			assert.Equal(t, float64(80), amount, "Fund allocation amount should be 80 (human-readable)")
+		switch amt := alloc["amount"].(type) {
+		case *big.Int:
+			assert.Equal(t, 0, amt.Cmp(big.NewInt(8000)), "Fund allocation amount should be 8000 (precise, $80)")
+		case float64:
+			assert.Equal(t, float64(8000), amt, "Fund allocation amount should be 8000 (precise, $80)")
+		default:
+			t.Errorf("Unexpected amount type: %T", alloc["amount"])
 		}
 	}
 
@@ -682,8 +691,11 @@ func TestLineageAllocationStrategies(t *testing.T) {
 		if len(lineage.FundAllocation) > 0 {
 			alloc := lineage.FundAllocation[0]
 			assert.Equal(t, "bank", alloc["provider"], "LIFO should use bank (newest) first")
-			if amount, ok := alloc["amount"].(float64); ok {
-				assert.Equal(t, float64(25), amount, "Should allocate $25 from bank")
+			switch amt := alloc["amount"].(type) {
+			case *big.Int:
+				assert.Equal(t, 0, amt.Cmp(big.NewInt(2500)), "Should allocate 2500 (precise, $25) from bank")
+			case float64:
+				assert.Equal(t, float64(2500), amt, "Should allocate 2500 (precise, $25) from bank")
 			}
 		}
 
@@ -797,11 +809,17 @@ func TestLineageAllocationStrategies(t *testing.T) {
 
 		assert.Len(t, lineage.FundAllocation, 2, "PROPORTIONAL should use both providers")
 
-		stripeAlloc := float64(0)
-		paypalAlloc := float64(0)
+		stripeAlloc := int64(0)
+		paypalAlloc := int64(0)
 		for _, alloc := range lineage.FundAllocation {
 			provider := alloc["provider"].(string)
-			amount := alloc["amount"].(float64)
+			var amount int64
+			switch amt := alloc["amount"].(type) {
+			case *big.Int:
+				amount = amt.Int64()
+			case float64:
+				amount = int64(amt)
+			}
 			switch provider {
 			case "stripe":
 				stripeAlloc = amount
@@ -809,8 +827,8 @@ func TestLineageAllocationStrategies(t *testing.T) {
 				paypalAlloc = amount
 			}
 		}
-		assert.Equal(t, float64(30), stripeAlloc, "Stripe should contribute $30 (60%% of $50)")
-		assert.Equal(t, float64(20), paypalAlloc, "Paypal should contribute $20 (40%% of $50)")
+		assert.Equal(t, int64(3000), stripeAlloc, "Stripe should contribute 3000 (precise, $30 = 60%% of $50)")
+		assert.Equal(t, int64(2000), paypalAlloc, "Paypal should contribute 2000 (precise, $20 = 40%% of $50)")
 
 		balLineage, err := blnk.GetBalanceLineage(ctx, balance.BalanceID)
 		require.NoError(t, err)

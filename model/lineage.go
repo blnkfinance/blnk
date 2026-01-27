@@ -13,6 +13,15 @@ const (
 	OutboxStatusFailed     = "failed"
 )
 
+// Lineage type constants
+const (
+	LineageTypeCredit       = "credit"
+	LineageTypeDebit        = "debit"
+	LineageTypeBoth         = "both"
+	LineageTypeShadowCommit = "shadow_commit"
+	LineageTypeShadowVoid   = "shadow_void"
+)
+
 // LineageOutbox represents a pending lineage processing task.
 // It is inserted atomically with the main transaction to ensure no lineage work is lost.
 type LineageOutbox struct {

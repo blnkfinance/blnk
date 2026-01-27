@@ -516,12 +516,31 @@ func (d Datasource) GetBalancesByIDsLite(ctx context.Context, ids []string) (map
 		}
 
 		// Parse big.Int values
-		balance.Balance, _ = parseBigInt(balanceValue)
-		balance.CreditBalance, _ = parseBigInt(creditBalanceValue)
-		balance.DebitBalance, _ = parseBigInt(debitBalanceValue)
-		balance.InflightBalance, _ = parseBigInt(inflightBalanceValue)
-		balance.InflightCreditBalance, _ = parseBigInt(inflightCreditBalanceValue)
-		balance.InflightDebitBalance, _ = parseBigInt(inflightDebitBalanceValue)
+		var parseErr error
+		balance.Balance, parseErr = parseBigInt(balanceValue)
+		if parseErr != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, fmt.Sprintf("balance %s: failed to parse balance", balance.BalanceID), parseErr)
+		}
+		balance.CreditBalance, parseErr = parseBigInt(creditBalanceValue)
+		if parseErr != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, fmt.Sprintf("balance %s: failed to parse credit_balance", balance.BalanceID), parseErr)
+		}
+		balance.DebitBalance, parseErr = parseBigInt(debitBalanceValue)
+		if parseErr != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, fmt.Sprintf("balance %s: failed to parse debit_balance", balance.BalanceID), parseErr)
+		}
+		balance.InflightBalance, parseErr = parseBigInt(inflightBalanceValue)
+		if parseErr != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, fmt.Sprintf("balance %s: failed to parse inflight_balance", balance.BalanceID), parseErr)
+		}
+		balance.InflightCreditBalance, parseErr = parseBigInt(inflightCreditBalanceValue)
+		if parseErr != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, fmt.Sprintf("balance %s: failed to parse inflight_credit_balance", balance.BalanceID), parseErr)
+		}
+		balance.InflightDebitBalance, parseErr = parseBigInt(inflightDebitBalanceValue)
+		if parseErr != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, fmt.Sprintf("balance %s: failed to parse inflight_debit_balance", balance.BalanceID), parseErr)
+		}
 
 		result[balance.BalanceID] = &balance
 	}

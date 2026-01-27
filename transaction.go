@@ -1110,9 +1110,9 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 		return nil, err
 	}
 
-	// Commit any shadow transactions created for lineage tracking
-	if err := l.commitShadowTransactions(ctx, transactionID, amount); err != nil {
-		logrus.Errorf("failed to commit shadow transactions for %s: %v", transactionID, err)
+	// Queue shadow commit work via outbox for reliable processing with retries
+	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowCommit); err != nil {
+		logrus.Errorf("failed to queue shadow commit for %s: %v", transactionID, err)
 	}
 
 	return committedTxn, nil
@@ -1155,9 +1155,9 @@ func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transacti
 		return nil, err
 	}
 
-	// Commit any shadow transactions created for lineage tracking
-	if err := l.commitShadowTransactions(ctx, transactionID, amount); err != nil {
-		logrus.Errorf("failed to commit shadow transactions for %s: %v", transactionID, err)
+	// Queue shadow commit work via outbox for reliable processing with retries
+	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowCommit); err != nil {
+		logrus.Errorf("failed to queue shadow commit for %s: %v", transactionID, err)
 	}
 
 	return committedTxn, nil
@@ -1385,9 +1385,9 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 		return nil, err
 	}
 
-	// Void any shadow transactions created for lineage tracking
-	if err := l.voidShadowTransactions(ctx, transactionID); err != nil {
-		logrus.Errorf("failed to void shadow transactions for %s: %v", transactionID, err)
+	// Queue shadow void work via outbox for reliable processing with retries
+	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowVoid); err != nil {
+		logrus.Errorf("failed to queue shadow void for %s: %v", transactionID, err)
 	}
 
 	return voidedTxn, nil

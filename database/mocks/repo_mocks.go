@@ -478,6 +478,11 @@ func (m *MockDataSource) InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx
 	return args.Error(0)
 }
 
+func (m *MockDataSource) InsertLineageOutbox(ctx context.Context, outbox *model.LineageOutbox) error {
+	args := m.Called(ctx, outbox)
+	return args.Error(0)
+}
+
 func (m *MockDataSource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) {
 	args := m.Called(ctx, batchSize, lockDuration)
 	if args.Get(0) == nil {
@@ -502,4 +507,9 @@ func (m *MockDataSource) GetOutboxByTransactionID(ctx context.Context, transacti
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*model.LineageOutbox), args.Error(1)
+}
+
+func (m *MockDataSource) HasPendingCreditOutbox(ctx context.Context, balanceID string) (bool, error) {
+	args := m.Called(ctx, balanceID)
+	return args.Bool(0), args.Error(1)
 }
