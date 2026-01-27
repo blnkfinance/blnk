@@ -1534,3 +1534,131 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 	span.AddEvent("Lineage processing completed from outbox")
 	return nil
 }
+
+// PrepareLineageOutbox creates a LineageOutbox entry for atomic insertion with the transaction.
+// This ensures lineage processing intent is captured in the same database transaction,
+// guaranteeing no lineage work is lost even if subsequent async operations fail.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The transaction being processed.
+// - sourceBalance *model.Balance: The source balance (may be nil).
+// - destinationBalance *model.Balance: The destination balance (may be nil).
+//
+// Returns:
+// - *model.LineageOutbox: The outbox entry to insert, or nil if no lineage processing needed.
+func (l *Blnk) PrepareLineageOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.LineageOutbox {
+	_, span := tracer.Start(ctx, "PrepareLineageOutbox")
+	defer span.End()
+
+	provider := l.getLineageProvider(txn)
+
+	// Determine what type of lineage processing is needed
+	needsCredit := provider != "" && destinationBalance != nil && destinationBalance.TrackFundLineage
+	needsDebit := sourceBalance != nil && sourceBalance.TrackFundLineage
+
+	if !needsCredit && !needsDebit {
+		span.AddEvent("No lineage processing needed")
+		return nil
+	}
+
+	lineageType := "both"
+	if needsCredit && !needsDebit {
+		lineageType = "credit"
+	} else if needsDebit && !needsCredit {
+		lineageType = "debit"
+	}
+
+	// Build the payload with transaction data needed for processing
+	payload := LineageOutboxPayload{
+		Amount:        txn.Amount,
+		PreciseAmount: txn.PreciseAmount.String(),
+		Currency:      txn.Currency,
+		Precision:     txn.Precision,
+		Reference:     txn.Reference,
+		SkipQueue:     true,
+		Inflight:      txn.Inflight,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logrus.Errorf("failed to marshal lineage outbox payload: %v", err)
+		span.RecordError(err)
+		return nil
+	}
+
+	var srcID, dstID string
+	if sourceBalance != nil {
+		srcID = sourceBalance.BalanceID
+	}
+	if destinationBalance != nil {
+		dstID = destinationBalance.BalanceID
+	}
+
+	outbox := &model.LineageOutbox{
+		TransactionID:        txn.TransactionID,
+		SourceBalanceID:      srcID,
+		DestinationBalanceID: dstID,
+		Provider:             provider,
+		LineageType:          lineageType,
+		Payload:              payloadBytes,
+		MaxAttempts:          5,
+		Inflight:             txn.Inflight, // explicit column, don't rely on JSON payload
+	}
+
+	span.AddEvent("Lineage outbox entry prepared", trace.WithAttributes(
+		attribute.String("transaction_id", txn.TransactionID),
+		attribute.String("lineage_type", lineageType),
+		attribute.String("provider", provider),
+	))
+
+	return outbox
+}
+
+// ProcessLineageFromOutbox processes a lineage outbox entry.
+// This is called by the outbox worker to perform deferred lineage processing.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - entry model.LineageOutbox: The outbox entry to process.
+//
+// Returns:
+// - error: An error if processing fails.
+func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.LineageOutbox) error {
+	ctx, span := tracer.Start(ctx, "ProcessLineageFromOutbox")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("outbox.id", fmt.Sprintf("%d", entry.ID)),
+		attribute.String("outbox.transaction_id", entry.TransactionID),
+		attribute.String("outbox.lineage_type", entry.LineageType),
+	)
+
+	// Fetch the transaction
+	txn, err := l.GetTransaction(ctx, entry.TransactionID)
+	if err != nil {
+		return fmt.Errorf("failed to get transaction: %w", err)
+	}
+
+	txn.Inflight = entry.Inflight
+
+	// Fetch balances
+	var sourceBalance, destinationBalance *model.Balance
+	if entry.SourceBalanceID != "" {
+		sourceBalance, err = l.datasource.GetBalanceByIDLite(entry.SourceBalanceID)
+		if err != nil {
+			logrus.Warnf("failed to get source balance %s for lineage processing: %v", entry.SourceBalanceID, err)
+		}
+	}
+	if entry.DestinationBalanceID != "" {
+		destinationBalance, err = l.datasource.GetBalanceByIDLite(entry.DestinationBalanceID)
+		if err != nil {
+			logrus.Warnf("failed to get destination balance %s for lineage processing: %v", entry.DestinationBalanceID, err)
+		}
+	}
+
+	// Process lineage using the existing logic
+	l.processLineage(ctx, txn, sourceBalance, destinationBalance)
+
+	span.AddEvent("Lineage processing completed from outbox")
+	return nil
+}
