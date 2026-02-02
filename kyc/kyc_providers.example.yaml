@@ -1,0 +1,60 @@
+providers:
+  - name: "onfido"
+    enabled: true
+    api_key: "${ONFIDO_API_KEY}"
+    auth_type: "bearer"
+    base_url: "https://api.onfido.com/v3.6"
+    endpoints:
+      create_check: "/applicants"
+      get_status: "/checks/{provider_ref}"
+      upload_document: "/documents"
+    request_config:
+      content_type: "application/json"
+      identity_field_mapping:
+        first_name: "first_name"
+        last_name: "last_name"
+        email_address: "email"
+        dob: "dob"
+    response_mapping:
+      status_field: "result"
+      reference_field: "id"
+      verified_values: ["clear", "complete"]
+      failed_values: ["consider", "rejected"]
+      pending_values: ["in_progress", "pending"]
+      review_values: ["manual_review"]
+
+  - name: "sumsub"
+    enabled: false
+    api_key: "${SUMSUB_API_KEY}"
+    api_secret: "${SUMSUB_SECRET_KEY}"
+    auth_type: "header"
+    auth_header: "X-App-Token"
+    base_url: "https://api.sumsub.com"
+    endpoints:
+      create_check: "/resources/applicants"
+      get_status: "/resources/applicants/{provider_ref}/status"
+      upload_document: "/resources/applicants/{identity_id}/info/idDoc"
+    response_mapping:
+      status_field: "reviewStatus"
+      reference_field: "applicantId"
+      verified_values: ["completed", "approved"]
+      failed_values: ["rejected"]
+      pending_values: ["pending", "init", "queued"]
+      review_values: ["onHold"]
+
+  - name: "veriff"
+    enabled: false
+    api_key: "${VERIFF_API_KEY}"
+    auth_type: "header"
+    auth_header: "X-AUTH-CLIENT"
+    base_url: "https://stationapi.veriff.com/v1"
+    endpoints:
+      create_check: "/sessions"
+      get_status: "/sessions/{provider_ref}/decision"
+    response_mapping:
+      status_field: "verification.status"
+      reference_field: "verification.id"
+      verified_values: ["approved"]
+      failed_values: ["declined", "expired", "abandoned"]
+      pending_values: ["created", "started", "submitted"]
+      review_values: ["review"]

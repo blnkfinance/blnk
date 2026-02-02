@@ -36,6 +36,7 @@ type IDataSource interface {
 	reconciliation // Interface for reconciliation-related operations
 	apikey         // Interface for API key operations
 	lineage        // Interface for fund lineage operations
+	kyc            // Interface for KYC operations
 }
 
 // transaction defines methods for handling transactions.
@@ -163,4 +164,17 @@ type lineage interface {
 	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error                                                     // Marks an outbox entry as failed
 	GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error)                        // Gets outbox entry by transaction ID
 	HasPendingCreditOutbox(ctx context.Context, balanceID string) (bool, error)                                              // Checks if there are pending credit outbox entries for a balance
+}
+
+// kyc defines methods for KYC/Compliance operations.
+type kyc interface {
+	CreateKYCWorkflow(workflow model.KYCWorkflow) (model.KYCWorkflow, error)
+	GetKYCWorkflow(id string) (*model.KYCWorkflow, error)
+	UpdateKYCWorkflow(workflow *model.KYCWorkflow) error
+
+	CreateKYCStep(step model.KYCStep) (model.KYCStep, error)
+	GetKYCStep(id string) (*model.KYCStep, error)
+	UpdateKYCStep(step *model.KYCStep) error
+	GetKYCStepsByWorkflow(workflowID string) ([]model.KYCStep, error)
+	GetKYCStepsByStatus(status model.KYCStepStatus) ([]model.KYCStep, error) // For poller to find SUBMITTED steps
 }
