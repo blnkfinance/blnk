@@ -104,6 +104,9 @@ func (a Api) Router() *gin.Engine {
 	// Search routes
 	router.POST("/search/:collection", a.Search)
 	router.POST("/multi-search", a.MultiSearch)
+	// Reindex routes
+	router.POST("/search/reindex", a.StartReindex)
+	router.GET("/search/reindex", a.GetReindexProgress)
 
 	// Reconciliation routes
 	router.POST("/reconciliation/upload", a.UploadExternalData)

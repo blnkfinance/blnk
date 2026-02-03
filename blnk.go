@@ -178,3 +178,11 @@ func (b *Blnk) Config() *config.Configuration {
 	}
 	return cfg
 }
+
+func (b *Blnk) GetSearchClient() *search.TypesenseClient {
+	return b.search
+}
+
+func (b *Blnk) GetDataSource() database.IDataSource {
+	return b.datasource
+}

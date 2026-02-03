@@ -663,58 +663,56 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 // - error: An error if any occurs during the query execution, data retrieval, or JSON parsing.
 func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 	var indicator sql.NullString
-	// Execute SQL query to select all balances with a limit of 20 records
 	rows, err := d.Conn.Query(`
-        SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+        SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data
         FROM blnk.balances
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
     `, limit, offset)
 	if err != nil {
-		return nil, err // Return error if the query fails
+		return nil, err
 	}
 	defer func(rows *sql.Rows) {
-		err := rows.Close() // Ensure rows are closed after query execution
+		err := rows.Close()
 		if err != nil {
-			logrus.Error(err) // Log error if closing rows fails
+			logrus.Error(err)
 		}
 	}(rows)
 
-	// Slice to store the retrieved balances
 	var balances []model.Balance
 	var balanceValue, creditBalanceValue, debitBalanceValue string
+	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
 
-	// Iterate through the rows and scan each balance into the Balance object
 	for rows.Next() {
 		balance := model.Balance{}
 		var metaDataJSON []byte
 
-		// Scan values from the current row into the balance object and temporary variables
 		err = rows.Scan(
 			&balance.BalanceID,
 			&indicator,
 			&balanceValue,
 			&creditBalanceValue,
 			&debitBalanceValue,
+			&inflightBalanceValue,
+			&inflightCreditBalanceValue,
+			&inflightDebitBalanceValue,
 			&balance.Currency,
 			&balance.CurrencyMultiplier,
 			&balance.LedgerID,
+			&balance.IdentityID,
 			&balance.CreatedAt,
 			&metaDataJSON,
 		)
 		if err != nil {
-			return nil, err // Return error if scanning fails
+			return nil, err
 		}
 
-		fmt.Println("Indicator: ", indicator.String)
-		// Handle null indicator field
 		if indicator.Valid {
 			balance.Indicator = indicator.String
 		} else {
 			balance.Indicator = ""
 		}
 
-		// Parse string values to big.Int
 		balance.Balance, err = parseBigInt(balanceValue)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse balance: %w", err)
@@ -727,18 +725,27 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse debit_balance: %w", err)
 		}
-
-		// Parse the metadata JSON into the MetaData map field
-		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+		balance.InflightBalance, err = parseBigInt(inflightBalanceValue)
 		if err != nil {
-			return nil, err // Return error if JSON parsing fails
+			return nil, fmt.Errorf("failed to parse inflight_balance: %w", err)
+		}
+		balance.InflightCreditBalance, err = parseBigInt(inflightCreditBalanceValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse inflight_credit_balance: %w", err)
+		}
+		balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
 		}
 
-		// Append the balance to the slice of balances
+		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+		if err != nil {
+			return nil, err
+		}
+
 		balances = append(balances, balance)
 	}
 
-	// Return the slice of balances
 	return balances, nil
 }
 

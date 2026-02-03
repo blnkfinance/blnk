@@ -316,7 +316,6 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			lineageProcessor := blnk.NewLineageOutboxProcessor(b.blnk)
 			lineageProcessor.Start(ctx)
 			defer lineageProcessor.Stop()
-			logrus.Info("Lineage outbox processor started")
 
 			// Start server
 			if err := startServer(router, cfg.Server.Port); err != nil {

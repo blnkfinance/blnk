@@ -991,7 +991,7 @@ func TestGetAllBalances_Success(t *testing.T) {
 	metaDataJSON, _ := json.Marshal(metaData)
 
 	query := `
-        SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+        SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data
         FROM blnk.balances
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
@@ -1001,10 +1001,10 @@ func TestGetAllBalances_Success(t *testing.T) {
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"balance_id", "indicator", "balance", "credit_balance", "debit_balance",
-			"currency", "currency_multiplier", "ledger_id", "created_at", "meta_data",
+			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
 		}).
-			AddRow("bln_1", "ACC001", "100000", "60000", "40000", "USD", 100, "ldg_001", time.Now(), metaDataJSON).
-			AddRow("bln_2", "ACC002", "200000", "120000", "80000", "EUR", 100, "ldg_001", time.Now(), metaDataJSON))
+			AddRow("bln_1", "ACC001", "100000", "60000", "40000", "0", "0", "0", "USD", 100, "ldg_001", "", time.Now(), metaDataJSON).
+			AddRow("bln_2", "ACC002", "200000", "120000", "80000", "0", "0", "0", "EUR", 100, "ldg_001", "", time.Now(), metaDataJSON))
 
 	balances, err := ds.GetAllBalances(10, 0)
 	assert.NoError(t, err)
@@ -1026,7 +1026,7 @@ func TestGetAllBalances_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-        SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+        SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data
         FROM blnk.balances
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
@@ -1036,7 +1036,7 @@ func TestGetAllBalances_Empty(t *testing.T) {
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"balance_id", "indicator", "balance", "credit_balance", "debit_balance",
-			"currency", "currency_multiplier", "ledger_id", "created_at", "meta_data",
+			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
 		}))
 
 	balances, err := ds.GetAllBalances(10, 0)
@@ -1055,7 +1055,7 @@ func TestGetAllBalances_QueryError(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-        SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+        SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data
         FROM blnk.balances
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
