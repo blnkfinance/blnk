@@ -240,14 +240,14 @@ func TestGetAllBalances(t *testing.T) {
 	// The column order must match the actual SQL generated.
 	rows := sqlmock.NewRows([]string{
 		"balance_id", "indicator", "balance", "credit_balance", "debit_balance",
-		"currency", "currency_multiplier", "ledger_id", "created_at", "meta_data",
+		"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
 	}).
 		AddRow(
-			"test-balance", "test-indicator", 100, 50, 50, "USD", 1.0, "test-ledger",
+			"test-balance", "test-indicator", 100, 50, 50, 0, 0, 0, "USD", 1.0, "test-ledger", "",
 			time.Now(), `{"key":"value"}`,
 		)
 
-	mock.ExpectQuery(`SELECT balance_id, indicator, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data FROM blnk.balances ORDER BY created_at DESC LIMIT \$1 OFFSET \$2`).
+	mock.ExpectQuery(`SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE\(identity_id, ''\) as identity_id, created_at, meta_data FROM blnk.balances ORDER BY created_at DESC LIMIT \$1 OFFSET \$2`).
 		WithArgs(1, 1).
 		WillReturnRows(rows)
 
