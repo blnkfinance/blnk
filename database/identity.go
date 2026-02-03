@@ -299,3 +299,56 @@ func (d Datasource) DeleteIdentity(id string) error {
 
 	return nil
 }
+
+// GetAllIdentitiesPaginated retrieves identities from the database with pagination support.
+// Parameters:
+// - limit: The maximum number of identities to return.
+// - offset: The offset to start fetching identities from (for pagination).
+// Returns:
+// - A slice of Identity objects if successful, or an error if any operation fails.
+func (d Datasource) GetAllIdentitiesPaginated(limit, offset int) ([]model.Identity, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	rows, err := d.Conn.Query(`
+		SELECT identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data
+		FROM blnk.identity
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve identities", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var identities []model.Identity
+
+	for rows.Next() {
+		identity := model.Identity{}
+		var metaDataJSON []byte
+
+		err = rows.Scan(
+			&identity.IdentityID, &identity.IdentityType,
+			&identity.FirstName, &identity.LastName, &identity.OtherNames, &identity.Gender, &identity.DOB, &identity.EmailAddress, &identity.PhoneNumber, &identity.Nationality,
+			&identity.OrganizationName, &identity.Category,
+			&identity.Street, &identity.Country, &identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt, &metaDataJSON,
+		)
+		if err != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan identity data", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &identity.MetaData)
+		if err != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		identities = append(identities, identity)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over identities", err)
+	}
+
+	return identities, nil
+}

@@ -107,8 +107,6 @@ func (p *LineageOutboxProcessor) Start(ctx context.Context) {
 	p.stopCh = make(chan struct{})
 	p.mu.Unlock()
 
-	logrus.Info("Starting lineage outbox processor")
-
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()

@@ -456,21 +456,7 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 	}
 	latestSchema := config.Schema
 
-	newFields, removedFields := compareSchemas(currentSchema, latestSchema)
-
-	for _, field := range removedFields {
-		dropField := true
-		updateSchema := &api.CollectionUpdateSchema{
-			Fields: []api.Field{{Name: field, Drop: &dropField}},
-		}
-
-		_, err := collection.Update(ctx, updateSchema)
-		if err != nil {
-			logrus.Warnf("Could not drop field %s from collection %s: %v (continuing)", field, collectionName, err)
-			continue
-		}
-		logrus.Infof("Dropped field %s from collection %s", field, collectionName)
-	}
+	newFields, _ := compareSchemas(currentSchema, latestSchema)
 
 	for _, field := range newFields {
 		updateSchema := &api.CollectionUpdateSchema{

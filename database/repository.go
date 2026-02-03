@@ -111,11 +111,12 @@ type balanceMonitor interface {
 
 // identity defines methods for handling identities.
 type identity interface {
-	CreateIdentity(identity model.Identity) (model.Identity, error) // Creates a new identity
-	GetIdentityByID(id string) (*model.Identity, error)             // Retrieves an identity by ID
-	GetAllIdentities() ([]model.Identity, error)                    // Retrieves all identities
-	UpdateIdentity(identity *model.Identity) error                  // Updates an identity
-	DeleteIdentity(id string) error                                 // Deletes an identity
+	CreateIdentity(identity model.Identity) (model.Identity, error)        // Creates a new identity
+	GetIdentityByID(id string) (*model.Identity, error)                    // Retrieves an identity by ID
+	GetAllIdentities() ([]model.Identity, error)                           // Retrieves all identities
+	GetAllIdentitiesPaginated(limit, offset int) ([]model.Identity, error) // Retrieves identities with pagination
+	UpdateIdentity(identity *model.Identity) error                         // Updates an identity
+	DeleteIdentity(id string) error                                        // Deletes an identity
 }
 
 // reconciliation defines methods for handling reconciliation processes.

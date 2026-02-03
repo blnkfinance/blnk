@@ -294,6 +294,11 @@ func (m *MockDataSource) GetAllIdentities() ([]model.Identity, error) {
 	return args.Get(0).([]model.Identity), args.Error(1)
 }
 
+func (m *MockDataSource) GetAllIdentitiesPaginated(limit, offset int) ([]model.Identity, error) {
+	args := m.Called(limit, offset)
+	return args.Get(0).([]model.Identity), args.Error(1)
+}
+
 func (m *MockDataSource) UpdateIdentity(identity *model.Identity) error {
 	args := m.Called(identity)
 	return args.Error(0)
