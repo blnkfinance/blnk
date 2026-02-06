@@ -527,24 +527,32 @@ func TestBuildOrderBy(t *testing.T) {
 	tests := []struct {
 		sortBy    string
 		sortOrder SortOrder
+		table     string
 		alias     string
 		expected  string
 	}{
-		{"created_at", SortDesc, "t", "t.created_at DESC"},
-		{"amount", SortAsc, "t", "t.amount ASC"},
-		{"status", SortDesc, "", "status DESC"},
-		{"name", SortAsc, "", "name ASC"},
+		{"created_at", SortDesc, "transactions", "t", "t.created_at DESC"},
+		{"amount", SortAsc, "transactions", "t", "t.amount ASC"},
+		{"status", SortDesc, "transactions", "", "status DESC"},
+		{"name", SortAsc, "ledgers", "", "name ASC"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
-			result := BuildOrderBy(tt.sortBy, tt.sortOrder, tt.alias)
+			result := BuildOrderBy(tt.sortBy, tt.sortOrder, tt.table, tt.alias)
 			if result != tt.expected {
-				t.Errorf("BuildOrderBy(%q, %q, %q) = %q, want %q",
-					tt.sortBy, tt.sortOrder, tt.alias, result, tt.expected)
+				t.Errorf("BuildOrderBy(%q, %q, %q, %q) = %q, want %q",
+					tt.sortBy, tt.sortOrder, tt.table, tt.alias, result, tt.expected)
 			}
 		})
 	}
+
+	t.Run("falls back to default for invalid sortBy", func(t *testing.T) {
+		result := BuildOrderBy("'; DROP TABLE balances;--", SortDesc, "balances", "")
+		if result != "created_at DESC" {
+			t.Errorf("expected fallback to created_at DESC for injection attempt, got %q", result)
+		}
+	})
 }
 
 func TestQueryOptionsDefaultSortOrder(t *testing.T) {

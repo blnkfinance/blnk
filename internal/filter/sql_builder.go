@@ -198,25 +198,36 @@ func BuildWithOptions(filters *QueryFilterSet, table string, alias string, start
 		return nil, err
 	}
 
-	// Then validate and build the ORDER BY clause
-	if opts != nil && opts.SortBy != "" {
-		if err := ValidateSortField(opts.SortBy, table); err != nil {
-			return nil, err
+	order := SortDesc
+	sortBy := ""
+	if opts != nil {
+		order = opts.DefaultSortOrder()
+		sortBy = opts.SortBy
+		if sortBy != "" {
+			if err := ValidateSortField(sortBy, table); err != nil {
+				return nil, err
+			}
 		}
-		result.OrderBy = BuildOrderBy(opts.SortBy, opts.DefaultSortOrder(), alias)
-	} else {
-		// Default sort by created_at DESC
-		result.OrderBy = BuildOrderBy(GetDefaultSortField(table), SortDesc, alias)
 	}
+	result.OrderBy = BuildOrderBy(sortBy, order, table, alias)
 
 	return result, nil
 }
 
-// BuildOrderBy constructs an ORDER BY clause for the given field and direction.
-func BuildOrderBy(sortBy string, sortOrder SortOrder, alias string) string {
-	fieldName := sortBy
+// BuildOrderBy constructs an ORDER BY clause. It resolves sortBy against the table's
+// allowlist and uses only allowlist-derived column names, never raw input.
+func BuildOrderBy(sortBy string, sortOrder SortOrder, table string, alias string) string {
+	safeField := GetDefaultSortField(table)
+	if sortBy != "" {
+		normalized := strings.ToLower(strings.TrimSpace(sortBy))
+		allowed := GetValidFieldsForTable(table)
+		if allowed[normalized] {
+			safeField = normalized
+		}
+	}
+	fieldName := safeField
 	if alias != "" {
-		fieldName = fmt.Sprintf("%s.%s", alias, sortBy)
+		fieldName = fmt.Sprintf("%s.%s", alias, safeField)
 	}
 
 	direction := "DESC"
