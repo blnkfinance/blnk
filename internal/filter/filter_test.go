@@ -279,6 +279,72 @@ func TestValidateSortField(t *testing.T) {
 	})
 }
 
+func TestValidateSortByForTable(t *testing.T) {
+	t.Run("returns nil for nil opts", func(t *testing.T) {
+		err := ValidateSortByForTable(nil, "balances")
+		if err != nil {
+			t.Errorf("expected no error for nil opts, got: %v", err)
+		}
+	})
+
+	t.Run("returns nil for empty sort_by", func(t *testing.T) {
+		opts := &QueryOptions{SortBy: ""}
+		err := ValidateSortByForTable(opts, "balances")
+		if err != nil {
+			t.Errorf("expected no error for empty sort_by, got: %v", err)
+		}
+	})
+
+	t.Run("allows valid field and normalizes to lowercase", func(t *testing.T) {
+		opts := &QueryOptions{SortBy: "Created_At"}
+		err := ValidateSortByForTable(opts, "balances")
+		if err != nil {
+			t.Errorf("expected no error for valid field, got: %v", err)
+		}
+		if opts.SortBy != "created_at" {
+			t.Errorf("expected SortBy normalized to created_at, got: %q", opts.SortBy)
+		}
+	})
+
+	t.Run("rejects invalid field", func(t *testing.T) {
+		opts := &QueryOptions{SortBy: "evil_field"}
+		err := ValidateSortByForTable(opts, "balances")
+		if err == nil {
+			t.Error("expected error for invalid field")
+		}
+	})
+
+	t.Run("rejects SQL injection attempt", func(t *testing.T) {
+		opts := &QueryOptions{SortBy: "'; DROP TABLE balances;--"}
+		err := ValidateSortByForTable(opts, "balances")
+		if err == nil {
+			t.Error("expected error for SQL injection attempt")
+		}
+	})
+
+	t.Run("rejects malformed sort_by", func(t *testing.T) {
+		opts := &QueryOptions{SortBy: "balance_id; DELETE FROM balances"}
+		err := ValidateSortByForTable(opts, "balances")
+		if err == nil {
+			t.Error("expected error for malformed sort_by")
+		}
+	})
+
+	t.Run("validates against correct table", func(t *testing.T) {
+		opts := &QueryOptions{SortBy: "status"}
+		err := ValidateSortByForTable(opts, "transactions")
+		if err != nil {
+			t.Errorf("status is valid for transactions, got: %v", err)
+		}
+
+		opts2 := &QueryOptions{SortBy: "status"}
+		err2 := ValidateSortByForTable(opts2, "balances")
+		if err2 == nil {
+			t.Error("status is invalid for balances, expected error")
+		}
+	})
+}
+
 func TestGetValidFieldsForTable(t *testing.T) {
 	tests := []struct {
 		table          string

@@ -399,6 +399,10 @@ func (d Datasource) GetAllAccountsWithFilterAndOptions(ctx context.Context, filt
 		limit = 20
 	}
 
+	if err := filter.ValidateSortByForTable(opts, "accounts"); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid sort_by field", nil)
+	}
+
 	// Build filter conditions with options
 	result, err := filter.BuildWithOptions(filters, "accounts", "", 1, opts)
 	if err != nil {

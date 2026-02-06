@@ -390,6 +390,10 @@ func (d Datasource) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, fi
 		limit = 20
 	}
 
+	if err := filter.ValidateSortByForTable(opts, "identity"); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid sort_by field", nil)
+	}
+
 	// Build filter conditions with options
 	result, err := filter.BuildWithOptions(filters, "identity", "", 1, opts)
 	if err != nil {

@@ -178,3 +178,19 @@ func ValidateSortField(sortBy, table string) error {
 func GetDefaultSortField(table string) string {
 	return "created_at"
 }
+
+// ValidateSortByForTable validates opts.SortBy against the table's allowed sort fields.
+// Normalizes SortBy (lowercase, trim) and returns an error if invalid.
+// Call this at the database boundary before BuildWithOptions for defense-in-depth.
+func ValidateSortByForTable(opts *QueryOptions, table string) error {
+	if opts == nil || opts.SortBy == "" {
+		return nil
+	}
+	sortBy := strings.ToLower(strings.TrimSpace(opts.SortBy))
+	allowed := GetValidFieldsForTable(table)
+	if len(allowed) == 0 || !allowed[sortBy] {
+		return fmt.Errorf("invalid sort_by field")
+	}
+	opts.SortBy = sortBy
+	return nil
+}
