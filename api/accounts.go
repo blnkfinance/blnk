@@ -159,7 +159,7 @@ func (a Api) GetAllAccounts(c *gin.Context) {
 // - 400 Bad Request: If there's an error parsing the filters or retrieving accounts.
 // - 200 OK: If the accounts are successfully retrieved.
 func (a Api) FilterAccounts(c *gin.Context) {
-	filters, opts, limit, offset, err := ParseFiltersFromBody(c)
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "accounts")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

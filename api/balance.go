@@ -171,7 +171,7 @@ func (a Api) GetBalances(c *gin.Context) {
 // - 400 Bad Request: If there's an error parsing the filters or retrieving balances.
 // - 200 OK: If the balances are successfully retrieved.
 func (a Api) FilterBalances(c *gin.Context) {
-	filters, opts, limit, offset, err := ParseFiltersFromBody(c)
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "balances")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

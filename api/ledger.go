@@ -168,7 +168,7 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 // - 400 Bad Request: If there's an error parsing the filters or retrieving ledgers.
 // - 200 OK: If the ledgers are successfully retrieved.
 func (a Api) FilterLedgers(c *gin.Context) {
-	filters, opts, limit, offset, err := ParseFiltersFromBody(c)
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "ledgers")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

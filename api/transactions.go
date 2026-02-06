@@ -352,7 +352,7 @@ func (a Api) GetAllTransactions(c *gin.Context) {
 // - 400 Bad Request: If there's an error parsing the filters or retrieving transactions.
 // - 200 OK: If the transactions are successfully retrieved.
 func (a Api) FilterTransactions(c *gin.Context) {
-	filters, opts, limit, offset, err := ParseFiltersFromBody(c)
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "transactions")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

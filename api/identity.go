@@ -220,7 +220,7 @@ func (a Api) GetAllIdentities(c *gin.Context) {
 // - 400 Bad Request: If there's an error parsing the filters or retrieving identities.
 // - 200 OK: If the identities are successfully retrieved.
 func (a Api) FilterIdentities(c *gin.Context) {
-	filters, opts, limit, offset, err := ParseFiltersFromBody(c)
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "identities")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

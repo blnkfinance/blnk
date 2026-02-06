@@ -17,6 +17,8 @@ limitations under the License.
 package api
 
 import (
+	"strings"
+
 	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/gin-gonic/gin"
 )
@@ -75,8 +77,9 @@ type FilterResponse struct {
 }
 
 // ParseFiltersFromBody parses filters from a JSON request body.
+// The table parameter is used to validate sort fields against the allowed fields for that table.
 // Returns the QueryFilterSet, QueryOptions, limit, offset, and any error.
-func ParseFiltersFromBody(c *gin.Context) (*filter.QueryFilterSet, *filter.QueryOptions, int, int, error) {
+func ParseFiltersFromBody(c *gin.Context, table string) (*filter.QueryFilterSet, *filter.QueryOptions, int, int, error) {
 	var req FilterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, nil, 0, 0, err
@@ -93,13 +96,29 @@ func ParseFiltersFromBody(c *gin.Context) (*filter.QueryFilterSet, *filter.Query
 		offset = 0
 	}
 
+	// Sanitize sort order: normalize to lowercase, only allow "asc" or "desc"
+	sortOrder := strings.ToLower(strings.TrimSpace(req.SortOrder))
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+
+	// Sanitize sort field: normalize to lowercase, validate against table's allowed fields
+	sortBy := strings.ToLower(strings.TrimSpace(req.SortBy))
+	if sortBy != "" {
+		allowedFields := filter.GetValidFieldsForTable(table)
+		if !allowedFields[sortBy] {
+			// Invalid field: coerce to empty string so default sort is used
+			sortBy = ""
+		}
+	}
+
 	filterSet := &filter.QueryFilterSet{
 		Filters: req.Filters,
 	}
 
 	opts := &filter.QueryOptions{
-		SortBy:       req.SortBy,
-		SortOrder:    filter.SortOrder(req.SortOrder),
+		SortBy:       sortBy,
+		SortOrder:    filter.SortOrder(sortOrder),
 		IncludeCount: req.IncludeCount,
 	}
 
@@ -107,11 +126,28 @@ func ParseFiltersFromBody(c *gin.Context) (*filter.QueryFilterSet, *filter.Query
 }
 
 // ParseQueryOptions extracts sorting options from query parameters.
+// The table parameter is used to validate sort fields against the allowed fields for that table.
 // Used for GET endpoints with query param filters.
-func ParseQueryOptions(c *gin.Context) *filter.QueryOptions {
+func ParseQueryOptions(c *gin.Context, table string) *filter.QueryOptions {
+	// Sanitize sort order: normalize to lowercase, only allow "asc" or "desc"
+	sortOrder := strings.ToLower(strings.TrimSpace(c.DefaultQuery("sort_order", "desc")))
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+
+	// Sanitize sort field: normalize to lowercase, validate against table's allowed fields
+	sortBy := strings.ToLower(strings.TrimSpace(c.DefaultQuery("sort_by", "")))
+	if sortBy != "" {
+		allowedFields := filter.GetValidFieldsForTable(table)
+		if !allowedFields[sortBy] {
+			// Invalid field: coerce to empty string so default sort is used
+			sortBy = ""
+		}
+	}
+
 	return &filter.QueryOptions{
-		SortBy:       c.DefaultQuery("sort_by", ""),
-		SortOrder:    filter.SortOrder(c.DefaultQuery("sort_order", "desc")),
+		SortBy:       sortBy,
+		SortOrder:    filter.SortOrder(sortOrder),
 		IncludeCount: c.DefaultQuery("include_count", "") == "true",
 	}
 }
