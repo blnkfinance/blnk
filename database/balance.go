@@ -29,6 +29,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 )
 
@@ -1542,4 +1543,180 @@ func (d Datasource) UpdateBalanceIdentity(balanceID string, identityID string) e
 	}
 
 	return nil
+}
+
+// GetAllBalancesWithFilter retrieves balances with advanced filtering support.
+// It delegates to GetAllBalancesWithFilterAndOptions with nil options.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - limit: The maximum number of balances to return.
+// - offset: The offset to start fetching balances from (for pagination).
+//
+// Returns:
+// - []model.Balance: A slice of balances matching the filter criteria.
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllBalancesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Balance, error) {
+	balances, _, err := d.GetAllBalancesWithFilterAndOptions(ctx, filters, nil, limit, offset)
+	return balances, err
+}
+
+// GetAllBalancesWithFilterAndOptions retrieves balances with filtering, sorting, and optional count.
+// It uses the filter package to build SQL WHERE and ORDER BY conditions.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - opts: Query options including sorting and count settings.
+// - limit: The maximum number of balances to return.
+// - offset: The offset to start fetching balances from (for pagination).
+//
+// Returns:
+// - []model.Balance: A slice of balances matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllBalancesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Balance, *int64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	// Build filter conditions with options
+	result, err := filter.BuildWithOptions(filters, "balances", "", 1, opts)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid filter: %s", err.Error()), err)
+	}
+
+	// Determine select fields based on whether count is requested
+	selectFields := "balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data"
+	if opts != nil && opts.IncludeCount {
+		selectFields += ", COUNT(*) OVER() AS total_count"
+	}
+
+	// Build base query
+	baseQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM blnk.balances
+	`, selectFields)
+
+	var args []interface{}
+	args = append(args, result.Args...)
+	argPos := result.NextArgPos
+
+	// Add WHERE clause if filters are provided
+	if len(result.Conditions) > 0 {
+		baseQuery += " WHERE " + strings.Join(result.Conditions, " AND ")
+	}
+
+	// Add ORDER BY clause
+	baseQuery += " ORDER BY " + result.OrderBy
+
+	// Add pagination
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	var indicator sql.NullString
+	rows, err := d.Conn.QueryContext(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve balances", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var balances []model.Balance
+	var totalCount *int64
+	var balanceValue, creditBalanceValue, debitBalanceValue string
+	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
+
+	for rows.Next() {
+		balance := model.Balance{}
+		var metaDataJSON []byte
+
+		if opts != nil && opts.IncludeCount {
+			var count int64
+			err = rows.Scan(
+				&balance.BalanceID,
+				&indicator,
+				&balanceValue,
+				&creditBalanceValue,
+				&debitBalanceValue,
+				&inflightBalanceValue,
+				&inflightCreditBalanceValue,
+				&inflightDebitBalanceValue,
+				&balance.Currency,
+				&balance.CurrencyMultiplier,
+				&balance.LedgerID,
+				&balance.IdentityID,
+				&balance.CreatedAt,
+				&metaDataJSON,
+				&count,
+			)
+			if totalCount == nil {
+				totalCount = &count
+			}
+		} else {
+			err = rows.Scan(
+				&balance.BalanceID,
+				&indicator,
+				&balanceValue,
+				&creditBalanceValue,
+				&debitBalanceValue,
+				&inflightBalanceValue,
+				&inflightCreditBalanceValue,
+				&inflightDebitBalanceValue,
+				&balance.Currency,
+				&balance.CurrencyMultiplier,
+				&balance.LedgerID,
+				&balance.IdentityID,
+				&balance.CreatedAt,
+				&metaDataJSON,
+			)
+		}
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan balance data", err)
+		}
+
+		if indicator.Valid {
+			balance.Indicator = indicator.String
+		} else {
+			balance.Indicator = ""
+		}
+
+		balance.Balance, err = parseBigInt(balanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse balance: %w", err)
+		}
+		balance.CreditBalance, err = parseBigInt(creditBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse credit_balance: %w", err)
+		}
+		balance.DebitBalance, err = parseBigInt(debitBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse debit_balance: %w", err)
+		}
+		balance.InflightBalance, err = parseBigInt(inflightBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse inflight_balance: %w", err)
+		}
+		balance.InflightCreditBalance, err = parseBigInt(inflightCreditBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse inflight_credit_balance: %w", err)
+		}
+		balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		balances = append(balances, balance)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over balances", err)
+	}
+
+	return balances, totalCount, nil
 }

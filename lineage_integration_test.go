@@ -305,6 +305,10 @@ func TestLineageFullFlow(t *testing.T) {
 	require.NoError(t, err, "Failed to poll for merchant balance")
 	t.Logf("Merchant's balance: %s", merchantAfterPayment.Balance.String())
 
+	// Wait for lineage debit processing to complete (processed asynchronously via outbox)
+	_, err = pollForTransactionFundAllocation(ctx, blnk, queuedPayment.TransactionID, 2, pollInterval, pollTimeout)
+	require.NoError(t, err, "Lineage debit processing should complete and populate fund allocation")
+
 	lineage, err := blnk.GetBalanceLineage(ctx, createdAlice.BalanceID)
 	require.NoError(t, err, "Failed to get balance lineage")
 

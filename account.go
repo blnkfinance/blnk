@@ -17,13 +17,14 @@ limitations under the License.
 package blnk
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/blnkfinance/blnk/model"
-
-	"github.com/blnkfinance/blnk/config"
 )
 
 // applyExternalAccount applies external account details to the given account.
@@ -183,4 +184,36 @@ func (l *Blnk) GetAccountByNumber(id string) (*model.Account, error) {
 // - error: An error if the accounts could not be retrieved.
 func (l *Blnk) GetAllAccounts() ([]model.Account, error) {
 	return l.datasource.GetAllAccounts()
+}
+
+// GetAllAccountsWithFilter retrieves accounts using advanced filters.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - filters *filter.QueryFilterSet: Filter conditions to apply.
+// - limit int: Maximum number of accounts to return.
+// - offset int: Offset for pagination.
+//
+// Returns:
+// - []model.Account: A slice of Account models matching the filter criteria.
+// - error: An error if the accounts could not be retrieved.
+func (l *Blnk) GetAllAccountsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Account, error) {
+	return l.datasource.GetAllAccountsWithFilter(ctx, filters, limit, offset)
+}
+
+// GetAllAccountsWithFilterAndOptions retrieves accounts with filters, sorting, and optional count.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - filters *filter.QueryFilterSet: Filter conditions to apply.
+// - opts *filter.QueryOptions: Query options including sorting and count settings.
+// - limit int: Maximum number of accounts to return.
+// - offset int: Offset for pagination.
+//
+// Returns:
+// - []model.Account: A slice of Account models matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the accounts could not be retrieved.
+func (l *Blnk) GetAllAccountsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Account, *int64, error) {
+	return l.datasource.GetAllAccountsWithFilterAndOptions(ctx, filters, opts, limit, offset)
 }

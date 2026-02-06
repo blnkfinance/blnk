@@ -95,6 +95,11 @@ func (a Api) GetBalance(c *gin.Context) {
 // GetBalances retrieves a list of balance records with pagination.
 // It extracts the 'limit' and 'offset' query parameters to control pagination,
 // and the 'include' query parameter to fetch additional related information.
+// Supports advanced filtering via query parameters in the format: field_operator=value
+// Example filters:
+//   - currency_eq=USD
+//   - ledger_id_in=ldg_123,ldg_456
+//   - created_at_gte=2024-01-01
 //
 // Parameters:
 // - c: The Gin context containing the request and response.
@@ -116,6 +121,25 @@ func (a Api) GetBalances(c *gin.Context) {
 		return
 	}
 
+	// Check if advanced filters are present
+	if HasFilters(c) {
+		filters, parseErrors := ParseFiltersFromContext(c, nil)
+		if len(parseErrors) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			return
+		}
+
+		// Use the new filter method
+		resp, err := a.blnk.GetAllBalancesWithFilter(c.Request.Context(), filters, limit, offset)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
 	// Fetch balances with pagination
 	resp, err := a.blnk.GetAllBalances(c.Request.Context(), limit, offset)
 	if err != nil {
@@ -124,6 +148,46 @@ func (a Api) GetBalances(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// FilterBalances filters balances using a JSON request body.
+// This endpoint accepts a POST request with filters specified in JSON format.
+//
+// Request body format:
+//
+//	{
+//	  "filters": [
+//	    {"field": "currency", "operator": "eq", "value": "USD"},
+//	    {"field": "ledger_id", "operator": "in", "values": ["ldg_123", "ldg_456"]}
+//	  ],
+//	  "limit": 20,
+//	  "offset": 0
+//	}
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error parsing the filters or retrieving balances.
+// - 200 OK: If the balances are successfully retrieved.
+func (a Api) FilterBalances(c *gin.Context) {
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, count, err := a.blnk.GetAllBalancesWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if opts.IncludeCount {
+		c.JSON(http.StatusOK, FilterResponse{Data: resp, TotalCount: count})
+	} else {
+		c.JSON(http.StatusOK, resp)
+	}
 }
 
 // CreateBalanceMonitor creates a new balance monitor record in the system.

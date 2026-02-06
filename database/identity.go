@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 )
 
@@ -351,4 +352,126 @@ func (d Datasource) GetAllIdentitiesPaginated(limit, offset int) ([]model.Identi
 	}
 
 	return identities, nil
+}
+
+// GetAllIdentitiesWithFilter retrieves identities with advanced filtering support.
+// It delegates to GetAllIdentitiesWithFilterAndOptions with nil options.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - limit: The maximum number of identities to return.
+// - offset: The offset to start fetching identities from (for pagination).
+//
+// Returns:
+// - []model.Identity: A slice of identities matching the filter criteria.
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllIdentitiesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Identity, error) {
+	identities, _, err := d.GetAllIdentitiesWithFilterAndOptions(ctx, filters, nil, limit, offset)
+	return identities, err
+}
+
+// GetAllIdentitiesWithFilterAndOptions retrieves identities with filtering, sorting, and optional count.
+// It uses the filter package to build SQL WHERE and ORDER BY conditions.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - opts: Query options including sorting and count settings.
+// - limit: The maximum number of identities to return.
+// - offset: The offset to start fetching identities from (for pagination).
+//
+// Returns:
+// - []model.Identity: A slice of identities matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Identity, *int64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	// Build filter conditions with options
+	result, err := filter.BuildWithOptions(filters, "identity", "", 1, opts)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid filter: %s", err.Error()), err)
+	}
+
+	// Determine select fields based on whether count is requested
+	selectFields := "identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data"
+	if opts != nil && opts.IncludeCount {
+		selectFields += ", COUNT(*) OVER() AS total_count"
+	}
+
+	// Build base query
+	baseQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM blnk.identity
+	`, selectFields)
+
+	var args []interface{}
+	args = append(args, result.Args...)
+	argPos := result.NextArgPos
+
+	// Add WHERE clause if filters are provided
+	if len(result.Conditions) > 0 {
+		baseQuery += " WHERE " + strings.Join(result.Conditions, " AND ")
+	}
+
+	// Add ORDER BY clause
+	baseQuery += " ORDER BY " + result.OrderBy
+
+	// Add pagination
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := d.Conn.QueryContext(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve identities", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var identities []model.Identity
+	var totalCount *int64
+
+	for rows.Next() {
+		identity := model.Identity{}
+		var metaDataJSON []byte
+
+		if opts != nil && opts.IncludeCount {
+			var count int64
+			err = rows.Scan(
+				&identity.IdentityID, &identity.IdentityType,
+				&identity.FirstName, &identity.LastName, &identity.OtherNames, &identity.Gender, &identity.DOB, &identity.EmailAddress, &identity.PhoneNumber, &identity.Nationality,
+				&identity.OrganizationName, &identity.Category,
+				&identity.Street, &identity.Country, &identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt, &metaDataJSON,
+				&count,
+			)
+			if totalCount == nil {
+				totalCount = &count
+			}
+		} else {
+			err = rows.Scan(
+				&identity.IdentityID, &identity.IdentityType,
+				&identity.FirstName, &identity.LastName, &identity.OtherNames, &identity.Gender, &identity.DOB, &identity.EmailAddress, &identity.PhoneNumber, &identity.Nationality,
+				&identity.OrganizationName, &identity.Category,
+				&identity.Street, &identity.Country, &identity.State, &identity.PostCode, &identity.City, &identity.CreatedAt, &metaDataJSON,
+			)
+		}
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan identity data", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &identity.MetaData)
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		identities = append(identities, identity)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over identities", err)
+	}
+
+	return identities, totalCount, nil
 }

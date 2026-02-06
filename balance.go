@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
@@ -283,6 +284,45 @@ func (l *Blnk) GetAllBalances(ctx context.Context, limit, offset int) ([]model.B
 	}
 	span.AddEvent("All balances retrieved", trace.WithAttributes(attribute.Int("balance.count", len(balances))))
 	return balances, nil
+}
+
+// GetAllBalancesWithFilter retrieves balances using advanced filters.
+// It starts a tracing span, fetches balances matching the filter criteria, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - filters *filter.QueryFilterSet: Filter conditions to apply.
+// - limit int: Maximum number of balances to return.
+// - offset int: Offset for pagination.
+//
+// Returns:
+// - []model.Balance: A slice of Balance models matching the filter criteria.
+// - error: An error if the balances could not be retrieved.
+func (l *Blnk) GetAllBalancesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Balance, error) {
+	_, span := balanceTracer.Start(ctx, "GetAllBalancesWithFilter")
+	defer span.End()
+
+	balances, err := l.datasource.GetAllBalancesWithFilter(ctx, filters, limit, offset)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	span.AddEvent("Balances with filter retrieved", trace.WithAttributes(attribute.Int("balance.count", len(balances))))
+	return balances, nil
+}
+
+// GetAllBalancesWithFilterAndOptions retrieves balances with advanced filters, sorting, and optional count.
+func (l *Blnk) GetAllBalancesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Balance, *int64, error) {
+	_, span := balanceTracer.Start(ctx, "GetAllBalancesWithFilterAndOptions")
+	defer span.End()
+
+	balances, count, err := l.datasource.GetAllBalancesWithFilterAndOptions(ctx, filters, opts, limit, offset)
+	if err != nil {
+		span.RecordError(err)
+		return nil, nil, err
+	}
+	span.AddEvent("Balances with filter and options retrieved", trace.WithAttributes(attribute.Int("balance.count", len(balances))))
+	return balances, count, nil
 }
 
 // CreateMonitor creates a new balance monitor.

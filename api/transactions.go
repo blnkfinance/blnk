@@ -19,6 +19,7 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
+	"strconv"
 
 	"github.com/sirupsen/logrus"
 
@@ -254,6 +255,126 @@ func (a Api) GetTransactionByRef(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, transformTransaction(&resp))
+}
+
+// GetAllTransactions retrieves all transactions with pagination and optional filtering.
+// Supports advanced filtering via query parameters in the format: field_operator=value
+// Example filters:
+//   - status_eq=APPLIED
+//   - currency_in=USD,EUR
+//   - amount_gte=1000
+//   - created_at_between=2024-01-01|2024-12-31
+//   - source_eq=bln_123
+//   - destination_eq=bln_456
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error retrieving the transactions or invalid filters.
+// - 200 OK: If the transactions are successfully retrieved.
+func (a Api) GetAllTransactions(c *gin.Context) {
+	// Extract limit and offset from query parameters
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limitInt, err := strconv.Atoi(limitStr)
+	if err != nil || limitInt <= 0 {
+		limitInt = 20
+	}
+
+	offsetInt, err := strconv.Atoi(offsetStr)
+	if err != nil || offsetInt < 0 {
+		offsetInt = 0
+	}
+
+	// Check if advanced filters are present
+	if HasFilters(c) {
+		filters, parseErrors := ParseFiltersFromContext(c, nil)
+		if len(parseErrors) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			return
+		}
+
+		// Use the new filter method
+		transactions, err := a.blnk.GetAllTransactionsWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Transform each transaction for response
+		result := make([]*model.Transaction, len(transactions))
+		for i := range transactions {
+			result[i] = transformTransaction(&transactions[i])
+		}
+
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	// Fall back to legacy method when no filters are present
+	transactions, err := a.blnk.GetAllTransactions(limitInt, offsetInt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Transform each transaction for response
+	result := make([]*model.Transaction, len(transactions))
+	for i := range transactions {
+		result[i] = transformTransaction(&transactions[i])
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// FilterTransactions filters transactions using a JSON request body.
+// This endpoint accepts a POST request with filters specified in JSON format,
+// providing more flexibility than query parameter filters.
+//
+// Request body format:
+//
+//	{
+//	  "filters": [
+//	    {"field": "status", "operator": "eq", "value": "APPLIED"},
+//	    {"field": "amount", "operator": "gte", "value": 1000},
+//	    {"field": "currency", "operator": "in", "values": ["USD", "EUR"]}
+//	  ],
+//	  "limit": 20,
+//	  "offset": 0
+//	}
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error parsing the filters or retrieving transactions.
+// - 200 OK: If the transactions are successfully retrieved.
+func (a Api) FilterTransactions(c *gin.Context) {
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	transactions, count, err := a.blnk.GetAllTransactionsWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Transform each transaction for response
+	result := make([]*model.Transaction, len(transactions))
+	for i := range transactions {
+		result[i] = transformTransaction(&transactions[i])
+	}
+
+	if opts.IncludeCount {
+		c.JSON(http.StatusOK, FilterResponse{Data: result, TotalCount: count})
+	} else {
+		c.JSON(http.StatusOK, result)
+	}
 }
 
 // UpdateInflightStatus updates the status of an inflight transaction based on the provided ID and status.

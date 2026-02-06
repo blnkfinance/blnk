@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/search"
@@ -1909,6 +1910,47 @@ func (l *Blnk) GetAllTransactions(limit, offset int) ([]model.Transaction, error
 
 	span.AddEvent("All transactions retrieved")
 	return transactions, nil
+}
+
+// GetAllTransactionsWithFilter retrieves transactions using advanced filters.
+// It starts a tracing span, fetches transactions matching the filter criteria, and records relevant events.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - filters *filter.QueryFilterSet: Filter conditions to apply.
+// - limit int: Maximum number of transactions to return.
+// - offset int: Offset for pagination.
+//
+// Returns:
+// - []model.Transaction: A slice of Transaction models matching the filter criteria.
+// - error: An error if the transactions could not be retrieved.
+func (l *Blnk) GetAllTransactionsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Transaction, error) {
+	ctx, span := tracer.Start(ctx, "GetAllTransactionsWithFilter")
+	defer span.End()
+
+	transactions, err := l.datasource.GetAllTransactionsWithFilter(ctx, filters, limit, offset)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.AddEvent("Transactions with filter retrieved")
+	return transactions, nil
+}
+
+// GetAllTransactionsWithFilterAndOptions retrieves transactions with advanced filters, sorting, and optional count.
+func (l *Blnk) GetAllTransactionsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Transaction, *int64, error) {
+	ctx, span := tracer.Start(ctx, "GetAllTransactionsWithFilterAndOptions")
+	defer span.End()
+
+	transactions, count, err := l.datasource.GetAllTransactionsWithFilterAndOptions(ctx, filters, opts, limit, offset)
+	if err != nil {
+		span.RecordError(err)
+		return nil, nil, err
+	}
+
+	span.AddEvent("Transactions with filter and options retrieved")
+	return transactions, count, nil
 }
 
 // GetTransactionByRef retrieves a transaction by its reference from the datasource.
