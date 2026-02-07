@@ -115,7 +115,7 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 		sourceBalance, err = l.getOrCreateBalanceByIndicator(ctx, transaction.Source, transaction.Currency)
 		if err != nil {
 			span.RecordError(err)
-			logrus.Errorf("source error %v", err)
+			logrus.WithError(err).Error("source balance lookup failed")
 			return nil, nil, err
 		}
 		// Update transaction source with the balance ID
@@ -130,7 +130,7 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 		}
 		if err != nil {
 			span.RecordError(err)
-			logrus.Errorf("source error %v", err)
+			logrus.WithError(err).Error("source balance lookup failed")
 			return nil, nil, err
 		}
 	}
@@ -140,7 +140,7 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 		destinationBalance, err = l.getOrCreateBalanceByIndicator(ctx, transaction.Destination, transaction.Currency)
 		if err != nil {
 			span.RecordError(err)
-			logrus.Errorf("destination error %v", err)
+			logrus.WithError(err).Error("destination balance lookup failed")
 			return nil, nil, err
 		}
 		// Update transaction destination with the balance ID
@@ -155,7 +155,7 @@ func (l *Blnk) getSourceAndDestination(ctx context.Context, transaction *model.T
 		}
 		if err != nil {
 			span.RecordError(err)
-			logrus.Errorf("destination error %v", err)
+			logrus.WithError(err).Error("destination balance lookup failed")
 			return nil, nil, err
 		}
 	}
@@ -784,8 +784,7 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 		// Execute post-transaction hooks
 		if err := l.Hooks.ExecutePostHooks(ctx, transaction.TransactionID, transaction); err != nil {
 			span.RecordError(err)
-			// Don't fail the transaction if post-hooks fail, just log the error
-			logrus.Errorf("post-transaction hooks failed: %v", err)
+			logrus.WithError(err).Error("post-transaction hooks failed")
 		}
 
 		// Perform post-transaction actions such as indexing and sending webhooks
@@ -977,7 +976,7 @@ func (l *Blnk) releaseLock(ctx context.Context, locker *redlock.MultiLocker) {
 	// Attempt to release all locks
 	if err := locker.Unlock(ctx); err != nil {
 		span.RecordError(err)
-		logrus.Error("failed to release lock: ", err)
+		logrus.WithError(err).Error("failed to release lock")
 	}
 	span.AddEvent("Locks released")
 }
@@ -995,7 +994,7 @@ func (l *Blnk) releaseSingleLock(ctx context.Context, locker *redlock.Locker) {
 	// Attempt to release the lock
 	if err := locker.Unlock(ctx); err != nil {
 		span.RecordError(err)
-		logrus.Error("failed to release lock: ", err)
+		logrus.WithError(err).Error("failed to release lock")
 	}
 	span.AddEvent("Lock released")
 }
@@ -1012,7 +1011,7 @@ func (l *Blnk) releaseSingleLock(ctx context.Context, locker *redlock.Locker) {
 // - error: A formatted error message combining the provided message and the original error.
 func (l *Blnk) logAndRecordError(span trace.Span, msg string, err error) error {
 	span.RecordError(err)
-	logrus.Error(msg, err)
+	logrus.WithError(err).Error(msg)
 	return fmt.Errorf("%s: %w", msg, err)
 }
 
@@ -1044,7 +1043,7 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 	transaction, err := l.datasource.RecordTransaction(ctx, transaction)
 	if err != nil {
 		span.RecordError(err)
-		logrus.Errorf("ERROR saving transaction to db. %s", err)
+		logrus.WithError(err).Error("failed to save transaction to db")
 		return nil, err
 	}
 
@@ -1113,7 +1112,7 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 
 	// Queue shadow commit work via outbox for reliable processing with retries
 	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowCommit); err != nil {
-		logrus.Errorf("failed to queue shadow commit for %s: %v", transactionID, err)
+		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to queue shadow commit")
 	}
 
 	return committedTxn, nil
@@ -1158,7 +1157,7 @@ func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transacti
 
 	// Queue shadow commit work via outbox for reliable processing with retries
 	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowCommit); err != nil {
-		logrus.Errorf("failed to queue shadow commit for %s: %v", transactionID, err)
+		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to queue shadow commit")
 	}
 
 	return committedTxn, nil
@@ -1388,7 +1387,7 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 
 	// Queue shadow void work via outbox for reliable processing with retries
 	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowVoid); err != nil {
-		logrus.Errorf("failed to queue shadow void for %s: %v", transactionID, err)
+		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to queue shadow void")
 	}
 
 	return voidedTxn, nil
@@ -1858,7 +1857,7 @@ func enqueueTransactions(ctx context.Context, queue *Queue, originalTransaction 
 	for _, txn := range transactionsToEnqueue {
 		if err := queue.Enqueue(ctx, txn); err != nil {
 			notification.NotifyError(err)
-			logrus.Errorf("Error queuing transaction: %v", err)
+			logrus.WithError(err).Error("failed to queue transaction")
 			return err
 		}
 	}
@@ -2200,9 +2199,12 @@ func (l *Blnk) refundNonInflightBatchTransactions(ctx context.Context, batchID s
 // logRollbackResult logs the outcome of a rollback operation
 func (l *Blnk) logRollbackResult(batchID string, action string, err error) {
 	if err != nil {
-		logrus.Errorf("Failed to rollback batch transactions for %s: %s", batchID, err.Error())
+		logrus.WithError(err).WithField("batch_id", batchID).Error("failed to rollback batch transactions")
 	} else {
-		logrus.Infof("Successfully rolled back atomic batch %s (%s)", batchID, action)
+		logrus.WithFields(logrus.Fields{
+			"batch_id": batchID,
+			"action":   action,
+		}).Info("successfully rolled back atomic batch")
 	}
 }
 
@@ -2230,14 +2232,14 @@ func (l *Blnk) sendBulkTransactionWebhook(batchID, status, errorMsg string, tran
 		Payload: payload,
 	})
 	if err != nil {
-		logrus.Errorf("Failed to send webhook notification for batch %s: %s", batchID, err.Error())
+		logrus.WithError(err).WithField("batch_id", batchID).Error("failed to send webhook notification")
 	}
 }
 
 // handleAsyncBulkTransactionFailure handles failures in asynchronous processing
 // and builds a detailed error message including rollback status
 func (l *Blnk) handleAsyncBulkTransactionFailure(ctx context.Context, err error, batchID string, isAtomic bool, isInflight bool) {
-	logrus.Errorf("Async bulk transaction error for batch %s: %s", batchID, err.Error())
+	logrus.WithError(err).WithField("batch_id", batchID).Error("async bulk transaction error")
 
 	var errorMessage string
 
@@ -2246,10 +2248,13 @@ func (l *Blnk) handleAsyncBulkTransactionFailure(ctx context.Context, err error,
 
 		if rollbackErr != nil {
 			errorMessage = fmt.Sprintf("%s. Failed to roll back all transactions: %s", err.Error(), rollbackErr.Error())
-			logrus.Errorf("Failed to roll back batch %s: %s", batchID, rollbackErr.Error())
+			logrus.WithError(rollbackErr).WithField("batch_id", batchID).Error("failed to roll back batch")
 		} else {
 			errorMessage = fmt.Sprintf("%s. All transactions in this batch have been %s.", err.Error(), action)
-			logrus.Infof("Successfully rolled back async batch %s (%s)", batchID, action)
+			logrus.WithFields(logrus.Fields{
+				"batch_id": batchID,
+				"action":   action,
+			}).Info("successfully rolled back async batch")
 		}
 	} else {
 		// If not atomic, just include the original error and note about no rollback
@@ -2324,7 +2329,7 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 	// Process transactions in batch
 	if err := l.processBulkTransactions(ctx, req.Transactions, batchID, req.Inflight, req.SkipQueue); err != nil {
 		span.RecordError(err)
-		logrus.Errorf("Sync bulk transaction error for batch %s: %s", batchID, err.Error())
+		logrus.WithError(err).WithField("batch_id", batchID).Error("sync bulk transaction error")
 
 		var responseError string
 		if req.Atomic {

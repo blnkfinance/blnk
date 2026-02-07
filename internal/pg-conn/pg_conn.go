@@ -2,12 +2,12 @@ package pgconn
 
 import (
 	"database/sql"
-	"log"
 	"sync"
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/cache"
 	_ "github.com/lib/pq" // Import the postgres driver
+	"github.com/sirupsen/logrus"
 )
 
 // Declare a package-level variable to hold the singleton instance.
@@ -33,7 +33,7 @@ func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
 
 		cacheInstance, errCache := cache.NewCache()
 		if errCache != nil {
-			log.Printf("Error creating cache: %v", errCache)
+			logrus.WithError(errCache).Error("Error creating cache")
 		}
 
 		instance = &Datasource{Conn: con, Cache: cacheInstance}
@@ -60,10 +60,10 @@ func ConnectDB(dsConfig config.DataSourceConfig) (*sql.DB, error) {
 	// Verify connection
 	err = db.Ping()
 	if err != nil {
-		log.Printf("Database connection error: %v", err)
+		logrus.WithError(err).Error("Database connection error")
 		return nil, err
 	}
 
-	log.Println("Database connection established")
+	logrus.Info("database connection established")
 	return db, nil
 }

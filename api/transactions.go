@@ -150,7 +150,7 @@ func (a Api) QueueTransaction(c *gin.Context) {
 	var newTransaction model2.RecordTransaction
 	// Bind the incoming JSON request to the newTransaction model
 	if err := c.ShouldBindJSON(&newTransaction); err != nil {
-		logrus.Error(err)
+		logrus.WithError(err).Error("failed to bind transaction JSON")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
@@ -165,7 +165,7 @@ func (a Api) QueueTransaction(c *gin.Context) {
 	// Queue the transaction using the Blnk service
 	resp, err := a.blnk.QueueTransaction(c.Request.Context(), newTransaction.ToTransaction())
 	if err != nil {
-		logrus.Error(err)
+		logrus.WithError(err).Error("failed to queue transaction")
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -465,7 +465,7 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 	// Handle the response based on the result and error from the service layer
 	if err != nil {
 		// If there was an error during synchronous processing
-		logrus.Errorf("Bulk transaction API error for batch %s: %v", result.BatchID, err)
+		logrus.WithError(err).WithField("batch_id", result.BatchID).Error("bulk transaction API error")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":    result.Error, // Use the detailed error from the result
 			"batch_id": result.BatchID,

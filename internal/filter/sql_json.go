@@ -12,8 +12,19 @@ func buildJSONPathCondition(f QueryFilter, tableAlias string, argPosition int) (
 		return "", nil, argPosition
 	}
 
-	jsonCol := parts[0]
-	jsonKey := parts[1]
+	// Resolve jsonCol to safe column name (breaks taint chain)
+	// Currently only "meta_data" is supported for JSON path queries
+	jsonCol := resolveJSONColumn(parts[0])
+	if jsonCol == "" {
+		return "", nil, argPosition
+	}
+
+	// Sanitize jsonKey - already validated by regex in Validate(), but we need to
+	// break the taint chain for static analyzers by copying through validation
+	jsonKey := sanitizeJSONKey(parts[1])
+	if jsonKey == "" {
+		return "", nil, argPosition
+	}
 
 	if tableAlias != "" {
 		jsonCol = fmt.Sprintf("%s.%s", tableAlias, jsonCol)
@@ -125,4 +136,50 @@ func buildJSONPathCondition(f QueryFilter, tableAlias string, argPosition int) (
 	}
 
 	return condition, args, newArgPosition
+}
+
+// resolveJSONColumn maps a JSON column name to a safe column using only string literals.
+// This breaks the taint chain for static analyzers.
+func resolveJSONColumn(col string) string {
+	switch col {
+	case "meta_data":
+		return "meta_data"
+	default:
+		return ""
+	}
+}
+
+// sanitizeJSONKey validates and returns a safe JSON key.
+// The key is validated against a regex pattern in Validate(), but we need to
+// explicitly break the taint chain by rebuilding the string character by character.
+func sanitizeJSONKey(key string) string {
+	if key == "" {
+		return ""
+	}
+
+	// Validate: must start with letter, contain only alphanumeric and underscore
+	if len(key) == 0 || !isLetter(key[0]) {
+		return ""
+	}
+
+	// Build a new string with only safe characters (breaks taint chain)
+	result := make([]byte, 0, len(key))
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		if isLetter(c) || isDigit(c) || c == '_' {
+			result = append(result, c)
+		} else {
+			return ""
+		}
+	}
+
+	return string(result)
+}
+
+func isLetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isDigit(c byte) bool {
+	return c >= '0' && c <= '9'
 }

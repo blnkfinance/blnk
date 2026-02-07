@@ -174,7 +174,7 @@ func initializeOpenTelemetry(ctx context.Context) (func(context.Context) error, 
 
 func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*search.TypesenseClient, error) {
 	if cfg.TypeSense.Dns == "" {
-		log.Println("TypeSense DNS not configured. Search functionality will be disabled.")
+		logrus.Warn("TypeSense DNS not configured. Search functionality will be disabled.")
 		return nil, nil
 	}
 

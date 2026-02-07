@@ -17,7 +17,6 @@ limitations under the License.
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/typesense/typesense-go/typesense/api"
@@ -160,17 +159,6 @@ func NewAPI(b *blnk.Blnk) *Api {
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")
-	})
-
-	r.POST("/webhook", func(c *gin.Context) {
-		var payload map[string]interface{}
-		err := c.Bind(&payload)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		fmt.Println(payload)
-		c.JSON(200, "webhook received")
 	})
 
 	return &Api{blnk: b, router: r, auth: auth}

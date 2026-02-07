@@ -73,7 +73,7 @@ func Build(filters *QueryFilterSet, table string, alias string, startArgPos int)
 			continue
 		}
 
-		cond, args, nextArgPos = buildStandardCondition(f, alias, argPos)
+		cond, args, nextArgPos = buildStandardCondition(f, table, alias, argPos)
 		if cond != "" {
 			result.Conditions = append(result.Conditions, cond)
 			result.Args = append(result.Args, args...)
@@ -85,10 +85,16 @@ func Build(filters *QueryFilterSet, table string, alias string, startArgPos int)
 	return result, nil
 }
 
-func buildStandardCondition(f QueryFilter, tableAlias string, argPosition int) (condition string, args []interface{}, newArgPosition int) {
-	fieldName := f.Field
+func buildStandardCondition(f QueryFilter, table string, tableAlias string, argPosition int) (condition string, args []interface{}, newArgPosition int) {
+	// Resolve field to safe column name (breaks taint chain for static analyzers)
+	safeField := safeColumnForTableAndField(table, f.Field)
+	if safeField == "" {
+		return "", nil, argPosition
+	}
+
+	fieldName := safeField
 	if tableAlias != "" {
-		fieldName = fmt.Sprintf("%s.%s", tableAlias, f.Field)
+		fieldName = fmt.Sprintf("%s.%s", tableAlias, safeField)
 	}
 
 	switch f.Operator {
@@ -214,17 +220,147 @@ func BuildWithOptions(filters *QueryFilterSet, table string, alias string, start
 	return result, nil
 }
 
-// BuildOrderBy constructs an ORDER BY clause. It resolves sortBy against the table's
-// allowlist and uses only allowlist-derived column names, never raw input.
-func BuildOrderBy(sortBy string, sortOrder SortOrder, table string, alias string) string {
-	safeField := GetDefaultSortField(table)
-	if sortBy != "" {
-		normalized := strings.ToLower(strings.TrimSpace(sortBy))
-		allowed := GetValidFieldsForTable(table)
-		if allowed[normalized] {
-			safeField = normalized
+// ResolveSortField maps a requested sort field to a safe column name.
+// It returns only string literals from a switch; user input selects which constant to return.
+// This breaks the taint chain for static analyzers.
+func ResolveSortField(table, sortBy string) string {
+	normalized := strings.ToLower(strings.TrimSpace(sortBy))
+	if normalized == "" {
+		return GetDefaultSortField(table)
+	}
+	allowed := GetValidFieldsForTable(table)
+	if allowed == nil || !allowed[normalized] {
+		return GetDefaultSortField(table)
+	}
+	return safeColumnForSort(table, normalized)
+}
+
+// safeColumnForTableAndField maps a field name to a safe column name using only string literals.
+// Returns empty string for unknown fields to break the taint chain for static analyzers.
+func safeColumnForTableAndField(table, logicalName string) string {
+	switch table {
+	case "transactions":
+		switch logicalName {
+		case "transaction_id": return "transaction_id"
+		case "parent_transaction": return "parent_transaction"
+		case "amount": return "amount"
+		case "currency": return "currency"
+		case "source": return "source"
+		case "destination": return "destination"
+		case "balance_id": return "balance_id"
+		case "reference": return "reference"
+		case "status": return "status"
+		case "created_at": return "created_at"
+		case "effective_date": return "effective_date"
+		case "source_identity": return "source_identity"
+		case "destination_identity": return "destination_identity"
+		case "indicator": return "indicator"
+		case "description": return "description"
+		case "precision": return "precision"
+		case "meta_data": return "meta_data"
+		}
+	case "balances":
+		switch logicalName {
+		case "balance_id": return "balance_id"
+		case "ledger_id": return "ledger_id"
+		case "identity_id": return "identity_id"
+		case "indicator": return "indicator"
+		case "currency": return "currency"
+		case "balance": return "balance"
+		case "credit_balance": return "credit_balance"
+		case "debit_balance": return "debit_balance"
+		case "inflight_balance": return "inflight_balance"
+		case "inflight_credit_balance": return "inflight_credit_balance"
+		case "inflight_debit_balance": return "inflight_debit_balance"
+		case "created_at": return "created_at"
+		case "meta_data": return "meta_data"
+		}
+	case "ledgers":
+		switch logicalName {
+		case "ledger_id": return "ledger_id"
+		case "name": return "name"
+		case "created_at": return "created_at"
+		case "meta_data": return "meta_data"
+		}
+	case "identity":
+		switch logicalName {
+		case "identity_id": return "identity_id"
+		case "first_name": return "first_name"
+		case "last_name": return "last_name"
+		case "other_names": return "other_names"
+		case "gender": return "gender"
+		case "dob": return "dob"
+		case "email_address": return "email_address"
+		case "phone_number": return "phone_number"
+		case "nationality": return "nationality"
+		case "street": return "street"
+		case "country": return "country"
+		case "state": return "state"
+		case "organization_name": return "organization_name"
+		case "category": return "category"
+		case "identity_type": return "identity_type"
+		case "post_code": return "post_code"
+		case "city": return "city"
+		case "created_at": return "created_at"
+		case "meta_data": return "meta_data"
+		}
+	case "accounts":
+		switch logicalName {
+		case "account_id": return "account_id"
+		case "name": return "name"
+		case "number": return "number"
+		case "bank_name": return "bank_name"
+		case "currency": return "currency"
+		case "ledger_id": return "ledger_id"
+		case "identity_id": return "identity_id"
+		case "balance_id": return "balance_id"
+		case "created_at": return "created_at"
+		case "meta_data": return "meta_data"
+		}
+	case "reconciliations":
+		switch logicalName {
+		case "reconciliation_id": return "reconciliation_id"
+		case "upload_id": return "upload_id"
+		case "status": return "status"
+		case "matched_transactions": return "matched_transactions"
+		case "unmatched_transactions": return "unmatched_transactions"
+		case "started_at": return "started_at"
+		case "completed_at": return "completed_at"
+		}
+	case "matching_rules":
+		switch logicalName {
+		case "rule_id": return "rule_id"
+		case "name": return "name"
+		case "description": return "description"
+		case "created_at": return "created_at"
+		case "updated_at": return "updated_at"
+		}
+	case "external_transactions":
+		switch logicalName {
+		case "id": return "id"
+		case "amount": return "amount"
+		case "reference": return "reference"
+		case "currency": return "currency"
+		case "description": return "description"
+		case "date": return "date"
+		case "source": return "source"
+		case "upload_id": return "upload_id"
 		}
 	}
+	return ""
+}
+
+// safeColumnForSort returns a safe column for sorting, with fallback to default.
+func safeColumnForSort(table, logicalName string) string {
+	if col := safeColumnForTableAndField(table, logicalName); col != "" {
+		return col
+	}
+	return GetDefaultSortField(table)
+}
+
+// BuildOrderBy constructs an ORDER BY clause using only safe, constant column names.
+func BuildOrderBy(sortBy string, sortOrder SortOrder, table string, alias string) string {
+	safeField := ResolveSortField(table, sortBy)
 	fieldName := safeField
 	if alias != "" {
 		fieldName = fmt.Sprintf("%s.%s", alias, safeField)

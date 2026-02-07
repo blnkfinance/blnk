@@ -412,7 +412,7 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	}
 
 	if err != nil {
-		logrus.Errorf("balance lite error %v", err)
+		logrus.WithError(err).Error("balance lite lookup failed")
 		if err == sql.ErrNoRows {
 			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
 		} else {
@@ -503,7 +503,7 @@ func (d Datasource) GetBalancesByIDsLite(ctx context.Context, ids []string) (map
 			&balance.IdentityID,
 		)
 		if err != nil {
-			logrus.Errorf("balance batch scan error: %v", err)
+			logrus.WithError(err).Error("balance batch scan failed")
 			continue
 		}
 
@@ -676,7 +676,7 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			logrus.Error(err)
+			logrus.WithError(err).Error("failed to close rows")
 		}
 	}(rows)
 
@@ -775,7 +775,7 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 		// Ensure the rows are closed after the query is completed
 		err := rows.Close()
 		if err != nil {
-			logrus.Error(err) // Log any error that occurs while closing the rows
+			logrus.WithError(err).Error("failed to close rows") // Log any error that occurs while closing the rows
 		}
 	}(rows)
 
@@ -1310,12 +1310,16 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 		if err != nil {
 			return nil, nil, time.Time{}, fmt.Errorf("failed to parse snapshot debit_balance: %w", err)
 		}
-		logrus.Debugf("Found snapshot for balance %s at %v with credit=%s, debit=%s",
-			balanceID, snapshotTime, snapshotCredit, snapshotDebit)
+		logrus.WithFields(logrus.Fields{
+			"balance_id": balanceID,
+			"time":       snapshotTime,
+			"credit":     snapshotCredit,
+			"debit":      snapshotDebit,
+		}).Debug("found snapshot for balance")
 		return creditBalance, debitBalance, snapshotTime, nil
 	} else if err == sql.ErrNoRows {
 		// No snapshot found, calculate from genesis (all transactions)
-		logrus.Debugf("No snapshot found for balance %s, calculating from genesis", balanceID)
+		logrus.WithField("balance_id", balanceID).Debug("no snapshot found, calculating from genesis")
 		return new(big.Int).SetInt64(0), new(big.Int).SetInt64(0), time.Time{}, nil
 	}
 
@@ -1326,7 +1330,11 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 // fetchTransactions retrieves transactions for a balance within a specific time range
 // using effective_date if available, otherwise falling back to created_at
 func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime, targetTime time.Time) (*sql.Rows, error) {
-	logrus.Debugf("Querying transactions from %v to %v for balance %s", startTime, targetTime, balanceID)
+	logrus.WithFields(logrus.Fields{
+		"balance_id": balanceID,
+		"start_time": startTime,
+		"end_time":   targetTime,
+	}).Debug("querying transactions")
 	rows, err := tx.QueryContext(ctx, `
         SELECT precise_amount, source, destination, created_at, 
                COALESCE(effective_date, created_at) as effective_date
@@ -1407,7 +1415,10 @@ func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sq
 		transactionCount++
 	}
 
-	logrus.Debugf("Processed %d transactions for balance %s", transactionCount, balanceID)
+	logrus.WithFields(logrus.Fields{
+		"balance_id":        balanceID,
+		"transaction_count": transactionCount,
+	}).Debug("processed transactions")
 
 	if err = rows.Err(); err != nil {
 		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error processing transactions", err)
@@ -1451,7 +1462,7 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	defer func() {
 		if err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				logrus.Errorf("GetBalanceAtTime: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+				logrus.WithError(rollbackErr).WithField("original_error", err.Error()).Error("GetBalanceAtTime: failed to rollback transaction")
 			}
 		}
 	}()
@@ -1467,7 +1478,7 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 
 	if fromSource {
 		// Skip snapshots and start from zero
-		logrus.Debugf("Skipping snapshots for balance %s as requested, calculating from genesis", balanceID)
+		logrus.WithField("balance_id", balanceID).Debug("skipping snapshots, calculating from genesis")
 		creditBalance = new(big.Int).SetInt64(0)
 		debitBalance = new(big.Int).SetInt64(0)
 		startTime = time.Time{} // Use zero time to get all transactions
@@ -1489,8 +1500,13 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	// Calculate final balance
 	balance := new(big.Int).Sub(creditBalance, debitBalance)
 
-	logrus.Debugf("Final calculated balance for %s at %v: credit=%s, debit=%s, balance=%s",
-		balanceID, targetTime, creditBalance.String(), debitBalance.String(), balance.String())
+	logrus.WithFields(logrus.Fields{
+		"balance_id":  balanceID,
+		"target_time": targetTime,
+		"credit":      creditBalance.String(),
+		"debit":       debitBalance.String(),
+		"balance":     balance.String(),
+	}).Debug("final calculated balance")
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {

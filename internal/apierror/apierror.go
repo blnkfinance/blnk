@@ -53,7 +53,7 @@ func (e APIError) Error() string {
 // NewAPIError creates a new APIError instance.
 // It logs the error details and returns the error object with the provided code, message, and additional details.
 func NewAPIError(code ErrorCode, message string, details interface{}) APIError {
-	logrus.Error(details) // Log the error details for monitoring and debugging.
+	logrus.WithField("details", details).Error("API error") // Log the error details for monitoring and debugging.
 	return APIError{
 		Code:    code,
 		Message: message,

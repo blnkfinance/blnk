@@ -33,6 +33,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/files"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/sirupsen/logrus"
 	"github.com/texttheater/golang-levenshtein/levenshtein"
 	"github.com/wacul/ptr"
 	"go.opentelemetry.io/otel"
@@ -415,8 +416,7 @@ func (s *Blnk) createReconciler(strategy string, groupCriteria string, matchingR
 			// Perform many-to-one reconciliation.
 			return s.manyToOneReconciliation(ctx, txns, groupCriteria, matchingRules, true)
 		default:
-			// Log unsupported strategies.
-			log.Printf("Unsupported reconciliation strategy: %s", strategy)
+			logrus.WithField("strategy", strategy).Warn("unsupported reconciliation strategy")
 			return nil, nil
 		}
 	}

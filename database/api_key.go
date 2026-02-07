@@ -2,16 +2,15 @@ package database
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/lib/pq"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -19,10 +18,28 @@ var (
 	ErrInvalidAPIKey  = errors.New("invalid api key")
 )
 
-// hashAPIKey creates a SHA-256 hash of the API key for secure storage
-func hashAPIKey(key string) string {
-	hash := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(hash[:])
+// hashAPIKey creates a bcrypt hash of the API key for secure storage.
+// bcrypt includes salt and is resistant to brute-force attacks.
+func hashAPIKey(key string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(key), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+// verifyAPIKey compares a plaintext key with a bcrypt hash.
+func verifyAPIKey(hashedKey, plainKey string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedKey), []byte(plainKey))
+	return err == nil
+}
+
+// getKeyPrefix extracts the first 16 characters of the key for efficient lookup.
+func getKeyPrefix(key string) string {
+	if len(key) >= 16 {
+		return key[:16]
+	}
+	return key
 }
 
 // getAPIKeyCacheKey generates a cache key for an API key lookup
@@ -32,7 +49,7 @@ func getAPIKeyCacheKey(hashedKey string) string {
 }
 
 // CreateAPIKey creates a new API key with the specified parameters and stores it in the database.
-// The key is hashed before storage for security. The plain text key is returned ONLY during creation
+// The key is hashed using bcrypt before storage for security. The plain text key is returned ONLY during creation
 // and should be displayed to the user immediately as it cannot be retrieved later.
 //
 // Parameters:
@@ -55,18 +72,25 @@ func (s *Datasource) CreateAPIKey(ctx context.Context, name, ownerID string, sco
 	// Store the plain text key to return to the user
 	plainTextKey := apiKey.Key
 
-	// Hash the key before storing in database
-	hashedKey := hashAPIKey(plainTextKey)
+	// Extract prefix for efficient lookup
+	keyPrefix := getKeyPrefix(plainTextKey)
+
+	// Hash the key using bcrypt before storing in database
+	hashedKey, err := hashAPIKey(plainTextKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash API key: %w", err)
+	}
 	apiKey.Key = hashedKey
 
 	query := `
-		INSERT INTO blnk.api_keys (api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO blnk.api_keys (api_key_id, key, key_prefix, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
 	_, err = s.Conn.ExecContext(ctx, query,
 		apiKey.APIKeyID,
-		apiKey.Key, // This is now the hashed key
+		apiKey.Key, // This is now the bcrypt hashed key
+		keyPrefix,
 		apiKey.Name,
 		apiKey.OwnerID,
 		pq.StringArray(apiKey.Scopes),
@@ -86,7 +110,7 @@ func (s *Datasource) CreateAPIKey(ctx context.Context, name, ownerID string, sco
 }
 
 // GetAPIKey retrieves an API key from the database using its key string.
-// The provided key is hashed before comparison with stored hashed keys.
+// The provided key's prefix is used for efficient lookup, then bcrypt verifies the full key.
 // Results are cached for 5 minutes to improve performance.
 // This function is typically used for authentication and authorization purposes.
 //
@@ -98,56 +122,70 @@ func (s *Datasource) CreateAPIKey(ctx context.Context, name, ownerID string, sco
 // - *model.APIKey: The API key object if found (with hashed key, not plain text).
 // - error: Returns ErrAPIKeyNotFound if the key doesn't exist, or other database errors if the query fails.
 func (s *Datasource) GetAPIKey(ctx context.Context, key string) (*model.APIKey, error) {
-	// Hash the incoming key for comparison
-	hashedKey := hashAPIKey(key)
-	cacheKey := getAPIKeyCacheKey(hashedKey)
+	// Extract prefix for efficient lookup
+	keyPrefix := getKeyPrefix(key)
+	cacheKey := getAPIKeyCacheKey(keyPrefix)
 
 	// Try to get from cache first
 	var apiKey model.APIKey
 	if s.Cache != nil {
 		err := s.Cache.Get(ctx, cacheKey, &apiKey)
 		if err == nil && apiKey.Key != "" {
-			return &apiKey, nil
+			// Verify the cached key matches using bcrypt
+			if verifyAPIKey(apiKey.Key, key) {
+				return &apiKey, nil
+			}
 		}
 	}
 
-	// Cache miss - query the database
+	// Cache miss - query the database using key_prefix for efficient lookup
 	query := `
 		SELECT api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked, revoked_at
 		FROM blnk.api_keys
-		WHERE key = $1
+		WHERE key_prefix = $1
 	`
 
-	var scopes pq.StringArray
-	err := s.Conn.QueryRowContext(ctx, query, hashedKey).Scan(
-		&apiKey.APIKeyID,
-		&apiKey.Key,
-		&apiKey.Name,
-		&apiKey.OwnerID,
-		&scopes,
-		&apiKey.ExpiresAt,
-		&apiKey.CreatedAt,
-		&apiKey.LastUsedAt,
-		&apiKey.IsRevoked,
-		&apiKey.RevokedAt,
-	)
-	apiKey.Scopes = []string(scopes)
-
-	if err == sql.ErrNoRows {
-		return nil, ErrAPIKeyNotFound
-	}
+	rows, err := s.Conn.QueryContext(ctx, query, keyPrefix)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 
-	if s.Cache != nil {
-		err = s.Cache.Set(ctx, cacheKey, &apiKey, 5*time.Minute)
+	// Check each matching key with bcrypt
+	for rows.Next() {
+		var candidate model.APIKey
+		var scopes pq.StringArray
+		err := rows.Scan(
+			&candidate.APIKeyID,
+			&candidate.Key,
+			&candidate.Name,
+			&candidate.OwnerID,
+			&scopes,
+			&candidate.ExpiresAt,
+			&candidate.CreatedAt,
+			&candidate.LastUsedAt,
+			&candidate.IsRevoked,
+			&candidate.RevokedAt,
+		)
 		if err != nil {
-			log.Printf("Failed to cache API key: %v", err)
+			return nil, err
+		}
+		candidate.Scopes = []string(scopes)
+
+		// Verify the key using bcrypt
+		if verifyAPIKey(candidate.Key, key) {
+			// Cache the verified key
+			if s.Cache != nil {
+				err = s.Cache.Set(ctx, cacheKey, &candidate, 5*time.Minute)
+				if err != nil {
+					logrus.WithError(err).Warn("failed to cache API key")
+				}
+			}
+			return &candidate, nil
 		}
 	}
 
-	return &apiKey, nil
+	return nil, ErrAPIKeyNotFound
 }
 
 // RevokeAPIKey marks an API key as revoked in the database, preventing its future use.
@@ -202,12 +240,17 @@ func (s *Datasource) RevokeAPIKey(ctx context.Context, id, ownerID string) error
 	}
 
 	// Invalidate the cache entry for this API key
-	cacheKey := getAPIKeyCacheKey(hashedKey)
-	if s.Cache != nil {
+	// Note: We need to get the key_prefix to invalidate the correct cache entry
+	getPrefixQuery := `SELECT key_prefix FROM blnk.api_keys WHERE api_key_id = $1`
+	var keyPrefix sql.NullString
+	_ = s.Conn.QueryRowContext(ctx, getPrefixQuery, id).Scan(&keyPrefix)
+
+	if keyPrefix.Valid && s.Cache != nil {
+		cacheKey := getAPIKeyCacheKey(keyPrefix.String)
 		err = s.Cache.Delete(ctx, cacheKey)
 		if err != nil {
 			// Log the error, but don't fail the revocation
-			log.Printf("Failed to invalidate API key cache: %v", err)
+			logrus.WithError(err).Warn("failed to invalidate API key cache")
 		}
 	}
 

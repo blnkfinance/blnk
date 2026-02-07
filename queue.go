@@ -21,11 +21,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"log"
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
+	"github.com/sirupsen/logrus"
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
@@ -53,7 +53,7 @@ type TransactionTypePayload struct {
 func NewQueue(conf *config.Configuration) *Queue {
 	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 	if err != nil {
-		log.Fatalf("Error parsing Redis URL: %v", err)
+		logrus.WithError(err).Fatal("failed to parse Redis URL")
 	}
 
 	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig}
@@ -85,12 +85,12 @@ func (q *Queue) queueInflightExpiry(transactionID string, expiresAt time.Time) e
 		asynq.ProcessIn(time.Until(expiresAt)),
 	}
 	task := asynq.NewTask(q.config.Queue.InflightExpiryQueue, IPayload, taskOptions...)
-	info, err := q.Client.Enqueue(task)
+	_, err = q.Client.Enqueue(task)
 	if err != nil {
-		log.Println(err, info)
+		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to enqueue inflight expiry")
 		return err
 	}
-	log.Printf(" [*] Successfully enqueued inflight expiry: %+v", transactionID)
+	logrus.WithField("transaction_id", transactionID).Debug("successfully enqueued inflight expiry")
 	return nil
 }
 
@@ -117,10 +117,10 @@ func (q *Queue) queueIndexBatch(batch interface{}) error {
 	task := asynq.NewTask("new:index:batch", payload, taskOptions...)
 	_, err = q.Client.Enqueue(task)
 	if err != nil {
-		log.Printf("failed to enqueue index batch: %v", err)
+		logrus.WithError(err).Error("failed to enqueue index batch")
 		return err
 	}
-	log.Printf(" [*] Successfully enqueued index batch")
+	logrus.Debug("successfully enqueued index batch")
 	return nil
 }
 
@@ -150,12 +150,12 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 
 	taskOptions := []asynq.Option{asynq.Queue(q.config.Queue.IndexQueue)}
 	task := asynq.NewTask(q.config.Queue.IndexQueue, IPayload, taskOptions...)
-	info, err := q.Client.Enqueue(task)
+	_, err = q.Client.Enqueue(task)
 	if err != nil {
-		log.Println("here", err, info)
+		logrus.WithError(err).WithField("id", id).Error("failed to enqueue index data")
 		return err
 	}
-	log.Printf(" [*] Successfully enqueued index data: %+v", id)
+	logrus.WithField("id", id).Debug("successfully enqueued index data")
 	return nil
 }
 
@@ -175,12 +175,12 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	if err != nil {
 		return err
 	}
-	info, err := q.Client.EnqueueContext(ctx, q.geTask(transaction, payload), asynq.MaxRetry(5))
+	_, err = q.Client.EnqueueContext(ctx, q.geTask(transaction, payload), asynq.MaxRetry(5))
 	if err != nil {
-		log.Println(err, info)
+		logrus.WithError(err).WithField("reference", transaction.Reference).Error("failed to enqueue transaction")
 		return err
 	}
-	log.Printf(" [*] Successfully enqueued transaction: %+v", transaction.Reference)
+	logrus.WithField("reference", transaction.Reference).Debug("successfully enqueued transaction")
 
 	return nil
 }
