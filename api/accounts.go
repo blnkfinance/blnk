@@ -17,6 +17,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
 
@@ -82,20 +83,99 @@ func (a Api) GetAccount(c *gin.Context) {
 
 // GetAllAccounts retrieves all accounts.
 // It fetches a list of all accounts in the system.
+// Supports advanced filtering via query parameters in the format: field_operator=value
+// Example filters:
+//   - name_eq=Main Account
+//   - currency_in=USD,EUR
+//   - created_at_gte=2024-01-01
 //
 // Parameters:
 // - c: The Gin context containing the request and response.
 //
 // Responses:
-// - 400 Bad Request: If there's an error in fetching the accounts.
+// - 400 Bad Request: If there's an error in fetching the accounts or invalid filters.
 // - 200 OK: If the accounts are successfully retrieved.
 func (a Api) GetAllAccounts(c *gin.Context) {
+	// Extract limit and offset from query parameters
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limitInt, err := strconv.Atoi(limitStr)
+	if err != nil || limitInt <= 0 {
+		limitInt = 20
+	}
+
+	offsetInt, err := strconv.Atoi(offsetStr)
+	if err != nil || offsetInt < 0 {
+		offsetInt = 0
+	}
+
+	// Check if advanced filters are present
+	if HasFilters(c) {
+		filters, parseErrors := ParseFiltersFromContext(c, nil)
+		if len(parseErrors) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			return
+		}
+
+		// Use the new filter method
+		resp, err := a.blnk.GetAllAccountsWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
+	// Fall back to the legacy method when no filters are present
 	accounts, err := a.blnk.GetAllAccounts()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, accounts)
+}
+
+// FilterAccounts filters accounts using a JSON request body.
+// This endpoint accepts a POST request with filters specified in JSON format.
+//
+// Request body format:
+//
+//	{
+//	  "filters": [
+//	    {"field": "currency", "operator": "eq", "value": "USD"},
+//	    {"field": "name", "operator": "ilike", "value": "%main%"}
+//	  ],
+//	  "limit": 20,
+//	  "offset": 0
+//	}
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error parsing the filters or retrieving accounts.
+// - 200 OK: If the accounts are successfully retrieved.
+func (a Api) FilterAccounts(c *gin.Context) {
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "accounts")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, count, err := a.blnk.GetAllAccountsWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if opts.IncludeCount {
+		c.JSON(http.StatusOK, FilterResponse{Data: resp, TotalCount: count})
+	} else {
+		c.JSON(http.StatusOK, resp)
+	}
 }
 
 // generateMockAccount generates and returns a mock account for testing purposes.

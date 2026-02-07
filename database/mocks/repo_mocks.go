@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/mock"
 )
@@ -80,6 +81,26 @@ func (m *MockDataSource) GetAllTransactions(ctx context.Context, limit, offset i
 	return args.Get(0).([]model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) GetAllTransactionsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Transaction, error) {
+	args := m.Called(ctx, filters, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Transaction), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Transaction, *int64, error) {
+	args := m.Called(ctx, filters, opts, limit, offset)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var count *int64
+	if args.Get(1) != nil {
+		count = args.Get(1).(*int64)
+	}
+	return args.Get(0).([]model.Transaction), count, args.Error(2)
+}
+
 func (m *MockDataSource) GetTotalCommittedTransactions(ctx context.Context, parentID string) (*big.Int, error) {
 	args := m.Called(ctx, parentID)
 	return args.Get(0).(*big.Int), args.Error(1)
@@ -125,6 +146,26 @@ func (m *MockDataSource) CreateLedger(ledger model.Ledger) (model.Ledger, error)
 func (m *MockDataSource) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
 	args := m.Called(limit, offset)
 	return args.Get(0).([]model.Ledger), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllLedgersWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Ledger, error) {
+	args := m.Called(ctx, filters, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Ledger), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllLedgersWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Ledger, *int64, error) {
+	args := m.Called(ctx, filters, opts, limit, offset)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var count *int64
+	if args.Get(1) != nil {
+		count = args.Get(1).(*int64)
+	}
+	return args.Get(0).([]model.Ledger), count, args.Error(2)
 }
 
 func (m *MockDataSource) GetLedgerByID(id string) (*model.Ledger, error) {
@@ -188,6 +229,26 @@ func (m *MockDataSource) GetAllBalances(limit, offset int) ([]model.Balance, err
 	return args.Get(0).([]model.Balance), args.Error(1)
 }
 
+func (m *MockDataSource) GetAllBalancesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Balance, error) {
+	args := m.Called(ctx, filters, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Balance), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllBalancesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Balance, *int64, error) {
+	args := m.Called(ctx, filters, opts, limit, offset)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var count *int64
+	if args.Get(1) != nil {
+		count = args.Get(1).(*int64)
+	}
+	return args.Get(0).([]model.Balance), count, args.Error(2)
+}
+
 func (m *MockDataSource) UpdateBalance(balance *model.Balance) error {
 	args := m.Called(balance)
 	return args.Error(0)
@@ -228,6 +289,26 @@ func (m *MockDataSource) GetAccountByID(id string, include []string) (*model.Acc
 func (m *MockDataSource) GetAllAccounts() ([]model.Account, error) {
 	args := m.Called()
 	return args.Get(0).([]model.Account), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllAccountsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Account, error) {
+	args := m.Called(ctx, filters, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Account), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllAccountsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Account, *int64, error) {
+	args := m.Called(ctx, filters, opts, limit, offset)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var count *int64
+	if args.Get(1) != nil {
+		count = args.Get(1).(*int64)
+	}
+	return args.Get(0).([]model.Account), count, args.Error(2)
 }
 
 func (m *MockDataSource) GetAccountByNumber(number string) (*model.Account, error) {
@@ -297,6 +378,26 @@ func (m *MockDataSource) GetAllIdentities() ([]model.Identity, error) {
 func (m *MockDataSource) GetAllIdentitiesPaginated(limit, offset int) ([]model.Identity, error) {
 	args := m.Called(limit, offset)
 	return args.Get(0).([]model.Identity), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllIdentitiesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Identity, error) {
+	args := m.Called(ctx, filters, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Identity), args.Error(1)
+}
+
+func (m *MockDataSource) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Identity, *int64, error) {
+	args := m.Called(ctx, filters, opts, limit, offset)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var count *int64
+	if args.Get(1) != nil {
+		count = args.Get(1).(*int64)
+	}
+	return args.Get(0).([]model.Identity), count, args.Error(2)
 }
 
 func (m *MockDataSource) UpdateIdentity(identity *model.Identity) error {

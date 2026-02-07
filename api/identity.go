@@ -18,6 +18,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	apimodel "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/model"
@@ -140,15 +141,55 @@ func (a Api) DeleteIdentity(c *gin.Context) {
 
 // GetAllIdentities retrieves all identity records in the system.
 // It fetches the identity records and responds with the list of identities.
+// Supports advanced filtering via query parameters in the format: field_operator=value
+// Example filters:
+//   - first_name_eq=John
+//   - category_in=individual,corporate
+//   - created_at_gte=2024-01-01
+//
 // If there's an error retrieving the identities, it responds with an appropriate error message.
 //
 // Parameters:
 // - c: The Gin context containing the request and response.
 //
 // Responses:
-// - 400 Bad Request: If there's an error retrieving the identities.
+// - 400 Bad Request: If there's an error retrieving the identities or invalid filters.
 // - 200 OK: If the identities are successfully retrieved.
 func (a Api) GetAllIdentities(c *gin.Context) {
+	// Extract limit and offset from query parameters
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limitInt, err := strconv.Atoi(limitStr)
+	if err != nil || limitInt <= 0 {
+		limitInt = 20
+	}
+
+	offsetInt, err := strconv.Atoi(offsetStr)
+	if err != nil || offsetInt < 0 {
+		offsetInt = 0
+	}
+
+	// Check if advanced filters are present
+	if HasFilters(c) {
+		filters, parseErrors := ParseFiltersFromContext(c, nil)
+		if len(parseErrors) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			return
+		}
+
+		// Use the new filter method
+		resp, err := a.blnk.GetAllIdentitiesWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
+	// Fall back to the legacy method when no filters are present
 	identities, err := a.blnk.GetAllIdentities()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -156,6 +197,46 @@ func (a Api) GetAllIdentities(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, identities)
+}
+
+// FilterIdentities filters identities using a JSON request body.
+// This endpoint accepts a POST request with filters specified in JSON format.
+//
+// Request body format:
+//
+//	{
+//	  "filters": [
+//	    {"field": "first_name", "operator": "eq", "value": "John"},
+//	    {"field": "category", "operator": "in", "values": ["individual", "corporate"]}
+//	  ],
+//	  "limit": 20,
+//	  "offset": 0
+//	}
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error parsing the filters or retrieving identities.
+// - 200 OK: If the identities are successfully retrieved.
+func (a Api) FilterIdentities(c *gin.Context) {
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "identity")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, count, err := a.blnk.GetAllIdentitiesWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if opts.IncludeCount {
+		c.JSON(http.StatusOK, FilterResponse{Data: resp, TotalCount: count})
+	} else {
+		c.JSON(http.StatusOK, resp)
+	}
 }
 
 // TokenizeIdentityField tokenizes a specific field in an identity.

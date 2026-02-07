@@ -87,13 +87,19 @@ func (a Api) GetLedger(c *gin.Context) {
 
 // GetAllLedgers retrieves all ledger records in the system.
 // It fetches the ledger records and responds with the list of ledgers.
+// Supports advanced filtering via query parameters in the format: field_operator=value
+// Example filters:
+//   - name_eq=USD Ledger
+//   - created_at_gte=2024-01-01
+//   - name_ilike=%savings%
+//
 // If there's an error retrieving the ledgers, it responds with an appropriate error message.
 //
 // Parameters:
 // - c: The Gin context containing the request and response.
 //
 // Responses:
-// - 400 Bad Request: If there's an error retrieving the ledger records.
+// - 400 Bad Request: If there's an error retrieving the ledger records or invalid filters.
 // - 200 OK: If the ledger records are successfully retrieved.
 func (a Api) GetAllLedgers(c *gin.Context) {
 	// Extract limit and offset from query parameters
@@ -113,7 +119,26 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 		return
 	}
 
-	// Call the GetAllLedgers method with limit and offset
+	// Check if advanced filters are present
+	if HasFilters(c) {
+		filters, parseErrors := ParseFiltersFromContext(c, nil)
+		if len(parseErrors) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			return
+		}
+
+		// Use the new filter method
+		resp, err := a.blnk.GetAllLedgersWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
+	// Fall back to the legacy method when no filters are present
 	resp, err := a.blnk.GetAllLedgers(limitInt, offsetInt)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -121,6 +146,45 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// FilterLedgers filters ledgers using a JSON request body.
+// This endpoint accepts a POST request with filters specified in JSON format.
+//
+// Request body format:
+//
+//	{
+//	  "filters": [
+//	    {"field": "name", "operator": "ilike", "value": "%savings%"}
+//	  ],
+//	  "limit": 20,
+//	  "offset": 0
+//	}
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If there's an error parsing the filters or retrieving ledgers.
+// - 200 OK: If the ledgers are successfully retrieved.
+func (a Api) FilterLedgers(c *gin.Context) {
+	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "ledgers")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, count, err := a.blnk.GetAllLedgersWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if opts.IncludeCount {
+		c.JSON(http.StatusOK, FilterResponse{Data: resp, TotalCount: count})
+	} else {
+		c.JSON(http.StatusOK, resp)
+	}
 }
 
 // UpdateLedger updates an existing ledger's name.

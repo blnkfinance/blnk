@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 )
 
@@ -63,14 +64,22 @@ type transaction interface {
 	IsTransactionRefunded(ctx context.Context, transaction *model.Transaction) (bool, error)                             // Checks if a transaction has already been refunded
 	GetTransactionsByCriteria(ctx context.Context, minAmount, maxAmount *float64, currency *string, minDate, maxDate *time.Time, limit int, offset int64) ([]*model.Transaction, error)
 	GetTransactionsByShadowFor(ctx context.Context, parentTransactionID string) ([]model.Transaction, error) // Retrieves shadow transactions by parent transaction ID
+
+	// Advanced filtering methods
+	GetAllTransactionsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Transaction, error)                                            // Retrieves transactions with advanced filtering
+	GetAllTransactionsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Transaction, *int64, error) // Retrieves transactions with filtering, sorting, and count
 }
 
 // ledger defines methods for handling ledgers.
 type ledger interface {
-	CreateLedger(ledger model.Ledger) (model.Ledger, error) // Creates a new ledger
-	GetAllLedgers(limit, offset int) ([]model.Ledger, error)
-	GetLedgerByID(id string) (*model.Ledger, error)      // Retrieves a ledger by ID
-	UpdateLedger(id, name string) (*model.Ledger, error) // Updates a ledger's name
+	CreateLedger(ledger model.Ledger) (model.Ledger, error)  // Creates a new ledger
+	GetAllLedgers(limit, offset int) ([]model.Ledger, error) // Retrieves all ledgers (legacy)
+	GetLedgerByID(id string) (*model.Ledger, error)          // Retrieves a ledger by ID
+	UpdateLedger(id, name string) (*model.Ledger, error)     // Updates a ledger's name
+
+	// Advanced filtering methods
+	GetAllLedgersWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Ledger, error)                                            // Retrieves ledgers with advanced filtering
+	GetAllLedgersWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Ledger, *int64, error) // Retrieves ledgers with filtering, sorting, and count
 }
 
 // balance defines methods for handling balances.
@@ -79,7 +88,7 @@ type balance interface {
 	GetBalanceByID(id string, include []string, withQueued bool) (*model.Balance, error)                                   // Retrieves a balance by ID with additional data and queued status
 	GetBalanceByIDLite(id string) (*model.Balance, error)                                                                  // Retrieves a balance by ID with minimal data
 	GetBalancesByIDsLite(ctx context.Context, ids []string) (map[string]*model.Balance, error)                             // Retrieves multiple balances by IDs with minimal data (batch query)
-	GetAllBalances(limit, offset int) ([]model.Balance, error)                                                             // Retrieves all balances
+	GetAllBalances(limit, offset int) ([]model.Balance, error)                                                             // Retrieves all balances (legacy)
 	UpdateBalance(balance *model.Balance) error                                                                            // Updates a balance
 	GetBalanceByIndicator(indicator, currency string) (*model.Balance, error)                                              // Retrieves a balance by indicator and currency
 	UpdateBalances(ctx context.Context, sourceBalance, destinationBalance *model.Balance) error                            // Updates multiple balances
@@ -87,16 +96,24 @@ type balance interface {
 	TakeBalanceSnapshots(ctx context.Context, batchSize int) (int, error)                                                  // Takes balance snapshots
 	GetBalanceAtTime(ctx context.Context, balanceID string, targetTime time.Time, fromSource bool) (*model.Balance, error) // Retrieves a balance at a specific time
 	UpdateBalanceIdentity(balanceID string, identityID string) error                                                       // Updates only the identity_id of a balance
+
+	// Advanced filtering methods
+	GetAllBalancesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Balance, error)                                            // Retrieves balances with advanced filtering
+	GetAllBalancesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Balance, *int64, error) // Retrieves balances with filtering, sorting, and count
 }
 
 // account defines methods for handling accounts.
 type account interface {
 	CreateAccount(account model.Account) (model.Account, error)         // Creates a new account
 	GetAccountByID(id string, include []string) (*model.Account, error) // Retrieves an account by ID with additional data
-	GetAllAccounts() ([]model.Account, error)                           // Retrieves all accounts
+	GetAllAccounts() ([]model.Account, error)                           // Retrieves all accounts (legacy)
 	GetAccountByNumber(number string) (*model.Account, error)           // Retrieves an account by its number
 	UpdateAccount(account *model.Account) error                         // Updates an account
 	DeleteAccount(id string) error                                      // Deletes an account
+
+	// Advanced filtering methods
+	GetAllAccountsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Account, error)                                            // Retrieves accounts with advanced filtering
+	GetAllAccountsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Account, *int64, error) // Retrieves accounts with filtering, sorting, and count
 }
 
 // balanceMonitor defines methods for monitoring balances.
@@ -113,10 +130,14 @@ type balanceMonitor interface {
 type identity interface {
 	CreateIdentity(identity model.Identity) (model.Identity, error)        // Creates a new identity
 	GetIdentityByID(id string) (*model.Identity, error)                    // Retrieves an identity by ID
-	GetAllIdentities() ([]model.Identity, error)                           // Retrieves all identities
-	GetAllIdentitiesPaginated(limit, offset int) ([]model.Identity, error) // Retrieves identities with pagination
+	GetAllIdentities() ([]model.Identity, error)                           // Retrieves all identities (legacy)
+	GetAllIdentitiesPaginated(limit, offset int) ([]model.Identity, error) // Retrieves identities with pagination (legacy)
 	UpdateIdentity(identity *model.Identity) error                         // Updates an identity
 	DeleteIdentity(id string) error                                        // Deletes an identity
+
+	// Advanced filtering methods
+	GetAllIdentitiesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Identity, error)                                            // Retrieves identities with advanced filtering
+	GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Identity, *int64, error) // Retrieves identities with filtering, sorting, and count
 }
 
 // reconciliation defines methods for handling reconciliation processes.

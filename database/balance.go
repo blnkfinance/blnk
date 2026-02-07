@@ -29,6 +29,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 )
 
@@ -411,7 +412,7 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	}
 
 	if err != nil {
-		logrus.Errorf("balance lite error %v", err)
+		logrus.WithError(err).Error("balance lite lookup failed")
 		if err == sql.ErrNoRows {
 			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
 		} else {
@@ -502,7 +503,7 @@ func (d Datasource) GetBalancesByIDsLite(ctx context.Context, ids []string) (map
 			&balance.IdentityID,
 		)
 		if err != nil {
-			logrus.Errorf("balance batch scan error: %v", err)
+			logrus.WithError(err).Error("balance batch scan failed")
 			continue
 		}
 
@@ -675,7 +676,7 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			logrus.Error(err)
+			logrus.WithError(err).Error("failed to close rows")
 		}
 	}(rows)
 
@@ -774,7 +775,7 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 		// Ensure the rows are closed after the query is completed
 		err := rows.Close()
 		if err != nil {
-			logrus.Error(err) // Log any error that occurs while closing the rows
+			logrus.WithError(err).Error("failed to close rows") // Log any error that occurs while closing the rows
 		}
 	}(rows)
 
@@ -1309,12 +1310,16 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 		if err != nil {
 			return nil, nil, time.Time{}, fmt.Errorf("failed to parse snapshot debit_balance: %w", err)
 		}
-		logrus.Debugf("Found snapshot for balance %s at %v with credit=%s, debit=%s",
-			balanceID, snapshotTime, snapshotCredit, snapshotDebit)
+		logrus.WithFields(logrus.Fields{
+			"balance_id": balanceID,
+			"time":       snapshotTime,
+			"credit":     snapshotCredit,
+			"debit":      snapshotDebit,
+		}).Debug("found snapshot for balance")
 		return creditBalance, debitBalance, snapshotTime, nil
 	} else if err == sql.ErrNoRows {
 		// No snapshot found, calculate from genesis (all transactions)
-		logrus.Debugf("No snapshot found for balance %s, calculating from genesis", balanceID)
+		logrus.WithField("balance_id", balanceID).Debug("no snapshot found, calculating from genesis")
 		return new(big.Int).SetInt64(0), new(big.Int).SetInt64(0), time.Time{}, nil
 	}
 
@@ -1325,7 +1330,11 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 // fetchTransactions retrieves transactions for a balance within a specific time range
 // using effective_date if available, otherwise falling back to created_at
 func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime, targetTime time.Time) (*sql.Rows, error) {
-	logrus.Debugf("Querying transactions from %v to %v for balance %s", startTime, targetTime, balanceID)
+	logrus.WithFields(logrus.Fields{
+		"balance_id": balanceID,
+		"start_time": startTime,
+		"end_time":   targetTime,
+	}).Debug("querying transactions")
 	rows, err := tx.QueryContext(ctx, `
         SELECT precise_amount, source, destination, created_at, 
                COALESCE(effective_date, created_at) as effective_date
@@ -1406,7 +1415,10 @@ func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sq
 		transactionCount++
 	}
 
-	logrus.Debugf("Processed %d transactions for balance %s", transactionCount, balanceID)
+	logrus.WithFields(logrus.Fields{
+		"balance_id":        balanceID,
+		"transaction_count": transactionCount,
+	}).Debug("processed transactions")
 
 	if err = rows.Err(); err != nil {
 		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error processing transactions", err)
@@ -1450,7 +1462,7 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	defer func() {
 		if err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				logrus.Errorf("GetBalanceAtTime: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
+				logrus.WithError(rollbackErr).WithField("original_error", err.Error()).Error("GetBalanceAtTime: failed to rollback transaction")
 			}
 		}
 	}()
@@ -1466,7 +1478,7 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 
 	if fromSource {
 		// Skip snapshots and start from zero
-		logrus.Debugf("Skipping snapshots for balance %s as requested, calculating from genesis", balanceID)
+		logrus.WithField("balance_id", balanceID).Debug("skipping snapshots, calculating from genesis")
 		creditBalance = new(big.Int).SetInt64(0)
 		debitBalance = new(big.Int).SetInt64(0)
 		startTime = time.Time{} // Use zero time to get all transactions
@@ -1488,8 +1500,13 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	// Calculate final balance
 	balance := new(big.Int).Sub(creditBalance, debitBalance)
 
-	logrus.Debugf("Final calculated balance for %s at %v: credit=%s, debit=%s, balance=%s",
-		balanceID, targetTime, creditBalance.String(), debitBalance.String(), balance.String())
+	logrus.WithFields(logrus.Fields{
+		"balance_id":  balanceID,
+		"target_time": targetTime,
+		"credit":      creditBalance.String(),
+		"debit":       debitBalance.String(),
+		"balance":     balance.String(),
+	}).Debug("final calculated balance")
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
@@ -1542,4 +1559,186 @@ func (d Datasource) UpdateBalanceIdentity(balanceID string, identityID string) e
 	}
 
 	return nil
+}
+
+// GetAllBalancesWithFilter retrieves balances with advanced filtering support.
+// It delegates to GetAllBalancesWithFilterAndOptions with nil options.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - limit: The maximum number of balances to return.
+// - offset: The offset to start fetching balances from (for pagination).
+//
+// Returns:
+// - []model.Balance: A slice of balances matching the filter criteria.
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllBalancesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Balance, error) {
+	balances, _, err := d.GetAllBalancesWithFilterAndOptions(ctx, filters, nil, limit, offset)
+	return balances, err
+}
+
+// GetAllBalancesWithFilterAndOptions retrieves balances with filtering, sorting, and optional count.
+// It uses the filter package to build SQL WHERE and ORDER BY conditions.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - opts: Query options including sorting and count settings.
+// - limit: The maximum number of balances to return.
+// - offset: The offset to start fetching balances from (for pagination).
+//
+// Returns:
+// - []model.Balance: A slice of balances matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllBalancesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Balance, *int64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	if opts == nil {
+		opts = &filter.QueryOptions{}
+	}
+	if err := filter.ValidateSortByForTable(opts, "balances"); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid sort_by field", nil)
+	}
+
+	result, err := filter.BuildWithOptions(filters, "balances", "", 1, opts)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid filter: %s", err.Error()), err)
+	}
+
+	// Determine select fields based on whether count is requested
+	selectFields := "balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data"
+	if opts != nil && opts.IncludeCount {
+		selectFields += ", COUNT(*) OVER() AS total_count"
+	}
+
+	// Build base query
+	baseQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM blnk.balances
+	`, selectFields)
+
+	var args []interface{}
+	args = append(args, result.Args...)
+	argPos := result.NextArgPos
+
+	// Add WHERE clause if filters are provided
+	if len(result.Conditions) > 0 {
+		baseQuery += " WHERE " + strings.Join(result.Conditions, " AND ")
+	}
+
+	// Add ORDER BY clause
+	baseQuery += " ORDER BY " + result.OrderBy
+
+	// Add pagination
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	var indicator sql.NullString
+	rows, err := d.Conn.QueryContext(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve balances", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var balances []model.Balance
+	var totalCount *int64
+	var balanceValue, creditBalanceValue, debitBalanceValue string
+	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
+
+	for rows.Next() {
+		balance := model.Balance{}
+		var metaDataJSON []byte
+
+		if opts != nil && opts.IncludeCount {
+			var count int64
+			err = rows.Scan(
+				&balance.BalanceID,
+				&indicator,
+				&balanceValue,
+				&creditBalanceValue,
+				&debitBalanceValue,
+				&inflightBalanceValue,
+				&inflightCreditBalanceValue,
+				&inflightDebitBalanceValue,
+				&balance.Currency,
+				&balance.CurrencyMultiplier,
+				&balance.LedgerID,
+				&balance.IdentityID,
+				&balance.CreatedAt,
+				&metaDataJSON,
+				&count,
+			)
+			if totalCount == nil {
+				totalCount = &count
+			}
+		} else {
+			err = rows.Scan(
+				&balance.BalanceID,
+				&indicator,
+				&balanceValue,
+				&creditBalanceValue,
+				&debitBalanceValue,
+				&inflightBalanceValue,
+				&inflightCreditBalanceValue,
+				&inflightDebitBalanceValue,
+				&balance.Currency,
+				&balance.CurrencyMultiplier,
+				&balance.LedgerID,
+				&balance.IdentityID,
+				&balance.CreatedAt,
+				&metaDataJSON,
+			)
+		}
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan balance data", err)
+		}
+
+		if indicator.Valid {
+			balance.Indicator = indicator.String
+		} else {
+			balance.Indicator = ""
+		}
+
+		balance.Balance, err = parseBigInt(balanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse balance: %w", err)
+		}
+		balance.CreditBalance, err = parseBigInt(creditBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse credit_balance: %w", err)
+		}
+		balance.DebitBalance, err = parseBigInt(debitBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse debit_balance: %w", err)
+		}
+		balance.InflightBalance, err = parseBigInt(inflightBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse inflight_balance: %w", err)
+		}
+		balance.InflightCreditBalance, err = parseBigInt(inflightCreditBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse inflight_credit_balance: %w", err)
+		}
+		balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		balances = append(balances, balance)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over balances", err)
+	}
+
+	return balances, totalCount, nil
 }

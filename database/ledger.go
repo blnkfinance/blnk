@@ -17,11 +17,15 @@ limitations under the License.
 package database
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/lib/pq"
 )
@@ -203,4 +207,121 @@ func (d Datasource) UpdateLedger(id, name string) (*model.Ledger, error) {
 	existingLedger.Name = name
 
 	return existingLedger, nil
+}
+
+// GetAllLedgersWithFilter retrieves ledgers with advanced filtering support.
+// It delegates to GetAllLedgersWithFilterAndOptions with nil options.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - limit: The maximum number of ledgers to return.
+// - offset: The offset to start fetching ledgers from (for pagination).
+//
+// Returns:
+// - []model.Ledger: A slice of ledgers matching the filter criteria.
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllLedgersWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Ledger, error) {
+	ledgers, _, err := d.GetAllLedgersWithFilterAndOptions(ctx, filters, nil, limit, offset)
+	return ledgers, err
+}
+
+// GetAllLedgersWithFilterAndOptions retrieves ledgers with filtering, sorting, and optional count.
+// It uses the filter package to build SQL WHERE and ORDER BY conditions.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - opts: Query options including sorting and count settings.
+// - limit: The maximum number of ledgers to return.
+// - offset: The offset to start fetching ledgers from (for pagination).
+//
+// Returns:
+// - []model.Ledger: A slice of ledgers matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllLedgersWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Ledger, *int64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	if opts == nil {
+		opts = &filter.QueryOptions{}
+	}
+	if err := filter.ValidateSortByForTable(opts, "ledgers"); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid sort_by field", nil)
+	}
+
+	result, err := filter.BuildWithOptions(filters, "ledgers", "", 1, opts)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid filter: %s", err.Error()), err)
+	}
+
+	// Determine select fields based on whether count is requested
+	selectFields := "ledger_id, name, created_at, meta_data"
+	if opts != nil && opts.IncludeCount {
+		selectFields = "ledger_id, name, created_at, meta_data, COUNT(*) OVER() AS total_count"
+	}
+
+	// Build base query
+	baseQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM blnk.ledgers
+	`, selectFields)
+
+	var args []interface{}
+	args = append(args, result.Args...)
+	argPos := result.NextArgPos
+
+	// Add WHERE clause if filters are provided
+	if len(result.Conditions) > 0 {
+		baseQuery += " WHERE " + strings.Join(result.Conditions, " AND ")
+	}
+
+	// Add ORDER BY clause
+	baseQuery += " ORDER BY " + result.OrderBy
+
+	// Add pagination
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := d.Conn.QueryContext(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve ledgers", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ledgers := []model.Ledger{}
+	var totalCount *int64
+
+	for rows.Next() {
+		ledger := model.Ledger{}
+		var metaDataJSON []byte
+
+		if opts != nil && opts.IncludeCount {
+			var count int64
+			err = rows.Scan(&ledger.LedgerID, &ledger.Name, &ledger.CreatedAt, &metaDataJSON, &count)
+			if totalCount == nil {
+				totalCount = &count
+			}
+		} else {
+			err = rows.Scan(&ledger.LedgerID, &ledger.Name, &ledger.CreatedAt, &metaDataJSON)
+		}
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan ledger data", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &ledger.MetaData)
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		ledgers = append(ledgers, ledger)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over ledgers", err)
+	}
+
+	return ledgers, totalCount, nil
 }

@@ -17,7 +17,6 @@ limitations under the License.
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/typesense/typesense-go/typesense/api"
@@ -50,11 +49,13 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/ledgers", a.CreateLedger)
 	router.GET("/ledgers/:id", a.GetLedger)
 	router.GET("/ledgers", a.GetAllLedgers)
+	router.POST("/ledgers/filter", a.FilterLedgers)
 	router.PUT("/ledgers/:id", a.UpdateLedger)
 
 	// Balance routes
 	router.POST("/balances", a.CreateBalance)
 	router.GET("/balances", a.GetBalances)
+	router.POST("/balances/filter", a.FilterBalances)
 	router.GET("/balances/:id", a.GetBalance)
 	router.GET("/balances/indicator/:indicator/currency/:currency", a.GetBalanceByIndicator)
 	router.GET("/balances/:id/at", a.GetBalanceAtTime)
@@ -72,7 +73,9 @@ func (a Api) Router() *gin.Engine {
 	// Transaction routes
 	router.POST("/transactions", a.QueueTransaction)
 	router.POST("/transactions/bulk", a.CreateBulkTransactions)
+	router.POST("/transactions/filter", a.FilterTransactions)
 	router.POST("/refund-transaction/:id", a.RefundTransaction)
+	router.GET("/transactions", a.GetAllTransactions)
 	router.GET("/transactions/:id", a.GetTransaction)
 	router.GET("/transactions/reference/:reference", a.GetTransactionByRef)
 	router.PUT("/transactions/inflight/:txID", a.UpdateInflightStatus)
@@ -83,6 +86,7 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/identities/:id", a.GetIdentity)
 	router.PUT("/identities/:id", a.UpdateIdentity)
 	router.GET("/identities", a.GetAllIdentities)
+	router.POST("/identities/filter", a.FilterIdentities)
 	router.GET("/identities/:id/tokenized-fields", a.GetTokenizedFields)
 	router.POST("/identities/:id/tokenize/:field", a.TokenizeIdentityField)
 	router.GET("/identities/:id/detokenize/:field", a.DetokenizeIdentityField)
@@ -93,6 +97,7 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/accounts", a.CreateAccount)
 	router.GET("/accounts/:id", a.GetAccount)
 	router.GET("/accounts", a.GetAllAccounts)
+	router.POST("/accounts/filter", a.FilterAccounts)
 
 	// Mocked Account route
 	router.GET("/mocked-account", a.generateMockAccount)
@@ -154,17 +159,6 @@ func NewAPI(b *blnk.Blnk) *Api {
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")
-	})
-
-	r.POST("/webhook", func(c *gin.Context) {
-		var payload map[string]interface{}
-		err := c.Bind(&payload)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		fmt.Println(payload)
-		c.JSON(200, "webhook received")
 	})
 
 	return &Api{blnk: b, router: r, auth: auth}

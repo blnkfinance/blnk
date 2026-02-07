@@ -19,6 +19,7 @@ package blnk
 import (
 	"context"
 
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/model"
 )
@@ -72,6 +73,39 @@ func (l *Blnk) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 // - error: An error if the ledgers could not be retrieved.
 func (l *Blnk) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
 	return l.datasource.GetAllLedgers(limit, offset)
+}
+
+// GetAllLedgersWithFilter retrieves ledgers from the datasource using advanced filters.
+// It returns a slice of Ledger models and an error if the operation fails.
+//
+// Parameters:
+// - ctx: Context for the operation.
+// - filters: A QueryFilterSet containing filter conditions.
+// - limit: Maximum number of ledgers to return.
+// - offset: Offset for pagination.
+//
+// Returns:
+// - []model.Ledger: A slice of Ledger models matching the filter criteria.
+// - error: An error if the ledgers could not be retrieved.
+func (l *Blnk) GetAllLedgersWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Ledger, error) {
+	return l.datasource.GetAllLedgersWithFilter(ctx, filters, limit, offset)
+}
+
+// GetAllLedgersWithFilterAndOptions retrieves ledgers with filters, sorting, and optional count.
+//
+// Parameters:
+// - ctx: Context for the operation.
+// - filters: A QueryFilterSet containing filter conditions.
+// - opts: Query options including sorting and count settings.
+// - limit: Maximum number of ledgers to return.
+// - offset: Offset for pagination.
+//
+// Returns:
+// - []model.Ledger: A slice of Ledger models matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the ledgers could not be retrieved.
+func (l *Blnk) GetAllLedgersWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Ledger, *int64, error) {
+	return l.datasource.GetAllLedgersWithFilterAndOptions(ctx, filters, opts, limit, offset)
 }
 
 // GetLedgerByID retrieves a ledger by its ID from the datasource.

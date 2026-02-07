@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"strconv"
 
 	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 
 	"github.com/shopspring/decimal"
 )
@@ -245,7 +245,7 @@ func ApplyPrecision(transaction *Transaction) *big.Int {
 func applyPrecisionLogic(transaction *Transaction) *big.Int {
 	// Ensure precision is not zero to avoid division by zero, though ApplyPrecision and ApplyPrecisionWithDBLookup should handle this.
 	if transaction.Precision == 0 {
-		log.Println("Warning: applyPrecisionLogic called with transaction.Precision = 0. Defaulting to 1.")
+		logrus.Warn("applyPrecisionLogic called with transaction.Precision = 0, defaulting to 1")
 		transaction.Precision = 1
 	}
 
@@ -264,16 +264,19 @@ func applyPrecisionLogic(transaction *Transaction) *big.Int {
 func fetchTransactionPrecisionFromDB(db *sql.DB, transactionID string) (float64, bool, error) {
 	// Check cache first
 	if precision, found := precisionCache[transactionID]; found {
-		log.Printf("Cache hit for transaction ID %s: precision %f", transactionID, precision)
+		logrus.WithFields(logrus.Fields{
+			"transaction_id": transactionID,
+			"precision":      precision,
+		}).Debug("cache hit for transaction precision")
 		return precision, true, nil
 	}
 
 	var precision float64
 	// First try to find precision by transaction_id
 	query := `
-		SELECT precision 
-		FROM blnk.transactions 
-		WHERE transaction_id = $1 
+		SELECT precision
+		FROM blnk.transactions
+		WHERE transaction_id = $1
 		OR parent_transaction = $1
 		LIMIT 1`
 	err := db.QueryRow(query, transactionID).Scan(&precision)
@@ -281,17 +284,23 @@ func fetchTransactionPrecisionFromDB(db *sql.DB, transactionID string) (float64,
 		return 0, false, nil
 	}
 	if err != nil {
-		log.Printf("Error querying precision for transaction ID %s: %v", transactionID, err)
+		logrus.WithError(err).WithField("transaction_id", transactionID).Error("error querying precision")
 		return 0, false, err
 	}
 	if precision <= 0 { // Or any other validation for valid precision
-		log.Printf("Invalid precision %f found in DB for transaction ID %s", precision, transactionID)
+		logrus.WithFields(logrus.Fields{
+			"transaction_id": transactionID,
+			"precision":      precision,
+		}).Warn("invalid precision found in DB")
 		return 0, false, nil // Treat invalid precision as not found for fallback logic
 	}
 
 	// Store in cache
 	precisionCache[transactionID] = precision
-	log.Printf("Cache miss for transaction ID %s: fetched precision %f from DB and cached", transactionID, precision)
+	logrus.WithFields(logrus.Fields{
+		"transaction_id": transactionID,
+		"precision":      precision,
+	}).Debug("cache miss, fetched precision from DB and cached")
 	return precision, true, nil
 }
 
@@ -306,22 +315,28 @@ func ApplyPrecisionWithDBLookup(transaction *Transaction, ds *pgconn.Datasource)
 	if ds != nil && ds.Conn != nil && transaction.TransactionID != "" {
 		dbPrecision, found, err = fetchTransactionPrecisionFromDB(ds.Conn, transaction.TransactionID)
 		if err != nil {
-			log.Printf("Error fetching precision from DB for transaction %s: %v. Will use local/default precision.", transaction.TransactionID, err)
+			logrus.WithError(err).WithField("transaction_id", transaction.TransactionID).Warn("error fetching precision from DB, using local/default precision")
 			// Fall through to use local or default precision
 		}
 	} else {
-		log.Println("Datasource, DB connection, or TransactionID is nil/empty; skipping DB lookup for precision.")
+		logrus.Debug("datasource, DB connection, or TransactionID is nil/empty; skipping DB lookup for precision")
 	}
 
 	if found && dbPrecision > 0 {
 		transaction.Precision = dbPrecision
-		log.Printf("Using precision %f from DB for transaction %s", transaction.Precision, transaction.TransactionID)
+		logrus.WithFields(logrus.Fields{
+			"transaction_id": transaction.TransactionID,
+			"precision":      transaction.Precision,
+		}).Debug("using precision from DB")
 	} else {
 		if transaction.Precision == 0 {
-			log.Printf("Precision not found in DB or invalid for transaction %s (or DB lookup skipped). Defaulting precision to 1.", transaction.TransactionID)
+			logrus.WithField("transaction_id", transaction.TransactionID).Debug("precision not found in DB, defaulting to 1")
 			transaction.Precision = 1
 		} else {
-			log.Printf("Precision not found in DB or invalid for transaction %s (or DB lookup skipped). Using pre-set precision: %f", transaction.TransactionID, transaction.Precision)
+			logrus.WithFields(logrus.Fields{
+				"transaction_id": transaction.TransactionID,
+				"precision":      transaction.Precision,
+			}).Debug("precision not found in DB, using pre-set precision")
 		}
 	}
 

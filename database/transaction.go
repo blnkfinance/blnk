@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -31,6 +32,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -1452,4 +1454,172 @@ func (d Datasource) GetTransactionsByShadowFor(ctx context.Context, parentTransa
 		attribute.String("parent_transaction_id", parentTransactionID),
 	))
 	return transactions, nil
+}
+
+// GetAllTransactionsWithFilter retrieves transactions with advanced filtering support.
+// It delegates to GetAllTransactionsWithFilterAndOptions with nil options.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - limit: The maximum number of transactions to return.
+// - offset: The offset to start fetching transactions from (for pagination).
+//
+// Returns:
+// - []model.Transaction: A slice of transactions matching the filter criteria.
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllTransactionsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Transaction, error) {
+	transactions, _, err := d.GetAllTransactionsWithFilterAndOptions(ctx, filters, nil, limit, offset)
+	return transactions, err
+}
+
+// GetAllTransactionsWithFilterAndOptions retrieves transactions with filtering, sorting, and optional count.
+// It uses the filter package to build SQL WHERE and ORDER BY conditions.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - opts: Query options including sorting and count settings.
+// - limit: The maximum number of transactions to return.
+// - offset: The offset to start fetching transactions from (for pagination).
+//
+// Returns:
+// - []model.Transaction: A slice of transactions matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Transaction, *int64, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetAllTransactionsWithFilterAndOptions")
+	defer span.End()
+
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	if opts == nil {
+		opts = &filter.QueryOptions{}
+	}
+	if err := filter.ValidateSortByForTable(opts, "transactions"); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid sort_by field", nil)
+	}
+
+	result, err := filter.BuildWithOptions(filters, "transactions", "", 1, opts)
+	if err != nil {
+		span.RecordError(err)
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid filter: %s", err.Error()), err)
+	}
+
+	// Determine select fields based on whether count is requested
+	selectFields := "transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, hash, created_at, meta_data"
+	if opts != nil && opts.IncludeCount {
+		selectFields += ", COUNT(*) OVER() AS total_count"
+	}
+
+	// Build base query
+	baseQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM blnk.transactions
+	`, selectFields)
+
+	var args []interface{}
+	args = append(args, result.Args...)
+	argPos := result.NextArgPos
+
+	// Add WHERE clause if filters are provided
+	if len(result.Conditions) > 0 {
+		baseQuery += " WHERE " + strings.Join(result.Conditions, " AND ")
+	}
+
+	// Prepend CTEs if any
+	if len(result.CTEs) > 0 {
+		baseQuery = "WITH " + strings.Join(result.CTEs, ", ") + " " + baseQuery
+	}
+
+	// Add ORDER BY clause
+	baseQuery += " ORDER BY " + result.OrderBy
+
+	// Add pagination
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := d.Conn.QueryContext(ctx, baseQuery, args...)
+	if err != nil {
+		span.RecordError(err)
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transactions", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var transactions []model.Transaction
+	var totalCount *int64
+
+	for rows.Next() {
+		transaction := model.Transaction{}
+		var metaDataJSON []byte
+		var preciseAmountStr string
+
+		if opts != nil && opts.IncludeCount {
+			var count int64
+			err = rows.Scan(
+				&transaction.TransactionID,
+				&transaction.Source,
+				&transaction.Reference,
+				&transaction.Amount,
+				&preciseAmountStr,
+				&transaction.Currency,
+				&transaction.Destination,
+				&transaction.Description,
+				&transaction.Status,
+				&transaction.Hash,
+				&transaction.CreatedAt,
+				&metaDataJSON,
+				&count,
+			)
+			if totalCount == nil {
+				totalCount = &count
+			}
+		} else {
+			err = rows.Scan(
+				&transaction.TransactionID,
+				&transaction.Source,
+				&transaction.Reference,
+				&transaction.Amount,
+				&preciseAmountStr,
+				&transaction.Currency,
+				&transaction.Destination,
+				&transaction.Description,
+				&transaction.Status,
+				&transaction.Hash,
+				&transaction.CreatedAt,
+				&metaDataJSON,
+			)
+		}
+		if err != nil {
+			span.RecordError(err)
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &transaction.MetaData)
+		if err != nil {
+			span.RecordError(err)
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
+
+		transactions = append(transactions, transaction)
+	}
+
+	if err = rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over transactions", err)
+	}
+
+	span.AddEvent("Transactions with filter and options retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+	))
+
+	return transactions, totalCount, nil
 }

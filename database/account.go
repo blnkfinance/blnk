@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 )
 
@@ -359,4 +361,130 @@ func (d Datasource) DeleteAccount(id string) error {
 
 	// Return any errors encountered during the deletion
 	return err
+}
+
+// GetAllAccountsWithFilter retrieves accounts with advanced filtering support.
+// It delegates to GetAllAccountsWithFilterAndOptions with nil options.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - limit: The maximum number of accounts to return.
+// - offset: The offset to start fetching accounts from (for pagination).
+//
+// Returns:
+// - []model.Account: A slice of accounts matching the filter criteria.
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllAccountsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Account, error) {
+	accounts, _, err := d.GetAllAccountsWithFilterAndOptions(ctx, filters, nil, limit, offset)
+	return accounts, err
+}
+
+// GetAllAccountsWithFilterAndOptions retrieves accounts with filtering, sorting, and optional count.
+// It uses the filter package to build SQL WHERE and ORDER BY conditions.
+//
+// Parameters:
+// - ctx: Context for the database operation.
+// - filters: A QueryFilterSet containing the filter conditions.
+// - opts: Query options including sorting and count settings.
+// - limit: The maximum number of accounts to return.
+// - offset: The offset to start fetching accounts from (for pagination).
+//
+// Returns:
+// - []model.Account: A slice of accounts matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the query fails or if there's an issue processing the results.
+func (d Datasource) GetAllAccountsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Account, *int64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	if opts == nil {
+		opts = &filter.QueryOptions{}
+	}
+	if err := filter.ValidateSortByForTable(opts, "accounts"); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, "Invalid sort_by field", nil)
+	}
+
+	result, err := filter.BuildWithOptions(filters, "accounts", "", 1, opts)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid filter: %s", err.Error()), err)
+	}
+
+	// Determine select fields based on whether count is requested
+	selectFields := "account_id, name, number, bank_name, currency, ledger_id, identity_id, balance_id, created_at, meta_data"
+	if opts != nil && opts.IncludeCount {
+		selectFields += ", COUNT(*) OVER() AS total_count"
+	}
+
+	// Build base query
+	baseQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM blnk.accounts
+	`, selectFields)
+
+	var args []interface{}
+	args = append(args, result.Args...)
+	argPos := result.NextArgPos
+
+	// Add WHERE clause if filters are provided
+	if len(result.Conditions) > 0 {
+		baseQuery += " WHERE " + strings.Join(result.Conditions, " AND ")
+	}
+
+	// Add ORDER BY clause
+	baseQuery += " ORDER BY " + result.OrderBy
+
+	// Add pagination
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := d.Conn.QueryContext(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve accounts", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var accounts []model.Account
+	var totalCount *int64
+
+	for rows.Next() {
+		account := model.Account{}
+		var metaDataJSON []byte
+
+		if opts != nil && opts.IncludeCount {
+			var count int64
+			err = rows.Scan(
+				&account.AccountID, &account.Name, &account.Number, &account.BankName,
+				&account.Currency, &account.LedgerID, &account.IdentityID, &account.BalanceID,
+				&account.CreatedAt, &metaDataJSON,
+				&count,
+			)
+			if totalCount == nil {
+				totalCount = &count
+			}
+		} else {
+			err = rows.Scan(
+				&account.AccountID, &account.Name, &account.Number, &account.BankName,
+				&account.Currency, &account.LedgerID, &account.IdentityID, &account.BalanceID,
+				&account.CreatedAt, &metaDataJSON,
+			)
+		}
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan account data", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &account.MetaData)
+		if err != nil {
+			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		accounts = append(accounts, account)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over accounts", err)
+	}
+
+	return accounts, totalCount, nil
 }

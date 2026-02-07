@@ -25,7 +25,7 @@ func TestCreateAPIKey_Success(t *testing.T) {
 	expiresAt := time.Now().Add(24 * time.Hour)
 
 	mock.ExpectExec("INSERT INTO blnk.api_keys").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), name, ownerID, pq.StringArray(scopes), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), false).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), name, ownerID, pq.StringArray(scopes), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), false).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	apiKey, err := ds.CreateAPIKey(context.Background(), name, ownerID, scopes, expiresAt)
@@ -55,7 +55,7 @@ func TestCreateAPIKey_DatabaseError(t *testing.T) {
 	expiresAt := time.Now().Add(24 * time.Hour)
 
 	mock.ExpectExec("INSERT INTO blnk.api_keys").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), name, ownerID, pq.StringArray(scopes), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), false).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), name, ownerID, pq.StringArray(scopes), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), false).
 		WillReturnError(sql.ErrConnDone)
 
 	apiKey, err := ds.CreateAPIKey(context.Background(), name, ownerID, scopes, expiresAt)
@@ -75,7 +75,9 @@ func TestGetAPIKey_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	key := "test-api-key"
-	hashedKey := hashAPIKey(key)
+	keyPrefix := getKeyPrefix(key)
+	hashedKey, err := hashAPIKey(key)
+	assert.NoError(t, err)
 	apiKeyID := "api_key_123"
 	name := "Test API Key"
 	ownerID := "owner123"
@@ -87,9 +89,9 @@ func TestGetAPIKey_Success(t *testing.T) {
 	row := sqlmock.NewRows([]string{"api_key_id", "key", "name", "owner_id", "scopes", "expires_at", "created_at", "last_used_at", "is_revoked", "revoked_at"}).
 		AddRow(apiKeyID, hashedKey, name, ownerID, pq.StringArray(scopes), expiresAt, createdAt, lastUsedAt, false, nil)
 
-	expectedQuery := regexp.QuoteMeta("SELECT api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked, revoked_at FROM blnk.api_keys WHERE key = $1")
+	expectedQuery := regexp.QuoteMeta("SELECT api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked, revoked_at FROM blnk.api_keys WHERE key_prefix = $1")
 	mock.ExpectQuery(expectedQuery).
-		WithArgs(hashedKey).
+		WithArgs(keyPrefix).
 		WillReturnRows(row)
 
 	apiKey, err := ds.GetAPIKey(context.Background(), key)
@@ -114,10 +116,10 @@ func TestGetAPIKey_NotFound(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	key := "non-existent-key"
-	hashedKey := hashAPIKey(key)
-	mock.ExpectQuery("SELECT api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked, revoked_at FROM blnk.api_keys WHERE key = \\$1").
-		WithArgs(hashedKey).
-		WillReturnError(sql.ErrNoRows)
+	keyPrefix := getKeyPrefix(key)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked, revoked_at FROM blnk.api_keys WHERE key_prefix = $1")).
+		WithArgs(keyPrefix).
+		WillReturnRows(sqlmock.NewRows([]string{"api_key_id", "key", "name", "owner_id", "scopes", "expires_at", "created_at", "last_used_at", "is_revoked", "revoked_at"}))
 
 	apiKey, err := ds.GetAPIKey(context.Background(), key)
 	assert.Error(t, err)
@@ -136,9 +138,9 @@ func TestGetAPIKey_DatabaseError(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	key := "test-api-key"
-	hashedKey := hashAPIKey(key)
-	mock.ExpectQuery("SELECT api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked, revoked_at FROM blnk.api_keys WHERE key = \\$1").
-		WithArgs(hashedKey).
+	keyPrefix := getKeyPrefix(key)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT api_key_id, key, name, owner_id, scopes, expires_at, created_at, last_used_at, is_revoked, revoked_at FROM blnk.api_keys WHERE key_prefix = $1")).
+		WithArgs(keyPrefix).
 		WillReturnError(sql.ErrConnDone)
 
 	apiKey, err := ds.GetAPIKey(context.Background(), key)

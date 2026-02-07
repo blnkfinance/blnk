@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/tokenization"
 	"github.com/blnkfinance/blnk/model"
@@ -82,6 +83,38 @@ func (l *Blnk) GetIdentity(id string) (*model.Identity, error) {
 // - error: An error if the identities could not be retrieved.
 func (l *Blnk) GetAllIdentities() ([]model.Identity, error) {
 	return l.datasource.GetAllIdentities()
+}
+
+// GetAllIdentitiesWithFilter retrieves identities using advanced filters.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - filters *filter.QueryFilterSet: Filter conditions to apply.
+// - limit int: Maximum number of identities to return.
+// - offset int: Offset for pagination.
+//
+// Returns:
+// - []model.Identity: A slice of Identity models matching the filter criteria.
+// - error: An error if the identities could not be retrieved.
+func (l *Blnk) GetAllIdentitiesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Identity, error) {
+	return l.datasource.GetAllIdentitiesWithFilter(ctx, filters, limit, offset)
+}
+
+// GetAllIdentitiesWithFilterAndOptions retrieves identities with filters, sorting, and optional count.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - filters *filter.QueryFilterSet: Filter conditions to apply.
+// - opts *filter.QueryOptions: Query options including sorting and count settings.
+// - limit int: Maximum number of identities to return.
+// - offset int: Offset for pagination.
+//
+// Returns:
+// - []model.Identity: A slice of Identity models matching the filter criteria.
+// - *int64: Optional total count of matching records (if opts.IncludeCount is true).
+// - error: An error if the identities could not be retrieved.
+func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Identity, *int64, error) {
+	return l.datasource.GetAllIdentitiesWithFilterAndOptions(ctx, filters, opts, limit, offset)
 }
 
 // UpdateIdentity updates an existing identity in the database.

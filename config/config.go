@@ -19,14 +19,12 @@ package config
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"os"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
-
 	"github.com/sirupsen/logrus"
 )
 
@@ -201,7 +199,7 @@ func loadConfigFromFile(file string) error {
 		}
 
 	} else if errors.Is(err, os.ErrNotExist) {
-		log.Println("config json not passed, will use env variables")
+		logrus.Info("config json not passed, will use env variables")
 	}
 
 	// override config from environment variables
@@ -244,7 +242,7 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 
 	// Validate tokenization secret length (AES-256 requires 32 bytes)
 	if len(cnf.TokenizationSecret) > 0 && len(cnf.TokenizationSecret) != 32 {
-		log.Println("Warning: Tokenization secret should be 32 bytes for AES-256 encryption")
+		logrus.Warn("tokenization secret should be 32 bytes for AES-256 encryption")
 	}
 
 	return nil
@@ -266,13 +264,13 @@ func (cnf *Configuration) setDefaultValues() {
 	// Project defaults
 	if cnf.ProjectName == "" {
 		cnf.ProjectName = "Blnk Server"
-		log.Println("Warning: Project name is empty. Setting a default name.")
+		logrus.Warn("project name is empty, setting default name")
 	}
 
 	// Server defaults
 	if cnf.Server.Port == "" {
 		cnf.Server.Port = DEFAULT_PORT
-		log.Printf("Warning: Port not specified in config. Setting default port: %s", DEFAULT_PORT)
+		logrus.WithField("port", DEFAULT_PORT).Warn("port not specified in config, setting default")
 	}
 
 	if cnf.TypeSenseKey == "" {
@@ -291,15 +289,15 @@ func (cnf *Configuration) setDefaultValues() {
 	}
 
 	if cnf.EnableTelemetry {
-		log.Println("Info: Telemetry enabled.")
+		logrus.Info("telemetry enabled")
 	} else {
-		log.Println("Info: Telemetry disabled.")
+		logrus.Info("telemetry disabled")
 	}
 
 	if cnf.EnableObservability {
-		log.Println("Info: Observability enabled.")
+		logrus.Info("observability enabled")
 	} else {
-		log.Println("Info: Observability disabled.")
+		logrus.Info("observability disabled")
 	}
 }
 
@@ -393,27 +391,26 @@ func (cnf *Configuration) setupRateLimiting() {
 		cnf.RateLimit.RequestsPerSecond = &defaultRPS
 		cnf.RateLimit.Burst = &defaultBurst
 
-		log.Printf(
-			"Info: Rate limiting not configured. Using defaults: RPS=%.2f, Burst=%d",
-			defaultRPS,
-			defaultBurst,
-		)
+		logrus.WithFields(logrus.Fields{
+			"rps":   defaultRPS,
+			"burst": defaultBurst,
+		}).Info("rate limiting not configured, using defaults")
 	}
 
 	if cnf.RateLimit.RequestsPerSecond != nil && cnf.RateLimit.Burst == nil {
 		defaultBurst := 2 * int(*cnf.RateLimit.RequestsPerSecond)
 		cnf.RateLimit.Burst = &defaultBurst
-		log.Printf("Warning: Rate limit burst not specified. Setting default value: %d", defaultBurst)
+		logrus.WithField("burst", defaultBurst).Warn("rate limit burst not specified, setting default")
 	}
 	if cnf.RateLimit.RequestsPerSecond == nil && cnf.RateLimit.Burst != nil {
 		defaultRPS := float64(*cnf.RateLimit.Burst) / 2
 		cnf.RateLimit.RequestsPerSecond = &defaultRPS
-		log.Printf("Warning: Rate limit RPS not specified. Setting default value: %.2f", defaultRPS)
+		logrus.WithField("rps", defaultRPS).Warn("rate limit RPS not specified, setting default")
 	}
 	if cnf.RateLimit.CleanupIntervalSec == nil {
 		defaultCleanup := DEFAULT_CLEANUP_SEC
 		cnf.RateLimit.CleanupIntervalSec = &defaultCleanup
-		log.Printf("Warning: Rate limit cleanup interval not specified. Setting default value: %d seconds", defaultCleanup)
+		logrus.WithField("cleanup_interval_sec", defaultCleanup).Warn("rate limit cleanup interval not specified, setting default")
 	}
 }
 
@@ -421,13 +418,15 @@ func (cnf *Configuration) setupRateLimiting() {
 func MockConfig(mockConfig *Configuration) {
 	err := mockConfig.validateAndAddDefaults()
 	if err != nil {
-		log.Printf("Error setting mock config: %v", err)
+		logrus.WithError(err).Error("error setting mock config")
 		return
 	}
 	ConfigStore.Store(mockConfig)
 }
 
 func logger() {
-	logger := logrus.New()
-	log.SetOutput(logger.Writer())
+	// Configure logrus defaults
+	logrus.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
+	})
 }
