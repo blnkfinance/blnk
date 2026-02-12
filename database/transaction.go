@@ -1509,7 +1509,7 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 	}
 
 	// Determine select fields based on whether count is requested
-	selectFields := "transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, hash, created_at, meta_data"
+	selectFields := "transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, hash, created_at, effective_date, meta_data"
 	if opts != nil && opts.IncludeCount {
 		selectFields += ", COUNT(*) OVER() AS total_count"
 	}
@@ -1570,6 +1570,7 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 				&transaction.Status,
 				&transaction.Hash,
 				&transaction.CreatedAt,
+				&transaction.EffectiveDate,
 				&metaDataJSON,
 				&count,
 			)
@@ -1589,6 +1590,7 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 				&transaction.Status,
 				&transaction.Hash,
 				&transaction.CreatedAt,
+				&transaction.EffectiveDate,
 				&metaDataJSON,
 			)
 		}
@@ -1622,4 +1624,78 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 	))
 
 	return transactions, totalCount, nil
+}
+
+// GetStuckQueuedTransactions retrieves QUEUED transactions that are older than the threshold
+// and have no child transactions, indicating they were never picked up by Redis processing.
+func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold time.Duration, batchSize int) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetStuckQueuedTransactions")
+	defer span.End()
+
+	cutoff := time.Now().Add(-threshold)
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions t
+		WHERE t.status = 'QUEUED'
+		  AND t.created_at < $1
+		  AND NOT EXISTS (
+		      SELECT 1 FROM blnk.transactions child
+		      WHERE child.parent_transaction = t.transaction_id
+		  )
+		ORDER BY t.created_at ASC
+		LIMIT $2
+	`, cutoff, batchSize)
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve stuck queued transactions", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
+
+	var transactions []*model.Transaction
+	for rows.Next() {
+		txn := &model.Transaction{}
+		var metaDataJSON []byte
+		var preciseAmountStr string
+		err = rows.Scan(
+			&txn.TransactionID, &txn.ParentTransaction, &txn.Source, &txn.Reference,
+			&txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Rate,
+			&txn.Currency, &txn.Destination, &txn.Description, &txn.Status,
+			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor, &txn.Hash,
+		)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan stuck queued transaction", err)
+		}
+
+		err = json.Unmarshal(metaDataJSON, &txn.MetaData)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		txn.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
+
+		model.ApplyPrecision(txn)
+
+		transactions = append(transactions, txn)
+	}
+
+	if err = rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error iterating stuck queued transactions", err)
+	}
+
+	span.AddEvent("Stuck queued transactions retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+	))
+	return transactions, nil
 }

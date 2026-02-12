@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -505,4 +506,28 @@ func (a Api) GetTransactionLineage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, lineage)
+}
+
+// RecoverQueuedTransactions triggers manual recovery of stuck queued transactions.
+// Accepts an optional "threshold" query parameter (e.g. "5m", "10m") specifying
+// the minimum age of transactions to recover. Defaults to 2 minutes, which is also
+// the enforced minimum.
+func (a Api) RecoverQueuedTransactions(c *gin.Context) {
+	threshold := 2 * time.Minute
+	if thresholdStr := c.Query("threshold"); thresholdStr != "" {
+		parsed, err := time.ParseDuration(thresholdStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid threshold duration: " + err.Error()})
+			return
+		}
+		threshold = parsed
+	}
+
+	recovered, err := a.blnk.RecoverQueuedTransactions(c.Request.Context(), threshold)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"recovered": recovered, "threshold": threshold.String()})
 }

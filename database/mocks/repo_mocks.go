@@ -136,6 +136,14 @@ func (m *MockDataSource) GetTransactionsByShadowFor(ctx context.Context, parentT
 	return args.Get(0).([]model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) GetStuckQueuedTransactions(ctx context.Context, threshold time.Duration, batchSize int) ([]*model.Transaction, error) {
+	args := m.Called(ctx, threshold, batchSize)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
 // Ledger methods
 
 func (m *MockDataSource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {

@@ -50,14 +50,13 @@ type TransactionTypePayload struct {
 //
 // Returns:
 // - *Queue: A pointer to the newly created Queue instance.
-func NewQueue(conf *config.Configuration) *Queue {
+func NewQueue(conf *config.Configuration, client *asynq.Client) *Queue {
 	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to parse Redis URL")
 	}
 
-	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig}
-	client := asynq.NewClient(queueOptions)
+	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig, PoolSize: conf.Redis.PoolSize}
 	inspector := asynq.NewInspector(queueOptions)
 	return &Queue{
 		Client:    client,

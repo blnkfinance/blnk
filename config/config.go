@@ -64,6 +64,11 @@ var (
 		WebhookConcurrency:  20,
 	}
 
+	defaultRedis = RedisConfig{
+		PoolSize:     100,
+		MinIdleConns: 20,
+	}
+
 	defaultDatabase = DataSourceConfig{
 		MaxOpenConns:    25,
 		MaxIdleConns:    10,
@@ -95,6 +100,8 @@ type DataSourceConfig struct {
 type RedisConfig struct {
 	Dns           string `json:"dns" envconfig:"BLNK_REDIS_DNS"`
 	SkipTLSVerify bool   `json:"skip_tls_verify" envconfig:"BLNK_REDIS_SKIP_TLS_VERIFY"`
+	PoolSize      int    `json:"pool_size" envconfig:"BLNK_REDIS_POOL_SIZE"`
+	MinIdleConns  int    `json:"min_idle_conns" envconfig:"BLNK_REDIS_MIN_IDLE_CONNS"`
 }
 
 type TypeSenseConfig struct {
@@ -278,15 +285,11 @@ func (cnf *Configuration) setDefaultValues() {
 	}
 
 	// Set module defaults
+	cnf.setRedisDefaults()
 	cnf.setDatabaseDefaults()
 	cnf.setTransactionDefaults()
 	cnf.setReconciliationDefaults()
 	cnf.setQueueDefaults()
-
-	// Enable telemetry by default unless explicitly disabled
-	if os.Getenv("BLNK_ENABLE_TELEMETRY") == "" {
-		cnf.EnableTelemetry = true
-	}
 
 	if cnf.EnableTelemetry {
 		logrus.Info("telemetry enabled")
@@ -360,6 +363,15 @@ func (cnf *Configuration) setQueueDefaults() {
 	}
 }
 
+func (cnf *Configuration) setRedisDefaults() {
+	if cnf.Redis.PoolSize == 0 {
+		cnf.Redis.PoolSize = defaultRedis.PoolSize
+	}
+	if cnf.Redis.MinIdleConns == 0 {
+		cnf.Redis.MinIdleConns = defaultRedis.MinIdleConns
+	}
+}
+
 func (cnf *Configuration) setDatabaseDefaults() {
 	if cnf.DataSource.MaxOpenConns == 0 {
 		cnf.DataSource.MaxOpenConns = defaultDatabase.MaxOpenConns
@@ -385,8 +397,8 @@ func (cnf *Configuration) trimWhitespace() {
 func (cnf *Configuration) setupRateLimiting() {
 
 	if cnf.RateLimit.RequestsPerSecond == nil && cnf.RateLimit.Burst == nil {
-		defaultRPS := 500.0
-		defaultBurst := 2000
+		defaultRPS := 5000000.0
+		defaultBurst := 10000000
 
 		cnf.RateLimit.RequestsPerSecond = &defaultRPS
 		cnf.RateLimit.Burst = &defaultBurst

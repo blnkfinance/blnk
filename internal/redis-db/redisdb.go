@@ -27,6 +27,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// PoolConfig holds Redis connection pool settings.
+type PoolConfig struct {
+	PoolSize     int
+	MinIdleConns int
+}
+
 // Redis struct holds the Redis client and addresses of Redis instances.
 // It supports both single-instance Redis connections and Redis Cluster setups.
 type Redis struct {
@@ -106,10 +112,22 @@ func ParseRedisURL(rawURL string, skipTLSVerify bool) (*redis.Options, error) {
 // Returns:
 // - *Redis: A new Redis client wrapper.
 // - error: An error if the provided address is invalid or connection setup fails.
-func NewRedisClient(addresses []string, skipTLSVerify bool) (*Redis, error) {
+func NewRedisClient(addresses []string, skipTLSVerify bool, pool ...*PoolConfig) (*Redis, error) {
 	// Ensure at least one address is provided
 	if len(addresses) == 0 {
 		return nil, errors.New("redis addresses list cannot be empty")
+	}
+
+	// Resolve pool config (use provided or defaults)
+	var pc PoolConfig
+	if len(pool) > 0 && pool[0] != nil {
+		pc = *pool[0]
+	}
+	if pc.PoolSize == 0 {
+		pc.PoolSize = 100
+	}
+	if pc.MinIdleConns == 0 {
+		pc.MinIdleConns = 20
 	}
 
 	var client redis.UniversalClient
@@ -120,6 +138,9 @@ func NewRedisClient(addresses []string, skipTLSVerify bool) (*Redis, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		opts.PoolSize = pc.PoolSize
+		opts.MinIdleConns = pc.MinIdleConns
 
 		client = redis.NewClient(opts)
 	} else {
@@ -155,9 +176,11 @@ func NewRedisClient(addresses []string, skipTLSVerify bool) (*Redis, error) {
 		}
 
 		client = redis.NewUniversalClient(&redis.UniversalOptions{
-			Addrs:     clusterAddrs,
-			Password:  password,
-			TLSConfig: tlsConfig,
+			Addrs:        clusterAddrs,
+			Password:     password,
+			TLSConfig:    tlsConfig,
+			PoolSize:     pc.PoolSize,
+			MinIdleConns: pc.MinIdleConns,
 		})
 	}
 

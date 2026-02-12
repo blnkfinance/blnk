@@ -94,7 +94,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		return err
 	}
 
-	log.Println(" [*] Transaction Processed", txn.TransactionID)
+	logrus.Infof("Transaction %s processed successfully", txn.TransactionID)
 	return nil
 }
 
@@ -247,6 +247,7 @@ func initializeWebhookWorkerServer(conf *config.Configuration, queues map[string
 			Password:  redisOption.Password,
 			DB:        redisOption.DB,
 			TLSConfig: redisOption.TLSConfig,
+			PoolSize:  conf.Redis.PoolSize,
 		},
 		asynq.Config{
 			Concurrency:     conf.Queue.WebhookConcurrency,
@@ -268,6 +269,7 @@ func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (
 			Password:  redisOption.Password,
 			DB:        redisOption.DB,
 			TLSConfig: redisOption.TLSConfig,
+			PoolSize:  conf.Redis.PoolSize,
 		},
 		asynq.Config{
 			Concurrency:     1,
@@ -284,7 +286,6 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 		return
 	}
 
-	// Register handlers for transaction queues
 	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
 		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
 		mux.HandleFunc(queueName, b.processTransaction)
@@ -299,7 +300,6 @@ func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 		return
 	}
 
-	// Register handlers for other task types
 	mux.HandleFunc(cfg.Queue.WebhookQueue, b.blnk.ProcessWebhook)
 	mux.HandleFunc("new:hook_execution", b.blnk.Hooks.ProcessHookTask)
 	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
@@ -316,13 +316,11 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			// Load configuration
 			conf, err := config.Fetch()
 			if err != nil {
 				log.Fatal("Error fetching config:", err)
 			}
 
-			// Initialize observability (tracing and PostHog)
 			phClient, shutdown, err := initializeTelemetryAndObservability(context.Background(), conf)
 			if err != nil {
 				log.Fatal(err)
@@ -340,7 +338,6 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				defer phClient.Close()
 			}
 
-			// Setup Workers
 			srv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
 			if err != nil {
 				log.Fatal(err)
@@ -348,13 +345,15 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			monitoringSrv := startMonitoringServer(conf)
 
-			// Start worker servers
 			if err := srv.Start(mux); err != nil {
 				log.Fatalf("could not start transaction worker server: %v", err)
 			}
 			if err := webhookSrv.Start(webhookMux); err != nil {
 				log.Fatalf("could not start webhook worker server: %v", err)
 			}
+
+			recoveryProcessor := blnk.NewQueuedTransactionRecoveryProcessor(b.blnk)
+			recoveryProcessor.Start(ctx)
 
 			logrus.Info("Workers started.")
 
@@ -363,7 +362,8 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			log.Printf("Shutdown signal received. Shutting down...")
 
-			// Stop monitoring HTTP server first
+			recoveryProcessor.Stop()
+
 			if monitoringSrv != nil {
 				sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -372,7 +372,6 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				}
 			}
 
-			// Gracefully stop both worker servers.
 			webhookSrv.Shutdown()
 			srv.Shutdown()
 
@@ -406,7 +405,6 @@ func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Ser
 	return srv, webhookSrv, mux, webhookMux, nil
 }
 
-// startMonitoringServer now returns the server so it can be gracefully shut down.
 func startMonitoringServer(conf *config.Configuration) *http.Server {
 	redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 	asynqmonHandler := asynqmon.New(asynqmon.Options{
@@ -416,6 +414,7 @@ func startMonitoringServer(conf *config.Configuration) *http.Server {
 			Password:  redisOption.Password,
 			DB:        redisOption.DB,
 			TLSConfig: redisOption.TLSConfig,
+			PoolSize:  conf.Redis.PoolSize,
 		},
 	})
 
