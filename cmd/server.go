@@ -327,9 +327,11 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			// Initialize TypeSense
-			_, err = initializeTypeSense(ctx, cfg)
+			tsClient, err := initializeTypeSense(ctx, cfg)
 			if err != nil {
 				log.Printf("TypeSense initialization error: %v", err)
+			} else if tsClient != nil {
+				search.TryReindexIfNeeded(ctx, tsClient, b.blnk.GetDataSource())
 			}
 
 			// Close database connection pool on shutdown

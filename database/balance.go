@@ -1593,8 +1593,8 @@ func (d Datasource) GetAllBalancesWithFilter(ctx context.Context, filters *filte
 // - *int64: Optional total count of matching records (if opts.IncludeCount is true).
 // - error: An error if the query fails or if there's an issue processing the results.
 func (d Datasource) GetAllBalancesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Balance, *int64, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
 	}
 
 	if opts == nil {

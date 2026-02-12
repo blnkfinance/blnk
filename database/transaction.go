@@ -1491,8 +1491,8 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetAllTransactionsWithFilterAndOptions")
 	defer span.End()
 
-	if limit <= 0 || limit > 100 {
-		limit = 20
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
 	}
 
 	if opts == nil {
