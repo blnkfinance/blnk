@@ -15,7 +15,7 @@ version: "3.8"
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.13.0}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.13.2}
     container_name: server
     restart: on-failure
     entrypoint: ["/bin/sh", "-c"]
@@ -36,7 +36,7 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.13.0}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.13.2}
     container_name: worker
     restart: on-failure
     entrypoint: ["blnk", "workers"]
