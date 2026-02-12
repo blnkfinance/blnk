@@ -423,3 +423,84 @@ func (t *TypesenseClient) DropAllCollections(ctx context.Context) error {
 
 	return nil
 }
+
+func dbHasData(ctx context.Context, ds database.IDataSource) bool {
+	ledgers, err := ds.GetAllLedgers(2, 0)
+	if err != nil {
+		logrus.WithError(err).Debug("could not check ledgers for reindex")
+		return false
+	}
+	if len(ledgers) > 1 {
+		return true
+	}
+
+	txns, err := ds.GetAllTransactions(ctx, 1, 0)
+	if err != nil {
+		logrus.WithError(err).Debug("could not check transactions for reindex")
+		return false
+	}
+	if len(txns) > 0 {
+		return true
+	}
+
+	balances, err := ds.GetAllBalances(1, 0)
+	if err != nil {
+		logrus.WithError(err).Debug("could not check balances for reindex")
+		return false
+	}
+	if len(balances) > 0 {
+		return true
+	}
+
+	identities, err := ds.GetAllIdentitiesPaginated(1, 0)
+	if err != nil {
+		logrus.WithError(err).Debug("could not check identities for reindex")
+		return false
+	}
+	return len(identities) > 0
+}
+
+func typesenseHasData(ctx context.Context, client *TypesenseClient) bool {
+	resp, err := client.Client.Collection(CollectionTransactions).Retrieve(ctx)
+	if err != nil {
+		logrus.WithError(err).Debug("could not retrieve transactions collection for reindex")
+		return true
+	}
+	if resp.NumDocuments == nil {
+		return false
+	}
+	return *resp.NumDocuments > 0
+}
+
+func shouldReindex(ctx context.Context, client *TypesenseClient, ds database.IDataSource) bool {
+	if !dbHasData(ctx, ds) {
+		return false
+	}
+	if typesenseHasData(ctx, client) {
+		return false
+	}
+	return true
+}
+
+func TryReindexIfNeeded(ctx context.Context, client *TypesenseClient, ds database.IDataSource) {
+	if client == nil || ds == nil {
+		return
+	}
+	if !shouldReindex(ctx, client, ds) {
+		return
+	}
+
+	logrus.Info("Database has data but Typesense is empty, triggering one-time reindex")
+	go func() {
+		reindexCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+
+		svc := NewReindexService(client, ds, ReindexConfig{BatchSize: 1000})
+		_, err := svc.StartReindex(reindexCtx)
+		if err != nil {
+			logrus.WithError(err).Error("reindex failed")
+			return
+		}
+		logrus.Info("reindex completed successfully")
+	}()
+}

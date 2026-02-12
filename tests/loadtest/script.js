@@ -8,6 +8,7 @@ import { uuidv4 } from "https://jslib.k6.io/k6-utils/1.4.0/index.js";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.4/index.js";
 
 const URL = __ENV.URL || "https://YOUR_DOMAIN/transactions";
+const API_KEY = __ENV.API_KEY || __ENV.BLNK_API_KEY;
 // baseline | ramp | contention | soak | spike
 const SCENARIO = __ENV.SCENARIO || "baseline";
 const HOT_DEST = __ENV.HOT_DEST || "@hot-balance-0001";
@@ -160,7 +161,7 @@ function buildOptions() {
       thresholds: merge(
         dth("spike_warm"),
         dth("spike_peak"),
-        dth("spike_recover")
+        dth("spike_recover"),
       ),
     };
   }
@@ -181,8 +182,12 @@ function postTxn(dest) {
     destination: dest,
   });
 
+  var headers = { "Content-Type": "application/json" };
+  if (API_KEY) {
+    headers["X-Blnk-Key"] = API_KEY;
+  }
   var res = http.post(URL, payload, {
-    headers: { "Content-Type": "application/json" },
+    headers: headers,
     timeout: "30s",
     tags: { endpoint: "transactions" },
   });

@@ -27,6 +27,8 @@ spec:
         - command:
             - blnk
             - workers
+            - --config
+            - /blnk.json
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://jaeger:4318
@@ -42,4 +44,3 @@ spec:
         - name: blnk-config
           configMap:
             name: blnk-config
-status: {}

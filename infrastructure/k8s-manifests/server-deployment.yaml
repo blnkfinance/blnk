@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - args:
-            - blnk migrate up && blnk start
+            - blnk migrate up --config /blnk.json && blnk start --config /blnk.json
           command:
             - /bin/sh
             - -c

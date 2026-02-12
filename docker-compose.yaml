@@ -78,6 +78,8 @@ services:
   typesense:
     image: typesense/typesense:29.0
     container_name: typesense
+    ports:
+      - "8108:8108"
     command:
       ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
     volumes:
