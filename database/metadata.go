@@ -20,7 +20,7 @@ func (d *Datasource) UpdateLedgerMetadata(id string, metadata map[string]interfa
 		return err
 	}
 
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.ledgers 
 		SET meta_data = $1
 		WHERE ledger_id = $2
@@ -94,7 +94,7 @@ func (d *Datasource) UpdateIdentityMetadata(id string, metadata map[string]inter
 		return err
 	}
 
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.identity 
 		SET meta_data = $1
 		WHERE identity_id = $2

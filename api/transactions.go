@@ -26,7 +26,7 @@ import (
 
 	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/config"
-	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
+	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/model"
 
 	"github.com/gin-gonic/gin"
@@ -407,13 +407,13 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	pg, err := pgconn.GetDBConnection(cnf)
+	ds, err := database.GetDBConnection(cnf)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	amount := model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: req.Amount, TransactionID: id}, pg)
+	amount := model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: req.Amount, TransactionID: id}, ds.Conn)
 
 	if req.PreciseAmount != nil {
 		amount = req.PreciseAmount

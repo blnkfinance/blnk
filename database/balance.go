@@ -260,7 +260,7 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 	}
 
 	// Insert the balance into the database
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data, track_fund_lineage, allocation_strategy)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON, balance.TrackFundLineage, allocationStrategy)
@@ -371,7 +371,7 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	var allocationStrategy sql.NullString
 
 	// Execute the query
-	row := d.Conn.QueryRow(`
+	row := d.Conn.QueryRowContext(context.Background(), `
        SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE balance_id = $1
@@ -572,7 +572,7 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 	var allocationStrategy sql.NullString
 
 	// Execute query to find the balance with the given indicator and currency
-	row := d.Conn.QueryRow(`
+	row := d.Conn.QueryRowContext(context.Background(), `
        SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE indicator = $1 AND currency = $2
@@ -664,7 +664,7 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 // - error: An error if any occurs during the query execution, data retrieval, or JSON parsing.
 func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 	var indicator sql.NullString
-	rows, err := d.Conn.Query(`
+	rows, err := d.Conn.QueryContext(context.Background(), `
         SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data
         FROM blnk.balances
         ORDER BY created_at DESC
@@ -764,7 +764,7 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 // - error: An error if any occurs during the query execution, data retrieval, or JSON parsing.
 func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error) {
 	// Execute SQL query to select balances for source and destination using a stored procedure
-	rows, err := d.Conn.Query(`
+	rows, err := d.Conn.QueryContext(context.Background(), `
 		SELECT blnk.get_balances_by_id($1,$2)
 	`, sourceId, destinationId)
 	if err != nil {
@@ -927,7 +927,7 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 	}
 
 	// Execute the SQL query to update the balance in the database
-	result, err := d.Conn.Exec(`
+	result, err := d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.balances
 		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
 		WHERE balance_id = $1
@@ -974,7 +974,7 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 	}
 
 	// Insert the monitor data into the balance_monitors table
-	_, err := d.Conn.Exec(`
+	_, err := d.Conn.ExecContext(context.Background(), `
 		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
@@ -1015,7 +1015,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	var preciseValue int64 // Temporary variable to hold the precise value as int64
 
 	// Query the database to get the monitor details by MonitorID
-	row := d.Conn.QueryRow(`
+	row := d.Conn.QueryRowContext(context.Background(), `
 		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
@@ -1052,7 +1052,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 // - error: If an error occurs during the query or while scanning the result set, an `APIError` is returned.
 func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	// Query the database for all balance monitors
-	rows, err := d.Conn.Query(`
+	rows, err := d.Conn.QueryContext(context.Background(), `
 		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at
 		FROM blnk.balance_monitors
 	`)
@@ -1105,7 +1105,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 // - error: If an error occurs during the query or while scanning the result set, an `APIError` is returned.
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	// Query the database for monitors associated with the given balance ID
-	rows, err := d.Conn.Query(`
+	rows, err := d.Conn.QueryContext(context.Background(), `
 		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`, balanceID)
@@ -1160,7 +1160,7 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 // - error: If the update fails, an appropriate `APIError` is returned.
 func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
 	// Execute the SQL update statement, replacing the placeholder values with the monitor's data
-	result, err := d.Conn.Exec(`
+	result, err := d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.balance_monitors
 		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7
 		WHERE monitor_id = $1
@@ -1196,7 +1196,7 @@ func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
 // - error: If the deletion fails or the monitor is not found, an appropriate `APIError` is returned.
 func (d Datasource) DeleteMonitor(id string) error {
 	// Execute the SQL DELETE statement, removing the monitor by its ID
-	result, err := d.Conn.Exec(`
+	result, err := d.Conn.ExecContext(context.Background(), `
 		DELETE FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
 	// If an error occurred during execution, return an internal server error
@@ -1536,7 +1536,7 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 // - error: An error is returned if the balance or identity does not exist or the database operation fails.
 func (d Datasource) UpdateBalanceIdentity(balanceID string, identityID string) error {
 	// Execute the SQL update statement to change the identity_id for the specified balance.
-	result, err := d.Conn.Exec(`
+	result, err := d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.balances
 		SET identity_id = $2
 		WHERE balance_id = $1
