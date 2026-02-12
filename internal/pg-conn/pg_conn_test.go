@@ -51,13 +51,3 @@ func TestConnectDB_UnreachableHost(t *testing.T) {
 	assert.Nil(t, db)
 }
 
-func TestDatasource_Struct(t *testing.T) {
-	ds := &Datasource{
-		Conn:  nil,
-		Cache: nil,
-	}
-
-	assert.NotNil(t, ds)
-	assert.Nil(t, ds.Conn)
-	assert.Nil(t, ds.Cache)
-}

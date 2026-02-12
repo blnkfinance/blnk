@@ -23,6 +23,7 @@ import (
 	"github.com/blnkfinance/blnk/config"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/go-redis/cache/v9"
+	redis "github.com/redis/go-redis/v9"
 )
 
 // Cache interface provides the basic operations for a cache system.
@@ -69,12 +70,22 @@ func NewCache() (Cache, error) {
 		return nil, err
 	}
 
-	// Initialize Redis cache with the configured Redis DNS
-	ca, err := newRedisCache([]string{cfg.Redis.Dns}, cfg.Redis.SkipTLSVerify)
+	// Initialize Redis cache with the configured Redis DNS and pool settings
+	ca, err := newRedisCache([]string{cfg.Redis.Dns}, cfg.Redis.SkipTLSVerify, cfg.Redis.PoolSize, cfg.Redis.MinIdleConns)
 	if err != nil {
 		return nil, err
 	}
 	return ca, nil
+}
+
+// NewCacheWithClient creates a new RedisCache using an existing Redis client.
+// No error is returned because no I/O occurs — the client is already validated.
+func NewCacheWithClient(client redis.UniversalClient) Cache {
+	c := cache.New(&cache.Options{
+		Redis:      client,
+		LocalCache: cache.NewTinyLFU(cacheSize, 1*time.Minute),
+	})
+	return &RedisCache{cache: c}
 }
 
 // cacheSize defines the size of the local cache (in number of entries) used alongside Redis.
@@ -84,9 +95,12 @@ const cacheSize = 128000
 // Parameters:
 // - addresses: The Redis server addresses to connect to.
 // Returns a RedisCache instance and an error if the connection fails.
-func newRedisCache(addresses []string, skipTLSVerify bool) (*RedisCache, error) {
+func newRedisCache(addresses []string, skipTLSVerify bool, poolSize int, minIdleConns int) (*RedisCache, error) {
 	// Initialize the Redis client using the provided addresses
-	client, err := redis_db.NewRedisClient(addresses, skipTLSVerify)
+	client, err := redis_db.NewRedisClient(addresses, skipTLSVerify, &redis_db.PoolConfig{
+		PoolSize:     poolSize,
+		MinIdleConns: minIdleConns,
+	})
 	if err != nil {
 		return nil, err
 	}

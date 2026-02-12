@@ -47,7 +47,7 @@ func (d Datasource) CreateIdentity(identity model.Identity) (model.Identity, err
 	identity.CreatedAt = time.Now()
 
 	// Insert the identity record into the database
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		INSERT INTO blnk.identity (identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
@@ -126,7 +126,7 @@ func (d Datasource) GetIdentityByID(id string) (*model.Identity, error) {
 // - A slice of Identity objects if successful, or an error if any operation fails.
 func (d Datasource) GetAllIdentities() ([]model.Identity, error) {
 	// Execute query to retrieve all identities, ordered by creation date
-	rows, err := d.Conn.Query(`
+	rows, err := d.Conn.QueryContext(context.Background(), `
 		SELECT identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data
 		FROM blnk.identity
 		ORDER BY created_at DESC
@@ -253,7 +253,7 @@ func (d Datasource) UpdateIdentity(identity *model.Identity) error {
 	args = append(args, identity.IdentityID)
 
 	// Execute the update query
-	result, err := d.Conn.Exec(query, args...)
+	result, err := d.Conn.ExecContext(context.Background(), query, args...)
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update identity", err)
 	}
@@ -278,7 +278,7 @@ func (d Datasource) UpdateIdentity(identity *model.Identity) error {
 // - An error if the deletion fails, or nil if successful.
 func (d Datasource) DeleteIdentity(id string) error {
 	// Execute the SQL delete query
-	result, err := d.Conn.Exec(`
+	result, err := d.Conn.ExecContext(context.Background(), `
 		DELETE FROM blnk.identity
 		WHERE identity_id = $1
 	`, id)
@@ -312,7 +312,7 @@ func (d Datasource) GetAllIdentitiesPaginated(limit, offset int) ([]model.Identi
 		limit = 20
 	}
 
-	rows, err := d.Conn.Query(`
+	rows, err := d.Conn.QueryContext(context.Background(), `
 		SELECT identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data
 		FROM blnk.identity
 		ORDER BY created_at DESC

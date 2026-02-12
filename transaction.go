@@ -55,6 +55,7 @@ const (
 )
 
 var asyncBulkSemaphore = semaphore.NewWeighted(100) // max 100 concurrent
+var asyncTxnSemaphore = semaphore.NewWeighted(20)   // max 20 concurrent async transaction processors
 
 // getTxns is a function type that retrieves a batch of transactions based on the parent transaction ID, batch size, and offset.
 //
@@ -1615,19 +1616,23 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 
 func processTransactionAsync(ctx context.Context, l *Blnk, transaction *model.Transaction, originalRef string, originalTxnID string, transactions []*model.Transaction) {
 	go func() {
+		if err := asyncTxnSemaphore.Acquire(ctx, 1); err != nil {
+			logrus.WithError(err).Error("failed to acquire async txn semaphore")
+			return
+		}
+		defer asyncTxnSemaphore.Release(1)
+
 		ctx, span := tracer.Start(ctx, "ProcessTransactionAsync")
 		defer span.End()
 
 		queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
 		if err != nil {
 			span.RecordError(err)
-			// return nil, err
 		}
 
 		if !transaction.SkipQueue {
 			if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
 				span.RecordError(err)
-				// return nil, err
 			}
 		}
 	}()
@@ -1800,8 +1805,15 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	}
 
 	// Set inflight flag in metadata if the transaction is inflight
+	//maybe move to their respective columns in the db later
 	if transaction.Inflight {
 		transaction.MetaData["inflight"] = true
+	}
+	if transaction.Atomic {
+		transaction.MetaData["atomic"] = true
+	}
+	if transaction.AllowOverdraft {
+		transaction.MetaData["allow_overdraft"] = true
 	}
 }
 

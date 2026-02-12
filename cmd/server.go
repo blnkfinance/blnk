@@ -30,6 +30,7 @@ import (
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/api"
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/search"
 	trace "github.com/blnkfinance/blnk/internal/traces"
 	"github.com/caddyserver/certmagic"
@@ -155,6 +156,26 @@ func sendHeartbeat(client posthog.Client, heartbeatID string) {
 }
 
 func healthCheckHandler(c *gin.Context) {
+	cfg, err := config.Fetch()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "DOWN", "reason": "config unavailable"})
+		return
+	}
+
+	ds, err := database.GetDBConnection(cfg)
+	if err != nil || ds == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "DOWN", "reason": "database unreachable"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+
+	if err := ds.Conn.PingContext(ctx); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "DOWN", "reason": "database ping failed"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"status": "UP"})
 }
 
@@ -310,6 +331,17 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			if err != nil {
 				log.Printf("TypeSense initialization error: %v", err)
 			}
+
+			// Close database connection pool on shutdown
+			defer func() {
+				ds, err := database.GetDBConnection(cfg)
+				if err == nil && ds != nil {
+					logrus.Info("Closing database connection pool...")
+					if err := ds.Close(); err != nil {
+						logrus.Errorf("Error closing database connection: %v", err)
+					}
+				}
+			}()
 
 			// Start lineage outbox processor
 			// This worker processes pending lineage entries that were captured atomically with transactions

@@ -60,7 +60,10 @@ var SQLFiles embed.FS
 
 // initializeRedisClients sets up both the Redis client and Asynq client
 func initializeRedisClients(config *config.Configuration) (redis.UniversalClient, *asynq.Client, error) {
-	redisClient, err := redis_db.NewRedisClient([]string{config.Redis.Dns}, config.Redis.SkipTLSVerify)
+	redisClient, err := redis_db.NewRedisClient([]string{config.Redis.Dns}, config.Redis.SkipTLSVerify, &redis_db.PoolConfig{
+		PoolSize:     config.Redis.PoolSize,
+		MinIdleConns: config.Redis.MinIdleConns,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,6 +78,7 @@ func initializeRedisClients(config *config.Configuration) (redis.UniversalClient
 		Password:  redisOption.Password,
 		DB:        redisOption.DB,
 		TLSConfig: redisOption.TLSConfig,
+		PoolSize:  config.Redis.PoolSize,
 	})
 
 	return redisClient.Client(), asynqClient, nil
@@ -123,16 +127,13 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	}
 
 	bt := NewBalanceTracker()
-	newQueue := NewQueue(configuration)
+	newQueue := NewQueue(configuration, asynqClient)
 	newSearch := search.NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
 	hookManager := hooks.NewHookManager(redisClient, asynqClient)
 	tokenizer := initializeTokenizationService(configuration)
 	httpClient := initializeHTTPClient()
 
-	newCache, err := cache.NewCache()
-	if err != nil {
-		return nil, err
-	}
+	newCache := cache.NewCacheWithClient(redisClient)
 
 	b := &Blnk{
 		datasource:  db,

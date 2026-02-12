@@ -48,7 +48,7 @@ func (d Datasource) CreateAccount(account model.Account) (model.Account, error) 
 	account.CreatedAt = time.Now()
 
 	// Insert the new account into the database
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		INSERT INTO blnk.accounts (account_id, name, number, bank_name, currency, ledger_id, identity_id, balance_id, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, account.AccountID, account.Name, account.Number, account.BankName, account.Currency, account.LedgerID, account.IdentityID, account.BalanceID, account.CreatedAt, metaDataJSON)
@@ -250,7 +250,7 @@ func scanAccountRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Account,
 // - A slice of Account objects or an error if the query or scan fails.
 func (d Datasource) GetAllAccounts() ([]model.Account, error) {
 	// Execute the SQL query to retrieve account data
-	rows, err := d.Conn.Query(`
+	rows, err := d.Conn.QueryContext(context.Background(), `
 		SELECT account_id, name, number, bank_name, currency, created_at, meta_data 
 		FROM blnk.accounts
 		ORDER BY created_at DESC
@@ -296,7 +296,7 @@ func (d Datasource) GetAllAccounts() ([]model.Account, error) {
 // - A pointer to the Account object if found, or an error if the account is not found or a query error occurs.
 func (d Datasource) GetAccountByNumber(number string) (*model.Account, error) {
 	// Query the database for the account with the given number
-	row := d.Conn.QueryRow(`
+	row := d.Conn.QueryRowContext(context.Background(), `
 		SELECT account_id, name, number, bank_name, created_at, meta_data 
 		FROM blnk.accounts WHERE number = $1
 	`, number)
@@ -337,7 +337,7 @@ func (d Datasource) UpdateAccount(account *model.Account) error {
 	}
 
 	// Execute the SQL update statement
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.accounts
 		SET name = $2, number = $3, bank_name = $4, meta_data = $5
 		WHERE account_id = $1
@@ -355,7 +355,7 @@ func (d Datasource) UpdateAccount(account *model.Account) error {
 // - An error if the deletion fails, otherwise returns nil.
 func (d Datasource) DeleteAccount(id string) error {
 	// Execute the SQL delete statement
-	_, err := d.Conn.Exec(`
+	_, err := d.Conn.ExecContext(context.Background(), `
 		DELETE FROM blnk.accounts WHERE account_id = $1
 	`, id)
 

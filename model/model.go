@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"strconv"
 
-	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
@@ -307,19 +306,19 @@ func fetchTransactionPrecisionFromDB(db *sql.DB, transactionID string) (float64,
 // ApplyPrecisionWithDBLookup attempts to fetch precision from the database
 // and then applies it to the transaction. Falls back to transaction-defined
 // precision or a default of 1 if DB lookup fails or precision is invalid.
-func ApplyPrecisionWithDBLookup(transaction *Transaction, ds *pgconn.Datasource) *big.Int {
+func ApplyPrecisionWithDBLookup(transaction *Transaction, db *sql.DB) *big.Int {
 	var dbPrecision float64
 	var found bool
 	var err error
 
-	if ds != nil && ds.Conn != nil && transaction.TransactionID != "" {
-		dbPrecision, found, err = fetchTransactionPrecisionFromDB(ds.Conn, transaction.TransactionID)
+	if db != nil && transaction.TransactionID != "" {
+		dbPrecision, found, err = fetchTransactionPrecisionFromDB(db, transaction.TransactionID)
 		if err != nil {
 			logrus.WithError(err).WithField("transaction_id", transaction.TransactionID).Warn("error fetching precision from DB, using local/default precision")
 			// Fall through to use local or default precision
 		}
 	} else {
-		logrus.Debug("datasource, DB connection, or TransactionID is nil/empty; skipping DB lookup for precision")
+		logrus.Debug("DB connection or TransactionID is nil/empty; skipping DB lookup for precision")
 	}
 
 	if found && dbPrecision > 0 {

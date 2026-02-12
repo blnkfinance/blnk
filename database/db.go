@@ -17,6 +17,7 @@ limitations under the License.
 package database
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"sync"
@@ -37,6 +38,14 @@ type Datasource struct {
 	Cache cache.Cache
 }
 
+// Close closes the underlying database connection pool.
+func (d *Datasource) Close() error {
+	if d.Conn != nil {
+		return d.Conn.Close()
+	}
+	return nil
+}
+
 // NewDataSource initializes a new database connection.
 func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
 	con, err := GetDBConnection(configuration)
@@ -45,7 +54,7 @@ func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
 	}
 
 	// Set the default schema for this connection.
-	if _, err := con.Conn.Exec("SET search_path TO blnk"); err != nil {
+	if _, err := con.Conn.ExecContext(context.Background(), "SET search_path TO blnk"); err != nil {
 		return nil, err
 	}
 	return con, nil

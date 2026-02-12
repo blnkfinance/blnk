@@ -51,7 +51,7 @@ func (d Datasource) CreateLedger(ledger model.Ledger) (model.Ledger, error) {
 	ledger.CreatedAt = time.Now()
 
 	// Insert the ledger into the database
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		INSERT INTO blnk.ledgers (meta_data, name, ledger_id)
 		VALUES ($1, $2, $3)
 	`, metaDataJSON, ledger.Name, ledger.LedgerID)
@@ -95,7 +95,7 @@ func (d Datasource) GetAllLedgers(limit, offset int) ([]model.Ledger, error) {
 		LIMIT $1 OFFSET $2
 	`
 
-	rows, err := d.Conn.Query(query, limit, offset)
+	rows, err := d.Conn.QueryContext(context.Background(), query, limit, offset)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, err.Error(), err)
 	}
@@ -142,7 +142,7 @@ func (d Datasource) GetLedgerByID(id string) (*model.Ledger, error) {
 	ledger := model.Ledger{}
 
 	// Query the database to find the ledger by its ID
-	row := d.Conn.QueryRow(`
+	row := d.Conn.QueryRowContext(context.Background(), `
 		SELECT ledger_id, name, created_at, meta_data
 		FROM blnk.ledgers
 		WHERE ledger_id = $1
@@ -185,7 +185,7 @@ func (d Datasource) UpdateLedger(id, name string) (*model.Ledger, error) {
 	}
 
 	// Update the ledger name
-	_, err = d.Conn.Exec(`
+	_, err = d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.ledgers 
 		SET name = $1 
 		WHERE ledger_id = $2

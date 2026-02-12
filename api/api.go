@@ -81,6 +81,9 @@ func (a Api) Router() *gin.Engine {
 	router.PUT("/transactions/inflight/:txID", a.UpdateInflightStatus)
 	router.GET("/transactions/:id/lineage", a.GetTransactionLineage)
 
+	// Recovery routes
+	router.POST("/transactions/recover", a.RecoverQueuedTransactions)
+
 	// Identity routes
 	router.POST("/identities", a.CreateIdentity)
 	router.GET("/identities/:id", a.GetIdentity)

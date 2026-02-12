@@ -20,12 +20,13 @@ import (
 	"math/big"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/config"
-	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
+	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/model"
 
 	"github.com/gin-gonic/gin"
@@ -406,13 +407,13 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	pg, err := pgconn.GetDBConnection(cnf)
+	ds, err := database.GetDBConnection(cnf)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	amount := model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: req.Amount, TransactionID: id}, pg)
+	amount := model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: req.Amount, TransactionID: id}, ds.Conn)
 
 	if req.PreciseAmount != nil {
 		amount = req.PreciseAmount
@@ -505,4 +506,28 @@ func (a Api) GetTransactionLineage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, lineage)
+}
+
+// RecoverQueuedTransactions triggers manual recovery of stuck queued transactions.
+// Accepts an optional "threshold" query parameter (e.g. "5m", "10m") specifying
+// the minimum age of transactions to recover. Defaults to 2 minutes, which is also
+// the enforced minimum.
+func (a Api) RecoverQueuedTransactions(c *gin.Context) {
+	threshold := 2 * time.Minute
+	if thresholdStr := c.Query("threshold"); thresholdStr != "" {
+		parsed, err := time.ParseDuration(thresholdStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid threshold duration: " + err.Error()})
+			return
+		}
+		threshold = parsed
+	}
+
+	recovered, err := a.blnk.RecoverQueuedTransactions(c.Request.Context(), threshold)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"recovered": recovered, "threshold": threshold.String()})
 }
