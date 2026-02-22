@@ -355,13 +355,13 @@ func (a Api) GetAllTransactions(c *gin.Context) {
 func (a Api) FilterTransactions(c *gin.Context) {
 	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "transactions")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"errorA": err.Error()})
 		return
 	}
 
 	transactions, count, err := a.blnk.GetAllTransactionsWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"errorB": err.Error()})
 		return
 	}
 
