@@ -577,6 +577,248 @@ func TestQueryOptionsDefaultSortOrder(t *testing.T) {
 	}
 }
 
+func TestBuildBalanceIdCondition(t *testing.T) {
+	t.Run("eq with no alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpEqual, Value: "bln_abc123"},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(result.Conditions) != 1 {
+			t.Fatalf("expected 1 condition, got %d", len(result.Conditions))
+		}
+		expected := "(source = $1 OR destination = $1)"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+		if len(result.Args) != 1 || result.Args[0] != "bln_abc123" {
+			t.Errorf("unexpected args: %v", result.Args)
+		}
+		if result.NextArgPos != 2 {
+			t.Errorf("expected NextArgPos=2, got %d", result.NextArgPos)
+		}
+	})
+
+	t.Run("eq with alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpEqual, Value: "bln_abc123"},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "t", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "(t.source = $1 OR t.destination = $1)"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+	})
+
+	t.Run("neq with no alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpNotEqual, Value: "bln_abc123"},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "(source != $1 AND destination != $1)"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+	})
+
+	t.Run("in with no alias (string array uses ANY)", func(t *testing.T) {
+		// String slices take the pq.Array / ANY($1) fast path — one arg, one placeholder.
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpIn, Values: []interface{}{"bln_aaa", "bln_bbb"}},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "(source = ANY($1) OR destination = ANY($1))"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+		if len(result.Args) != 1 {
+			t.Errorf("expected 1 arg (pq.Array), got %d", len(result.Args))
+		}
+		if result.NextArgPos != 2 {
+			t.Errorf("expected NextArgPos=2, got %d", result.NextArgPos)
+		}
+	})
+
+	t.Run("in with no alias (non-string array uses individual placeholders)", func(t *testing.T) {
+		// Non-string values fall through to the individual-placeholder branch.
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpIn, Values: []interface{}{1, 2}},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "(source IN ($1, $2) OR destination IN ($1, $2))"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+		if result.NextArgPos != 3 {
+			t.Errorf("expected NextArgPos=3, got %d", result.NextArgPos)
+		}
+	})
+
+	t.Run("isnull with no alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpIsNull},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "(source IS NULL AND destination IS NULL)"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+		if result.NextArgPos != 1 {
+			t.Errorf("IS NULL should not consume args, NextArgPos=%d", result.NextArgPos)
+		}
+	})
+
+	t.Run("isnotnull with no alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpIsNotNull},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "(source IS NOT NULL OR destination IS NOT NULL)"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+	})
+
+	t.Run("balance_id ignored for non-transactions table", func(t *testing.T) {
+		// balance_id on the balances table is a plain column, not the special handler
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "balance_id", Operator: OpEqual, Value: "bln_abc123"},
+			},
+		}
+
+		result, err := Build(filters, "balances", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "balance_id = $1"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+	})
+}
+
+func TestBuildIndicatorCondition(t *testing.T) {
+	t.Run("eq with no alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "indicator", Operator: OpEqual, Value: "my-indicator"},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(result.Conditions) != 1 {
+			t.Fatalf("expected 1 condition, got %d", len(result.Conditions))
+		}
+		expected := "(source IN (SELECT balance_id FROM _indicator_matches) OR destination IN (SELECT balance_id FROM _indicator_matches))"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+		if len(result.CTEs) != 1 {
+			t.Fatalf("expected 1 CTE, got %d", len(result.CTEs))
+		}
+		if result.NextArgPos != 2 {
+			t.Errorf("expected NextArgPos=2, got %d", result.NextArgPos)
+		}
+	})
+
+	t.Run("eq with alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "indicator", Operator: OpEqual, Value: "my-indicator"},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "t", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := "(t.source IN (SELECT balance_id FROM _indicator_matches) OR t.destination IN (SELECT balance_id FROM _indicator_matches))"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+	})
+
+	t.Run("ilike with no alias", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "indicator", Operator: OpILike, Value: "%savings%"},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(result.CTEs) != 1 {
+			t.Fatalf("expected 1 CTE, got %d", len(result.CTEs))
+		}
+		expectedCTE := "_indicator_matches AS (SELECT b.balance_id FROM blnk.balances b WHERE b.indicator ILIKE $1)"
+		if result.CTEs[0] != expectedCTE {
+			t.Errorf("expected CTE %q, got %q", expectedCTE, result.CTEs[0])
+		}
+		expected := "(source IN (SELECT balance_id FROM _indicator_matches) OR destination IN (SELECT balance_id FROM _indicator_matches))"
+		if result.Conditions[0] != expected {
+			t.Errorf("expected %q, got %q", expected, result.Conditions[0])
+		}
+	})
+}
+
 // Helper function
 func joinStrings(s []string, sep string) string {
 	result := ""
