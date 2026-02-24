@@ -17,6 +17,8 @@ Blnk Finance provides a double-entry, production-grade ledger and tools to help 
 
 [Read developer docs](https://docs.blnkfinance.com/home/install)
 
+Want dedicated Support, [view our Support plans](https://blnkfinance.com/pricing#support-plans)
+
 <br/>
 
 ## Installation
