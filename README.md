@@ -13,9 +13,50 @@
 
 ## Open-Source Financial Ledger for Developers
 
-Blnk Finance is a developer-first toolkit designed for developers who want to **ship fintech products fast** without compromising compliance and correctness.
+Blnk Finance provides a double-entry, production-grade ledger and tools to help developers **build/ship fintech products fast** without compromising compliance and correctness. 
 
-This toolkit consists of:
+[Read developer docs](https://docs.blnkfinance.com/home/install)
+
+<br/>
+
+## Installation
+
+To install Blnk, make sure you have [Docker Compose](https://docs.docker.com/compose/) installed and running on your machine, or [deploy on Cloud](https://cloud.blnkfinance.com/auth/sign-up).
+
+1. Clone the repository into your machine:
+   
+   ```
+   git clone https://github.com/blnkledger/blnk && cd blnk
+   ```
+   
+2. Create a configuration file, `blnk.json`, copy the following configuration and save:
+
+   ```json
+   {
+      "project_name": "Blnk",
+      "data_source": {
+         "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
+      },
+      "redis": {
+         "dns": "redis:6379"
+      },
+      "server": {
+         "port": "5001"
+      }
+   }
+   ```
+
+3. Start your Blnk server with Docker Compose:
+
+   ```
+   docker compose up
+   ```
+
+<br/>
+
+## About the ledger
+
+At its core, the Blnk Ledger consists of:
 
 * **Ledger:** Our open-source double-entry ledger for managing balances and recording any transaction workflow. Features include balance monitoring, balance snapshots, historical balances, inflight transactions, scheduling and overdrafts, bulk transactions, and so much more.
 
@@ -23,14 +64,14 @@ This toolkit consists of:
 
 * **Identity Management:** Easily create & manage identities with PII tokenization features and the ability to link to balances and transactions.
 
-Here are some fintech use cases for Blnk:
+Here are some ways developers build Blnk:
 
 1. [Wallet Management](https://docs.blnkfinance.com/tutorials/quick-start/wallet-management)
 2. [Deposits & Withdrawals](https://docs.blnkfinance.com/tutorials/digital-banking/deposits-withdrawals)
 3. [Order Exchange](https://docs.blnkfinance.com/tutorials/crypto/order-exchange)
 4. [Lending](https://docs.blnkfinance.com/tutorials/digital-banking/lending)
 5. [Loyalty Points System](https://docs.blnkfinance.com/tutorials/quick-start/loyalty-points)
-6. [Savings Application](https://docs.blnkfinance.com/tutorials/quick-start/savings-application)
+6. [AI Billing](https://docs.blnkfinance.com/tutorials/more/ai-billing)
 7. [Escrow Application](https://docs.blnkfinance.com/tutorials/quick-start/escrow-payments)
 
 ### Love what we're building?
@@ -54,44 +95,6 @@ Here are a few things to try:
 5. [Record backdated transactions](https://docs.blnkfinance.com/transactions/backdated-transactions)
 6. [Create an identity](https://docs.blnkfinance.com/identities/introduction)
 7. [Link an identity to a balance](https://docs.blnkfinance.com/identities/link-balances)
-
-<br/>
-
-## Installation
-
-To install Blnk, make sure you have [Docker Compose](https://docs.docker.com/compose/) installed and running on your machine.
-
-1. Clone the repository into your machine:
-   
-   ```
-   git clone https://github.com/blnkledger/Blnk && cd Blnk
-   ```
-   
-2. Create a configuration file, `blnk.json`, copy the following configuration and save:
-
-   ```json
-   {
-      "project_name": "Blnk",
-      "data_source": {
-         "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
-      },
-      "redis": {
-         "dns": "redis:6379"
-      },
-      "typesense":{
-         "dns": "http://typesense:8108"
-      },
-      "server": {
-         "port": "5001"
-      }
-   }
-   ```
-
-3. Start your Blnk server with Docker Compose:
-
-   ```
-   docker compose up
-   ```
 
 <br/>
 
