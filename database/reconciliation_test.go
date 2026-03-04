@@ -994,8 +994,8 @@ func TestFetchAndGroupExternalTransactions_Success(t *testing.T) {
 
 	txDate := time.Now()
 
-	mock.ExpectQuery("SELECT").
-		WithArgs("amount", "upload123", 10, int64(0)).
+	mock.ExpectQuery(`(?s)SELECT amount::text AS group_key.*WHERE upload_id = \$1 AND amount::text IS NOT NULL AND amount::text != ''.*ORDER BY amount::text.*LIMIT \$2 OFFSET \$3`).
+		WithArgs("upload123", 10, int64(0)).
 		WillReturnRows(sqlmock.NewRows([]string{"group_key", "id", "amount", "reference", "currency", "description", "date", "source"}).
 			AddRow("100.00", "ext_123", 100.0, "ref_123", "USD", "test desc", txDate, "external_source"))
 
@@ -1003,4 +1003,8 @@ func TestFetchAndGroupExternalTransactions_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Len(t, result, 1)
+	assert.Contains(t, result, "100.00")
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
 }

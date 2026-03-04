@@ -194,49 +194,61 @@ func TestOneToManyReconciliationNoMatches(t *testing.T) {
 	mockDS.AssertExpectations(t)
 }
 
-// func TestManyToOneReconciliation(t *testing.T) {
-// 	mockDS := new(mocks.MockDataSource)
-// 	blnk := &Blnk{datasource: mockDS}
+func TestManyToOneReconciliationUsesUploadID(t *testing.T) {
+	cnf := &config.Configuration{
+		Transaction: config.TransactionConfig{
+			BatchSize:  100000,
+			MaxWorkers: 1,
+		},
+	}
+	config.ConfigStore.Store(cnf)
+	mockDS := new(mocks.MockDataSource)
+	blnk := &Blnk{datasource: mockDS}
 
-// 	ctx := context.Background()
-// 	internalTxns := []*model.Transaction{
-// 		{TransactionID: "int1", Amount: 300, CreatedAt: time.Now(), Description: "Internal 1 External 1 2 3", Reference: "REF1", Currency: "USD"},
-// 	}
-// 	externalTxns := []*model.Transaction{
-// 		{TransactionID: "ext1", Amount: 100, CreatedAt: time.Now().Add(-1 * time.Hour), Description: "External 1", Reference: "REF1-A", Currency: "USD"},
-// 		{TransactionID: "ext2", Amount: 150, CreatedAt: time.Now(), Description: "External 2", Reference: "REF1-B", Currency: "USD"},
-// 		{TransactionID: "ext3", Amount: 53, CreatedAt: time.Now().Add(1 * time.Hour), Description: "External 3", Reference: "REF1-C", Currency: "USD"},
-// 	}
+	ctx := context.Background()
+	internalTxns := []*model.Transaction{
+		{TransactionID: "int1", Amount: 303, CreatedAt: time.Now(), Description: "Internal 1 External 1 2 3", Reference: "REF1", Currency: "USD"},
+	}
+	externalTxns := []*model.Transaction{
+		{TransactionID: "ext1", Amount: 100, CreatedAt: time.Now().Add(-1 * time.Hour), Description: "External 1", Reference: "REF1-A", Currency: "USD"},
+		{TransactionID: "ext2", Amount: 150, CreatedAt: time.Now(), Description: "External 2", Reference: "REF1-B", Currency: "USD"},
+		{TransactionID: "ext3", Amount: 53, CreatedAt: time.Now().Add(1 * time.Hour), Description: "External 3", Reference: "REF1-C", Currency: "USD"},
+	}
 
-// 	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100, int64(0)).Return(internalTxns, nil).Once()
-// 	mockDS.On("GetTransactionsPaginated", mock.Anything, "", 100, int64(1)).Return([]*model.Transaction{}, nil).Once()
+	groupedExternalTxns := map[string][]*model.Transaction{
+		"ref-group-1": externalTxns,
+	}
+	emptyGroup := map[string][]*model.Transaction{}
 
-// 	matchingRules := []model.MatchingRule{
-// 		{
-// 			RuleID: "2024-8-1",
-// 			Criteria: []model.MatchingCriteria{
-// 				{Field: "amount", Operator: "equals", AllowableDrift: 0.01}, // 1% drift allowed
-// 				{Field: "description", Operator: "contains"},
-// 				{Field: "reference", Operator: "contains"},
-// 				{Field: "currency", Operator: "equals"},
-// 			},
-// 		},
-// 	}
+	mockDS.On("FetchAndGroupExternalTransactions", mock.Anything, "upload123", "reference", 100000, int64(0)).
+		Return(groupedExternalTxns, nil).Once()
+	mockDS.On("FetchAndGroupExternalTransactions", mock.Anything, "upload123", "reference", 100000, int64(100000)).
+		Return(emptyGroup, nil).Once()
 
-// 	matches, unmatched := blnk.groupToNReconciliation(ctx, externalTxns, "2024-8-1", matchingRules, true)
+	matchingRules := []model.MatchingRule{
+		{
+			RuleID: "reference",
+			Criteria: []model.MatchingCriteria{
+				{Field: "amount", Operator: "equals", AllowableDrift: 0.01},
+				{Field: "description", Operator: "contains"},
+				{Field: "reference", Operator: "contains"},
+				{Field: "currency", Operator: "equals"},
+			},
+		},
+	}
 
-// 	assert.Equal(t, 3, len(matches), "Expected 3 matches")
-// 	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
+	matches, unmatched := blnk.manyToOneReconciliation(ctx, internalTxns, "upload123", "reference", matchingRules, true)
 
-// 	assert.Equal(t, "int1", matches[0].InternalTransactionID)
-// 	assert.Equal(t, "ext1", matches[0].ExternalTransactionID)
-// 	assert.Equal(t, "int1", matches[1].InternalTransactionID)
-// 	assert.Equal(t, "ext2", matches[1].ExternalTransactionID)
-// 	assert.Equal(t, "int1", matches[2].InternalTransactionID)
-// 	assert.Equal(t, "ext3", matches[2].ExternalTransactionID)
-
-// 	mockDS.AssertExpectations(t)
-// }
+	assert.Equal(t, 3, len(matches), "Expected 3 matches")
+	assert.Equal(t, 0, len(unmatched), "Expected 0 unmatched transactions")
+	assert.Equal(t, "ext1", matches[0].ExternalTransactionID)
+	assert.Equal(t, "int1", matches[0].InternalTransactionID)
+	assert.Equal(t, "ext2", matches[1].ExternalTransactionID)
+	assert.Equal(t, "int1", matches[1].InternalTransactionID)
+	assert.Equal(t, "ext3", matches[2].ExternalTransactionID)
+	assert.Equal(t, "int1", matches[2].InternalTransactionID)
+	mockDS.AssertExpectations(t)
+}
 
 // TestMatchingRules tests the matching rules functionality
 func TestMatchingRules(t *testing.T) {

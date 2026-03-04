@@ -741,17 +741,18 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	}
 
 	// If not in cache or error occurred, fetch from database
-	query := `
-        SELECT $1::text AS group_key, transaction_id, parent_transaction, source, reference, 
-               amount, precise_amount, precision, rate, currency, destination, 
+	groupExpression := fmt.Sprintf("%s::text", groupCriteria)
+	query := fmt.Sprintf(`
+        SELECT %s AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
-        WHERE $1::text IS NOT NULL AND $1::text != ''
-        ORDER BY $1::text
-        LIMIT $2 OFFSET $3
-    `
+        WHERE %s IS NOT NULL AND %s != ''
+        ORDER BY %s
+        LIMIT $1 OFFSET $2
+    `, groupExpression, groupExpression, groupExpression, groupExpression)
 
-	rows, err := d.Conn.QueryContext(ctx, query, groupCriteria, batchSize, offset)
+	rows, err := d.Conn.QueryContext(ctx, query, batchSize, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped transactions", err)
@@ -1632,7 +1633,7 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetStuckQueuedTransactions")
 	defer span.End()
 
-	cutoff := time.Now().Add(-threshold)
+	cutoff := time.Now().UTC().Add(-threshold)
 
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash

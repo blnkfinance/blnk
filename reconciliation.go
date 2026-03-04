@@ -350,7 +350,7 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 	}
 
 	// Create the reconciler function based on the strategy and rules.
-	reconciler := s.createReconciler(strategy, groupCriteria, matchingRules)
+	reconciler := s.createReconciler(strategy, reconciliation.UploadID, groupCriteria, matchingRules)
 
 	// Create a transaction processor to handle the reconciliation logic.
 	processor := s.createTransactionProcessor(reconciliation, progress, reconciler)
@@ -403,7 +403,7 @@ func (s *Blnk) initializeReconciliationProgress(ctx context.Context, reconciliat
 // - matchingRules: A list of matching rules to apply during reconciliation.
 // Returns:
 // - reconciler: A function that performs reconciliation according to the specified strategy.
-func (s *Blnk) createReconciler(strategy string, groupCriteria string, matchingRules []model.MatchingRule) reconciler {
+func (s *Blnk) createReconciler(strategy string, uploadID string, groupCriteria string, matchingRules []model.MatchingRule) reconciler {
 	return func(ctx context.Context, txns []*model.Transaction) ([]model.Match, []string) {
 		switch strategy {
 		case "one_to_one":
@@ -414,7 +414,7 @@ func (s *Blnk) createReconciler(strategy string, groupCriteria string, matchingR
 			return s.oneToManyReconciliation(ctx, txns, groupCriteria, matchingRules, false)
 		case "many_to_one":
 			// Perform many-to-one reconciliation.
-			return s.manyToOneReconciliation(ctx, txns, groupCriteria, matchingRules, true)
+			return s.manyToOneReconciliation(ctx, txns, uploadID, groupCriteria, matchingRules, true)
 		default:
 			logrus.WithField("strategy", strategy).Warn("unsupported reconciliation strategy")
 			return nil, nil
@@ -719,7 +719,7 @@ func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*mode
 // Returns:
 // - []model.Match: A list of matched transactions.
 // - []string: A list of unmatched transaction IDs.
-func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
+func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*model.Transaction, uploadID string, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	conf, err := config.Fetch()
 	if err != nil {
 		log.Printf("Error fetching configuration: %v", err)
@@ -733,7 +733,7 @@ func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*mode
 	var wg sync.WaitGroup
 
 	// Initiate the many-to-one reconciliation process.
-	err = s.manyToOne(ctx, internalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, conf.Transaction.BatchSize, matchChan, unmatchedChan)
+	err = s.manyToOne(ctx, internalTxns, uploadID, matchingRules, isExternalGrouped, &wg, groupCriteria, conf.Transaction.BatchSize, matchChan, unmatchedChan)
 	if err != nil {
 		log.Printf("Error in many-to-one reconciliation: %v", err)
 	}
@@ -769,14 +769,14 @@ func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*mode
 // - unMatchChan: Channel to collect unmatched transactions.
 // Returns:
 // - error: If any error occurs during processing.
-func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, groupingCriteria string, batchSize int, matchChan chan model.Match, unMatchChan chan string) error {
+func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction, uploadID string, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, groupingCriteria string, batchSize int, matchChan chan model.Match, unMatchChan chan string) error {
 	offset := int64(0)
 	ctx, span := otel.Tracer("blnk.reconciliation").Start(ctx, "ProcessManyToOne")
 	defer span.End()
 
 	// Loop to process transactions in batches.
 	for {
-		groupedExternalTxns, err := s.groupExternalTransactions(ctx, groupingCriteria, batchSize, offset)
+		groupedExternalTxns, err := s.groupExternalTransactions(ctx, uploadID, groupingCriteria, batchSize, offset)
 		if err != nil {
 			log.Printf("Error grouping external transactions: %v", err)
 			break
@@ -808,8 +808,8 @@ func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction,
 // Returns:
 // - map[string][]*model.Transaction: A map of grouped transactions.
 // - error: If there is an error retrieving the transactions.
-func (s *Blnk) groupExternalTransactions(ctx context.Context, groupingCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
-	return s.datasource.FetchAndGroupExternalTransactions(ctx, "", groupingCriteria, batchSize, offset)
+func (s *Blnk) groupExternalTransactions(ctx context.Context, uploadID string, groupingCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) {
+	return s.datasource.FetchAndGroupExternalTransactions(ctx, uploadID, groupingCriteria, batchSize, offset)
 }
 
 // processGroupedTransactions handles the matching of transactions for both one-to-many and many-to-one reconciliations.

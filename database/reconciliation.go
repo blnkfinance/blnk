@@ -757,15 +757,16 @@ func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploa
 	}
 
 	// If not in cache or error occurred, fetch from database
-	query := `
-        SELECT $1::text AS group_key, id, amount, reference, currency, description, date, source
+	groupExpression := fmt.Sprintf("%s::text", groupCriteria)
+	query := fmt.Sprintf(`
+        SELECT %s AS group_key, id, amount, reference, currency, description, date, source
         FROM blnk.external_transactions
-        WHERE upload_id = $2 AND $1::text IS NOT NULL AND $1::text != ''
-        ORDER BY $1::text
-        LIMIT $3 OFFSET $4
-    `
+        WHERE upload_id = $1 AND %s IS NOT NULL AND %s != ''
+        ORDER BY %s
+        LIMIT $2 OFFSET $3
+    `, groupExpression, groupExpression, groupExpression, groupExpression)
 
-	rows, err := d.Conn.QueryContext(ctx, query, groupCriteria, uploadID, batchSize, offset)
+	rows, err := d.Conn.QueryContext(ctx, query, uploadID, batchSize, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped external transactions", err)
