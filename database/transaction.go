@@ -718,12 +718,8 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GroupTransactions")
 	defer span.End()
 
-	validColumns := map[string]bool{
-		"transaction_id": true, "parent_transaction": true, "source": true,
-		"reference": true, "currency": true, "destination": true,
-		"status": true, "created_at": true,
-	}
-	if !validColumns[groupCriteria] {
+	query, ok := groupedTransactionsQuery(groupCriteria)
+	if !ok {
 		span.RecordError(fmt.Errorf("invalid group criteria: %s", groupCriteria))
 		return nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid group criteria: %s", groupCriteria), nil)
 	}
@@ -741,17 +737,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	}
 
 	// If not in cache or error occurred, fetch from database
-	query := `
-        SELECT $1::text AS group_key, transaction_id, parent_transaction, source, reference, 
-               amount, precise_amount, precision, rate, currency, destination, 
-               description, status, created_at, meta_data, scheduled_for, hash
-        FROM blnk.transactions
-        WHERE $1::text IS NOT NULL AND $1::text != ''
-        ORDER BY $1::text
-        LIMIT $2 OFFSET $3
-    `
-
-	rows, err := d.Conn.QueryContext(ctx, query, groupCriteria, batchSize, offset)
+	rows, err := d.Conn.QueryContext(ctx, query, batchSize, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped transactions", err)
@@ -824,6 +810,93 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 		attribute.Int("group.count", len(groupedTransactions)),
 	))
 	return groupedTransactions, nil
+}
+
+func groupedTransactionsQuery(groupCriteria string) (string, bool) {
+	switch groupCriteria {
+	case "transaction_id":
+		return `
+        SELECT transaction_id::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE transaction_id::text IS NOT NULL AND transaction_id::text != ''
+        ORDER BY transaction_id::text
+        LIMIT $1 OFFSET $2
+    `, true
+	case "parent_transaction":
+		return `
+        SELECT parent_transaction::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE parent_transaction::text IS NOT NULL AND parent_transaction::text != ''
+        ORDER BY parent_transaction::text
+        LIMIT $1 OFFSET $2
+    `, true
+	case "source":
+		return `
+        SELECT source::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE source::text IS NOT NULL AND source::text != ''
+        ORDER BY source::text
+        LIMIT $1 OFFSET $2
+    `, true
+	case "reference":
+		return `
+        SELECT reference::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE reference::text IS NOT NULL AND reference::text != ''
+        ORDER BY reference::text
+        LIMIT $1 OFFSET $2
+    `, true
+	case "currency":
+		return `
+        SELECT currency::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE currency::text IS NOT NULL AND currency::text != ''
+        ORDER BY currency::text
+        LIMIT $1 OFFSET $2
+    `, true
+	case "destination":
+		return `
+        SELECT destination::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE destination::text IS NOT NULL AND destination::text != ''
+        ORDER BY destination::text
+        LIMIT $1 OFFSET $2
+    `, true
+	case "status":
+		return `
+        SELECT status::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE status::text IS NOT NULL AND status::text != ''
+        ORDER BY status::text
+        LIMIT $1 OFFSET $2
+    `, true
+	case "created_at":
+		return `
+        SELECT created_at::text AS group_key, transaction_id, parent_transaction, source, reference,
+               amount, precise_amount, precision, rate, currency, destination,
+               description, status, created_at, meta_data, scheduled_for, hash
+        FROM blnk.transactions
+        WHERE created_at::text IS NOT NULL AND created_at::text != ''
+        ORDER BY created_at::text
+        LIMIT $1 OFFSET $2
+    `, true
+	default:
+		return "", false
+	}
 }
 
 // GetInflightTransactionsByParentID retrieves all inflight transactions associated with a given parent transaction ID.
@@ -1632,7 +1705,7 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetStuckQueuedTransactions")
 	defer span.End()
 
-	cutoff := time.Now().Add(-threshold)
+	cutoff := time.Now().UTC().Add(-threshold)
 
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash

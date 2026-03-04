@@ -735,11 +735,8 @@ func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploa
 	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "FetchAndGroupExternalTransactions")
 	defer span.End()
 
-	validColumns := map[string]bool{
-		"id": true, "amount": true, "reference": true, "currency": true,
-		"description": true, "date": true, "source": true,
-	}
-	if !validColumns[groupCriteria] {
+	query, ok := groupedExternalTransactionsQuery(groupCriteria)
+	if !ok {
 		span.RecordError(fmt.Errorf("invalid group criteria: %s", groupCriteria))
 		return nil, apierror.NewAPIError(apierror.ErrBadRequest, fmt.Sprintf("Invalid group criteria: %s", groupCriteria), nil)
 	}
@@ -757,15 +754,7 @@ func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploa
 	}
 
 	// If not in cache or error occurred, fetch from database
-	query := `
-        SELECT $1::text AS group_key, id, amount, reference, currency, description, date, source
-        FROM blnk.external_transactions
-        WHERE upload_id = $2 AND $1::text IS NOT NULL AND $1::text != ''
-        ORDER BY $1::text
-        LIMIT $3 OFFSET $4
-    `
-
-	rows, err := d.Conn.QueryContext(ctx, query, groupCriteria, uploadID, batchSize, offset)
+	rows, err := d.Conn.QueryContext(ctx, query, uploadID, batchSize, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve grouped external transactions", err)
@@ -808,4 +797,67 @@ func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploa
 		attribute.Int("group.count", len(groupedTransactions)),
 	))
 	return groupedTransactions, nil
+}
+
+func groupedExternalTransactionsQuery(groupCriteria string) (string, bool) {
+	switch groupCriteria {
+	case "id":
+		return `
+        SELECT id::text AS group_key, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND id::text IS NOT NULL AND id::text != ''
+        ORDER BY id::text
+        LIMIT $2 OFFSET $3
+    `, true
+	case "amount":
+		return `
+        SELECT amount::text AS group_key, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND amount::text IS NOT NULL AND amount::text != ''
+        ORDER BY amount::text
+        LIMIT $2 OFFSET $3
+    `, true
+	case "reference":
+		return `
+        SELECT reference::text AS group_key, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND reference::text IS NOT NULL AND reference::text != ''
+        ORDER BY reference::text
+        LIMIT $2 OFFSET $3
+    `, true
+	case "currency":
+		return `
+        SELECT currency::text AS group_key, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND currency::text IS NOT NULL AND currency::text != ''
+        ORDER BY currency::text
+        LIMIT $2 OFFSET $3
+    `, true
+	case "description":
+		return `
+        SELECT description::text AS group_key, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND description::text IS NOT NULL AND description::text != ''
+        ORDER BY description::text
+        LIMIT $2 OFFSET $3
+    `, true
+	case "date":
+		return `
+        SELECT date::text AS group_key, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND date::text IS NOT NULL AND date::text != ''
+        ORDER BY date::text
+        LIMIT $2 OFFSET $3
+    `, true
+	case "source":
+		return `
+        SELECT source::text AS group_key, id, amount, reference, currency, description, date, source
+        FROM blnk.external_transactions
+        WHERE upload_id = $1 AND source::text IS NOT NULL AND source::text != ''
+        ORDER BY source::text
+        LIMIT $2 OFFSET $3
+    `, true
+	default:
+		return "", false
+	}
 }

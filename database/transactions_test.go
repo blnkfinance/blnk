@@ -29,7 +29,6 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/apierror"
-	"github.com/blnkfinance/blnk/internal/cache"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
@@ -1455,9 +1454,7 @@ func TestGroupTransactions_InvalidCriteria(t *testing.T) {
 	assert.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	newCache, err := cache.NewCache()
-	assert.NoError(t, err)
-	ds := Datasource{Conn: db, Cache: newCache}
+	ds := Datasource{Conn: db, Cache: newMockCache()}
 	ctx := context.Background()
 
 	result, err := ds.GroupTransactions(ctx, "invalid_column", 10, 0)
@@ -1466,6 +1463,38 @@ func TestGroupTransactions_InvalidCriteria(t *testing.T) {
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
 	assert.Equal(t, apierror.ErrBadRequest, apiErr.Code)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGroupTransactions_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db, Cache: newMockCache()}
+	ctx := context.Background()
+
+	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
+	assert.NoError(t, err)
+	now := time.Now()
+
+	mock.ExpectQuery(`(?s)SELECT parent_transaction::text AS group_key.*WHERE parent_transaction::text IS NOT NULL AND parent_transaction::text != ''.*ORDER BY parent_transaction::text.*LIMIT \$1 OFFSET \$2`).
+		WithArgs(10, int64(0)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"group_key", "transaction_id", "parent_transaction", "source", "reference",
+			"amount", "precise_amount", "precision", "rate", "currency", "destination",
+			"description", "status", "created_at", "meta_data", "scheduled_for", "hash",
+		}).
+			AddRow("parent-1", "txn_1", "parent-1", "bln_src", "ref_1", 1000.0, "100000", 100, 1.0, "USD", "bln_dest", "Desc 1", "APPLIED", now, metaDataJSON, now, "hash1").
+			AddRow("parent-1", "txn_2", "parent-1", "bln_src", "ref_2", 500.0, "50000", 100, 1.0, "USD", "bln_dest", "Desc 2", "APPLIED", now, metaDataJSON, now, "hash2"))
+
+	txns, err := ds.GroupTransactions(ctx, "parent_transaction", 10, 0)
+	assert.NoError(t, err)
+	assert.Len(t, txns, 1)
+	assert.Contains(t, txns, "parent-1")
+	assert.Len(t, txns["parent-1"], 2)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
