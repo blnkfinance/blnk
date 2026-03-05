@@ -34,11 +34,9 @@ spec:
             - "8108"
           image: typesense/typesense:29.0
           livenessProbe:
-            exec:
-              command:
-                - curl
-                - -f
-                - http://localhost:8108/health
+            httpGet:
+              path: /health
+              port: 8108
             failureThreshold: 5
             periodSeconds: 30
             timeoutSeconds: 10
