@@ -32,7 +32,7 @@ spec:
             - --api-key=blnk-api-key
             - --listen-port
             - "8108"
-          image: typesense/typesense:0.23.1
+          image: typesense/typesense:29.0
           livenessProbe:
             exec:
               command:
