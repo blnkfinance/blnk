@@ -41,6 +41,29 @@ func TestResolveOperator(t *testing.T) {
 	}
 }
 
+func TestResolveLogicalOperator(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected LogicalOperator
+	}{
+		{"", LogicalAnd},
+		{"and", LogicalAnd},
+		{"AND", LogicalAnd},
+		{"or", LogicalOr},
+		{" OR ", LogicalOr},
+		{"invalid", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := ResolveLogicalOperator(tt.input)
+			if result != tt.expected {
+				t.Errorf("ResolveLogicalOperator(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestParseFromQuery(t *testing.T) {
 	t.Run("parses basic equality filter", func(t *testing.T) {
 		params := url.Values{"status_eq": {"APPLIED"}}
@@ -169,6 +192,50 @@ func TestParseFromQuery(t *testing.T) {
 			t.Errorf("expected OpIsNull, got: %s", f.Operator)
 		}
 	})
+
+	t.Run("parses logical_operator from query", func(t *testing.T) {
+		params := url.Values{
+			"logical_operator": {"or"},
+			"status_eq":        {"APPLIED"},
+		}
+		result := ParseFromQuery(params, nil)
+
+		if len(result.Errors) > 0 {
+			t.Fatalf("unexpected errors: %v", result.Errors)
+		}
+
+		if result.Filters.LogicalOperator != LogicalOr {
+			t.Errorf("expected LogicalOr, got: %s", result.Filters.LogicalOperator)
+		}
+	})
+
+	t.Run("defaults logical_operator to and when omitted", func(t *testing.T) {
+		params := url.Values{"status_eq": {"APPLIED"}}
+		result := ParseFromQuery(params, nil)
+
+		if len(result.Errors) > 0 {
+			t.Fatalf("unexpected errors: %v", result.Errors)
+		}
+
+		if result.Filters.LogicalOperator != LogicalAnd {
+			t.Errorf("expected LogicalAnd, got: %s", result.Filters.LogicalOperator)
+		}
+	})
+
+	t.Run("returns error for invalid logical_operator", func(t *testing.T) {
+		params := url.Values{"logical_operator": {"xor"}}
+		result := ParseFromQuery(params, nil)
+
+		if len(result.Errors) != 1 {
+			t.Fatalf("expected 1 error, got %d", len(result.Errors))
+		}
+		if result.Errors[0].Param != "logical_operator" {
+			t.Errorf("expected error for logical_operator, got: %s", result.Errors[0].Param)
+		}
+		if result.Filters.LogicalOperator != LogicalAnd {
+			t.Errorf("expected default LogicalAnd on invalid input, got: %s", result.Filters.LogicalOperator)
+		}
+	})
 }
 
 func TestValidate(t *testing.T) {
@@ -242,6 +309,20 @@ func TestValidate(t *testing.T) {
 		err := Validate(nil, "transactions")
 		if err != nil {
 			t.Errorf("expected nil for nil filters, got: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid logical operator", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			LogicalOperator: LogicalOperator("xor"),
+			Filters: []QueryFilter{
+				{Field: "status", Operator: OpEqual, Value: "APPLIED"},
+			},
+		}
+
+		err := Validate(filters, "transactions")
+		if err == nil {
+			t.Error("expected error for invalid logical_operator")
 		}
 	})
 }
@@ -421,6 +502,33 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("builds string IN with ANY using one placeholder", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "status", Operator: OpEqual, Value: "APPLIED"},
+				{Field: "currency", Operator: OpIn, Values: []interface{}{"USD", "EUR"}},
+			},
+		}
+
+		result, err := Build(filters, "transactions", "", 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(result.Conditions) != 2 {
+			t.Fatalf("expected 2 conditions, got %d", len(result.Conditions))
+		}
+		if result.Conditions[1] != "currency = ANY($2)" {
+			t.Errorf("unexpected IN condition: %s", result.Conditions[1])
+		}
+		if len(result.Args) != 2 {
+			t.Fatalf("expected 2 args, got %d", len(result.Args))
+		}
+		if result.NextArgPos != 3 {
+			t.Errorf("expected NextArgPos=3, got %d", result.NextArgPos)
+		}
+	})
+
 	t.Run("builds BETWEEN condition", func(t *testing.T) {
 		filters := &QueryFilterSet{
 			Filters: []QueryFilter{
@@ -519,6 +627,35 @@ func TestBuildWithOptions(t *testing.T) {
 		_, err := BuildWithOptions(nil, "transactions", "t", 1, opts)
 		if err == nil {
 			t.Error("expected error for invalid sort field")
+		}
+	})
+}
+
+func TestBuildConditionExpression(t *testing.T) {
+	t.Run("joins with and by default", func(t *testing.T) {
+		conditions := []string{"status = $1", "amount > $2"}
+		got := BuildConditionExpression(conditions, "")
+		want := "status = $1 AND amount > $2"
+
+		if got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("joins with or and wraps conditions", func(t *testing.T) {
+		conditions := []string{"status = $1", "amount > $2"}
+		got := BuildConditionExpression(conditions, LogicalOr)
+		want := "(status = $1) OR (amount > $2)"
+
+		if got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("returns empty string for no conditions", func(t *testing.T) {
+		got := BuildConditionExpression(nil, LogicalOr)
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
 		}
 	})
 }

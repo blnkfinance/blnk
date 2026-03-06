@@ -32,9 +32,24 @@ func ParseFromQuery(queryParams url.Values, opts *ParseOptions) *ParseResult {
 
 	result := &ParseResult{
 		Filters: &QueryFilterSet{
-			Filters: make([]QueryFilter, 0),
+			Filters:         make([]QueryFilter, 0),
+			LogicalOperator: LogicalAnd,
 		},
 		Errors: make([]ParseError, 0),
+	}
+
+	// Parse top-level logical operator for combining filters.
+	logicalOperatorRaw := strings.TrimSpace(queryParams.Get("logical_operator"))
+	if logicalOperatorRaw != "" {
+		logicalOperator := ResolveLogicalOperator(logicalOperatorRaw)
+		if logicalOperator == "" {
+			result.Errors = append(result.Errors, ParseError{
+				Param:   "logical_operator",
+				Message: "invalid logical_operator: must be 'and' or 'or'",
+			})
+		} else {
+			result.Filters.LogicalOperator = logicalOperator
+		}
 	}
 
 	filterCount := 0

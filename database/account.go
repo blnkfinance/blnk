@@ -429,7 +429,11 @@ func (d Datasource) GetAllAccountsWithFilterAndOptions(ctx context.Context, filt
 
 	// Add WHERE clause if filters are provided
 	if len(result.Conditions) > 0 {
-		baseQuery += " WHERE " + strings.Join(result.Conditions, " AND ")
+		logicalOperator := filter.LogicalAnd
+		if filters != nil {
+			logicalOperator = filters.LogicalOperator
+		}
+		baseQuery += " WHERE " + filter.BuildConditionExpression(result.Conditions, logicalOperator)
 	}
 
 	// Add ORDER BY clause
