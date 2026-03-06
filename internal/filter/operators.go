@@ -32,3 +32,18 @@ func ResolveOperator(s string) Operator {
 		return ""
 	}
 }
+
+func ResolveLogicalOperator(s string) LogicalOperator {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "and":
+		return LogicalAnd
+	case "or":
+		return LogicalOr
+	default:
+		return ""
+	}
+}
+
+func IsValidLogicalOperator(op LogicalOperator) bool {
+	return op == "" || op == LogicalAnd || op == LogicalOr
+}

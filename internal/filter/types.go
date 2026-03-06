@@ -34,8 +34,17 @@ type QueryFilter struct {
 	Values   []interface{} `json:"values,omitempty"`
 }
 
+// LogicalOperator represents how multiple filters are combined.
+type LogicalOperator string
+
+const (
+	LogicalAnd LogicalOperator = "and"
+	LogicalOr  LogicalOperator = "or"
+)
+
 type QueryFilterSet struct {
-	Filters []QueryFilter `json:"filters"`
+	Filters         []QueryFilter   `json:"filters"`
+	LogicalOperator LogicalOperator `json:"logical_operator,omitempty"`
 }
 
 // SortOrder represents the sort direction.

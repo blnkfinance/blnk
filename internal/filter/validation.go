@@ -13,6 +13,10 @@ func Validate(filters *QueryFilterSet, table string) error {
 		return nil
 	}
 
+	if !IsValidLogicalOperator(filters.LogicalOperator) {
+		return fmt.Errorf("invalid logical_operator '%s': must be 'and' or 'or'", filters.LogicalOperator)
+	}
+
 	validFields := GetValidFieldsForTable(table)
 	if len(validFields) == 0 {
 		return fmt.Errorf("unsupported table for advanced filtering: %s", table)

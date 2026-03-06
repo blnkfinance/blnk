@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/blnkfinance/blnk/internal/filter"
@@ -39,6 +40,7 @@ import (
 //   - ilike: Case-insensitive pattern match (e.g., name_ilike=%usd%)
 //   - isnull: Is null (e.g., identity_id_isnull=true)
 //   - isnotnull: Is not null (e.g., identity_id_isnotnull=true)
+//   - logical_operator: Top-level combinator for multiple filters (e.g., logical_operator=or)
 //
 // Parameters:
 // - c: The gin context containing the request
@@ -56,18 +58,19 @@ func ParseFiltersFromContext(c *gin.Context, opts *filter.ParseOptions) (*filter
 // It returns true if filters were provided, false otherwise.
 func HasFilters(c *gin.Context) bool {
 	result := filter.ParseFromQuery(c.Request.URL.Query(), nil)
-	return result.Filters != nil && len(result.Filters.Filters) > 0
+	return (result.Filters != nil && len(result.Filters.Filters) > 0) || len(result.Errors) > 0
 }
 
 // FilterRequest represents the JSON body for filter endpoints.
 // It allows clients to pass filters directly as JSON instead of query parameters.
 type FilterRequest struct {
-	Filters      []filter.QueryFilter `json:"filters"`
-	Limit        int                  `json:"limit,omitempty"`
-	Offset       int                  `json:"offset,omitempty"`
-	SortBy       string               `json:"sort_by,omitempty"`
-	SortOrder    string               `json:"sort_order,omitempty"` // "asc" or "desc"
-	IncludeCount bool                 `json:"include_count,omitempty"`
+	Filters         []filter.QueryFilter `json:"filters"`
+	LogicalOperator string               `json:"logical_operator,omitempty"` // "and" or "or"
+	Limit           int                  `json:"limit,omitempty"`
+	Offset          int                  `json:"offset,omitempty"`
+	SortBy          string               `json:"sort_by,omitempty"`
+	SortOrder       string               `json:"sort_order,omitempty"` // "asc" or "desc"
+	IncludeCount    bool                 `json:"include_count,omitempty"`
 }
 
 // FilterResponse wraps the response with optional count.
@@ -113,7 +116,16 @@ func ParseFiltersFromBody(c *gin.Context, table string) (*filter.QueryFilterSet,
 	}
 
 	filterSet := &filter.QueryFilterSet{
-		Filters: req.Filters,
+		Filters:         req.Filters,
+		LogicalOperator: filter.LogicalAnd,
+	}
+
+	if strings.TrimSpace(req.LogicalOperator) != "" {
+		logicalOperator := filter.ResolveLogicalOperator(req.LogicalOperator)
+		if logicalOperator == "" {
+			return nil, nil, 0, 0, fmt.Errorf("invalid logical_operator: must be 'and' or 'or'")
+		}
+		filterSet.LogicalOperator = logicalOperator
 	}
 
 	opts := &filter.QueryOptions{
