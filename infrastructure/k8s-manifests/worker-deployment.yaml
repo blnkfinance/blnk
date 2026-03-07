@@ -32,7 +32,7 @@ spec:
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://jaeger:4318
-          image: jerryenebeli/blnk:0.10.5
+          image: jerryenebeli/blnk:0.13.3
           name: worker
           resources: {}
           volumeMounts:
