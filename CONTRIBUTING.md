@@ -109,4 +109,4 @@ Before opening a PR, ensure:
 
 ## Reporting Security Issues
 
-Please do not open public issues for security vulnerabilities. Contact the blnk tean privately first.
+Please do not open public issues for security vulnerabilities. Contact the blnk team privately first.
