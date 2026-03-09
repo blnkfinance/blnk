@@ -29,6 +29,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/apierror"
+	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
@@ -1546,6 +1547,72 @@ func TestGetTransactionsByCriteria_Error(t *testing.T) {
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
 	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestGetAllTransactionsWithFilterAndOptions_ReturnsPrecision(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
+	assert.NoError(t, err)
+
+	mock.ExpectQuery(`(?s)SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data\s+FROM blnk\.transactions\s+ORDER BY created_at DESC\s+LIMIT \$1 OFFSET \$2`).
+		WithArgs(10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "precise_amount", "precision",
+			"currency", "destination", "description", "status", "hash", "created_at", "effective_date", "meta_data",
+		}).AddRow(
+			"txn_1", "bln_src", "ref_1", 1000.0, "100000", 100,
+			"USD", "bln_dest", "Desc", "APPLIED", "hash_1", now, now, metaDataJSON,
+		))
+
+	txns, count, err := ds.GetAllTransactionsWithFilterAndOptions(ctx, nil, nil, 10, 0)
+	assert.NoError(t, err)
+	assert.Nil(t, count)
+	assert.Len(t, txns, 1)
+	assert.Equal(t, float64(100), txns[0].Precision)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetAllTransactionsWithFilterAndOptions_IncludeCountReturnsPrecision(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	opts := &filter.QueryOptions{IncludeCount: true}
+
+	now := time.Now().UTC()
+	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
+	assert.NoError(t, err)
+
+	mock.ExpectQuery(`(?s)SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, COUNT\(\*\) OVER\(\) AS total_count\s+FROM blnk\.transactions\s+ORDER BY created_at DESC\s+LIMIT \$1 OFFSET \$2`).
+		WithArgs(10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "precise_amount", "precision",
+			"currency", "destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "total_count",
+		}).AddRow(
+			"txn_1", "bln_src", "ref_1", 1000.0, "100000", 100,
+			"USD", "bln_dest", "Desc", "APPLIED", "hash_1", now, now, metaDataJSON, int64(1),
+		))
+
+	txns, count, err := ds.GetAllTransactionsWithFilterAndOptions(ctx, nil, opts, 10, 0)
+	assert.NoError(t, err)
+	assert.NotNil(t, count)
+	assert.EqualValues(t, 1, *count)
+	assert.Len(t, txns, 1)
+	assert.Equal(t, float64(100), txns[0].Precision)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
 }
 
 func TestGetQueuedAmounts_Success(t *testing.T) {

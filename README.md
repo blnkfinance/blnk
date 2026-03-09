@@ -104,6 +104,8 @@ Here are a few things to try:
 
 Contributions and feedback are welcome and encouraged. Join our [Discord community](https://discord.gg/7WNv94zPpx) to do so, and connect with other developers from around the world.
 
+Please read our [Contributing Guide](./CONTRIBUTING.md) before opening issues or pull requests.
+
 <br/>
 
 ## License

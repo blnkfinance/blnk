@@ -119,6 +119,8 @@ func (a Api) Router() *gin.Engine {
 	// Reconciliation routes
 	router.POST("/reconciliation/upload", a.UploadExternalData)
 	router.POST("/reconciliation/matching-rules", a.CreateMatchingRule)
+	router.PUT("/reconciliation/matching-rules/:id", a.UpdateMatchingRule)
+	router.DELETE("/reconciliation/matching-rules/:id", a.DeleteMatchingRule)
 	router.POST("/reconciliation/start", a.StartReconciliation)
 	router.POST("/reconciliation/start-instant", a.InstantReconciliation)
 	router.GET("/reconciliation/:id", a.GetReconciliation)
