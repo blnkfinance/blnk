@@ -96,9 +96,9 @@ Before opening a PR, ensure:
 - New behavior is covered by tests.
 - API changes are reflected in docs/examples when relevant.
 - PR description explains:
-  - what changed
-  - why it changed
-  - how it was tested
+  - What changed
+  - Why it changed
+  - How it was tested
 
 ## Submitting a PR
 
@@ -109,4 +109,4 @@ Before opening a PR, ensure:
 
 ## Reporting Security Issues
 
-Please do not open public issues for security vulnerabilities. Contact the blnk team privately first.
+Please do not open public issues for security vulnerabilities. Contact the Blnk team privately first.
