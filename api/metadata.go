@@ -48,5 +48,5 @@ func (a Api) UpdateMetadata(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"metadata": updatedMetadata})
+	c.JSON(http.StatusOK, gin.H{"meta_data": updatedMetadata})
 }
