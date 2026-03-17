@@ -222,7 +222,7 @@ function bucketedName(base, buckets) {
 function postTxn(source, destination) {
   var amount = Math.floor(Math.random() * (1000 - 100 + 1)) + 100; // 100..1000
   var payload = JSON.stringify({
-    amount: amount,
+    amount: 100,
     description: "load test",
     precision: 100,
     allow_overdraft: true,
