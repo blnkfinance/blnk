@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/hotpairs"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/sirupsen/logrus"
 
@@ -174,7 +175,7 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	if err != nil {
 		return err
 	}
-	_, err = q.Client.EnqueueContext(ctx, q.geTask(transaction, payload), asynq.MaxRetry(5))
+	_, err = q.Client.EnqueueContext(ctx, q.geTask(transaction, payload), asynq.MaxRetry(q.config.Queue.MaxRetryAttempts))
 	if err != nil {
 		logrus.WithError(err).WithField("reference", transaction.Reference).Error("failed to enqueue transaction")
 		return err
@@ -213,8 +214,7 @@ func (q *Queue) QueueInflightExpiry(ctx context.Context, transaction *model.Tran
 // Returns:
 // - *asynq.Task: The generated task ready to be enqueued.
 func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Task {
-	queueIndex := hashBalanceID(transaction.Source) % q.config.Queue.NumberOfQueues
-	queueName := fmt.Sprintf("%s_%d", q.config.Queue.TransactionQueue, queueIndex+1)
+	queueName := q.transactionQueueName(transaction)
 
 	taskOptions := []asynq.Option{asynq.TaskID(transaction.TransactionID), asynq.Queue(queueName)}
 	if !transaction.ScheduledFor.IsZero() {
@@ -222,6 +222,17 @@ func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Ta
 	}
 
 	return asynq.NewTask(queueName, payload, taskOptions...)
+}
+
+func (q *Queue) transactionQueueName(transaction *model.Transaction) string {
+	if q.config.Queue.EnableHotLane && transaction != nil && transaction.MetaData != nil {
+		if hotpairs.QueueLaneFromMetadata(transaction.MetaData) == hotpairs.LaneHot {
+			return q.config.Queue.HotQueueName
+		}
+	}
+
+	queueIndex := hashBalanceID(transaction.Source) % q.config.Queue.NumberOfQueues
+	return fmt.Sprintf("%s_%d", q.config.Queue.TransactionQueue, queueIndex+1)
 }
 
 // hashBalanceID returns a consistent hash value for a string balance ID.
@@ -249,6 +260,16 @@ func (q *Queue) GetTransactionFromQueue(transactionID string) (*model.Transactio
 	for i := 1; i <= q.config.Queue.NumberOfQueues; i++ {
 		queueName := fmt.Sprintf("%s_%d", q.config.Queue.TransactionQueue, i)
 		task, err := q.Inspector.GetTaskInfo(queueName, transactionID)
+		if err == nil && task != nil {
+			var txn model.Transaction
+			if err := json.Unmarshal(task.Payload, &txn); err != nil {
+				return nil, err
+			}
+			return &txn, nil
+		}
+	}
+	if q.config.Queue.EnableHotLane {
+		task, err := q.Inspector.GetTaskInfo(q.config.Queue.HotQueueName, transactionID)
 		if err == nil && task != nil {
 			var txn model.Transaction
 			if err := json.Unmarshal(task.Payload, &txn); err != nil {

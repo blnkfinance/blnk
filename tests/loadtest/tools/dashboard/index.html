@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blnk Load Test Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <section class="page-header">
+        <div class="page-copy">
+          <p class="eyebrow">Insights</p>
+          <h1>Blnk load tests</h1>
+          <p class="hero-text">
+            Review summary metrics, latency, checks, and trends from your k6
+            runs without leaving the browser.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refreshButton" class="button button-secondary" type="button">
+            Refresh
+          </button>
+          <button id="compareButton" class="button button-secondary" type="button">
+            Compare reports
+          </button>
+          <button id="fileButton" class="button button-primary" type="button">
+            Upload file
+          </button>
+          <input
+            id="fileInput"
+            class="visually-hidden"
+            type="file"
+            accept=".json,.csv,.ndjson,text/csv,application/json"
+          />
+        </div>
+      </section>
+
+      <main class="layout">
+        <aside class="sidebar">
+          <section class="panel upload-panel">
+            <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-describedby="dropHelp">
+              <p class="drop-title">Drop `summary.json`, NDJSON, or CSV</p>
+              <p id="dropHelp" class="drop-text">
+                Upload a fresh load-test result or choose from the runs already
+                discovered below.
+              </p>
+            </div>
+          </section>
+
+          <section class="panel run-list-panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Discovered runs</p>
+                <h2>Available data</h2>
+              </div>
+              <span id="runCount" class="pill">0</span>
+            </div>
+            <div id="runList" class="run-list" aria-live="polite"></div>
+          </section>
+        </aside>
+
+        <section class="content">
+          <section class="panel status-panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Selected run</p>
+                <h2 id="runTitle">No load test selected</h2>
+              </div>
+              <span id="runKind" class="pill pill-muted">Waiting</span>
+            </div>
+            <p id="runMeta" class="run-meta">
+              Choose a discovered run or upload a load test file.
+            </p>
+          </section>
+
+          <section id="summaryGrid" class="summary-grid" aria-live="polite"></section>
+
+          <section class="chart-grid">
+            <article class="panel chart-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Trend</p>
+                  <h2>Throughput over time</h2>
+                </div>
+                <span class="pill pill-muted">TPM</span>
+              </div>
+              <div id="throughputChart" class="chart-slot"></div>
+            </article>
+
+            <article class="panel chart-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Trend</p>
+                  <h2>Latency profile</h2>
+                </div>
+                <span class="pill pill-muted">ms</span>
+              </div>
+              <div id="latencyChart" class="chart-slot"></div>
+            </article>
+
+            <article class="panel chart-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Quality</p>
+                  <h2>Reliability</h2>
+                </div>
+                <span class="pill pill-muted">ratio</span>
+              </div>
+              <div id="reliabilityChart" class="chart-slot"></div>
+            </article>
+          </section>
+
+          <section class="detail-grid">
+            <article class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Signals</p>
+                  <h2>Thresholds</h2>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead id="thresholdHead">
+                    <tr>
+                      <th>Signal</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="thresholdTable"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Checks</p>
+                  <h2>Assertions</h2>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead id="checksHead">
+                    <tr>
+                      <th>Check</th>
+                      <th>Passes</th>
+                      <th>Fails</th>
+                      <th>Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody id="checksTable"></tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Metrics</p>
+                <h2>Load test details</h2>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead id="metricsHead">
+                  <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody id="metricsTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <template id="emptyStateTemplate">
+      <div class="empty-state">
+        <p class="empty-title">No chart data yet</p>
+        <p class="empty-text">
+          This view needs minute-by-minute data or parsed load test metrics.
+        </p>
+      </div>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

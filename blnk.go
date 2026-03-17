@@ -27,6 +27,7 @@ import (
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/cache"
 	"github.com/blnkfinance/blnk/internal/hooks"
+	"github.com/blnkfinance/blnk/internal/hotpairs"
 	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/search"
@@ -49,6 +50,7 @@ type Blnk struct {
 	Hooks       hooks.HookManager
 	config      *config.Configuration
 	cache       cache.Cache
+	hotPairs    *hotpairs.Manager
 }
 
 const (
@@ -127,6 +129,12 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 	}
 
 	bt := NewBalanceTracker()
+	hotPairManager := hotpairs.NewManager(redisClient, hotpairs.Config{
+		Enabled:                 configuration.Queue.EnableHotLane,
+		HotQueueName:            configuration.Queue.HotQueueName,
+		HotPairTTL:              configuration.Queue.HotPairTTL,
+		LockContentionThreshold: configuration.Queue.HotPairLockContentionThreshold,
+	})
 	newQueue := NewQueue(configuration, asynqClient)
 	newSearch := search.NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
 	hookManager := hooks.NewHookManager(redisClient, asynqClient)
@@ -147,6 +155,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 		Hooks:       hookManager,
 		config:      configuration,
 		cache:       newCache,
+		hotPairs:    hotPairManager,
 	}
 
 	notification.RegisterWebhookSender(func(event string, payload interface{}) error {

@@ -33,6 +33,7 @@ import (
 
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/hotpairs"
 	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/search"
@@ -62,7 +63,30 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		return err
 	}
 
-	_, err := b.blnk.RecordTransaction(ctx, &txn)
+	exists, err := b.blnk.GetDataSource().TransactionExistsByRef(ctx, txn.Reference)
+	if err != nil {
+		logrus.WithError(err).Warnf("failed pre-checking transaction reference %s", txn.Reference)
+	} else if exists {
+		// logrus.WithFields(logrus.Fields{
+		// 	"transaction_id": txn.TransactionID,
+		// 	"reference":      txn.Reference,
+		// }).Info("Skipping queued transaction because reference is already processed")
+		return nil
+	}
+
+	handled, err := b.blnk.TryRecordQueuedTransactionBatch(ctx, &txn)
+	if b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName {
+		handled, err = b.blnk.TryRecordQueuedTransactionBatchForHotLane(ctx, &txn)
+	}
+	if err != nil {
+		logrus.WithError(err).Warnf("coalesced processing attempt failed for transaction %s", txn.TransactionID)
+	}
+	if handled {
+		logrus.Infof("Transaction %s processed successfully via coalesced batch", txn.TransactionID)
+		return nil
+	}
+
+	_, err = b.blnk.RecordTransaction(ctx, &txn)
 	if err != nil {
 		// Handle reference already used error
 		if strings.Contains(strings.ToLower(err.Error()), "reference") && strings.Contains(strings.ToLower(err.Error()), "already been used") {
@@ -71,22 +95,45 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		}
 
 		if strings.Contains(strings.ToLower(err.Error()), "insufficient funds") {
-			cfg, _ := config.Fetch()
-			if !cfg.Queue.InsufficientFundRetries {
+			if !b.cnf.Queue.InsufficientFundRetries {
 				return handleTransactionRejection(ctx, b, &txn, err)
 			}
 
 			retryCount, _ := asynq.GetRetryCount(ctx)
-			if retryCount >= cfg.Queue.MaxRetryAttempts {
-				return handleTransactionRejection(ctx, b, &txn, fmt.Errorf("max retry attempts reached after insufficient funds"))
+			if hasReachedMaxRetryAttempt(b.cnf, retryCount) {
+				logrus.WithFields(logrus.Fields{
+					"transaction_id": txn.TransactionID,
+					"retry_count":    retryCount,
+					"max_retries":    b.cnf.Queue.MaxRetryAttempts,
+				}).Warn("Transaction reached max retry attempts; rejecting with final processing error")
+				return handleTransactionRejection(ctx, b, &txn, err)
 			}
 
 			logrus.Infof("Insufficient funds for transaction %s, retry attempt %d/%d",
-				txn.TransactionID, retryCount, cfg.Queue.MaxRetryAttempts)
+				txn.TransactionID, retryCount, b.cnf.Queue.MaxRetryAttempts)
 			return err // This will trigger a retry
 		}
 
 		if strings.Contains(strings.ToLower(err.Error()), "transaction exceeds overdraft limit") {
+			return handleTransactionRejection(ctx, b, &txn, err)
+		}
+
+		if shouldRejectLockContentionImmediately(b.cnf, err) {
+			logrus.WithFields(logrus.Fields{
+				"transaction_id": txn.TransactionID,
+				"error":          err.Error(),
+			}).Warn("Rejecting transaction immediately due to lock contention policy")
+			return handleTransactionRejection(ctx, b, &txn, err)
+		}
+
+		retryCount, _ := asynq.GetRetryCount(ctx)
+		if hasReachedMaxRetryAttempt(b.cnf, retryCount) {
+			logrus.WithFields(logrus.Fields{
+				"transaction_id": txn.TransactionID,
+				"retry_count":    retryCount,
+				"max_retries":    b.cnf.Queue.MaxRetryAttempts,
+				"error":          err.Error(),
+			}).Warn("Transaction reached max retry attempts; rejecting with final processing error")
 			return handleTransactionRejection(ctx, b, &txn, err)
 		}
 
@@ -109,6 +156,20 @@ func handleTransactionRejection(ctx context.Context, b *blnkInstance, txn *model
 		Payload: *txn,
 	})
 	return webhookErr
+}
+
+func hasReachedMaxRetryAttempt(cfg *config.Configuration, retryCount int) bool {
+	if cfg == nil || cfg.Queue.MaxRetryAttempts <= 0 {
+		return false
+	}
+	return retryCount >= cfg.Queue.MaxRetryAttempts
+}
+
+func shouldRejectLockContentionImmediately(cfg *config.Configuration, err error) bool {
+	if cfg == nil || !cfg.Queue.RejectLockContentionImmediately {
+		return false
+	}
+	return hotpairs.IsLockContentionError(err)
 }
 
 // indexData indexes data into TypeSense for searchability.
@@ -221,6 +282,21 @@ func initializeQueues() map[string]int {
 	return queues
 }
 
+func initializeHotQueues() map[string]int {
+	cfg, err := config.Fetch()
+	if err != nil {
+		log.Printf("Error fetching config, using defaults: %v", err)
+		return nil
+	}
+	if !cfg.Queue.EnableHotLane {
+		return nil
+	}
+
+	return map[string]int{
+		cfg.Queue.HotQueueName: 1,
+	}
+}
+
 func initializeWebhookQueues() map[string]int {
 	cfg, err := config.Fetch()
 	if err != nil {
@@ -272,7 +348,29 @@ func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (
 			PoolSize:  conf.Redis.PoolSize,
 		},
 		asynq.Config{
-			Concurrency:     1,
+			Concurrency:     conf.Queue.TransactionWorkerConcurrency,
+			Queues:          queues,
+			ShutdownTimeout: 30 * time.Second,
+		},
+	), nil
+}
+
+func initializeHotWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
+	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing Redis URL: %v", err)
+	}
+
+	return asynq.NewServer(
+		asynq.RedisClientOpt{
+			Addr:      redisOption.Addr,
+			Password:  redisOption.Password,
+			DB:        redisOption.DB,
+			TLSConfig: redisOption.TLSConfig,
+			PoolSize:  conf.Redis.PoolSize,
+		},
+		asynq.Config{
+			Concurrency:     conf.Queue.HotQueueConcurrency,
 			Queues:          queues,
 			ShutdownTimeout: 30 * time.Second,
 		},
@@ -289,6 +387,9 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
 		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
 		mux.HandleFunc(queueName, b.processTransaction)
+	}
+	if cfg.Queue.EnableHotLane {
+		mux.HandleFunc(cfg.Queue.HotQueueName, b.processTransaction)
 	}
 	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
 }
@@ -338,7 +439,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				defer phClient.Close()
 			}
 
-			srv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
+			srv, hotSrv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -347,6 +448,11 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 
 			if err := srv.Start(mux); err != nil {
 				log.Fatalf("could not start transaction worker server: %v", err)
+			}
+			if hotSrv != nil {
+				if err := hotSrv.Start(mux); err != nil {
+					log.Fatalf("could not start hot transaction worker server: %v", err)
+				}
 			}
 			if err := webhookSrv.Start(webhookMux); err != nil {
 				log.Fatalf("could not start webhook worker server: %v", err)
@@ -373,6 +479,9 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			webhookSrv.Shutdown()
+			if hotSrv != nil {
+				hotSrv.Shutdown()
+			}
 			srv.Shutdown()
 
 			log.Printf("Shutdown complete.")
@@ -382,18 +491,27 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 	return cmd
 }
 
-func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Server, *asynq.Server, *asynq.ServeMux, *asynq.ServeMux, error) {
+func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Server, *asynq.Server, *asynq.Server, *asynq.ServeMux, *asynq.ServeMux, error) {
 	queues := initializeQueues()
+	hotQueues := initializeHotQueues()
 	webhookQueues := initializeWebhookQueues()
 
 	srv, err := initializeWorkerServer(conf, queues)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
+	}
+
+	var hotSrv *asynq.Server
+	if conf.Queue.EnableHotLane && len(hotQueues) > 0 {
+		hotSrv, err = initializeHotWorkerServer(conf, hotQueues)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
 	}
 
 	webhookSrv, err := initializeWebhookWorkerServer(conf, webhookQueues)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	mux := asynq.NewServeMux()
@@ -402,7 +520,7 @@ func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Ser
 	webhookMux := asynq.NewServeMux()
 	initializeWebhookTaskHandlers(b, webhookMux)
 
-	return srv, webhookSrv, mux, webhookMux, nil
+	return srv, hotSrv, webhookSrv, mux, webhookMux, nil
 }
 
 func startMonitoringServer(conf *config.Configuration) *http.Server {

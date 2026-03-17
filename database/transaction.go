@@ -36,7 +36,7 @@ import (
 	"github.com/blnkfinance/blnk/model"
 
 	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 // RecordTransaction records a new transaction in the database.
@@ -103,6 +103,94 @@ func recordTransactionInTx(ctx context.Context, tx *sql.Tx, txn *model.Transacti
 
 	span.AddEvent("Transaction recorded in transaction", trace.WithAttributes(
 		attribute.String("transaction.id", txn.TransactionID),
+	))
+
+	return nil
+}
+
+// recordTransactionsInTx inserts multiple transaction records within an existing database
+// transaction using PostgreSQL's COPY protocol to reduce SQL parsing and roundtrips.
+func recordTransactionsInTx(ctx context.Context, tx *sql.Tx, txns []*model.Transaction) error {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "recordTransactionsInTx")
+	defer span.End()
+
+	if len(txns) == 0 {
+		return nil
+	}
+
+	stmt, err := tx.PrepareContext(ctx, pq.CopyInSchema(
+		"blnk",
+		"transactions",
+		"transaction_id",
+		"parent_transaction",
+		"source",
+		"reference",
+		"amount",
+		"precise_amount",
+		"precision",
+		"rate",
+		"currency",
+		"destination",
+		"description",
+		"status",
+		"created_at",
+		"meta_data",
+		"scheduled_for",
+		"hash",
+		"effective_date",
+	))
+	if err != nil {
+		span.RecordError(err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to prepare transaction copy", err)
+	}
+
+	defer func() {
+		_ = stmt.Close()
+	}()
+
+	for _, txn := range txns {
+		metaDataJSON, err := json.Marshal(txn.MetaData)
+		if err != nil {
+			span.RecordError(err)
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
+		}
+
+		if _, err := stmt.ExecContext(ctx,
+			txn.TransactionID,
+			txn.ParentTransaction,
+			txn.Source,
+			txn.Reference,
+			txn.AmountString,
+			txn.PreciseAmount.String(),
+			txn.Precision,
+			txn.Rate,
+			txn.Currency,
+			txn.Destination,
+			txn.Description,
+			txn.Status,
+			txn.CreatedAt,
+			string(metaDataJSON),
+			txn.ScheduledFor,
+			txn.Hash,
+			txn.EffectiveDate,
+		); err != nil {
+			span.RecordError(err)
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to stream transaction copy row", err)
+		}
+	}
+
+	if _, err := stmt.ExecContext(ctx); err != nil {
+		span.RecordError(err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to flush transaction copy", err)
+	}
+
+	if err := stmt.Close(); err != nil {
+		span.RecordError(err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to finalize transaction copy", err)
+	}
+
+	span.AddEvent("Transactions recorded in transaction", trace.WithAttributes(
+		attribute.Int("transaction.count", len(txns)),
 	))
 
 	return nil
@@ -231,6 +319,63 @@ func (d Datasource) RecordTransactionWithBalancesAndOutbox(ctx context.Context, 
 	))
 
 	return txn, nil
+}
+
+// RecordTransactionsWithBalancesAndOutboxes atomically records multiple transactions, updates
+// the source and destination balances once, and inserts any lineage outbox entries in the same
+// database transaction.
+func (d Datasource) RecordTransactionsWithBalancesAndOutboxes(ctx context.Context, txns []*model.Transaction, sourceBalance, destinationBalance *model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "RecordTransactionsWithBalancesAndOutboxes")
+	defer span.End()
+
+	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault})
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
+	}
+
+	defer func(tx *sql.Tx) {
+		_ = tx.Rollback()
+	}(tx)
+
+	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := updateBalance(ctx, tx, destinationBalance); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := recordTransactionsInTx(ctx, tx, txns); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	for _, outbox := range outboxes {
+		if outbox == nil {
+			continue
+		}
+		if err := d.InsertLineageOutboxInTx(ctx, tx, outbox); err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to insert lineage outbox: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
+	}
+
+	span.AddEvent("Transactions, balances, and outboxes recorded atomically", trace.WithAttributes(
+		attribute.Int("transaction.count", len(txns)),
+		attribute.Int("outbox.count", len(outboxes)),
+		attribute.String("source.balance_id", sourceBalance.BalanceID),
+		attribute.String("destination.balance_id", destinationBalance.BalanceID),
+	))
+
+	return txns, nil
 }
 
 // GetTransaction retrieves a transaction by its ID from the database.
@@ -1777,4 +1922,107 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 		attribute.Int("transaction.count", len(transactions)),
 	))
 	return transactions, nil
+}
+
+// GetQueuedTransactionsForCoalescing retrieves QUEUED transactions for the exact same pair that
+// are ready to be coalesced because they do not yet have a child transaction.
+func (d Datasource) GetQueuedTransactionsForCoalescing(ctx context.Context, source, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetQueuedTransactionsForCoalescing")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions t
+		WHERE t.status = 'QUEUED'
+		  AND t.source = $1
+		  AND t.destination = $2
+		  AND t.currency = $3
+		  AND t.transaction_id <> $4
+		  AND t.created_at >= $5
+		  AND NOT EXISTS (
+		      SELECT 1 FROM blnk.transactions child
+		      WHERE child.parent_transaction = t.transaction_id
+		  )
+		ORDER BY t.created_at ASC
+		LIMIT $6
+	`, source, destination, currency, excludeTransactionID, createdAtOrAfter.UTC(), limit)
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve queued transactions for coalescing", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
+
+	var transactions []*model.Transaction
+	for rows.Next() {
+		txn := &model.Transaction{}
+		var metaDataJSON []byte
+		var preciseAmountStr string
+		err = rows.Scan(
+			&txn.TransactionID, &txn.ParentTransaction, &txn.Source, &txn.Reference,
+			&txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Rate,
+			&txn.Currency, &txn.Destination, &txn.Description, &txn.Status,
+			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor, &txn.Hash,
+		)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan queued transaction for coalescing", err)
+		}
+
+		if err := json.Unmarshal(metaDataJSON, &txn.MetaData); err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		}
+
+		txn.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
+		}
+
+		model.ApplyPrecision(txn)
+		transactions = append(transactions, txn)
+	}
+
+	if err := rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error iterating queued transactions for coalescing", err)
+	}
+
+	span.AddEvent("Queued transactions for coalescing retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+		attribute.String("source.balance_id", source),
+		attribute.String("destination.balance_id", destination),
+	))
+
+	return transactions, nil
+}
+
+func (d Datasource) CountQueuedTransactionsForPairLane(ctx context.Context, source, destination, currency, lane string) (int, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "CountQueuedTransactionsForPairLane")
+	defer span.End()
+
+	var count int
+	err := d.Conn.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM blnk.transactions t
+		WHERE t.status = 'QUEUED'
+		  AND t.source = $1
+		  AND t.destination = $2
+		  AND t.currency = $3
+		  AND COALESCE(t.meta_data->>'queue_lane', 'normal') = $4
+		  AND NOT EXISTS (
+		      SELECT 1 FROM blnk.transactions child
+		      WHERE child.parent_transaction = t.transaction_id
+		  )
+	`, source, destination, currency, lane).Scan(&count)
+	if err != nil {
+		span.RecordError(err)
+		return 0, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to count queued transactions for pair lane", err)
+	}
+
+	return count, nil
 }

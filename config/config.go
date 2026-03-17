@@ -44,6 +44,7 @@ var (
 		MaxWorkers:         10,
 		LockDuration:       30 * time.Minute,
 		IndexQueuePrefix:   "transactions",
+		EnableCoalescing:   false,
 		EnableQueuedChecks: false,
 	}
 
@@ -55,13 +56,21 @@ var (
 	}
 
 	defaultQueue = QueueConfig{
-		TransactionQueue:    "new:transaction",
-		WebhookQueue:        "new:webhook",
-		IndexQueue:          "new:index",
-		InflightExpiryQueue: "new:inflight-expiry",
-		NumberOfQueues:      20,
-		MonitoringPort:      DEFAULT_MONITORING_PORT,
-		WebhookConcurrency:  20,
+		TransactionQueue:                "new:transaction",
+		WebhookQueue:                    "new:webhook",
+		IndexQueue:                      "new:index",
+		InflightExpiryQueue:             "new:inflight-expiry",
+		NumberOfQueues:                  20,
+		EnableHotLane:                   false,
+		HotQueueName:                    "hot_transactions",
+		HotQueueConcurrency:             1,
+		HotPairTTL:                      5 * time.Minute,
+		HotPairLockContentionThreshold:  3,
+		RejectLockContentionImmediately: false,
+		MaxRetryAttempts:                5,
+		MonitoringPort:                  DEFAULT_MONITORING_PORT,
+		WebhookConcurrency:              20,
+		TransactionWorkerConcurrency:    1,
 	}
 
 	defaultRedis = RedisConfig{
@@ -146,6 +155,7 @@ type TransactionConfig struct {
 	MaxWorkers         int           `json:"max_workers" envconfig:"BLNK_TRANSACTION_MAX_WORKERS"`
 	LockDuration       time.Duration `json:"lock_duration" envconfig:"BLNK_TRANSACTION_LOCK_DURATION"`
 	IndexQueuePrefix   string        `json:"index_queue_prefix" envconfig:"BLNK_TRANSACTION_INDEX_QUEUE_PREFIX"`
+	EnableCoalescing   bool          `json:"enable_coalescing" envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
 	EnableQueuedChecks bool          `json:"enable_queued_checks" envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
 }
 
@@ -157,15 +167,22 @@ type ReconciliationConfig struct {
 }
 
 type QueueConfig struct {
-	TransactionQueue        string `json:"transaction_queue" envconfig:"BLNK_QUEUE_TRANSACTION"`
-	WebhookQueue            string `json:"webhook_queue" envconfig:"BLNK_QUEUE_WEBHOOK"`
-	IndexQueue              string `json:"index_queue" envconfig:"BLNK_QUEUE_INDEX"`
-	InflightExpiryQueue     string `json:"inflight_expiry_queue" envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
-	NumberOfQueues          int    `json:"number_of_queues" envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
-	InsufficientFundRetries bool   `json:"insufficient_fund_retries" envconfig:"BLNK_QUEUE_INSUFFICIENT_FUND_RETRIES"`
-	MaxRetryAttempts        int    `json:"max_retry_attempts" envconfig:"BLNK_QUEUE_MAX_RETRY_ATTEMPTS"`
-	MonitoringPort          string `json:"monitoring_port" envconfig:"BLNK_QUEUE_MONITORING_PORT"`
-	WebhookConcurrency      int    `json:"webhook_concurrency" envconfig:"BLNK_QUEUE_WEBHOOK_CONCURRENCY"`
+	TransactionQueue                string        `json:"transaction_queue" envconfig:"BLNK_QUEUE_TRANSACTION"`
+	WebhookQueue                    string        `json:"webhook_queue" envconfig:"BLNK_QUEUE_WEBHOOK"`
+	IndexQueue                      string        `json:"index_queue" envconfig:"BLNK_QUEUE_INDEX"`
+	InflightExpiryQueue             string        `json:"inflight_expiry_queue" envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
+	NumberOfQueues                  int           `json:"number_of_queues" envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
+	EnableHotLane                   bool          `json:"enable_hot_lane" envconfig:"BLNK_QUEUE_ENABLE_HOT_LANE"`
+	HotQueueName                    string        `json:"hot_queue_name" envconfig:"BLNK_QUEUE_HOT_QUEUE_NAME"`
+	HotQueueConcurrency             int           `json:"hot_queue_concurrency" envconfig:"BLNK_QUEUE_HOT_QUEUE_CONCURRENCY"`
+	HotPairTTL                      time.Duration `json:"hot_pair_ttl" envconfig:"BLNK_QUEUE_HOT_PAIR_TTL"`
+	HotPairLockContentionThreshold  int           `json:"hot_pair_lock_contention_threshold" envconfig:"BLNK_QUEUE_HOT_PAIR_LOCK_CONTENTION_THRESHOLD"`
+	RejectLockContentionImmediately bool          `json:"reject_lock_contention_immediately" envconfig:"BLNK_QUEUE_REJECT_LOCK_CONTENTION_IMMEDIATELY"`
+	InsufficientFundRetries         bool          `json:"insufficient_fund_retries" envconfig:"BLNK_QUEUE_INSUFFICIENT_FUND_RETRIES"`
+	MaxRetryAttempts                int           `json:"max_retry_attempts" envconfig:"BLNK_QUEUE_MAX_RETRY_ATTEMPTS"`
+	MonitoringPort                  string        `json:"monitoring_port" envconfig:"BLNK_QUEUE_MONITORING_PORT"`
+	WebhookConcurrency              int           `json:"webhook_concurrency" envconfig:"BLNK_QUEUE_WEBHOOK_CONCURRENCY"`
+	TransactionWorkerConcurrency    int           `json:"transaction_worker_concurrency" envconfig:"BLNK_QUEUE_TRANSACTION_WORKER_CONCURRENCY"`
 }
 
 type Configuration struct {
@@ -355,11 +372,31 @@ func (cnf *Configuration) setQueueDefaults() {
 	if cnf.Queue.NumberOfQueues == 0 {
 		cnf.Queue.NumberOfQueues = defaultQueue.NumberOfQueues
 	}
+	if cnf.Queue.HotQueueName == "" {
+		cnf.Queue.HotQueueName = defaultQueue.HotQueueName
+	}
+	if cnf.Queue.HotQueueConcurrency == 0 {
+		cnf.Queue.HotQueueConcurrency = defaultQueue.HotQueueConcurrency
+	}
+	if cnf.Queue.HotPairTTL == 0 {
+		cnf.Queue.HotPairTTL = defaultQueue.HotPairTTL
+	} else {
+		cnf.Queue.HotPairTTL = cnf.Queue.HotPairTTL * time.Second
+	}
+	if cnf.Queue.HotPairLockContentionThreshold == 0 {
+		cnf.Queue.HotPairLockContentionThreshold = defaultQueue.HotPairLockContentionThreshold
+	}
+	if cnf.Queue.MaxRetryAttempts == 0 {
+		cnf.Queue.MaxRetryAttempts = defaultQueue.MaxRetryAttempts
+	}
 	if cnf.Queue.MonitoringPort == "" {
 		cnf.Queue.MonitoringPort = defaultQueue.MonitoringPort
 	}
 	if cnf.Queue.WebhookConcurrency == 0 {
 		cnf.Queue.WebhookConcurrency = defaultQueue.WebhookConcurrency
+	}
+	if cnf.Queue.TransactionWorkerConcurrency == 0 {
+		cnf.Queue.TransactionWorkerConcurrency = defaultQueue.TransactionWorkerConcurrency
 	}
 }
 

@@ -44,17 +44,18 @@ type transaction interface {
 	RecordTransaction(cxt context.Context, txn *model.Transaction) (*model.Transaction, error)                                                                                                     // Records a new transaction
 	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error)                                       // Records a transaction with balance updates atomically
 	RecordTransactionWithBalancesAndOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance, outbox *model.LineageOutbox) (*model.Transaction, error) // Records a transaction with balance updates and optional lineage outbox atomically
-	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                                                                     // Retrieves a transaction by ID
-	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                                                                    // Checks if a parent transaction is void
-	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                                                                          // Retrieves a transaction by reference
-	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)                                                                                                                    // Checks if a transaction exists by reference
-	UpdateTransactionStatus(cxt context.Context, id string, status string) error                                                                                                                   // Updates the status of a transaction
-	GetAllTransactions(cxt context.Context, limit, offset int) ([]model.Transaction, error)                                                                                                        // Retrieves all transactions
-	GetTotalCommittedTransactions(cxt context.Context, parentID string) (*big.Int, error)                                                                                                          // Gets the total count of committed transactions for a parent
-	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)                                                                            // Retrieves transactions in a paginated manner
-	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)                                                  // Retrieves inflight transactions by parent ID
-	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)                                                // Retrieves refundable transactions by parent ID
-	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)                                                             // Groups transactions based on specified criteria
+	RecordTransactionsWithBalancesAndOutboxes(ctx context.Context, txns []*model.Transaction, sourceBalance, destinationBalance *model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error)
+	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                      // Retrieves a transaction by ID
+	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                     // Checks if a parent transaction is void
+	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                           // Retrieves a transaction by reference
+	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)                                                                     // Checks if a transaction exists by reference
+	UpdateTransactionStatus(cxt context.Context, id string, status string) error                                                                    // Updates the status of a transaction
+	GetAllTransactions(cxt context.Context, limit, offset int) ([]model.Transaction, error)                                                         // Retrieves all transactions
+	GetTotalCommittedTransactions(cxt context.Context, parentID string) (*big.Int, error)                                                           // Gets the total count of committed transactions for a parent
+	GetTransactionsPaginated(ctx context.Context, id string, batchSize int, offset int64) ([]*model.Transaction, error)                             // Retrieves transactions in a paginated manner
+	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)   // Retrieves inflight transactions by parent ID
+	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) // Retrieves refundable transactions by parent ID
+	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)              // Groups transactions based on specified criteria
 	UpdateLedgerMetadata(id string, metadata map[string]interface{}) error
 	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
@@ -65,9 +66,11 @@ type transaction interface {
 	GetTransactionsByCriteria(ctx context.Context, minAmount, maxAmount *float64, currency *string, minDate, maxDate *time.Time, limit int, offset int64) ([]*model.Transaction, error)
 	GetTransactionsByShadowFor(ctx context.Context, parentTransactionID string) ([]model.Transaction, error)              // Retrieves shadow transactions by parent transaction ID
 	GetStuckQueuedTransactions(ctx context.Context, threshold time.Duration, batchSize int) ([]*model.Transaction, error) // Retrieves stuck QUEUED transactions with no child
+	GetQueuedTransactionsForCoalescing(ctx context.Context, source, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error)
+	CountQueuedTransactionsForPairLane(ctx context.Context, source, destination, currency, lane string) (int, error)
 
 	// Advanced filtering methods
-	GetAllTransactionsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Transaction, error)                                            // Retrieves transactions with advanced filtering
+	GetAllTransactionsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Transaction, error)                                              // Retrieves transactions with advanced filtering
 	GetAllTransactionsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Transaction, *int64, error) // Retrieves transactions with filtering, sorting, and count
 }
 
@@ -79,7 +82,7 @@ type ledger interface {
 	UpdateLedger(id, name string) (*model.Ledger, error)     // Updates a ledger's name
 
 	// Advanced filtering methods
-	GetAllLedgersWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Ledger, error)                                            // Retrieves ledgers with advanced filtering
+	GetAllLedgersWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Ledger, error)                                              // Retrieves ledgers with advanced filtering
 	GetAllLedgersWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Ledger, *int64, error) // Retrieves ledgers with filtering, sorting, and count
 }
 
@@ -99,7 +102,7 @@ type balance interface {
 	UpdateBalanceIdentity(balanceID string, identityID string) error                                                       // Updates only the identity_id of a balance
 
 	// Advanced filtering methods
-	GetAllBalancesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Balance, error)                                            // Retrieves balances with advanced filtering
+	GetAllBalancesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Balance, error)                                              // Retrieves balances with advanced filtering
 	GetAllBalancesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Balance, *int64, error) // Retrieves balances with filtering, sorting, and count
 }
 
@@ -113,7 +116,7 @@ type account interface {
 	DeleteAccount(id string) error                                      // Deletes an account
 
 	// Advanced filtering methods
-	GetAllAccountsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Account, error)                                            // Retrieves accounts with advanced filtering
+	GetAllAccountsWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Account, error)                                              // Retrieves accounts with advanced filtering
 	GetAllAccountsWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Account, *int64, error) // Retrieves accounts with filtering, sorting, and count
 }
 
@@ -137,7 +140,7 @@ type identity interface {
 	DeleteIdentity(id string) error                                        // Deletes an identity
 
 	// Advanced filtering methods
-	GetAllIdentitiesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Identity, error)                                            // Retrieves identities with advanced filtering
+	GetAllIdentitiesWithFilter(ctx context.Context, filters *filter.QueryFilterSet, limit, offset int) ([]model.Identity, error)                                              // Retrieves identities with advanced filtering
 	GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters *filter.QueryFilterSet, opts *filter.QueryOptions, limit, offset int) ([]model.Identity, *int64, error) // Retrieves identities with filtering, sorting, and count
 }
 

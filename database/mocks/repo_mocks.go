@@ -51,6 +51,14 @@ func (m *MockDataSource) RecordTransactionWithBalancesAndOutbox(ctx context.Cont
 	return args.Get(0).(*model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) RecordTransactionsWithBalancesAndOutboxes(ctx context.Context, txns []*model.Transaction, sourceBalance, destinationBalance *model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error) {
+	args := m.Called(ctx, txns, sourceBalance, destinationBalance, outboxes)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
 func (m *MockDataSource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
 	args := m.Called(ctx, id)
 	return args.Get(0).(*model.Transaction), args.Error(1)
@@ -142,6 +150,19 @@ func (m *MockDataSource) GetStuckQueuedTransactions(ctx context.Context, thresho
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
+func (m *MockDataSource) GetQueuedTransactionsForCoalescing(ctx context.Context, source, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
+	args := m.Called(ctx, source, destination, currency, excludeTransactionID, createdAtOrAfter, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
+func (m *MockDataSource) CountQueuedTransactionsForPairLane(ctx context.Context, source, destination, currency, lane string) (int, error) {
+	args := m.Called(ctx, source, destination, currency, lane)
+	return args.Int(0), args.Error(1)
 }
 
 // Ledger methods

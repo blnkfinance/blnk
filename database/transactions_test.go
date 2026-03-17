@@ -31,6 +31,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
 )
@@ -2062,4 +2063,129 @@ func TestRecordTransactionWithBalances_CommitError(t *testing.T) {
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
 	assert.Equal(t, apierror.ErrInternalServer, apiErr.Code)
+}
+
+func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	txns := []*model.Transaction{
+		{
+			TransactionID: "txn_1",
+			Source:        "bln_source",
+			Reference:     "ref_1_q",
+			AmountString:  "10.00",
+			PreciseAmount: big.NewInt(1000),
+			Precision:     100,
+			Rate:          1,
+			Currency:      "USD",
+			Destination:   "bln_dest",
+			Description:   "first",
+			Status:        "APPLIED",
+			CreatedAt:     now,
+			MetaData:      map[string]interface{}{"batch": true},
+			Hash:          "hash_1",
+			EffectiveDate: &now,
+		},
+		{
+			TransactionID:     "txn_2",
+			ParentTransaction: "txn_parent",
+			Source:            "bln_source",
+			Reference:         "ref_2_q",
+			AmountString:      "20.00",
+			PreciseAmount:     big.NewInt(2000),
+			Precision:         100,
+			Rate:              1,
+			Currency:          "USD",
+			Destination:       "bln_dest",
+			Description:       "second",
+			Status:            "APPLIED",
+			CreatedAt:         now.Add(time.Second),
+			MetaData:          map[string]interface{}{"batch": true},
+			Hash:              "hash_2",
+			EffectiveDate:     &now,
+		},
+	}
+
+	sourceBalance := &model.Balance{
+		BalanceID:             "bln_source",
+		Balance:               big.NewInt(1000),
+		CreditBalance:         big.NewInt(500),
+		DebitBalance:          big.NewInt(500),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Currency:              "USD",
+		CurrencyMultiplier:    100,
+		Version:               1,
+	}
+
+	destBalance := &model.Balance{
+		BalanceID:             "bln_dest",
+		Balance:               big.NewInt(2000),
+		CreditBalance:         big.NewInt(1000),
+		DebitBalance:          big.NewInt(1000),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Currency:              "USD",
+		CurrencyMultiplier:    100,
+		Version:               1,
+	}
+
+	copySQL := pq.CopyInSchema(
+		"blnk",
+		"transactions",
+		"transaction_id",
+		"parent_transaction",
+		"source",
+		"reference",
+		"amount",
+		"precise_amount",
+		"precision",
+		"rate",
+		"currency",
+		"destination",
+		"description",
+		"status",
+		"created_at",
+		"meta_data",
+		"scheduled_for",
+		"hash",
+		"effective_date",
+	)
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE blnk.balances SET").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE blnk.balances SET").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	copyPrepare := mock.ExpectPrepare(regexp.QuoteMeta(copySQL))
+	copyPrepare.ExpectExec().
+		WithArgs(
+			"txn_1", "", "bln_source", "ref_1_q", "10.00", "1000", float64(100), float64(1), "USD", "bln_dest", "first", "APPLIED", now, sqlmock.AnyArg(), time.Time{}, "hash_1", &now,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	copyPrepare.ExpectExec().
+		WithArgs(
+			"txn_2", "txn_parent", "bln_source", "ref_2_q", "20.00", "2000", float64(100), float64(1), "USD", "bln_dest", "second", "APPLIED", now.Add(time.Second), sqlmock.AnyArg(), time.Time{}, "hash_2", &now,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	copyPrepare.ExpectExec().
+		WithArgs().
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	copyPrepare.WillBeClosed()
+	mock.ExpectCommit()
+
+	result, err := ds.RecordTransactionsWithBalancesAndOutboxes(ctx, txns, sourceBalance, destBalance, nil)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, "txn_1", result[0].TransactionID)
+	assert.Equal(t, "txn_2", result[1].TransactionID)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

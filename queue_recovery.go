@@ -163,15 +163,7 @@ func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Co
 }
 
 func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context.Context, stuckTxn *model.Transaction) error {
-	if v, ok := stuckTxn.MetaData["inflight"].(bool); ok {
-		stuckTxn.Inflight = v
-	}
-	if v, ok := stuckTxn.MetaData["atomic"].(bool); ok {
-		stuckTxn.Atomic = v
-	}
-	if v, ok := stuckTxn.MetaData["allow_overdraft"].(bool); ok {
-		stuckTxn.AllowOverdraft = v
-	}
+	restoreTransactionFlagsFromMetadata(stuckTxn)
 
 	attempts := 0
 	if stuckTxn.MetaData != nil {

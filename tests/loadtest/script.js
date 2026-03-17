@@ -9,6 +9,7 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.4/index.js";
 
 const URL = __ENV.URL || "https://YOUR_DOMAIN/transactions";
 const API_KEY = __ENV.API_KEY || __ENV.BLNK_API_KEY;
+const SUMMARY_OUT = __ENV.SUMMARY_OUT || "tests/loadtest/summary.json";
 // baseline | ramp | contention | soak | spike
 const SCENARIO = __ENV.SCENARIO || "baseline";
 const HOT_DEST = __ENV.HOT_DEST || "@hot-balance-0001";
@@ -172,13 +173,16 @@ function buildOptions() {
 function postTxn(dest) {
   var amount = Math.floor(Math.random() * (1000 - 100 + 1)) + 100; // 100..1000
   var payload = JSON.stringify({
-    amount: amount,
+    amount: 100,
     description: "load test",
     precision: 100,
     allow_overdraft: true,
+    inflight: true,
     reference: uuidv4(),
     currency: "USD",
-    source: "@test_account_" + uuidv4(),
+    // source: "@jerry3333",
+    // destination: "@world33333",
+    source: dest + "-source",
     destination: dest,
   });
 
@@ -216,6 +220,6 @@ export function randomTraffic() {
 export function handleSummary(data) {
   return {
     stdout: textSummary(data, { indent: " ", enableColors: true }),
-    "summary.json": JSON.stringify(data, null, 2),
+    [SUMMARY_OUT]: JSON.stringify(data, null, 2),
   };
 }
