@@ -67,7 +67,7 @@ jobs:
         run: go mod tidy
 
       - name: Migrate Database
-        run: go run ./cmd/*.go migrate up
+        run: go run ./cmd migrate up
         env:
           BLNK_DATA_SOURCE_DNS: postgres://postgres@localhost:5432/blnk?sslmode=disable
           BLNK_REDIS_DNS: localhost:6379
