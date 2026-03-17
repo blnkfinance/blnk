@@ -480,9 +480,11 @@ func (l *Blnk) fetchAndValidateInflightTransaction(ctx context.Context, transact
 	var transaction *model.Transaction
 
 	dbTransaction, err := l.datasource.GetTransaction(ctx, transactionID)
-	if err == sql.ErrNoRows {
+	switch err {
+	case nil:
+		transaction = dbTransaction
+	case sql.ErrNoRows:
 		queuedTxn, err := l.queue.GetTransactionFromQueue(transactionID)
-		log.Println("found inflight transaction in queue using it for commit/void", transactionID, queuedTxn.TransactionID)
 		if err != nil {
 			span.RecordError(err)
 			return &model.Transaction{}, err
@@ -492,10 +494,9 @@ func (l *Blnk) fetchAndValidateInflightTransaction(ctx context.Context, transact
 			span.RecordError(err)
 			return nil, err
 		}
+		log.Println("found inflight transaction in queue using it for commit/void", transactionID, queuedTxn.TransactionID)
 		transaction = queuedTxn
-	} else if err == nil {
-		transaction = dbTransaction
-	} else {
+	default:
 		span.RecordError(err)
 		return &model.Transaction{}, err
 	}
