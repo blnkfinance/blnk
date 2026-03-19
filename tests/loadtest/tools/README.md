@@ -2,6 +2,10 @@
 
 This replaces the one-off conversion workflow with a small local web app.
 
+For the end-to-end load-test workflow, named test cases, and queue benchmark usage, see:
+
+- `tests/loadtest/README.md`
+
 ## Start the dashboard
 
 ```bash

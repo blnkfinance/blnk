@@ -325,6 +325,12 @@ func (d Datasource) RecordTransactionWithBalancesAndOutbox(ctx context.Context, 
 // the source and destination balances once, and inserts any lineage outbox entries in the same
 // database transaction.
 func (d Datasource) RecordTransactionsWithBalancesAndOutboxes(ctx context.Context, txns []*model.Transaction, sourceBalance, destinationBalance *model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error) {
+	return d.RecordTransactionsWithBalanceSetAndOutboxes(ctx, txns, []*model.Balance{sourceBalance, destinationBalance}, outboxes)
+}
+
+// RecordTransactionsWithBalanceSetAndOutboxes atomically records multiple transactions, updates
+// all changed balances, and inserts any lineage outbox entries in the same database transaction.
+func (d Datasource) RecordTransactionsWithBalanceSetAndOutboxes(ctx context.Context, txns []*model.Transaction, balances []*model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error) {
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "RecordTransactionsWithBalancesAndOutboxes")
 	defer span.End()
 
@@ -338,12 +344,7 @@ func (d Datasource) RecordTransactionsWithBalancesAndOutboxes(ctx context.Contex
 		_ = tx.Rollback()
 	}(tx)
 
-	if err := updateBalance(ctx, tx, sourceBalance); err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	if err := updateBalance(ctx, tx, destinationBalance); err != nil {
+	if err := updateBalanceSet(ctx, tx, balances); err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
@@ -370,9 +371,8 @@ func (d Datasource) RecordTransactionsWithBalancesAndOutboxes(ctx context.Contex
 
 	span.AddEvent("Transactions, balances, and outboxes recorded atomically", trace.WithAttributes(
 		attribute.Int("transaction.count", len(txns)),
+		attribute.Int("balance.count", len(balances)),
 		attribute.Int("outbox.count", len(outboxes)),
-		attribute.String("source.balance_id", sourceBalance.BalanceID),
-		attribute.String("destination.balance_id", destinationBalance.BalanceID),
 	))
 
 	return txns, nil
@@ -506,6 +506,54 @@ func (d Datasource) TransactionExistsByRef(ctx context.Context, reference string
 	))
 
 	return exists, nil
+}
+
+// GetExistingTransactionReferences retrieves the subset of the provided references that already
+// exist in the database. It returns an empty set when the input is empty.
+func (d Datasource) GetExistingTransactionReferences(ctx context.Context, references []string) (map[string]struct{}, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetExistingTransactionReferences")
+	defer span.End()
+
+	existing := make(map[string]struct{})
+	if len(references) == 0 {
+		return existing, nil
+	}
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT reference
+		FROM blnk.transactions
+		WHERE reference = ANY($1)
+	`, pq.Array(references))
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve existing transaction references", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
+
+	for rows.Next() {
+		var reference string
+		if err := rows.Scan(&reference); err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan existing transaction reference", err)
+		}
+		existing[reference] = struct{}{}
+	}
+
+	if err := rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error iterating existing transaction references", err)
+	}
+
+	span.AddEvent("Existing transaction references retrieved", trace.WithAttributes(
+		attribute.Int("reference.requested_count", len(references)),
+		attribute.Int("reference.existing_count", len(existing)),
+	))
+
+	return existing, nil
 }
 
 // GetTransactionByRef retrieves a transaction from the database using the provided reference.
@@ -1950,6 +1998,98 @@ func (d Datasource) GetQueuedTransactionsForCoalescing(ctx context.Context, sour
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve queued transactions for coalescing", err)
 	}
+	transactions, err := scanQueuedTransactionsForCoalescing(rows)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.AddEvent("Queued transactions for coalescing retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+		attribute.String("source.balance_id", source),
+		attribute.String("destination.balance_id", destination),
+	))
+
+	return transactions, nil
+}
+
+func (d Datasource) GetQueuedTransactionsForSourceCoalescing(ctx context.Context, source, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetQueuedTransactionsForSourceCoalescing")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions t
+		WHERE t.status = 'QUEUED'
+		  AND t.source = $1
+		  AND t.currency = $2
+		  AND t.transaction_id <> $3
+		  AND t.created_at >= $4
+		  AND NOT EXISTS (
+		      SELECT 1 FROM blnk.transactions child
+		      WHERE child.parent_transaction = t.transaction_id
+		  )
+		ORDER BY t.created_at ASC
+		LIMIT $5
+	`, source, currency, excludeTransactionID, createdAtOrAfter.UTC(), limit)
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve source-scoped queued transactions for coalescing", err)
+	}
+
+	transactions, err := scanQueuedTransactionsForCoalescing(rows)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.AddEvent("Source-scoped queued transactions for coalescing retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+		attribute.String("source.balance_id", source),
+	))
+
+	return transactions, nil
+}
+
+func (d Datasource) GetQueuedTransactionsForDestinationCoalescing(ctx context.Context, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetQueuedTransactionsForDestinationCoalescing")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		FROM blnk.transactions t
+		WHERE t.status = 'QUEUED'
+		  AND t.destination = $1
+		  AND t.currency = $2
+		  AND t.transaction_id <> $3
+		  AND t.created_at >= $4
+		  AND NOT EXISTS (
+		      SELECT 1 FROM blnk.transactions child
+		      WHERE child.parent_transaction = t.transaction_id
+		  )
+		ORDER BY t.created_at ASC
+		LIMIT $5
+	`, destination, currency, excludeTransactionID, createdAtOrAfter.UTC(), limit)
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve destination-scoped queued transactions for coalescing", err)
+	}
+
+	transactions, err := scanQueuedTransactionsForCoalescing(rows)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.AddEvent("Destination-scoped queued transactions for coalescing retrieved", trace.WithAttributes(
+		attribute.Int("transaction.count", len(transactions)),
+		attribute.String("destination.balance_id", destination),
+	))
+
+	return transactions, nil
+}
+
+func scanQueuedTransactionsForCoalescing(rows *sql.Rows) ([]*model.Transaction, error) {
 	defer func() {
 		if err := rows.Close(); err != nil {
 			log.Printf("Error closing rows: %v", err)
@@ -1961,42 +2101,32 @@ func (d Datasource) GetQueuedTransactionsForCoalescing(ctx context.Context, sour
 		txn := &model.Transaction{}
 		var metaDataJSON []byte
 		var preciseAmountStr string
-		err = rows.Scan(
+		if err := rows.Scan(
 			&txn.TransactionID, &txn.ParentTransaction, &txn.Source, &txn.Reference,
 			&txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Rate,
 			&txn.Currency, &txn.Destination, &txn.Description, &txn.Status,
 			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor, &txn.Hash,
-		)
-		if err != nil {
-			span.RecordError(err)
+		); err != nil {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan queued transaction for coalescing", err)
 		}
 
 		if err := json.Unmarshal(metaDataJSON, &txn.MetaData); err != nil {
-			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		txn.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		preciseAmount, err := parseBigInt(preciseAmountStr)
 		if err != nil {
-			span.RecordError(err)
 			return nil, fmt.Errorf("failed to parse precise_amount: %w", err)
 		}
+		txn.PreciseAmount = preciseAmount
 
 		model.ApplyPrecision(txn)
 		transactions = append(transactions, txn)
 	}
 
 	if err := rows.Err(); err != nil {
-		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error iterating queued transactions for coalescing", err)
 	}
-
-	span.AddEvent("Queued transactions for coalescing retrieved", trace.WithAttributes(
-		attribute.Int("transaction.count", len(transactions)),
-		attribute.String("source.balance_id", source),
-		attribute.String("destination.balance_id", destination),
-	))
 
 	return transactions, nil
 }

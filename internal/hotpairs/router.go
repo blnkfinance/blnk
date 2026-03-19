@@ -158,7 +158,6 @@ func RecordContention(ctx context.Context, manager *Manager, source, destination
 		logrus.WithFields(fields).Info("Hot-pair contention threshold reached; pair marked for promotion")
 		return
 	}
-	logrus.WithFields(fields).Info("Recorded lock contention for pair")
 }
 
 func IsLockContentionError(err error) bool {

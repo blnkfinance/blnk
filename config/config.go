@@ -39,13 +39,14 @@ const (
 // Default values for different configurations
 var (
 	defaultTransaction = TransactionConfig{
-		BatchSize:          100000,
-		MaxQueueSize:       1000,
-		MaxWorkers:         10,
-		LockDuration:       30 * time.Minute,
-		IndexQueuePrefix:   "transactions",
-		EnableCoalescing:   false,
-		EnableQueuedChecks: false,
+		BatchSize:                  1000,
+		MaxQueueSize:               1000,
+		MaxWorkers:                 10,
+		LockDuration:               30 * time.Minute,
+		IndexQueuePrefix:           "transactions",
+		EnableCoalescing:           false,
+		EnableQueuedChecks:         false,
+		DisableBatchReferenceCheck: false,
 	}
 
 	defaultReconciliation = ReconciliationConfig{
@@ -150,13 +151,14 @@ type Notification struct {
 }
 
 type TransactionConfig struct {
-	BatchSize          int           `json:"batch_size" envconfig:"BLNK_TRANSACTION_BATCH_SIZE"`
-	MaxQueueSize       int           `json:"max_queue_size" envconfig:"BLNK_TRANSACTION_MAX_QUEUE_SIZE"`
-	MaxWorkers         int           `json:"max_workers" envconfig:"BLNK_TRANSACTION_MAX_WORKERS"`
-	LockDuration       time.Duration `json:"lock_duration" envconfig:"BLNK_TRANSACTION_LOCK_DURATION"`
-	IndexQueuePrefix   string        `json:"index_queue_prefix" envconfig:"BLNK_TRANSACTION_INDEX_QUEUE_PREFIX"`
-	EnableCoalescing   bool          `json:"enable_coalescing" envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
-	EnableQueuedChecks bool          `json:"enable_queued_checks" envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
+	BatchSize                  int           `json:"batch_size" envconfig:"BLNK_TRANSACTION_BATCH_SIZE"`
+	MaxQueueSize               int           `json:"max_queue_size" envconfig:"BLNK_TRANSACTION_MAX_QUEUE_SIZE"`
+	MaxWorkers                 int           `json:"max_workers" envconfig:"BLNK_TRANSACTION_MAX_WORKERS"`
+	LockDuration               time.Duration `json:"lock_duration" envconfig:"BLNK_TRANSACTION_LOCK_DURATION"`
+	IndexQueuePrefix           string        `json:"index_queue_prefix" envconfig:"BLNK_TRANSACTION_INDEX_QUEUE_PREFIX"`
+	EnableCoalescing           bool          `json:"enable_coalescing" envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
+	EnableQueuedChecks         bool          `json:"enable_queued_checks" envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
+	DisableBatchReferenceCheck bool          `json:"disable_batch_reference_check" envconfig:"BLNK_TRANSACTION_DISABLE_BATCH_REFERENCE_CHECK"`
 }
 
 type ReconciliationConfig struct {

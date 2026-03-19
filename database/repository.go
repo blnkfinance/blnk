@@ -45,10 +45,12 @@ type transaction interface {
 	RecordTransactionWithBalances(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error)                                       // Records a transaction with balance updates atomically
 	RecordTransactionWithBalancesAndOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance, outbox *model.LineageOutbox) (*model.Transaction, error) // Records a transaction with balance updates and optional lineage outbox atomically
 	RecordTransactionsWithBalancesAndOutboxes(ctx context.Context, txns []*model.Transaction, sourceBalance, destinationBalance *model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error)
+	RecordTransactionsWithBalanceSetAndOutboxes(ctx context.Context, txns []*model.Transaction, balances []*model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error)
 	GetTransaction(cxt context.Context, id string) (*model.Transaction, error)                                                                      // Retrieves a transaction by ID
 	IsParentTransactionVoid(cxt context.Context, parentID string) (bool, error)                                                                     // Checks if a parent transaction is void
 	GetTransactionByRef(cxt context.Context, reference string) (model.Transaction, error)                                                           // Retrieves a transaction by reference
 	TransactionExistsByRef(ctx context.Context, reference string) (bool, error)                                                                     // Checks if a transaction exists by reference
+	GetExistingTransactionReferences(ctx context.Context, references []string) (map[string]struct{}, error)                                         // Gets existing transaction references in bulk
 	UpdateTransactionStatus(cxt context.Context, id string, status string) error                                                                    // Updates the status of a transaction
 	GetAllTransactions(cxt context.Context, limit, offset int) ([]model.Transaction, error)                                                         // Retrieves all transactions
 	GetTotalCommittedTransactions(cxt context.Context, parentID string) (*big.Int, error)                                                           // Gets the total count of committed transactions for a parent
@@ -67,6 +69,8 @@ type transaction interface {
 	GetTransactionsByShadowFor(ctx context.Context, parentTransactionID string) ([]model.Transaction, error)              // Retrieves shadow transactions by parent transaction ID
 	GetStuckQueuedTransactions(ctx context.Context, threshold time.Duration, batchSize int) ([]*model.Transaction, error) // Retrieves stuck QUEUED transactions with no child
 	GetQueuedTransactionsForCoalescing(ctx context.Context, source, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error)
+	GetQueuedTransactionsForSourceCoalescing(ctx context.Context, source, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error)
+	GetQueuedTransactionsForDestinationCoalescing(ctx context.Context, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error)
 	CountQueuedTransactionsForPairLane(ctx context.Context, source, destination, currency, lane string) (int, error)
 
 	// Advanced filtering methods
