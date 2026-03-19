@@ -247,6 +247,30 @@ func TestTransactionExistsByRef_Failure(t *testing.T) {
 	assert.IsType(t, apierror.APIError{}, err)
 }
 
+func TestGetExistingTransactionReferences_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	tracer := otel.Tracer("transaction.database")
+	ctx, span := tracer.Start(context.Background(), "TestGetExistingTransactionReferences")
+	defer span.End()
+
+	ds := Datasource{Conn: db}
+
+	mock.ExpectQuery("SELECT reference FROM blnk.transactions WHERE reference = ANY\\(\\$1\\)").
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"reference"}).
+			AddRow("ref123_q").
+			AddRow("ref456_q"))
+
+	existing, err := ds.GetExistingTransactionReferences(ctx, []string{"ref123_q", "ref456_q", "ref789_q"})
+	assert.NoError(t, err)
+	assert.Contains(t, existing, "ref123_q")
+	assert.Contains(t, existing, "ref456_q")
+	assert.NotContains(t, existing, "ref789_q")
+}
+
 func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)

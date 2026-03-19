@@ -10,11 +10,15 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.4/index.js";
 const URL = __ENV.URL || "https://YOUR_DOMAIN/transactions";
 const API_KEY = __ENV.API_KEY || __ENV.BLNK_API_KEY;
 const SUMMARY_OUT = __ENV.SUMMARY_OUT || "tests/loadtest/summary.json";
-// baseline | ramp | contention | soak | spike
+// baseline | ramp | contention | hot_source | hot_destination | soak | spike
 const SCENARIO = __ENV.SCENARIO || "baseline";
 const HOT_DEST = __ENV.HOT_DEST || "@hot-balance-0001";
+const HOT_SOURCE = __ENV.HOT_SOURCE || "@hot-source-0001";
 const HOT_RPS = Number(__ENV.HOT_RPS || 308); // ~70%
 const RANDOM_RPS = Number(__ENV.RANDOM_RPS || 132); // ~30%
+const RATE = Number(__ENV.RATE || 300);
+const SOURCE_BUCKETS = Number(__ENV.SOURCE_BUCKETS || 1);
+const DESTINATION_BUCKETS = Number(__ENV.DESTINATION_BUCKETS || 1);
 
 function dth(scn) {
   var o = {};
@@ -167,23 +171,66 @@ function buildOptions() {
     };
   }
 
+  if (SCENARIO === "hot_source") {
+    return {
+      scenarios: {
+        hot_source: {
+          executor: "constant-arrival-rate",
+          rate: RATE,
+          timeUnit: "1s",
+          duration: __ENV.DURATION || "5m",
+          preAllocatedVUs: Number(__ENV.VUS || 200),
+          maxVUs: Number(__ENV.MAX_VUS || 800),
+          tags: { scenario: "hot_source" },
+          exec: "hotSourceTraffic",
+        },
+      },
+      thresholds: dth("hot_source"),
+    };
+  }
+
+  if (SCENARIO === "hot_destination") {
+    return {
+      scenarios: {
+        hot_destination: {
+          executor: "constant-arrival-rate",
+          rate: RATE,
+          timeUnit: "1s",
+          duration: __ENV.DURATION || "5m",
+          preAllocatedVUs: Number(__ENV.VUS || 200),
+          maxVUs: Number(__ENV.MAX_VUS || 800),
+          tags: { scenario: "hot_destination" },
+          exec: "hotDestinationTraffic",
+        },
+      },
+      thresholds: dth("hot_destination"),
+    };
+  }
+
   throw new Error("Unknown SCENARIO=" + SCENARIO);
 }
 
-function postTxn(dest) {
+function bucketedName(base, buckets) {
+  if (buckets <= 1) {
+    return base;
+  }
+
+  var shard = Math.floor(Math.random() * buckets) + 1;
+  return base + "-bucket-" + shard;
+}
+
+function postTxn(source, destination) {
   var amount = Math.floor(Math.random() * (1000 - 100 + 1)) + 100; // 100..1000
   var payload = JSON.stringify({
-    amount: 100,
+    amount: amount,
     description: "load test",
     precision: 100,
     allow_overdraft: true,
     inflight: true,
     reference: uuidv4(),
     currency: "USD",
-    // source: "@jerry3333",
-    // destination: "@world33333",
-    source: dest + "-source",
-    destination: dest,
+    source: source,
+    destination: destination,
   });
 
   var headers = { "Content-Type": "application/json" };
@@ -205,15 +252,29 @@ function postTxn(dest) {
 
 export default function () {
   // baseline, ramp, soak, spike use this
-  postTxn("@" + uuidv4());
+  var destination = "@" + uuidv4();
+  postTxn(destination + "-source", destination);
 }
 
 export function hotTraffic() {
-  postTxn(HOT_DEST);
+  postTxn(HOT_DEST + "-source", HOT_DEST);
 }
 
 export function randomTraffic() {
-  postTxn("@" + uuidv4());
+  var destination = "@" + uuidv4();
+  postTxn(destination + "-source", destination);
+}
+
+export function hotSourceTraffic() {
+  var source = bucketedName(HOT_SOURCE, SOURCE_BUCKETS);
+  var destination = "@" + uuidv4();
+  postTxn(source, destination);
+}
+
+export function hotDestinationTraffic() {
+  var source = "@" + uuidv4();
+  var destination = bucketedName(HOT_DEST, DESTINATION_BUCKETS);
+  postTxn(source, destination);
 }
 
 // Optional: saves detailed stats to stdout + JSON file

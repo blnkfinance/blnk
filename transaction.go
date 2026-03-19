@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -56,7 +57,15 @@ var asyncBulkSemaphore = semaphore.NewWeighted(100) // max 100 concurrent
 var asyncTxnSemaphore = semaphore.NewWeighted(20)   // max 20 concurrent async transaction processors
 
 const (
-	maxSamePairCoalescingBatchSize = 10000
+	maxQueuedCoalescingBatchSize = 10000
+)
+
+type queuedCoalescingScope string
+
+const (
+	queuedCoalescingScopePair        queuedCoalescingScope = "pair"
+	queuedCoalescingScopeSource      queuedCoalescingScope = "source"
+	queuedCoalescingScopeDestination queuedCoalescingScope = "destination"
 )
 
 // getTxns is a function type that retrieves a batch of transactions based on the parent transaction ID, batch size, and offset.
@@ -690,9 +699,10 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	})
 }
 
-// TryRecordQueuedTransactionBatch opportunistically coalesces multiple QUEUED transactions for
-// the exact same balance pair into a single balance commit. It is intentionally conservative and
-// fails open by returning handled=false if batching would be unsafe or provides no benefit.
+// TryRecordQueuedTransactionBatch opportunistically coalesces multiple QUEUED transactions that
+// share the same contention shape into a single balance commit. It prefers the narrowest safe
+// scope first (pair, then source, then destination) and fails open by returning handled=false if
+// batching would be unsafe or provides no benefit.
 func (l *Blnk) TryRecordQueuedTransactionBatch(ctx context.Context, transaction *model.Transaction) (handled bool, err error) {
 	return l.tryRecordQueuedTransactionBatch(ctx, transaction, false)
 }
@@ -725,25 +735,12 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 		return false, nil
 	}
 
-	batchSize := l.samePairCoalescingBatchSize(force)
+	batchSize := l.queuedCoalescingBatchSize(force)
 	if batchSize < 2 {
-		logrus.WithFields(logrus.Fields{
-			"transaction_id": transaction.TransactionID,
-			"batch_size":     batchSize,
-			"reason":         "batch_size_below_minimum",
-		}).Info("Skipping queued transaction coalescing")
 		return false, nil
 	}
 
-	siblings, err := l.datasource.GetQueuedTransactionsForCoalescing(
-		ctx,
-		transaction.Source,
-		transaction.Destination,
-		transaction.Currency,
-		transaction.ParentTransaction,
-		transaction.CreatedAt,
-		batchSize-1,
-	)
+	batch, scope, err := l.buildQueuedCoalescingBatch(ctx, transaction, batchSize)
 	if err != nil {
 		span.RecordError(err)
 		logrus.WithError(err).WithFields(logrus.Fields{
@@ -752,38 +749,13 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 			"source":         transaction.Source,
 			"destination":    transaction.Destination,
 			"currency":       transaction.Currency,
+			"scope":          scope,
 			"reason":         "queued_sibling_lookup_failed",
 		}).Warn("Skipping queued transaction coalescing")
 		return false, nil
 	}
 
-	batch := []*model.Transaction{transaction}
-	for _, sibling := range siblings {
-		restoreTransactionFlagsFromMetadata(sibling)
-		if eligible, reason := l.canCoalesceQueuedOriginal(sibling); !eligible {
-			logrus.WithFields(logrus.Fields{
-				"transaction_id": sibling.TransactionID,
-				"parent":         sibling.ParentTransaction,
-				"source":         sibling.Source,
-				"destination":    sibling.Destination,
-				"currency":       sibling.Currency,
-				"reason":         reason,
-			}).Info("Skipping sibling transaction during coalescing")
-			continue
-		}
-		batch = append(batch, createQueueCopy(sibling, sibling.Reference))
-	}
-
 	if len(batch) < 2 {
-		logrus.WithFields(logrus.Fields{
-			"transaction_id": transaction.TransactionID,
-			"parent":         transaction.ParentTransaction,
-			"source":         transaction.Source,
-			"destination":    transaction.Destination,
-			"currency":       transaction.Currency,
-			"reason":         "no_eligible_sibling_transactions",
-			"siblings_found": len(siblings),
-		}).Info("Skipping queued transaction coalescing")
 		return false, nil
 	}
 
@@ -795,6 +767,7 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 			"source":         transaction.Source,
 			"destination":    transaction.Destination,
 			"currency":       transaction.Currency,
+			"scope":          scope,
 			"batch_size":     len(batch),
 			"reason":         "batch_processing_failed_open",
 		}).Warn("Queued transaction coalescing failed open; switching leader to per-transaction processing")
@@ -807,11 +780,13 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 		"source":         transaction.Source,
 		"destination":    transaction.Destination,
 		"currency":       transaction.Currency,
+		"scope":          scope,
 		"batch_size":     len(batch),
 	}).Info("Queued transaction coalescing applied")
 
 	span.AddEvent("Queued transaction batch processed", trace.WithAttributes(
 		attribute.Int("batch.size", len(batch)),
+		attribute.String("batch.scope", string(scope)),
 		attribute.String("source.balance_id", transaction.Source),
 		attribute.String("destination.balance_id", transaction.Destination),
 	))
@@ -827,32 +802,45 @@ func (l *Blnk) persistQueuedTransactionBatch(ctx context.Context, transactions [
 		return nil
 	}
 
-	sourceID := transactions[0].Source
-	destinationID := transactions[0].Destination
 	currency := transactions[0].Currency
 
 	for _, txn := range transactions[1:] {
-		if txn.Source != sourceID || txn.Destination != destinationID || txn.Currency != currency {
-			return fmt.Errorf("coalescing batch contains multiple balance pairs or currencies")
+		if txn.Currency != currency {
+			return fmt.Errorf("coalescing batch contains multiple currencies")
 		}
 	}
 
-	locker, err := l.acquireLock(ctx, sourceID, destinationID)
+	balanceIDs := collectQueuedCoalescingBalanceIDs(transactions)
+	locker, err := l.acquireBalanceSetLock(ctx, balanceIDs)
 	if err != nil {
-		hotpairs.RecordContention(ctx, l.hotPairs, sourceID, destinationID, currency, err)
+		hotpairs.RecordContention(ctx, l.hotPairs, transactions[0].Source, transactions[0].Destination, currency, err)
 		return fmt.Errorf("failed to acquire batch lock: %w", err)
 	}
 	defer l.releaseLock(ctx, locker)
 
-	sourceBalance, destinationBalance, err := l.getSourceAndDestination(ctx, transactions[0])
+	balancesByID, orderedBalances, err := l.loadBalancesForQueuedBatch(ctx, balanceIDs)
 	if err != nil {
 		return fmt.Errorf("failed to load balances for coalesced batch: %w", err)
 	}
 
 	finalizedTransactions := make([]*model.Transaction, 0, len(transactions))
 	outboxes := make([]*model.LineageOutbox, 0, len(transactions))
+	prefetchedReferences := make(map[string]struct{})
+	existingReferences := make(map[string]struct{})
+	if l.batchReferenceCheckEnabled() {
+		prefetchedReferences, existingReferences, err = l.getQueuedBatchExistingReferences(ctx, transactions)
+		if err != nil {
+			return fmt.Errorf("failed to validate coalesced transaction references: %w", err)
+		}
+	}
+	batchReferences := make(map[string]struct{}, len(transactions))
 
 	for _, txn := range transactions {
+		sourceBalance, destinationBalance, err := coalescingBalancesForTransaction(balancesByID, txn)
+		if err != nil {
+			return err
+		}
+
 		if l.Hooks != nil {
 			if err := l.Hooks.ExecutePreHooks(ctx, txn.TransactionID, txn); err != nil {
 				span.RecordError(err)
@@ -860,7 +848,7 @@ func (l *Blnk) persistQueuedTransactionBatch(ctx context.Context, transactions [
 			}
 		}
 
-		if err := l.validateTxn(ctx, txn); err != nil {
+		if err := l.validateQueuedBatchTransactionReference(ctx, txn, prefetchedReferences, existingReferences, batchReferences); err != nil {
 			return fmt.Errorf("batch transaction validation failed: %w", err)
 		}
 
@@ -880,14 +868,19 @@ func (l *Blnk) persistQueuedTransactionBatch(ctx context.Context, transactions [
 		finalizedTransactions = append(finalizedTransactions, finalizedTxn)
 	}
 
-	if _, err := l.datasource.RecordTransactionsWithBalancesAndOutboxes(ctx, finalizedTransactions, sourceBalance, destinationBalance, outboxes); err != nil {
+	if _, err := l.datasource.RecordTransactionsWithBalanceSetAndOutboxes(ctx, finalizedTransactions, orderedBalances, outboxes); err != nil {
 		return l.logAndRecordError(span, "failed to persist coalesced transaction batch", err)
 	}
 
-	go l.checkBalanceMonitors(ctx, sourceBalance)
-	go l.checkBalanceMonitors(ctx, destinationBalance)
+	for _, balance := range orderedBalances {
+		go l.checkBalanceMonitors(ctx, balance)
+	}
 
 	for _, txn := range finalizedTransactions {
+		sourceBalance, destinationBalance, err := coalescingBalancesForTransaction(balancesByID, txn)
+		if err != nil {
+			return err
+		}
 		if l.Hooks != nil {
 			if err := l.Hooks.ExecutePostHooks(ctx, txn.TransactionID, txn); err != nil {
 				span.RecordError(err)
@@ -1073,7 +1066,7 @@ func (l *Blnk) prepareTransactionOutbox(ctx context.Context, transaction *model.
 	return l.PrepareLineageOutbox(ctx, transaction, sourceBalance, destinationBalance)
 }
 
-func (l *Blnk) samePairCoalescingBatchSize(force bool) int {
+func (l *Blnk) queuedCoalescingBatchSize(force bool) int {
 	if !force && !l.Config().Transaction.EnableCoalescing {
 		return 0
 	}
@@ -1082,11 +1075,238 @@ func (l *Blnk) samePairCoalescingBatchSize(force bool) int {
 	switch {
 	case size <= 1:
 		return size
-	case size > maxSamePairCoalescingBatchSize:
-		return maxSamePairCoalescingBatchSize
+	case size > maxQueuedCoalescingBatchSize:
+		return maxQueuedCoalescingBatchSize
 	default:
 		return size
 	}
+}
+
+func (l *Blnk) buildQueuedCoalescingBatch(ctx context.Context, transaction *model.Transaction, batchSize int) ([]*model.Transaction, queuedCoalescingScope, error) {
+	for _, scope := range []queuedCoalescingScope{
+		queuedCoalescingScopePair,
+		queuedCoalescingScopeSource,
+		queuedCoalescingScopeDestination,
+	} {
+		batch, err := l.buildQueuedCoalescingBatchForScope(ctx, transaction, scope, batchSize)
+		if err != nil {
+			return nil, scope, err
+		}
+		if len(batch) >= 2 {
+			return batch, scope, nil
+		}
+	}
+
+	return nil, "", nil
+}
+
+func (l *Blnk) buildQueuedCoalescingBatchForScope(ctx context.Context, leader *model.Transaction, scope queuedCoalescingScope, batchSize int) ([]*model.Transaction, error) {
+	siblings, err := l.loadQueuedTransactionsForCoalescingScope(ctx, leader, scope, batchSize-1)
+	if err != nil {
+		return nil, err
+	}
+
+	batch := []*model.Transaction{leader}
+	for _, sibling := range siblings {
+		restoreTransactionFlagsFromMetadata(sibling)
+		if eligible, reason := l.canCoalesceQueuedOriginal(sibling); !eligible {
+			logrus.WithFields(logrus.Fields{
+				"transaction_id": sibling.TransactionID,
+				"parent":         sibling.ParentTransaction,
+				"source":         sibling.Source,
+				"destination":    sibling.Destination,
+				"currency":       sibling.Currency,
+				"scope":          scope,
+				"reason":         reason,
+			}).Info("Skipping sibling transaction during coalescing")
+			continue
+		}
+		batch = append(batch, createQueueCopy(sibling, sibling.Reference))
+	}
+
+	return batch, nil
+}
+
+func (l *Blnk) loadQueuedTransactionsForCoalescingScope(ctx context.Context, leader *model.Transaction, scope queuedCoalescingScope, limit int) ([]*model.Transaction, error) {
+	switch scope {
+	case queuedCoalescingScopePair:
+		return l.datasource.GetQueuedTransactionsForCoalescing(
+			ctx,
+			leader.Source,
+			leader.Destination,
+			leader.Currency,
+			leader.ParentTransaction,
+			leader.CreatedAt,
+			limit,
+		)
+	case queuedCoalescingScopeSource:
+		return l.datasource.GetQueuedTransactionsForSourceCoalescing(
+			ctx,
+			leader.Source,
+			leader.Currency,
+			leader.ParentTransaction,
+			leader.CreatedAt,
+			limit,
+		)
+	case queuedCoalescingScopeDestination:
+		return l.datasource.GetQueuedTransactionsForDestinationCoalescing(
+			ctx,
+			leader.Destination,
+			leader.Currency,
+			leader.ParentTransaction,
+			leader.CreatedAt,
+			limit,
+		)
+	default:
+		return nil, fmt.Errorf("unsupported queued coalescing scope %q", scope)
+	}
+}
+
+func collectQueuedCoalescingBalanceIDs(transactions []*model.Transaction) []string {
+	seen := make(map[string]struct{}, len(transactions)*2)
+	ids := make([]string, 0, len(transactions)*2)
+	for _, txn := range transactions {
+		if txn == nil {
+			continue
+		}
+		for _, id := range []string{txn.Source, txn.Destination} {
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (l *Blnk) acquireBalanceSetLock(ctx context.Context, balanceIDs []string) (*redlock.MultiLocker, error) {
+	ctx, span := tracer.Start(ctx, "Acquiring Balance Set Lock")
+	defer span.End()
+
+	locker := redlock.NewMultiLocker(l.redis, balanceIDs, model.GenerateUUIDWithSuffix("loc"))
+	if err := locker.Lock(ctx, l.Config().Transaction.LockDuration); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	span.AddEvent("Locks acquired", trace.WithAttributes(
+		attribute.StringSlice("locked.keys", locker.Keys()),
+	))
+	return locker, nil
+}
+
+func (l *Blnk) loadBalancesForQueuedBatch(ctx context.Context, balanceIDs []string) (map[string]*model.Balance, []*model.Balance, error) {
+	balancesByID := make(map[string]*model.Balance, len(balanceIDs))
+
+	if l.Config().Transaction.EnableQueuedChecks {
+		for _, balanceID := range balanceIDs {
+			balance, err := l.datasource.GetBalanceByID(balanceID, nil, true)
+			if err != nil {
+				return nil, nil, err
+			}
+			balancesByID[balanceID] = balance
+		}
+	} else {
+		loaded, err := l.datasource.GetBalancesByIDsLite(ctx, balanceIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+		for balanceID, balance := range loaded {
+			balancesByID[balanceID] = balance
+		}
+	}
+
+	orderedBalances := make([]*model.Balance, 0, len(balanceIDs))
+	for _, balanceID := range balanceIDs {
+		balance, ok := balancesByID[balanceID]
+		if !ok || balance == nil {
+			return nil, nil, fmt.Errorf("failed to load balance %s for coalesced batch", balanceID)
+		}
+		orderedBalances = append(orderedBalances, balance)
+	}
+
+	return balancesByID, orderedBalances, nil
+}
+
+func coalescingBalancesForTransaction(balancesByID map[string]*model.Balance, txn *model.Transaction) (*model.Balance, *model.Balance, error) {
+	sourceBalance, ok := balancesByID[txn.Source]
+	if !ok || sourceBalance == nil {
+		return nil, nil, fmt.Errorf("missing source balance %s for coalesced transaction", txn.Source)
+	}
+
+	destinationBalance, ok := balancesByID[txn.Destination]
+	if !ok || destinationBalance == nil {
+		return nil, nil, fmt.Errorf("missing destination balance %s for coalesced transaction", txn.Destination)
+	}
+
+	return sourceBalance, destinationBalance, nil
+}
+
+func (l *Blnk) getQueuedBatchExistingReferences(ctx context.Context, transactions []*model.Transaction) (map[string]struct{}, map[string]struct{}, error) {
+	references := make([]string, 0, len(transactions))
+	prefetched := make(map[string]struct{}, len(transactions))
+	for _, txn := range transactions {
+		if txn == nil || txn.Reference == "" {
+			continue
+		}
+		if _, ok := prefetched[txn.Reference]; ok {
+			continue
+		}
+		prefetched[txn.Reference] = struct{}{}
+		references = append(references, txn.Reference)
+	}
+
+	existing, err := l.datasource.GetExistingTransactionReferences(ctx, references)
+	if err != nil {
+		return nil, nil, err
+	}
+	return prefetched, existing, nil
+}
+
+func (l *Blnk) validateQueuedBatchTransactionReference(ctx context.Context, transaction *model.Transaction, prefetchedReferences, existingReferences, batchReferences map[string]struct{}) error {
+	if transaction == nil {
+		return fmt.Errorf("nil transaction")
+	}
+
+	if transaction.Reference == "" {
+		return fmt.Errorf("reference is required")
+	}
+
+	if _, ok := batchReferences[transaction.Reference]; ok {
+		return fmt.Errorf("reference %s has already been used", transaction.Reference)
+	}
+
+	if _, ok := existingReferences[transaction.Reference]; ok {
+		return fmt.Errorf("reference %s has already been used", transaction.Reference)
+	}
+
+	if len(prefetchedReferences) == 0 {
+		if err := l.validateTxn(ctx, transaction); err != nil {
+			return err
+		}
+		batchReferences[transaction.Reference] = struct{}{}
+		return nil
+	}
+
+	// Fall back to the single-reference validation path only if the transaction's
+	// current reference was not part of the prefetched batch reference set.
+	if _, ok := prefetchedReferences[transaction.Reference]; !ok {
+		if err := l.validateTxn(ctx, transaction); err != nil {
+			return err
+		}
+	}
+
+	batchReferences[transaction.Reference] = struct{}{}
+	return nil
+}
+
+func (l *Blnk) batchReferenceCheckEnabled() bool {
+	return !l.Config().Transaction.DisableBatchReferenceCheck
 }
 
 func (l *Blnk) canCoalesceQueuedTransaction(transaction *model.Transaction) (bool, string) {

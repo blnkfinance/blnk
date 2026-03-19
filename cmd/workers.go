@@ -67,10 +67,6 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 	if err != nil {
 		logrus.WithError(err).Warnf("failed pre-checking transaction reference %s", txn.Reference)
 	} else if exists {
-		// logrus.WithFields(logrus.Fields{
-		// 	"transaction_id": txn.TransactionID,
-		// 	"reference":      txn.Reference,
-		// }).Info("Skipping queued transaction because reference is already processed")
 		return nil
 	}
 

@@ -59,6 +59,14 @@ func (m *MockDataSource) RecordTransactionsWithBalancesAndOutboxes(ctx context.C
 	return args.Get(0).([]*model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) RecordTransactionsWithBalanceSetAndOutboxes(ctx context.Context, txns []*model.Transaction, balances []*model.Balance, outboxes []*model.LineageOutbox) ([]*model.Transaction, error) {
+	args := m.Called(ctx, txns, balances, outboxes)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
 func (m *MockDataSource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
 	args := m.Called(ctx, id)
 	return args.Get(0).(*model.Transaction), args.Error(1)
@@ -77,6 +85,14 @@ func (m *MockDataSource) GetTransactionByRef(ctx context.Context, reference stri
 func (m *MockDataSource) TransactionExistsByRef(ctx context.Context, reference string) (bool, error) {
 	args := m.Called(ctx, reference)
 	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockDataSource) GetExistingTransactionReferences(ctx context.Context, references []string) (map[string]struct{}, error) {
+	args := m.Called(ctx, references)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]struct{}), args.Error(1)
 }
 
 func (m *MockDataSource) UpdateTransactionStatus(ctx context.Context, id string, status string) error {
@@ -154,6 +170,22 @@ func (m *MockDataSource) GetStuckQueuedTransactions(ctx context.Context, thresho
 
 func (m *MockDataSource) GetQueuedTransactionsForCoalescing(ctx context.Context, source, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
 	args := m.Called(ctx, source, destination, currency, excludeTransactionID, createdAtOrAfter, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
+func (m *MockDataSource) GetQueuedTransactionsForSourceCoalescing(ctx context.Context, source, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
+	args := m.Called(ctx, source, currency, excludeTransactionID, createdAtOrAfter, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*model.Transaction), args.Error(1)
+}
+
+func (m *MockDataSource) GetQueuedTransactionsForDestinationCoalescing(ctx context.Context, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
+	args := m.Called(ctx, destination, currency, excludeTransactionID, createdAtOrAfter, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

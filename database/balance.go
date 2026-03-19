@@ -910,6 +910,23 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 	return nil
 }
 
+func updateBalanceSet(ctx context.Context, tx *sql.Tx, balances []*model.Balance) error {
+	seen := make(map[string]struct{}, len(balances))
+	for _, balance := range balances {
+		if balance == nil || balance.BalanceID == "" {
+			continue
+		}
+		if _, ok := seen[balance.BalanceID]; ok {
+			continue
+		}
+		seen[balance.BalanceID] = struct{}{}
+		if err := updateBalance(ctx, tx, balance); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpdateBalance updates an existing balance entry in the database.
 // This method takes a balance object and updates the corresponding fields in the database, based on the provided balance ID.
 // It handles both the balance data and the associated metadata.
