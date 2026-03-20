@@ -354,14 +354,9 @@ func (d Datasource) RecordTransactionsWithBalanceSetAndOutboxes(ctx context.Cont
 		return nil, err
 	}
 
-	for _, outbox := range outboxes {
-		if outbox == nil {
-			continue
-		}
-		if err := d.InsertLineageOutboxInTx(ctx, tx, outbox); err != nil {
-			span.RecordError(err)
-			return nil, fmt.Errorf("failed to insert lineage outbox: %w", err)
-		}
+	if err := insertLineageOutboxesInTx(ctx, tx, outboxes); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to insert lineage outboxes: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

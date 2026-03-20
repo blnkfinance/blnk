@@ -78,7 +78,6 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		logrus.WithError(err).Warnf("coalesced processing attempt failed for transaction %s", txn.TransactionID)
 	}
 	if handled {
-		logrus.Infof("Transaction %s processed successfully via coalesced batch", txn.TransactionID)
 		return nil
 	}
 

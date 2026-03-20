@@ -19,6 +19,8 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
@@ -162,6 +164,86 @@ func (d Datasource) InsertLineageOutboxInTx(ctx context.Context, tx *sql.Tx, out
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to insert lineage outbox entry", err)
 	}
+	return nil
+}
+
+func insertLineageOutboxesInTx(ctx context.Context, tx *sql.Tx, outboxes []*model.LineageOutbox) error {
+	if len(outboxes) == 0 {
+		return nil
+	}
+
+	var query strings.Builder
+	query.WriteString(`
+		INSERT INTO blnk.lineage_outbox
+		(transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, max_attempts, created_at, inflight)
+		VALUES
+	`)
+
+	args := make([]interface{}, 0, len(outboxes)*10)
+	now := time.Now()
+	for i, outbox := range outboxes {
+		if outbox == nil {
+			continue
+		}
+		if len(args) > 0 {
+			query.WriteString(",")
+		}
+		base := len(args) + 1
+		query.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)", base, base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9))
+		args = append(args,
+			outbox.TransactionID,
+			outbox.SourceBalanceID,
+			outbox.DestinationBalanceID,
+			outbox.Provider,
+			outbox.LineageType,
+			outbox.Payload,
+			model.OutboxStatusPending,
+			outbox.MaxAttempts,
+			now.Add(time.Duration(i)*time.Nanosecond),
+			outbox.Inflight,
+		)
+	}
+
+	if len(args) == 0 {
+		return nil
+	}
+
+	query.WriteString(" RETURNING id, transaction_id")
+	rows, err := tx.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to insert lineage outbox entries", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	outboxesByTransactionID := make(map[string]*model.LineageOutbox, len(outboxes))
+	for _, outbox := range outboxes {
+		if outbox == nil {
+			continue
+		}
+		outboxesByTransactionID[outbox.TransactionID] = outbox
+	}
+
+	inserted := 0
+	for rows.Next() {
+		var id int64
+		var transactionID string
+		if err := rows.Scan(&id, &transactionID); err != nil {
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan inserted lineage outbox entry", err)
+		}
+		if outbox, ok := outboxesByTransactionID[transactionID]; ok {
+			outbox.ID = id
+		}
+		inserted++
+	}
+
+	if err := rows.Err(); err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed while iterating inserted lineage outbox entries", err)
+	}
+
+	if inserted != len(outboxesByTransactionID) {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to insert all lineage outbox entries", nil)
+	}
+
 	return nil
 }
 

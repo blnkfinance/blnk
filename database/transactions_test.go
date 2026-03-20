@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"regexp"
 	"testing"
@@ -2185,10 +2186,8 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 	)
 
 	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE blnk.balances SET").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE blnk.balances SET").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("UPDATE blnk.balances AS b").
+		WillReturnRows(sqlmock.NewRows([]string{"balance_id"}).AddRow("bln_source").AddRow("bln_dest"))
 	copyPrepare := mock.ExpectPrepare(regexp.QuoteMeta(copySQL))
 	copyPrepare.ExpectExec().
 		WithArgs(
@@ -2211,5 +2210,223 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 	assert.Len(t, result, 2)
 	assert.Equal(t, "txn_1", result[0].TransactionID)
 	assert.Equal(t, "txn_2", result[1].TransactionID)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRecordTransactionsWithBalancesAndOutboxes_BatchesLineageOutboxes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	txn := &model.Transaction{
+		TransactionID: "txn_1",
+		Source:        "bln_source",
+		Reference:     "ref_1_q",
+		AmountString:  "10.00",
+		PreciseAmount: big.NewInt(1000),
+		Precision:     100,
+		Rate:          1,
+		Currency:      "USD",
+		Destination:   "bln_dest",
+		Description:   "first",
+		Status:        "APPLIED",
+		CreatedAt:     now,
+		MetaData:      map[string]interface{}{"batch": true},
+		Hash:          "hash_1",
+		EffectiveDate: &now,
+	}
+
+	sourceBalance := &model.Balance{
+		BalanceID:             "bln_source",
+		Balance:               big.NewInt(1000),
+		CreditBalance:         big.NewInt(500),
+		DebitBalance:          big.NewInt(500),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Currency:              "USD",
+		CurrencyMultiplier:    100,
+		Version:               1,
+	}
+
+	destBalance := &model.Balance{
+		BalanceID:             "bln_dest",
+		Balance:               big.NewInt(2000),
+		CreditBalance:         big.NewInt(1000),
+		DebitBalance:          big.NewInt(1000),
+		InflightBalance:       big.NewInt(0),
+		InflightCreditBalance: big.NewInt(0),
+		InflightDebitBalance:  big.NewInt(0),
+		Currency:              "USD",
+		CurrencyMultiplier:    100,
+		Version:               1,
+	}
+
+	outbox := &model.LineageOutbox{
+		TransactionID:        txn.TransactionID,
+		SourceBalanceID:      sourceBalance.BalanceID,
+		DestinationBalanceID: destBalance.BalanceID,
+		Provider:             "provider",
+		LineageType:          "both",
+		Payload:              []byte(`{"test":true}`),
+		MaxAttempts:          5,
+	}
+
+	copySQL := pq.CopyInSchema(
+		"blnk",
+		"transactions",
+		"transaction_id",
+		"parent_transaction",
+		"source",
+		"reference",
+		"amount",
+		"precise_amount",
+		"precision",
+		"rate",
+		"currency",
+		"destination",
+		"description",
+		"status",
+		"created_at",
+		"meta_data",
+		"scheduled_for",
+		"hash",
+		"effective_date",
+	)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("UPDATE blnk.balances AS b").
+		WillReturnRows(sqlmock.NewRows([]string{"balance_id"}).AddRow("bln_source").AddRow("bln_dest"))
+	copyPrepare := mock.ExpectPrepare(regexp.QuoteMeta(copySQL))
+	copyPrepare.ExpectExec().
+		WithArgs(
+			"txn_1", "", "bln_source", "ref_1_q", "10.00", "1000", float64(100), float64(1), "USD", "bln_dest", "first", "APPLIED", now, sqlmock.AnyArg(), time.Time{}, "hash_1", &now,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	copyPrepare.ExpectExec().
+		WithArgs().
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	copyPrepare.WillBeClosed()
+	mock.ExpectQuery("INSERT INTO blnk.lineage_outbox").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "transaction_id"}).AddRow(int64(1), "txn_1"))
+	mock.ExpectCommit()
+
+	result, err := ds.RecordTransactionsWithBalanceSetAndOutboxes(ctx, []*model.Transaction{txn}, []*model.Balance{sourceBalance, destBalance}, []*model.LineageOutbox{outbox})
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, int64(1), outbox.ID)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpdateBalanceSet_ChunksLargeBalanceSets(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ctx := context.Background()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	assert.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+
+	balances := make([]*model.Balance, 0, maxBalancesPerUpdateChunk+1)
+	firstChunkRows := sqlmock.NewRows([]string{"balance_id"})
+	secondChunkRows := sqlmock.NewRows([]string{"balance_id"})
+
+	for i := 0; i < maxBalancesPerUpdateChunk+1; i++ {
+		balanceID := fmt.Sprintf("bln_%d", i)
+		balances = append(balances, &model.Balance{
+			BalanceID:             balanceID,
+			Balance:               big.NewInt(1000),
+			CreditBalance:         big.NewInt(500),
+			DebitBalance:          big.NewInt(500),
+			InflightBalance:       big.NewInt(0),
+			InflightCreditBalance: big.NewInt(0),
+			InflightDebitBalance:  big.NewInt(0),
+			Currency:              "USD",
+			CurrencyMultiplier:    100,
+			LedgerID:              "ldg_1",
+			CreatedAt:             time.Unix(1700000000, 0).UTC(),
+			Version:               1,
+		})
+
+		if i < maxBalancesPerUpdateChunk {
+			firstChunkRows.AddRow(balanceID)
+		} else {
+			secondChunkRows.AddRow(balanceID)
+		}
+	}
+
+	mock.ExpectQuery("UPDATE blnk.balances AS b").
+		WillReturnRows(firstChunkRows)
+	mock.ExpectQuery("UPDATE blnk.balances AS b").
+		WillReturnRows(secondChunkRows)
+	mock.ExpectCommit()
+
+	err = updateBalanceSet(ctx, tx, balances)
+	assert.NoError(t, err)
+	for _, balance := range balances {
+		assert.Equal(t, int64(2), balance.Version)
+	}
+	assert.NoError(t, tx.Commit())
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpdateBalanceSet_ReturnsConflictWhenAChunkMissesABalance(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ctx := context.Background()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	assert.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+
+	balances := make([]*model.Balance, 0, maxBalancesPerUpdateChunk+1)
+	firstChunkRows := sqlmock.NewRows([]string{"balance_id"})
+	secondChunkRows := sqlmock.NewRows([]string{"balance_id"})
+
+	for i := 0; i < maxBalancesPerUpdateChunk+1; i++ {
+		balanceID := fmt.Sprintf("bln_%d", i)
+		balances = append(balances, &model.Balance{
+			BalanceID:             balanceID,
+			Balance:               big.NewInt(1000),
+			CreditBalance:         big.NewInt(500),
+			DebitBalance:          big.NewInt(500),
+			InflightBalance:       big.NewInt(0),
+			InflightCreditBalance: big.NewInt(0),
+			InflightDebitBalance:  big.NewInt(0),
+			Currency:              "USD",
+			CurrencyMultiplier:    100,
+			LedgerID:              "ldg_1",
+			CreatedAt:             time.Unix(1700000000, 0).UTC(),
+			Version:               1,
+		})
+
+		if i < maxBalancesPerUpdateChunk {
+			firstChunkRows.AddRow(balanceID)
+		}
+	}
+
+	mock.ExpectQuery("UPDATE blnk.balances AS b").
+		WillReturnRows(firstChunkRows)
+	mock.ExpectQuery("UPDATE blnk.balances AS b").
+		WillReturnRows(secondChunkRows)
+	mock.ExpectRollback()
+
+	err = updateBalanceSet(ctx, tx, balances)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Optimistic locking failure")
+
+	for _, balance := range balances {
+		assert.Equal(t, int64(1), balance.Version)
+	}
+
+	assert.NoError(t, tx.Rollback())
 	assert.NoError(t, mock.ExpectationsWereMet())
 }

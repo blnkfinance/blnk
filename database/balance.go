@@ -33,6 +33,8 @@ import (
 	"github.com/blnkfinance/blnk/model"
 )
 
+const maxBalancesPerUpdateChunk = 1000
+
 // Helper function to check if a slice contains a value.
 func contains(slice []string, val string) bool {
 	for _, s := range slice {
@@ -912,6 +914,7 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 
 func updateBalanceSet(ctx context.Context, tx *sql.Tx, balances []*model.Balance) error {
 	seen := make(map[string]struct{}, len(balances))
+	uniqueBalances := make([]*model.Balance, 0, len(balances))
 	for _, balance := range balances {
 		if balance == nil || balance.BalanceID == "" {
 			continue
@@ -920,10 +923,152 @@ func updateBalanceSet(ctx context.Context, tx *sql.Tx, balances []*model.Balance
 			continue
 		}
 		seen[balance.BalanceID] = struct{}{}
-		if err := updateBalance(ctx, tx, balance); err != nil {
+		uniqueBalances = append(uniqueBalances, balance)
+	}
+
+	if len(uniqueBalances) == 0 {
+		return nil
+	}
+
+	for start := 0; start < len(uniqueBalances); start += maxBalancesPerUpdateChunk {
+		end := start + maxBalancesPerUpdateChunk
+		if end > len(uniqueBalances) {
+			end = len(uniqueBalances)
+		}
+
+		if err := updateBalanceChunk(ctx, tx, uniqueBalances[start:end]); err != nil {
 			return err
 		}
 	}
+
+	for _, balance := range uniqueBalances {
+		balance.Version++
+	}
+
+	return nil
+}
+
+func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balance) error {
+	if len(balances) == 0 {
+		return nil
+	}
+
+	var query strings.Builder
+	query.WriteString(`
+		UPDATE blnk.balances AS b
+		SET balance = v.balance,
+		    credit_balance = v.credit_balance,
+		    debit_balance = v.debit_balance,
+		    inflight_balance = v.inflight_balance,
+		    inflight_credit_balance = v.inflight_credit_balance,
+		    inflight_debit_balance = v.inflight_debit_balance,
+		    currency = v.currency,
+		    currency_multiplier = v.currency_multiplier,
+		    ledger_id = v.ledger_id,
+		    created_at = v.created_at,
+		    version = b.version + 1
+		FROM (VALUES
+	`)
+
+	args := make([]interface{}, 0, len(balances)*12)
+	for i, balance := range balances {
+		if i > 0 {
+			query.WriteString(",")
+		}
+		base := i*12 + 1
+		query.WriteString(fmt.Sprintf(
+			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base,
+			base+1,
+			base+2,
+			base+3,
+			base+4,
+			base+5,
+			base+6,
+			base+7,
+			base+8,
+			base+9,
+			base+10,
+			base+11,
+		))
+		args = append(args,
+			balance.BalanceID,
+			balance.Balance.String(),
+			balance.CreditBalance.String(),
+			balance.DebitBalance.String(),
+			balance.InflightBalance.String(),
+			balance.InflightCreditBalance.String(),
+			balance.InflightDebitBalance.String(),
+			balance.Currency,
+			balance.CurrencyMultiplier,
+			balance.LedgerID,
+			balance.CreatedAt,
+			balance.Version,
+		)
+	}
+
+	query.WriteString(`
+		) AS raw(
+			balance_id,
+			balance,
+			credit_balance,
+			debit_balance,
+			inflight_balance,
+			inflight_credit_balance,
+			inflight_debit_balance,
+			currency,
+			currency_multiplier,
+			ledger_id,
+			created_at,
+			expected_version
+		)
+		CROSS JOIN LATERAL (
+			SELECT
+				raw.balance_id::text AS balance_id,
+				raw.balance::numeric AS balance,
+				raw.credit_balance::numeric AS credit_balance,
+				raw.debit_balance::numeric AS debit_balance,
+				raw.inflight_balance::numeric AS inflight_balance,
+				raw.inflight_credit_balance::numeric AS inflight_credit_balance,
+				raw.inflight_debit_balance::numeric AS inflight_debit_balance,
+				raw.currency::text AS currency,
+				raw.currency_multiplier::numeric AS currency_multiplier,
+				raw.ledger_id::text AS ledger_id,
+				raw.created_at::timestamp AS created_at,
+				raw.expected_version::integer AS expected_version
+		) AS v
+		WHERE b.balance_id = v.balance_id
+		  AND b.version = v.expected_version
+		RETURNING b.balance_id
+	`)
+
+	rows, err := tx.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance set", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	updated := make(map[string]struct{}, len(balances))
+	for rows.Next() {
+		var balanceID string
+		if err := rows.Scan(&balanceID); err != nil {
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan updated balance", err)
+		}
+		updated[balanceID] = struct{}{}
+	}
+
+	if err := rows.Err(); err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed while iterating updated balances", err)
+	}
+
+	for _, balance := range balances {
+		if _, ok := updated[balance.BalanceID]; !ok {
+			return apierror.NewAPIError(apierror.ErrConflict, fmt.Sprintf("Optimistic locking failure: balance with ID '%s' may have been updated or deleted by another transaction", balance.BalanceID), nil)
+		}
+	}
+
 	return nil
 }
 

@@ -131,10 +131,7 @@ func processHTTP(data NewWebhook, client *http.Client) error {
 // Returns:
 // - error: An error if the task could not be enqueued.
 func (b *Blnk) SendWebhook(newWebhook NewWebhook) error {
-	conf, err := config.Fetch()
-	if err != nil {
-		return err
-	}
+	conf := b.Config()
 
 	if conf.Notification.Webhook.Url == "" {
 		return nil
