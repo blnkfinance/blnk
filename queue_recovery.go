@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/hotpairs"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
 )
@@ -38,23 +38,23 @@ type QueuedTransactionRecoveryProcessor struct {
 	wg                  sync.WaitGroup
 	running             bool
 	mu                  sync.Mutex
+	tryBatch            func(ctx context.Context, txn *model.Transaction) (bool, error)
+	tryHotBatch         func(ctx context.Context, txn *model.Transaction) (bool, error)
+	recordTransaction   func(ctx context.Context, txn *model.Transaction) (*model.Transaction, error)
 }
 
 func NewQueuedTransactionRecoveryProcessor(blnk *Blnk) *QueuedTransactionRecoveryProcessor {
-	maxWorkers := 10
-	cfg, err := config.Fetch()
-	if err == nil && cfg.Transaction.MaxWorkers > 0 {
-		maxWorkers = cfg.Transaction.MaxWorkers
-	}
-
 	return &QueuedTransactionRecoveryProcessor{
 		blnk:                blnk,
-		batchSize:           maxWorkers * 100,
-		maxWorkers:          maxWorkers,
+		batchSize:           100,
+		maxWorkers:          1,
 		pollInterval:        30 * time.Second,
 		stuckThreshold:      2 * time.Hour,
 		maxRecoveryAttempts: 3,
 		stopCh:              make(chan struct{}),
+		tryBatch:            blnk.TryRecordQueuedTransactionBatch,
+		tryHotBatch:         blnk.TryRecordQueuedTransactionBatchForHotLane,
+		recordTransaction:   blnk.RecordTransaction,
 	}
 }
 
@@ -143,22 +143,12 @@ func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Co
 
 	logrus.Infof("Processing %d stuck queued transactions with %d workers (threshold=%v)", len(stuckTxns), p.maxWorkers, threshold)
 
-	sem := make(chan struct{}, p.maxWorkers)
-	var batchWg sync.WaitGroup
-
 	for _, txn := range stuckTxns {
-		sem <- struct{}{}
-		batchWg.Add(1)
-		go func(t *model.Transaction) {
-			defer batchWg.Done()
-			defer func() { <-sem }()
-			if err := p.processStuckTransaction(ctx, t); err != nil {
-				logrus.Errorf("failed to process stuck transaction %s: %v", t.TransactionID, err)
-			}
-		}(txn)
+		if err := p.processStuckTransaction(ctx, txn); err != nil {
+			logrus.Errorf("failed to process stuck transaction %s: %v", txn.TransactionID, err)
+		}
 	}
 
-	batchWg.Wait()
 	return len(stuckTxns)
 }
 
@@ -207,7 +197,7 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	}
 
 	queueCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
-	_, err := p.blnk.RecordTransaction(ctx, queueCopy)
+	handled, err := p.tryRecordRecoveredTransaction(ctx, queueCopy)
 	if err != nil {
 		if isReferenceAlreadyUsedError(err) {
 			logrus.Infof("Stuck transaction %s already processed (reference %s already used)", stuckTxn.TransactionID, queueCopy.Reference)
@@ -219,9 +209,36 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 		return err
 	}
 
-	logrus.Infof("Successfully recovered stuck transaction %s via queue copy %s", stuckTxn.TransactionID, queueCopy.TransactionID)
+	if handled {
+		logrus.Infof("Successfully recovered stuck transaction %s via coalesced batch", stuckTxn.TransactionID)
+	} else {
+		logrus.Infof("Successfully recovered stuck transaction %s via queue copy %s", stuckTxn.TransactionID, queueCopy.TransactionID)
+	}
 	p.updateRecoveryMetadata(ctx, stuckTxn, attempts, "recovered")
 	return nil
+}
+
+func (p *QueuedTransactionRecoveryProcessor) tryRecordRecoveredTransaction(ctx context.Context, queueCopy *model.Transaction) (bool, error) {
+	if hotpairs.QueueLaneFromMetadata(queueCopy.MetaData) == hotpairs.LaneHot {
+		handled, err := p.tryHotBatch(ctx, queueCopy)
+		if err != nil {
+			logrus.WithError(err).Warnf("coalesced hot-lane recovery attempt failed for transaction %s", queueCopy.TransactionID)
+		}
+		if handled {
+			return true, nil
+		}
+	} else {
+		handled, err := p.tryBatch(ctx, queueCopy)
+		if err != nil {
+			logrus.WithError(err).Warnf("coalesced recovery attempt failed for transaction %s", queueCopy.TransactionID)
+		}
+		if handled {
+			return true, nil
+		}
+	}
+
+	_, err := p.recordTransaction(ctx, queueCopy)
+	return false, err
 }
 
 func (p *QueuedTransactionRecoveryProcessor) updateRecoveryMetadata(ctx context.Context, txn *model.Transaction, attempts int, status string) {
