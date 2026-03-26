@@ -13,10 +13,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 )
 
-// TestNewMeterProvider_OTLPDisabledWithoutEnvVar verifies that when
-// OTEL_EXPORTER_OTLP_ENDPOINT is unset, the MeterProvider is created
-// with only the Prometheus exporter (no OTLP push).
-func TestNewMeterProvider_OTLPDisabledWithoutEnvVar(t *testing.T) {
+// TestNewMeterProvider_PrometheusOnlyWhenNoOTLPEndpoint verifies that when
+// neither OTEL_EXPORTER_OTLP_ENDPOINT nor OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+// is set, the MeterProvider is created with only the Prometheus exporter.
+func TestNewMeterProvider_PrometheusOnlyWhenNoOTLPEndpoint(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
 

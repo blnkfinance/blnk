@@ -32,7 +32,7 @@ spec:
             - /bin/sh
             - -c
           env:
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: http://jaeger:4318
             - name: TZ
               value: Etc/UTC

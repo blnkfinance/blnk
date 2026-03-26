@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: prometheus
+  name: prometheus
+  namespace: blnk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: prometheus
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        io.kompose.service: prometheus
+    spec:
+      containers:
+        - image: prom/prometheus:latest
+          name: prometheus
+          ports:
+            - containerPort: 9090
+          resources: {}
+          volumeMounts:
+            - name: prometheus-config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+      restartPolicy: Always
+      volumes:
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config

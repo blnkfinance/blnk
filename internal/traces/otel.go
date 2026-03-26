@@ -159,9 +159,10 @@ func newMeterProvider(ctx context.Context, res *resource.Resource) (*sdkmetric.M
 		sdkmetric.WithReader(promExp),
 	}
 
-	// Push exporter: OTLP HTTP — only enabled when an OTLP endpoint is configured.
-	// Uses standard OTel env vars (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)
-	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "" {
+	// Push exporter: enabled when an OTLP metrics endpoint is configured.
+	// Checks OTEL_EXPORTER_OTLP_METRICS_ENDPOINT (signal-specific) or
+	// OTEL_EXPORTER_OTLP_ENDPOINT (generic fallback) per the OTel spec.
+	if os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
 		otlpExp, err := otlpmetrichttp.New(ctx,
 			otlpmetrichttp.WithInsecure(),
 		)
@@ -190,8 +191,9 @@ func newLoggerProvider() (*log.LoggerProvider, error) {
 }
 
 func newTraceExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+	// OTel SDK reads OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+	// (or the generic OTEL_EXPORTER_OTLP_ENDPOINT as fallback) from the environment.
 	return otlptracehttp.New(ctx,
 		otlptracehttp.WithInsecure(),
-		otlptracehttp.WithEndpoint("jaeger:4318"),
 	)
 }

@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'blnk-server'
+    static_configs:
+      - targets: ['server:5001']
+  - job_name: 'blnk-worker'
+    static_configs:
+      - targets: ['worker:5004']

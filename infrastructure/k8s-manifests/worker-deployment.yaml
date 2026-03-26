@@ -30,10 +30,12 @@ spec:
             - --config
             - /blnk.json
           env:
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: http://jaeger:4318
           image: jerryenebeli/blnk:0.13.3
           name: worker
+          ports:
+            - containerPort: 5004
           resources: {}
           volumeMounts:
             - name: blnk-config

@@ -23,7 +23,7 @@ services:
       - "blnk migrate up && blnk start"
     environment:
       TZ: ${TZ:-Etc/UTC}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318
     ports:
       - "5001:5001"
       - "80:80"
@@ -41,7 +41,7 @@ services:
     restart: on-failure
     entrypoint: ["blnk", "workers"]
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318
     ports:
       - "5004:5004"
     depends_on:
@@ -104,6 +104,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    profiles:
+      - monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - server
+      - worker
 
 volumes:
   pg_data:
