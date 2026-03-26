@@ -192,6 +192,12 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 			return
 		}
 
+		// Skip X-Blnk-Key auth for metrics endpoint, it uses its own bearer token auth
+		if c.Request != nil && c.Request.URL != nil && c.Request.URL.Path == "/metrics" {
+			c.Next()
+			return
+		}
+
 		// Check if secure mode is enabled
 		conf, err := config.Fetch()
 		if err == nil && conf != nil && !conf.Server.Secure {

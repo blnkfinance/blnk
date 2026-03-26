@@ -32,6 +32,7 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/api/middleware"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/hotpairs"
 	"github.com/blnkfinance/blnk/internal/metrics"
@@ -559,7 +560,7 @@ func startMonitoringServer(conf *config.Configuration) *http.Server {
 
 	monitoringMux.Handle("/monitoring/", asynqmonHandler)
 	if h := trace.MetricsHandler(); h != nil {
-		monitoringMux.Handle("/metrics", h)
+		monitoringMux.Handle("/metrics", middleware.MetricsAuthHandler(conf.Server.Secure, conf.Server.MetricsBearerToken, h))
 	}
 
 	monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
