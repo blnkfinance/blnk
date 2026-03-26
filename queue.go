@@ -187,9 +187,8 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	logrus.WithField("reference", transaction.Reference).Debug("successfully enqueued transaction")
 
 	// Record enqueue metrics.
-	queueName := q.transactionQueueName(transaction)
 	metrics.QueueEnqueuedTotal.Add(ctx, 1,
-		otelmetric.WithAttributes(attribute.String("queue_name", queueName)),
+		otelmetric.WithAttributes(attribute.String("queue_name", task.Type())),
 	)
 
 	return nil
