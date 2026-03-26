@@ -3701,6 +3701,63 @@ func TestStandardTransactionRefund(t *testing.T) {
 		"Destination balance should be back to original credit after refund of refund")
 }
 
+func TestCategorizeRejectionReason(t *testing.T) {
+	tests := []struct {
+		name     string
+		reason   string
+		expected string
+	}{
+		// Actual error strings from the codebase:
+		{
+			name:     "insufficient funds from model.go",
+			reason:   "insufficient funds in source balance",
+			expected: "insufficient_funds",
+		},
+		{
+			name:     "overdraft limit from model.go",
+			reason:   "transaction exceeds overdraft limit",
+			expected: "overdraft_limit",
+		},
+		{
+			name:     "lock already held",
+			reason:   "failed to acquire lock: resource already held",
+			expected: "lock_contention",
+		},
+		{
+			name:     "failed to acquire lock",
+			reason:   "failed to acquire lock",
+			expected: "lock_contention",
+		},
+		{
+			name:     "failed to acquire batch lock",
+			reason:   "failed to acquire batch lock for balance xyz",
+			expected: "lock_contention",
+		},
+		{
+			name:     "max queued recovery attempts from queue_recovery.go",
+			reason:   "exceeded max queued recovery attempts",
+			expected: "max_retries",
+		},
+		{
+			name:     "unknown error maps to other",
+			reason:   "some unexpected database error",
+			expected: "other",
+		},
+		{
+			name:     "case insensitive matching",
+			reason:   "INSUFFICIENT FUNDS in source balance",
+			expected: "insufficient_funds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := categorizeRejectionReason(tt.reason)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestRejectTransaction(t *testing.T) {
 	// Skip in short mode
 	if testing.Short() {
