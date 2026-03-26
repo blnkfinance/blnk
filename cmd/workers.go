@@ -34,10 +34,14 @@ import (
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/hotpairs"
+	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/search"
+	trace "github.com/blnkfinance/blnk/internal/traces"
 	"github.com/blnkfinance/blnk/model"
+	"go.opentelemetry.io/otel/attribute"
+	otelmetric "go.opentelemetry.io/otel/metric"
 
 	"github.com/hibiken/asynq"
 	"github.com/hibiken/asynqmon"
@@ -56,6 +60,8 @@ type indexData struct {
 func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) error {
 	ctx, span := otel.Tracer("blnk.transactions.worker").Start(ctx, "Process Transaction From Redis Queue")
 	defer span.End()
+
+	startTime := time.Now()
 
 	var txn model.Transaction
 	if err := json.Unmarshal(t.Payload(), &txn); err != nil {
@@ -78,6 +84,9 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		logrus.WithError(err).Warnf("coalesced processing attempt failed for transaction %s", txn.TransactionID)
 	}
 	if handled {
+		metrics.QueueProcessingDuration.Record(ctx, time.Since(startTime).Seconds(),
+			otelmetric.WithAttributes(attribute.String("result", "success")),
+		)
 		return nil
 	}
 
@@ -106,6 +115,9 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 
 			logrus.Infof("Insufficient funds for transaction %s, retry attempt %d/%d",
 				txn.TransactionID, retryCount, b.cnf.Queue.MaxRetryAttempts)
+			metrics.WorkerRetriesTotal.Add(ctx, 1,
+				otelmetric.WithAttributes(attribute.String("reason", "insufficient_funds")),
+			)
 			return err // This will trigger a retry
 		}
 
@@ -133,10 +145,16 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		}
 
 		logrus.Infof("Transaction %s pushed back for retry due to error: %v", txn.TransactionID, err)
+		metrics.WorkerRetriesTotal.Add(ctx, 1,
+			otelmetric.WithAttributes(attribute.String("reason", "other")),
+		)
 		return err
 	}
 
 	logrus.Infof("Transaction %s processed successfully", txn.TransactionID)
+	metrics.QueueProcessingDuration.Record(ctx, time.Since(startTime).Seconds(),
+		otelmetric.WithAttributes(attribute.String("result", "success")),
+	)
 	return nil
 }
 
@@ -540,6 +558,9 @@ func startMonitoringServer(conf *config.Configuration) *http.Server {
 	})
 
 	monitoringMux.Handle("/monitoring/", asynqmonHandler)
+	if h := trace.MetricsHandler(); h != nil {
+		monitoringMux.Handle("/metrics", h)
+	}
 
 	monitoringAddr := fmt.Sprintf(":%s", conf.Queue.MonitoringPort)
 	srv := &http.Server{

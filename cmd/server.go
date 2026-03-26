@@ -181,7 +181,10 @@ func healthCheckHandler(c *gin.Context) {
 
 func initializeRouter(b *blnkInstance) *gin.Engine {
 	router := api.NewAPI(b.blnk).Router()
-	router.GET("/health", healthCheckHandler) // Add health check route
+	router.GET("/health", healthCheckHandler)
+	if h := trace.MetricsHandler(); h != nil {
+		router.GET("/metrics", gin.WrapH(h))
+	}
 	return router
 }
 

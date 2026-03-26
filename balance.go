@@ -24,6 +24,7 @@ import (
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/filter"
+	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
@@ -236,6 +237,7 @@ func (l *Blnk) CreateBalance(ctx context.Context, balance model.Balance) (model.
 		return model.Balance{}, err
 	}
 	l.postBalanceActions(ctx, &balance)
+	metrics.BalanceCreatedTotal.Add(ctx, 1)
 	span.AddEvent("Balance created", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
 	return balance, nil
 }

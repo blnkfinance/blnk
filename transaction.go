@@ -32,9 +32,11 @@ import (
 	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/internal/hotpairs"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
+	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/search"
 	"go.opentelemetry.io/otel/attribute"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/semaphore"
 
@@ -668,7 +670,9 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 	ctx, span := tracer.Start(ctx, "RecordTransaction")
 	defer span.End()
 
-	return l.executeWithLock(ctx, transaction, func(ctx context.Context) (*model.Transaction, error) {
+	startTime := time.Now()
+
+	result, err := l.executeWithLock(ctx, transaction, func(ctx context.Context) (*model.Transaction, error) {
 		// Execute pre-transaction hooks
 		if err := l.Hooks.ExecutePreHooks(ctx, transaction.TransactionID, transaction); err != nil {
 			span.RecordError(err)
@@ -708,6 +712,28 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 		span.AddEvent("Transaction processed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 		return transaction, nil
 	})
+
+	// Record metrics regardless of success or failure.
+	duration := time.Since(startTime).Seconds()
+	status := "error"
+	currency := transaction.Currency
+	if result != nil {
+		status = result.Status
+		currency = result.Currency
+	}
+	metrics.TransactionDuration.Record(ctx, duration,
+		otelmetric.WithAttributes(attribute.String("status", status)),
+	)
+	if err == nil {
+		metrics.TransactionTotal.Add(ctx, 1,
+			otelmetric.WithAttributes(
+				attribute.String("status", status),
+				attribute.String("currency", currency),
+			),
+		)
+	}
+
+	return result, err
 }
 
 // TryRecordQueuedTransactionBatch opportunistically coalesces multiple QUEUED transactions that
@@ -759,6 +785,9 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 	}
 
 	if len(batch) < 2 {
+		metrics.TransactionBatchTotal.Add(ctx, 1,
+			otelmetric.WithAttributes(attribute.String("result", "skipped")),
+		)
 		return false, nil
 	}
 
@@ -774,6 +803,9 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 			"batch_size":     len(batch),
 			"reason":         "batch_processing_failed_open",
 		}).Warn("transaction coalescing failed open; switching leader to per-transaction processing")
+		metrics.TransactionBatchTotal.Add(ctx, 1,
+			otelmetric.WithAttributes(attribute.String("result", "failure")),
+		)
 		return false, nil
 	}
 
@@ -788,6 +820,12 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 		attribute.String("source.balance_id", transaction.Source),
 		attribute.String("destination.balance_id", transaction.Destination),
 	))
+
+	// Record batch metrics on success.
+	metrics.TransactionBatchSize.Record(ctx, int64(len(batch)))
+	metrics.TransactionBatchTotal.Add(ctx, 1,
+		otelmetric.WithAttributes(attribute.String("result", "success")),
+	)
 
 	return true, nil
 }
@@ -974,6 +1012,7 @@ func (l *Blnk) executeWithLock(ctx context.Context, transaction *model.Transacti
 	locker, err := l.acquireLock(ctx, sourceID, destID)
 	if err != nil {
 		hotpairs.RecordContention(ctx, l.hotPairs, sourceID, destID, transaction.Currency, err)
+		metrics.HotpairsContentionTotal.Add(ctx, 1)
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
@@ -1498,6 +1537,18 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 
 	span.AddEvent("Transaction rejected", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
+	// Record rejection metrics.
+	rejectionReason := categorizeRejectionReason(reason)
+	metrics.TransactionRejectedTotal.Add(ctx, 1,
+		otelmetric.WithAttributes(attribute.String("reason", rejectionReason)),
+	)
+	metrics.TransactionTotal.Add(ctx, 1,
+		otelmetric.WithAttributes(
+			attribute.String("status", StatusRejected),
+			attribute.String("currency", transaction.Currency),
+		),
+	)
+
 	if transaction.Atomic {
 		logrus.Info(transaction.ParentTransaction, "parent transaction", transaction.Atomic, "atomic", transaction.Inflight, "inflight")
 		parentTransactionID, ok := transaction.MetaData["QUEUED_PARENT_TRANSACTION"].(string)
@@ -1509,6 +1560,24 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 	// For rejected transactions, no balances were updated, so pass nil
 	l.postTransactionActions(ctx, transaction, nil, nil)
 	return transaction, nil
+}
+
+// categorizeRejectionReason maps a free-text rejection reason to a bounded set of metric labels
+// to keep Prometheus cardinality under control.
+func categorizeRejectionReason(reason string) string {
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.Contains(lower, "insufficient funds"):
+		return "insufficient_funds"
+	case strings.Contains(lower, "overdraft limit"):
+		return "overdraft_limit"
+	case hotpairs.IsLockContentionError(errors.New(reason)):
+		return "lock_contention"
+	case strings.Contains(lower, "exceeded max"):
+		return "max_retries"
+	default:
+		return "other"
+	}
 }
 
 // prepareTransactionForQueue prepares a transaction for queueing by setting status, metadata,

@@ -25,8 +25,11 @@ import (
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/hotpairs"
+	"github.com/blnkfinance/blnk/internal/metrics"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	otelmetric "go.opentelemetry.io/otel/metric"
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
@@ -175,12 +178,19 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	if err != nil {
 		return err
 	}
-	_, err = q.Client.EnqueueContext(ctx, q.geTask(transaction, payload), asynq.MaxRetry(q.config.Queue.MaxRetryAttempts))
+	task := q.geTask(transaction, payload)
+	_, err = q.Client.EnqueueContext(ctx, task, asynq.MaxRetry(q.config.Queue.MaxRetryAttempts))
 	if err != nil {
 		logrus.WithError(err).WithField("reference", transaction.Reference).Error("failed to enqueue transaction")
 		return err
 	}
 	logrus.WithField("reference", transaction.Reference).Debug("successfully enqueued transaction")
+
+	// Record enqueue metrics.
+	queueName := q.transactionQueueName(transaction)
+	metrics.QueueEnqueuedTotal.Add(ctx, 1,
+		otelmetric.WithAttributes(attribute.String("queue_name", queueName)),
+	)
 
 	return nil
 }
@@ -227,10 +237,16 @@ func (q *Queue) geTask(transaction *model.Transaction, payload []byte) *asynq.Ta
 func (q *Queue) transactionQueueName(transaction *model.Transaction) string {
 	if q.config.Queue.EnableHotLane && transaction != nil && transaction.MetaData != nil {
 		if hotpairs.QueueLaneFromMetadata(transaction.MetaData) == hotpairs.LaneHot {
+			metrics.HotpairsLaneRoutedTotal.Add(context.Background(), 1,
+				otelmetric.WithAttributes(attribute.String("lane", "hot")),
+			)
 			return q.config.Queue.HotQueueName
 		}
 	}
 
+	metrics.HotpairsLaneRoutedTotal.Add(context.Background(), 1,
+		otelmetric.WithAttributes(attribute.String("lane", "normal")),
+	)
 	queueIndex := hashBalanceID(transaction.Source) % q.config.Queue.NumberOfQueues
 	return fmt.Sprintf("%s_%d", q.config.Queue.TransactionQueue, queueIndex+1)
 }
