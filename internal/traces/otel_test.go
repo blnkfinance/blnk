@@ -65,3 +65,48 @@ func TestMetricsHandler_ServesPrometheusFormat(t *testing.T) {
 		"expected Prometheus content type, got: %s", contentType)
 	assert.Contains(t, rec.Body.String(), "target_info", "response should contain OTel default metrics")
 }
+
+// TestParseOTLPEndpoint verifies backward-compatible endpoint normalization.
+// Operators may provide the endpoint in various formats — all should resolve
+// to the correct host:port for WithEndpoint().
+func TestParseOTLPEndpoint(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantHost     string
+		wantInsecure bool
+	}{
+		{
+			name:         "full http URL (existing deployments)",
+			input:        "http://jaeger:4318",
+			wantHost:     "jaeger:4318",
+			wantInsecure: true,
+		},
+		{
+			name:         "full http URL with path",
+			input:        "http://jaeger:4318/v1/traces",
+			wantHost:     "jaeger:4318",
+			wantInsecure: true,
+		},
+		{
+			name:         "https URL",
+			input:        "https://otel-collector.prod:4318",
+			wantHost:     "otel-collector.prod:4318",
+			wantInsecure: false,
+		},
+		{
+			name:         "bare host:port",
+			input:        "jaeger:4318",
+			wantHost:     "jaeger:4318",
+			wantInsecure: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host, insecure := parseOTLPEndpoint(tt.input)
+			assert.Equal(t, tt.wantHost, host)
+			assert.Equal(t, tt.wantInsecure, insecure)
+		})
+	}
+}

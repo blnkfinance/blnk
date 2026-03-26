@@ -160,7 +160,13 @@ func NewAPI(b *blnk.Blnk) *Api {
 	auth := middleware.NewAuthMiddleware(b)
 	r.Use(middleware.RateLimitMiddleware(conf))
 	r.Use(middleware.SecurityHeaders())
-	r.Use(otelgin.Middleware("BLNK"))
+	r.Use(otelgin.Middleware("BLNK",
+		otelgin.WithFilter(func(r *http.Request) bool {
+			// Exclude high-frequency operational endpoints from tracing
+			// to avoid polluting the trace feed with noise.
+			return r.URL.Path != "/metrics"
+		}),
+	))
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, "server running...")

@@ -23,7 +23,7 @@ services:
       - "blnk migrate up && blnk start"
     environment:
       TZ: ${TZ:-Etc/UTC}
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "5001:5001"
       - "80:80"
@@ -41,7 +41,7 @@ services:
     restart: on-failure
     entrypoint: ["blnk", "workers"]
     environment:
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "5004:5004"
     depends_on:

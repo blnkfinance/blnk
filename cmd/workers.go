@@ -453,6 +453,11 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				defer phClient.Close()
 			}
 
+			// Initialize metric instruments (safe to call even when observability is disabled).
+			if err := metrics.Init(); err != nil {
+				log.Fatalf("failed to initialize metrics: %v", err)
+			}
+
 			srv, hotSrv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
 			if err != nil {
 				log.Fatal(err)

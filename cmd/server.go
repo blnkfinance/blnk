@@ -32,6 +32,7 @@ import (
 	"github.com/blnkfinance/blnk/api/middleware"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/blnkfinance/blnk/internal/search"
 	trace "github.com/blnkfinance/blnk/internal/traces"
 	"github.com/caddyserver/certmagic"
@@ -312,16 +313,14 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.Background()
 
-			// Initialize router
-			router := initializeRouter(b)
-
 			// Load configuration
 			cfg, err := config.Fetch()
 			if err != nil {
 				log.Println(err)
 			}
 
-			// Initialize telemetry and observability
+			// Initialize telemetry and observability before the router,
+			// so MetricsHandler() is available when routes are registered.
 			phClient, shutdown, err := initializeTelemetryAndObservability(ctx, cfg)
 			if err != nil {
 				log.Fatal(err)
@@ -336,6 +335,14 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			if phClient != nil {
 				defer phClient.Close()
 			}
+
+			// Initialize metric instruments (safe to call even when observability is disabled).
+			if err := metrics.Init(); err != nil {
+				log.Fatalf("failed to initialize metrics: %v", err)
+			}
+
+			// Initialize router (after OTel so /metrics handler is available)
+			router := initializeRouter(b)
 
 			// Initialize TypeSense
 			tsClient, err := initializeTypeSense(ctx, cfg)

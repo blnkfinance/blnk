@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -191,9 +192,35 @@ func newLoggerProvider() (*log.LoggerProvider, error) {
 }
 
 func newTraceExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
-	// OTel SDK reads OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-	// (or the generic OTEL_EXPORTER_OTLP_ENDPOINT as fallback) from the environment.
-	return otlptracehttp.New(ctx,
-		otlptracehttp.WithInsecure(),
-	)
+	// Resolve endpoint from signal-specific var first, then generic fallback.
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+	if endpoint == "" {
+		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	}
+	if endpoint == "" {
+		// No endpoint configured — let the SDK use its defaults.
+		return otlptracehttp.New(ctx, otlptracehttp.WithInsecure())
+	}
+
+	// Normalize the endpoint to host:port. The SDK's WithEndpoint() takes host:port
+	// and always appends /v1/traces, so this works regardless of whether the env var
+	// contains "jaeger:4318", "http://jaeger:4318", or "http://jaeger:4318/v1/traces".
+	host, insecure := parseOTLPEndpoint(endpoint)
+	opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(host)}
+	if insecure {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	return otlptracehttp.New(ctx, opts...)
+}
+
+// parseOTLPEndpoint extracts the host:port from an OTLP endpoint string and
+// determines whether to use an insecure (non-TLS) connection.
+// Handles all common formats: "host:port", "http://host:port", "http://host:port/v1/traces".
+func parseOTLPEndpoint(endpoint string) (hostPort string, insecure bool) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Host == "" {
+		// Not a valid URL — treat as bare host:port, assume insecure.
+		return endpoint, true
+	}
+	return parsed.Host, parsed.Scheme != "https"
 }
