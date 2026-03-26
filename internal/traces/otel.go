@@ -19,18 +19,35 @@ package trace
 import (
 	"context"
 	"errors"
+	"net/http"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// metricsHandler holds the Prometheus HTTP handler for the /metrics endpoint.
+// Set during SetupOTelSDK and accessed via MetricsHandler().
+var metricsHandler http.Handler
+
+// MetricsHandler returns the Prometheus HTTP handler for serving the /metrics endpoint.
+// Returns nil if SetupOTelSDK has not been called or metrics are not configured.
+func MetricsHandler() http.Handler {
+	return metricsHandler
+}
 
 // SetupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
@@ -54,18 +71,33 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 		err = errors.Join(inErr, shutdown(ctx))
 	}
 
+	// Create shared resource for all providers.
+	res, err := newResource(ctx, serviceName)
+	if err != nil {
+		return shutdown, err
+	}
+
 	// Set up propagator.
 	prop := newPropagator()
 	otel.SetTextMapPropagator(prop)
 
 	// Set up trace provider.
-	tracerProvider, err := newTraceProvider(ctx, serviceName)
+	tracerProvider, err := newTraceProvider(ctx, res)
 	if err != nil {
 		handleErr(err)
 		return
 	}
 	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
 	otel.SetTracerProvider(tracerProvider)
+
+	// Set up meter provider (dual-mode: Prometheus pull + OTLP push).
+	meterProvider, err := newMeterProvider(ctx, res)
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
+	otel.SetMeterProvider(meterProvider)
 
 	// Set up logger provider.
 	loggerProvider, err := newLoggerProvider()
@@ -79,6 +111,15 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 	return
 }
 
+// newResource creates a shared OTel resource with the service name.
+func newResource(ctx context.Context, serviceName string) (*resource.Resource, error) {
+	return resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String(serviceName),
+		),
+	)
+}
+
 func newPropagator() propagation.TextMapPropagator {
 	return propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
@@ -86,17 +127,8 @@ func newPropagator() propagation.TextMapPropagator {
 	)
 }
 
-func newTraceProvider(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {
-	exporter, err := newExporter(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := resource.New(ctx,
-		resource.WithAttributes(
-			semconv.ServiceNameKey.String(serviceName),
-		),
-	)
+func newTraceProvider(ctx context.Context, res *resource.Resource) (*sdktrace.TracerProvider, error) {
+	exporter, err := newTraceExporter(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +139,42 @@ func newTraceProvider(ctx context.Context, serviceName string) (*sdktrace.Tracer
 		sdktrace.WithResource(res),
 	)
 	return traceProvider, nil
+}
+
+// newMeterProvider creates a MeterProvider with dual-mode export:
+//   - Pull (Prometheus): always active — exposes metrics via /metrics endpoint for scraping.
+//   - Push (OTLP HTTP): opt-in — enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+//     Uses the standard OTel env var, so it works automatically with any OTel Collector.
+func newMeterProvider(ctx context.Context, res *resource.Resource) (*sdkmetric.MeterProvider, error) {
+	// Pull exporter: Prometheus scrape endpoint (always active).
+	promExp, err := promexporter.New()
+	if err != nil {
+		return nil, err
+	}
+
+	metricsHandler = promhttp.Handler()
+
+	opts := []sdkmetric.Option{
+		sdkmetric.WithResource(res),
+		sdkmetric.WithReader(promExp),
+	}
+
+	// Push exporter: OTLP HTTP — only enabled when an OTLP endpoint is configured.
+	// Uses standard OTel env vars (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "" {
+		otlpExp, err := otlpmetrichttp.New(ctx,
+			otlpmetrichttp.WithInsecure(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(otlpExp,
+			sdkmetric.WithInterval(60*time.Second),
+		)))
+	}
+
+	meterProvider := sdkmetric.NewMeterProvider(opts...)
+	return meterProvider, nil
 }
 
 func newLoggerProvider() (*log.LoggerProvider, error) {
@@ -121,7 +189,7 @@ func newLoggerProvider() (*log.LoggerProvider, error) {
 	return loggerProvider, nil
 }
 
-func newExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+func newTraceExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
 	return otlptracehttp.New(ctx,
 		otlptracehttp.WithInsecure(),
 		otlptracehttp.WithEndpoint("jaeger:4318"),
