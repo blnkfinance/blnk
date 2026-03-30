@@ -30,6 +30,7 @@ import (
 
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/filter"
+	blnkhooks "github.com/blnkfinance/blnk/internal/hooks"
 	"github.com/blnkfinance/blnk/internal/hotpairs"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/internal/notification"
@@ -72,11 +73,30 @@ type queuedBatchPostCommitWork struct {
 	transaction        *model.Transaction
 	sourceBalance      *model.Balance
 	destinationBalance *model.Balance
+	outbox             *model.LineageOutbox
 }
 
 type queuedBatchPersistResult struct {
 	orderedBalances []*model.Balance
 	postCommitWork  []queuedBatchPostCommitWork
+}
+
+type transactionExecutionMode string
+
+const (
+	transactionExecutionModeSingle         transactionExecutionMode = "single"
+	transactionExecutionModeQueuedBatch    transactionExecutionMode = "queued_batch"
+	transactionExecutionModeHotQueuedBatch transactionExecutionMode = "hot_queued_batch"
+)
+
+type transactionExecutionPlan struct {
+	mode        transactionExecutionMode
+	transaction *model.Transaction
+}
+
+type transactionExecutionResult struct {
+	mode        transactionExecutionMode
+	transaction *model.Transaction
 }
 
 // getTxns is a function type that retrieves a batch of transactions based on the parent transaction ID, batch size, and offset.
@@ -628,6 +648,80 @@ func fetchTransactions(ctx context.Context, parentTransactionID string, batchSiz
 	}
 }
 
+// usedCoalescing reports whether the execution result came from a queued batch path
+// instead of the single-transaction executor.
+func (r transactionExecutionResult) usedCoalescing() bool {
+	return r.mode == transactionExecutionModeQueuedBatch || r.mode == transactionExecutionModeHotQueuedBatch
+}
+
+// planTransactionExecution selects the internal execution mode for a transaction based on
+// whether queued batching is allowed and whether hot-lane execution should be used.
+func (l *Blnk) planTransactionExecution(transaction *model.Transaction, allowQueuedBatch, hotLane bool) transactionExecutionPlan {
+	if allowQueuedBatch {
+		if hotLane {
+			return transactionExecutionPlan{mode: transactionExecutionModeHotQueuedBatch, transaction: transaction}
+		}
+		return transactionExecutionPlan{mode: transactionExecutionModeQueuedBatch, transaction: transaction}
+	}
+
+	return transactionExecutionPlan{mode: transactionExecutionModeSingle, transaction: transaction}
+}
+
+// executeTransactionPlan runs the selected internal execution mode and fails open from queued
+// batching back to the single-transaction path when batching does not handle the work.
+func (l *Blnk) executeTransactionPlan(ctx context.Context, plan transactionExecutionPlan) (transactionExecutionResult, error) {
+	switch plan.mode {
+	case transactionExecutionModeQueuedBatch:
+		handled, err := l.TryRecordQueuedTransactionBatch(ctx, plan.transaction)
+		if err != nil {
+			logrus.WithError(err).Warnf("coalesced processing attempt failed for transaction %s", plan.transaction.TransactionID)
+		}
+		if handled {
+			return transactionExecutionResult{
+				mode:        transactionExecutionModeQueuedBatch,
+				transaction: plan.transaction,
+			}, nil
+		}
+		return l.executeTransactionPlan(ctx, l.planTransactionExecution(plan.transaction, false, false))
+	case transactionExecutionModeHotQueuedBatch:
+		handled, err := l.TryRecordQueuedTransactionBatchForHotLane(ctx, plan.transaction)
+		if err != nil {
+			logrus.WithError(err).Warnf("coalesced hot-lane processing attempt failed for transaction %s", plan.transaction.TransactionID)
+		}
+		if handled {
+			return transactionExecutionResult{
+				mode:        transactionExecutionModeHotQueuedBatch,
+				transaction: plan.transaction,
+			}, nil
+		}
+		return l.executeTransactionPlan(ctx, l.planTransactionExecution(plan.transaction, false, false))
+	case transactionExecutionModeSingle:
+		transaction, err := l.recordTransactionSingle(ctx, plan.transaction)
+		if err != nil {
+			return transactionExecutionResult{}, err
+		}
+		return transactionExecutionResult{
+			mode:        transactionExecutionModeSingle,
+			transaction: transaction,
+		}, nil
+	default:
+		transaction, err := l.recordTransactionSingle(ctx, plan.transaction)
+		if err != nil {
+			return transactionExecutionResult{}, err
+		}
+		return transactionExecutionResult{
+			mode:        transactionExecutionModeSingle,
+			transaction: transaction,
+		}, nil
+	}
+}
+
+// processQueuedTransaction routes queued work through the shared executor so the planner can
+// choose between normal queued batching, hot-lane batching, and single-transaction fallback.
+func (l *Blnk) processQueuedTransaction(ctx context.Context, transaction *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
+	return l.executeTransactionPlan(ctx, l.planTransactionExecution(transaction, true, hotLane))
+}
+
 // RefundWorker processes refund transactions from the jobs channel and sends the results to the results channel.
 // It starts a tracing span, processes each transaction, and records relevant events and errors.
 //
@@ -654,6 +748,16 @@ func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction,
 	}
 }
 
+// ProcessQueuedTransaction preserves the existing queued-worker behavior while routing the
+// decision through the shared internal transaction executor.
+func (l *Blnk) ProcessQueuedTransaction(ctx context.Context, transaction *model.Transaction, hotLane bool) (*model.Transaction, error) {
+	result, err := l.processQueuedTransaction(ctx, transaction, hotLane)
+	if err != nil {
+		return nil, err
+	}
+	return result.transaction, nil
+}
+
 // RecordTransaction records a transaction by validating, processing balances, and finalizing the transaction.
 // It starts a tracing span, acquires a lock, and performs the necessary steps to record the transaction.
 //
@@ -665,6 +769,16 @@ func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction,
 // - *model.Transaction: A pointer to the recorded Transaction model.
 // - error: An error if the transaction could not be recorded.
 func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+	result, err := l.executeTransactionPlan(ctx, l.planTransactionExecution(transaction, false, false))
+	if err != nil {
+		return nil, err
+	}
+	return result.transaction, nil
+}
+
+// recordTransactionSingle preserves the existing direct transaction-processing semantics by
+// running the single-transaction flow under the balance lock.
+func (l *Blnk) recordTransactionSingle(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "RecordTransaction")
 	defer span.End()
 
@@ -688,25 +802,23 @@ func (l *Blnk) RecordTransaction(ctx context.Context, transaction *model.Transac
 			return nil, err
 		}
 
-		// Finalize the transaction by persisting it and updating the balances
-		transaction, err = l.finalizeTransaction(ctx, transaction, sourceBalance, destinationBalance)
+		work, skipPersist := l.buildTransactionExecutionWork(ctx, transaction, sourceBalance, destinationBalance)
+		if skipPersist {
+			span.AddEvent("Transaction with zero amount discarded, not persisted", trace.WithAttributes(attribute.String("transaction.id", work.transaction.TransactionID)))
+			return work.transaction, nil
+		}
+
+		work, err = l.persistSingleTransactionExecutionWork(ctx, work)
 		if err != nil {
 			span.RecordError(err)
 			return nil, err
 		}
 
-		// Execute post-transaction hooks
-		if err := l.Hooks.ExecutePostHooks(ctx, transaction.TransactionID, transaction); err != nil {
-			span.RecordError(err)
-			logrus.WithError(err).Error("post-transaction hooks failed")
-		}
+		l.runTransactionPostCommitWork(ctx, span, []*model.Balance{sourceBalance, destinationBalance}, []queuedBatchPostCommitWork{work})
 
-		// Perform post-transaction actions such as indexing and sending webhooks
-		// Pass balances to ensure they are indexed before the transaction
-		l.postTransactionActions(ctx, transaction, sourceBalance, destinationBalance)
-
-		span.AddEvent("Transaction processed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
-		return transaction, nil
+		span.AddEvent("Transaction processed", trace.WithAttributes(attribute.String("transaction.id", work.transaction.TransactionID)))
+		logrus.Infof("Transaction %s processed successfully", work.transaction.TransactionID)
+		return work.transaction, nil
 	})
 }
 
@@ -722,6 +834,8 @@ func (l *Blnk) TryRecordQueuedTransactionBatchForHotLane(ctx context.Context, tr
 	return l.tryRecordQueuedTransactionBatch(ctx, transaction, true)
 }
 
+// tryRecordQueuedTransactionBatch builds and persists a coalesced queued batch when it is
+// safe and useful, otherwise it returns handled=false so callers can fail open.
 func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction *model.Transaction, force bool) (handled bool, err error) {
 	ctx, span := tracer.Start(ctx, "TryRecordQueuedTransactionBatch")
 	defer span.End()
@@ -792,6 +906,8 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 	return true, nil
 }
 
+// persistQueuedTransactionBatch acquires the balance-set lock, prepares the batch in memory,
+// commits the final state atomically, and dispatches post-commit side effects.
 func (l *Blnk) persistQueuedTransactionBatch(ctx context.Context, transactions []*model.Transaction) error {
 	ctx, span := tracer.Start(ctx, "RecordQueuedTransactionBatch")
 	defer span.End()
@@ -822,6 +938,8 @@ func (l *Blnk) persistQueuedTransactionBatch(ctx context.Context, transactions [
 	return nil
 }
 
+// validateQueuedBatchCurrencies ensures that every transaction in a coalesced batch uses the
+// same currency before any lock or balance work begins.
 func validateQueuedBatchCurrencies(transactions []*model.Transaction) error {
 	if len(transactions) == 0 {
 		return nil
@@ -837,12 +955,18 @@ func validateQueuedBatchCurrencies(transactions []*model.Transaction) error {
 	return nil
 }
 
+// persistQueuedTransactionBatchLocked prepares every transaction against the shared in-memory
+// balance set and persists the final balance and transaction state atomically.
 func (l *Blnk) persistQueuedTransactionBatchLocked(ctx context.Context, span trace.Span, locker *redlock.MultiLocker, balanceIDs []string, transactions []*model.Transaction) (queuedBatchPersistResult, error) {
 	defer l.releaseLock(ctx, locker)
 
 	balancesByID, orderedBalances, err := l.loadBalancesForQueuedBatch(ctx, balanceIDs)
 	if err != nil {
 		return queuedBatchPersistResult{}, fmt.Errorf("failed to load balances for coalesced batch: %w", err)
+	}
+	preHooks, err := l.listHooksForExecution(ctx, blnkhooks.PreTransaction)
+	if err != nil {
+		return queuedBatchPersistResult{}, fmt.Errorf("failed to list pre-transaction hooks for coalesced batch: %w", err)
 	}
 
 	finalizedTransactions := make([]*model.Transaction, 0, len(transactions))
@@ -855,15 +979,15 @@ func (l *Blnk) persistQueuedTransactionBatchLocked(ctx context.Context, span tra
 	batchReferences := make(map[string]struct{}, len(transactions))
 
 	for _, txn := range transactions {
-		work, outbox, err := l.prepareQueuedBatchTransaction(ctx, span, txn, balancesByID, prefetchedReferences, existingReferences, batchReferences)
+		work, err := l.prepareQueuedBatchTransaction(ctx, span, txn, balancesByID, preHooks, prefetchedReferences, existingReferences, batchReferences)
 		if err != nil {
 			return queuedBatchPersistResult{}, err
 		}
 
 		finalizedTransactions = append(finalizedTransactions, work.transaction)
 		postCommitWork = append(postCommitWork, work)
-		if outbox != nil {
-			outboxes = append(outboxes, outbox)
+		if work.outbox != nil {
+			outboxes = append(outboxes, work.outbox)
 		}
 	}
 
@@ -877,6 +1001,8 @@ func (l *Blnk) persistQueuedTransactionBatchLocked(ctx context.Context, span tra
 	}, nil
 }
 
+// queuedBatchReferenceSets prepares the prefetched and existing reference sets used by batch
+// validation when batch reference checking is enabled.
 func (l *Blnk) queuedBatchReferenceSets(ctx context.Context, transactions []*model.Transaction) (map[string]struct{}, map[string]struct{}, error) {
 	prefetchedReferences := make(map[string]struct{})
 	existingReferences := make(map[string]struct{})
@@ -892,53 +1018,89 @@ func (l *Blnk) queuedBatchReferenceSets(ctx context.Context, transactions []*mod
 	return prefetchedReferences, existingReferences, nil
 }
 
-func (l *Blnk) prepareQueuedBatchTransaction(ctx context.Context, span trace.Span, txn *model.Transaction, balancesByID map[string]*model.Balance, prefetchedReferences, existingReferences, batchReferences map[string]struct{}) (queuedBatchPostCommitWork, *model.LineageOutbox, error) {
+// prepareQueuedBatchTransaction performs the per-transaction work inside a coalesced batch:
+// hooks, reference validation, in-memory balance application, and persistence shaping.
+func (l *Blnk) prepareQueuedBatchTransaction(ctx context.Context, span trace.Span, txn *model.Transaction, balancesByID map[string]*model.Balance, preHooks []*blnkhooks.Hook, prefetchedReferences, existingReferences, batchReferences map[string]struct{}) (queuedBatchPostCommitWork, error) {
 	sourceBalance, destinationBalance, err := coalescingBalancesForTransaction(balancesByID, txn)
 	if err != nil {
-		return queuedBatchPostCommitWork{}, nil, err
+		return queuedBatchPostCommitWork{}, err
 	}
 
 	if l.Hooks != nil {
-		if err := l.Hooks.ExecutePreHooks(ctx, txn.TransactionID, txn); err != nil {
+		if err := l.Hooks.ExecuteHooks(ctx, preHooks, blnkhooks.PreTransaction, txn.TransactionID, txn); err != nil {
 			span.RecordError(err)
-			return queuedBatchPostCommitWork{}, nil, fmt.Errorf("batch pre-transaction hook failed: %w", err)
+			return queuedBatchPostCommitWork{}, fmt.Errorf("batch pre-transaction hook failed: %w", err)
 		}
 	}
 
 	if err := l.validateQueuedBatchTransactionReference(ctx, txn, prefetchedReferences, existingReferences, batchReferences); err != nil {
-		return queuedBatchPostCommitWork{}, nil, fmt.Errorf("batch transaction validation failed: %w", err)
+		return queuedBatchPostCommitWork{}, fmt.Errorf("batch transaction validation failed: %w", err)
 	}
 
 	finalizedTxn := l.updateTransactionDetails(ctx, txn, sourceBalance, destinationBalance)
-	if finalizedTxn.PreciseAmount == nil || finalizedTxn.PreciseAmount.Cmp(big.NewInt(0)) == 0 {
-		return queuedBatchPostCommitWork{}, nil, fmt.Errorf("batch coalescing does not support zero-amount transactions")
-	}
-
 	if err := l.processBalances(ctx, finalizedTxn, sourceBalance, destinationBalance); err != nil {
-		return queuedBatchPostCommitWork{}, nil, err
+		return queuedBatchPostCommitWork{}, err
 	}
 
-	return queuedBatchPostCommitWork{
-		transaction:        finalizedTxn,
-		sourceBalance:      sourceBalance,
-		destinationBalance: destinationBalance,
-	}, l.prepareTransactionOutbox(ctx, finalizedTxn, sourceBalance, destinationBalance), nil
+	work, skipPersist := l.buildTransactionExecutionWork(ctx, finalizedTxn, sourceBalance, destinationBalance)
+	if skipPersist {
+		return queuedBatchPostCommitWork{}, fmt.Errorf("batch coalescing does not support zero-amount transactions")
+	}
+
+	return work, nil
 }
 
+// runQueuedBatchPostCommitWork dispatches the post-commit work for a coalesced batch after
+// the balance-set lock has been released.
 func (l *Blnk) runQueuedBatchPostCommitWork(ctx context.Context, span trace.Span, result queuedBatchPersistResult) {
-	for _, balance := range result.orderedBalances {
+	postHooks, err := l.listHooksForExecution(ctx, blnkhooks.PostTransaction)
+	if err != nil {
+		logrus.WithError(err).Warn("failed to list post-transaction hooks for coalesced batch; falling back to per-transaction lookup")
+		l.runTransactionPostCommitWork(ctx, span, result.orderedBalances, result.postCommitWork)
+		return
+	}
+
+	l.runTransactionPostCommitWorkWithHooks(ctx, span, result.orderedBalances, result.postCommitWork, postHooks)
+}
+
+// runTransactionPostCommitWork executes monitor checks, post-hooks, and post-transaction
+// actions for already-persisted work items outside the locked persistence path.
+func (l *Blnk) runTransactionPostCommitWork(ctx context.Context, span trace.Span, orderedBalances []*model.Balance, postCommitWork []queuedBatchPostCommitWork) {
+	l.runTransactionPostCommitWorkWithHooks(ctx, span, orderedBalances, postCommitWork, nil)
+}
+
+// runTransactionPostCommitWorkWithHooks executes monitor checks, post-hooks, and
+// post-transaction actions for persisted work items, optionally reusing a preloaded hook set.
+func (l *Blnk) runTransactionPostCommitWorkWithHooks(ctx context.Context, span trace.Span, orderedBalances []*model.Balance, postCommitWork []queuedBatchPostCommitWork, postHooks []*blnkhooks.Hook) {
+	for _, balance := range orderedBalances {
 		go l.checkBalanceMonitors(ctx, balance)
 	}
 
-	for _, work := range result.postCommitWork {
+	for _, work := range postCommitWork {
 		if l.Hooks != nil {
-			if err := l.Hooks.ExecutePostHooks(ctx, work.transaction.TransactionID, work.transaction); err != nil {
+			var err error
+			if postHooks != nil {
+				err = l.Hooks.ExecuteHooks(ctx, postHooks, blnkhooks.PostTransaction, work.transaction.TransactionID, work.transaction)
+			} else {
+				err = l.Hooks.ExecutePostHooks(ctx, work.transaction.TransactionID, work.transaction)
+			}
+			if err != nil {
 				span.RecordError(err)
 				logrus.WithError(err).Error("post-transaction hooks failed")
 			}
 		}
 		l.postTransactionActions(ctx, work.transaction, work.sourceBalance, work.destinationBalance)
 	}
+}
+
+// listHooksForExecution returns the current hook set for the requested type, or nil when
+// hook execution is not configured for the current Blnk instance.
+func (l *Blnk) listHooksForExecution(ctx context.Context, hookType blnkhooks.HookType) ([]*blnkhooks.Hook, error) {
+	if l.Hooks == nil {
+		return nil, nil
+	}
+
+	return l.Hooks.ListHooks(ctx, hookType)
 }
 
 // executeWithLock executes a function with distributed locks to ensure exclusive access to both
@@ -1029,7 +1191,7 @@ func (l *Blnk) validateAndPrepareTransaction(ctx context.Context, transaction *m
 // processBalances processes the source and destination balances by applying the transaction in-memory.
 // It starts a tracing span, applies the transaction to the balances, and records relevant events and errors.
 // Note: The actual database update of balances is done atomically with the transaction persistence
-// in finalizeTransaction to ensure consistency.
+// step to ensure consistency.
 //
 // Parameters:
 // - ctx context.Context: The context for the operation.
@@ -1053,51 +1215,45 @@ func (l *Blnk) processBalances(ctx context.Context, transaction *model.Transacti
 	return nil
 }
 
-// finalizeTransaction finalizes the transaction by updating its details and atomically persisting
-// both the transaction and balance updates to the database in a single database transaction.
-// This ensures that either both operations succeed together, or neither is committed,
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction to be finalized.
-// - sourceBalance *model.Balance: The source balance associated with the transaction.
-// - destinationBalance *model.Balance: The destination balance associated with the transaction.
-//
-// Returns:
-// - *model.Transaction: A pointer to the finalized Transaction model.
-// - error: An error if the transaction could not be persisted.
-func (l *Blnk) finalizeTransaction(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) (*model.Transaction, error) {
-	ctx, span := tracer.Start(ctx, "FinalizeTransaction")
+// buildTransactionExecutionWork converts an in-memory-applied transaction into the shared
+// persistence and post-commit work shape used by both single and batched execution paths.
+func (l *Blnk) buildTransactionExecutionWork(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) (queuedBatchPostCommitWork, bool) {
+	transaction = l.updateTransactionDetails(ctx, transaction, sourceBalance, destinationBalance)
+	if transaction.PreciseAmount != nil && transaction.PreciseAmount.Cmp(big.NewInt(0)) == 0 {
+		return queuedBatchPostCommitWork{
+			transaction:        transaction,
+			sourceBalance:      sourceBalance,
+			destinationBalance: destinationBalance,
+		}, true
+	}
+
+	return queuedBatchPostCommitWork{
+		transaction:        transaction,
+		sourceBalance:      sourceBalance,
+		destinationBalance: destinationBalance,
+		outbox:             l.prepareTransactionOutbox(ctx, transaction, sourceBalance, destinationBalance),
+	}, false
+}
+
+// persistSingleTransactionExecutionWork atomically persists one prepared transaction, its
+// updated balances, and any lineage outbox using the shared execution work shape.
+func (l *Blnk) persistSingleTransactionExecutionWork(ctx context.Context, work queuedBatchPostCommitWork) (queuedBatchPostCommitWork, error) {
+	ctx, span := tracer.Start(ctx, "PersistSingleTransactionExecutionWork")
 	defer span.End()
 
-	// Update the transaction details with the source and destination balances
-	transaction = l.updateTransactionDetails(ctx, transaction, sourceBalance, destinationBalance)
-
-	// Discard transaction if amount is 0
-	if transaction.PreciseAmount != nil && transaction.PreciseAmount.Cmp(big.NewInt(0)) == 0 {
-		span.AddEvent("Transaction with zero amount discarded, not persisted", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
-		return transaction, nil
-	}
-
-	outbox := l.prepareTransactionOutbox(ctx, transaction, sourceBalance, destinationBalance)
-
-	// Atomically persist the transaction, update balances, and insert lineage outbox in a single database transaction
-	transaction, err := l.datasource.RecordTransactionWithBalancesAndOutbox(ctx, transaction, sourceBalance, destinationBalance, outbox)
+	transaction, err := l.datasource.RecordTransactionWithBalancesAndOutbox(ctx, work.transaction, work.sourceBalance, work.destinationBalance, work.outbox)
 	if err != nil {
 		span.RecordError(err)
-		return nil, l.logAndRecordError(span, "failed to persist transaction with balances", err)
+		return queuedBatchPostCommitWork{}, l.logAndRecordError(span, "failed to persist transaction with balances", err)
 	}
 
-	// Check balance monitors asynchronously (fire and forget - not on critical path)
-	go l.checkBalanceMonitors(ctx, sourceBalance)
-	go l.checkBalanceMonitors(ctx, destinationBalance)
-
+	work.transaction = transaction
 	span.AddEvent("Transaction and balances persisted atomically", trace.WithAttributes(
 		attribute.String("transaction.id", transaction.TransactionID),
-		attribute.Bool("lineage.outbox_created", outbox != nil),
+		attribute.Bool("lineage.outbox_created", work.outbox != nil),
 	))
 
-	return transaction, nil
+	return work, nil
 }
 
 func (l *Blnk) prepareTransactionOutbox(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.LineageOutbox {

@@ -70,18 +70,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		return nil
 	}
 
-	handled, err := b.blnk.TryRecordQueuedTransactionBatch(ctx, &txn)
-	if b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName {
-		handled, err = b.blnk.TryRecordQueuedTransactionBatchForHotLane(ctx, &txn)
-	}
-	if err != nil {
-		logrus.WithError(err).Warnf("coalesced processing attempt failed for transaction %s", txn.TransactionID)
-	}
-	if handled {
-		return nil
-	}
-
-	_, err = b.blnk.RecordTransaction(ctx, &txn)
+	_, err = b.blnk.ProcessQueuedTransaction(ctx, &txn, b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName)
 	if err != nil {
 		// Handle reference already used error
 		if strings.Contains(strings.ToLower(err.Error()), "reference") && strings.Contains(strings.ToLower(err.Error()), "already been used") {
@@ -136,7 +125,6 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		return err
 	}
 
-	logrus.Infof("Transaction %s processed successfully", txn.TransactionID)
 	return nil
 }
 

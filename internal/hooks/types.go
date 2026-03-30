@@ -68,6 +68,7 @@ type HookManager interface {
 	DeleteHook(ctx context.Context, hookID string) error
 	GetHook(ctx context.Context, hookID string) (*Hook, error)
 	ListHooks(ctx context.Context, hookType HookType) ([]*Hook, error)
+	ExecuteHooks(ctx context.Context, hooks []*Hook, hookType HookType, transactionID string, data interface{}) error
 	ExecutePreHooks(ctx context.Context, transactionID string, data interface{}) error
 	ExecutePostHooks(ctx context.Context, transactionID string, data interface{}) error
 	ProcessHookTask(ctx context.Context, task *asynq.Task) error

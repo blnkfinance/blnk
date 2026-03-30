@@ -33,17 +33,10 @@ func TestProcessStuckTransaction_UsesCoalescingBeforeDirectReplay(t *testing.T) 
 		MetaData:      map[string]interface{}{},
 	}
 
-	var recorded bool
-	processor.tryBatch = func(ctx context.Context, txn *model.Transaction) (bool, error) {
-		return true, nil
-	}
-	processor.tryHotBatch = func(ctx context.Context, txn *model.Transaction) (bool, error) {
-		t.Fatalf("hot lane coalescing should not be used for normal lane recovery")
-		return false, nil
-	}
-	processor.recordTransaction = func(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
-		recorded = true
-		return txn, nil
+	var hotLane bool
+	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, gotHotLane bool) (transactionExecutionResult, error) {
+		hotLane = gotHotLane
+		return transactionExecutionResult{mode: transactionExecutionModeQueuedBatch, transaction: txn}, nil
 	}
 
 	mockDS.On("UpdateTransactionMetadata", mock.Anything, stuckTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
@@ -52,7 +45,7 @@ func TestProcessStuckTransaction_UsesCoalescingBeforeDirectReplay(t *testing.T) 
 
 	err := processor.processStuckTransaction(context.Background(), stuckTxn)
 	assert.NoError(t, err)
-	assert.False(t, recorded)
+	assert.False(t, hotLane)
 	mockDS.AssertExpectations(t)
 }
 
@@ -73,18 +66,10 @@ func TestProcessStuckTransaction_UsesHotLaneCoalescingWhenMarkedHot(t *testing.T
 		},
 	}
 
-	var normalBatchCalled bool
-	var recorded bool
-	processor.tryBatch = func(ctx context.Context, txn *model.Transaction) (bool, error) {
-		normalBatchCalled = true
-		return false, nil
-	}
-	processor.tryHotBatch = func(ctx context.Context, txn *model.Transaction) (bool, error) {
-		return true, nil
-	}
-	processor.recordTransaction = func(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
-		recorded = true
-		return txn, nil
+	var hotLane bool
+	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, gotHotLane bool) (transactionExecutionResult, error) {
+		hotLane = gotHotLane
+		return transactionExecutionResult{mode: transactionExecutionModeHotQueuedBatch, transaction: txn}, nil
 	}
 
 	mockDS.On("UpdateTransactionMetadata", mock.Anything, stuckTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
@@ -93,8 +78,7 @@ func TestProcessStuckTransaction_UsesHotLaneCoalescingWhenMarkedHot(t *testing.T
 
 	err := processor.processStuckTransaction(context.Background(), stuckTxn)
 	assert.NoError(t, err)
-	assert.False(t, normalBatchCalled)
-	assert.False(t, recorded)
+	assert.True(t, hotLane)
 	mockDS.AssertExpectations(t)
 }
 
@@ -113,17 +97,10 @@ func TestProcessStuckTransaction_FallsBackToDirectReplayWhenBatchNotHandled(t *t
 		MetaData:      map[string]interface{}{},
 	}
 
-	var recorded bool
-	processor.tryBatch = func(ctx context.Context, txn *model.Transaction) (bool, error) {
-		return false, nil
-	}
-	processor.tryHotBatch = func(ctx context.Context, txn *model.Transaction) (bool, error) {
-		t.Fatalf("hot lane coalescing should not be used for normal lane recovery")
-		return false, nil
-	}
-	processor.recordTransaction = func(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
-		recorded = true
-		return txn, nil
+	var hotLane bool
+	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, gotHotLane bool) (transactionExecutionResult, error) {
+		hotLane = gotHotLane
+		return transactionExecutionResult{mode: transactionExecutionModeSingle, transaction: txn}, nil
 	}
 
 	mockDS.On("UpdateTransactionMetadata", mock.Anything, stuckTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
@@ -132,6 +109,6 @@ func TestProcessStuckTransaction_FallsBackToDirectReplayWhenBatchNotHandled(t *t
 
 	err := processor.processStuckTransaction(context.Background(), stuckTxn)
 	assert.NoError(t, err)
-	assert.True(t, recorded)
+	assert.False(t, hotLane)
 	mockDS.AssertExpectations(t)
 }
