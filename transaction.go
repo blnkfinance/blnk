@@ -21,7 +21,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"sort"
 	"strings"
@@ -533,7 +532,7 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 		if len(allErrors) > 0 {
 			// Log errors and return a combined error
 			for _, err := range allErrors {
-				log.Printf("Error during processing: %v", err)
+				logrus.Errorf("Error during processing: %v", err)
 				span.RecordError(err)
 			}
 			return allTxns, fmt.Errorf("error occurred during processing: %v", allErrors)
@@ -572,13 +571,13 @@ func processResults(results chan BatchJobResult, mu *sync.Mutex, allTxns *[]*mod
 		mu.Lock()
 		if result.Error != nil {
 			// Log any error encountered during transaction processing
-			log.Printf("Error processing transaction: %v", result.Error)
+			logrus.Errorf("Error processing transaction: %v", result.Error)
 			*allErrors = append(*allErrors, result.Error)
 		} else if result.Txn != nil {
 			*allTxns = append(*allTxns, result.Txn)
 		} else {
 			// Handle the case where the result contains no transaction and no error
-			log.Printf("Received a result with no transaction and no error")
+			logrus.Warn("Received a result with no transaction and no error")
 		}
 		mu.Unlock()
 	}
@@ -616,7 +615,7 @@ func fetchTransactions(ctx context.Context, parentTransactionID string, batchSiz
 			txns, err := gt(newCtx, parentTransactionID, batchSize, offset)
 			if err != nil {
 				// Log and send error if fetching transactions fails
-				log.Printf("Error fetching transactions: %v", err)
+				logrus.Errorf("Error fetching transactions: %v", err)
 				errChan <- err
 				span.RecordError(err)
 				return

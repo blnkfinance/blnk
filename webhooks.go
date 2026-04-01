@@ -20,13 +20,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
+	"github.com/sirupsen/logrus"
 
 	"github.com/hibiken/asynq"
 )
@@ -116,7 +116,7 @@ func processHTTP(data NewWebhook, client *http.Client) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("Webhook failed with status %d", resp.StatusCode)
+		logrus.Warnf("Webhook failed with status %d", resp.StatusCode)
 		return nil
 	}
 
@@ -145,7 +145,7 @@ func (b *Blnk) SendWebhook(newWebhook NewWebhook) error {
 	task := asynq.NewTask(conf.Queue.WebhookQueue, payload, taskOptions...)
 	info, err := b.asynqClient.Enqueue(task)
 	if err != nil {
-		log.Println(err, info)
+		logrus.Error(err, info)
 		return err
 	}
 	return err
@@ -170,7 +170,7 @@ func (b *Blnk) ProcessWebhook(_ context.Context, task *asynq.Task) error {
 	}
 	var payload NewWebhook
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		log.Printf("Error unmarshaling task payload: %v", err)
+		logrus.Errorf("Error unmarshaling task payload: %v", err)
 		return err
 	}
 	err = processHTTP(payload, b.httpClient)
