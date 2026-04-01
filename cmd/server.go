@@ -20,7 +20,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -62,7 +61,7 @@ func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
 	// Define domain(s) for the certificate
 	domains := []string{conf.Domain}
 	if conf.Domain == "" {
-		log.Println("No domain specified, defaulting to localhost")
+		logrus.Error("No domain specified, defaulting to localhost")
 		domains = []string{"localhost"} // Use localhost if no domain is provided
 	}
 
@@ -78,10 +77,10 @@ func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
 		TLSConfig: cfg.TLSConfig(), // TLS configuration from CertMagic
 	}
 
-	log.Printf("Starting HTTPS server on %s\n", conf.Port)
+	logrus.Errorf("Starting HTTPS server on %s\n", conf.Port)
 	// Start the HTTPS server with automatic certificate management
 	if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Failed to start HTTPS server: %v", err)
+		logrus.Fatalf("Failed to start HTTPS server: %v", err)
 	}
 
 	return nil
@@ -109,14 +108,14 @@ func migrateTypeSenseSchema(ctx context.Context, t *search.TypesenseClient) erro
 func getOrCreateHeartbeatID() string {
 	db, err := sql.Open("sqlite3", "./heartbeat.db")
 	if err != nil {
-		log.Printf("Failed to open SQLite DB: %v", err)
+		logrus.Errorf("Failed to open SQLite DB: %v", err)
 		return uuid.New().String() // fallback to temp UUID
 	}
 	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)`)
 	if err != nil {
-		log.Printf("Failed to create config table: %v", err)
+		logrus.Errorf("Failed to create config table: %v", err)
 		return uuid.New().String()
 	}
 
@@ -126,10 +125,10 @@ func getOrCreateHeartbeatID() string {
 		heartbeatID = uuid.New().String()
 		_, err = db.Exec(`INSERT INTO config (key, value) VALUES (?, ?)`, "heartbeat_id", heartbeatID)
 		if err != nil {
-			log.Printf("Failed to insert heartbeat_id: %v", err)
+			logrus.Errorf("Failed to insert heartbeat_id: %v", err)
 		}
 	} else if err != nil {
-		log.Printf("Failed to read heartbeat_id: %v", err)
+		logrus.Errorf("Failed to read heartbeat_id: %v", err)
 		return uuid.New().String()
 	}
 
@@ -149,7 +148,7 @@ func sendHeartbeat(client posthog.Client, heartbeatID string) {
 					"timestamp": time.Now().UTC(),
 				},
 			}); err != nil {
-				log.Printf("Failed to send heartbeat: %v", err)
+				logrus.Errorf("Failed to send heartbeat: %v", err)
 			}
 		}
 	}()
@@ -188,7 +187,7 @@ func initializeRouter(b *blnkInstance) *gin.Engine {
 func initializeOpenTelemetry(ctx context.Context) (func(context.Context) error, error) {
 	shutdown, err := trace.SetupOTelSDK(ctx, "BLNK")
 	if err != nil {
-		return nil, fmt.Errorf("error setting up OTel SDK: %v", err)
+		return nil, fmt.Errorf("error setting up OTel SDK: %w", err)
 	}
 	return shutdown, nil
 }
@@ -212,7 +211,7 @@ func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*searc
 			}
 		}
 
-		log.Printf("TypeSense initialization failed (attempt %d/%d): %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
+		logrus.Errorf("TypeSense initialization failed (attempt %d/%d): %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
 
 		select {
 		case <-ctx.Done():
@@ -307,18 +306,18 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			// Load configuration
 			cfg, err := config.Fetch()
 			if err != nil {
-				log.Println(err)
+				logrus.Error(err)
 			}
 
 			// Initialize telemetry and observability
 			phClient, shutdown, err := initializeTelemetryAndObservability(ctx, cfg)
 			if err != nil {
-				log.Fatal(err)
+				logrus.Fatal(err)
 			}
 			if shutdown != nil {
 				defer func() {
 					if err := shutdown(ctx); err != nil {
-						log.Printf("Error during shutdown: %v", err)
+						logrus.Errorf("Error during shutdown: %v", err)
 					}
 				}()
 			}
@@ -329,7 +328,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			// Initialize TypeSense
 			tsClient, err := initializeTypeSense(ctx, cfg)
 			if err != nil {
-				log.Printf("TypeSense initialization error: %v", err)
+				logrus.Errorf("TypeSense initialization error: %v", err)
 			} else if tsClient != nil {
 				search.TryReindexIfNeeded(ctx, tsClient, b.blnk.GetDataSource())
 			}
@@ -353,7 +352,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 
 			// Start server
 			if err := startServer(router, cfg.Server.Port); err != nil {
-				log.Fatal(err)
+				logrus.Fatal(err)
 			}
 		},
 	}

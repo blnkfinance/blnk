@@ -27,6 +27,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/sirupsen/logrus"
 )
 
 // CreateAccount inserts a new Account into the database.
@@ -218,7 +219,7 @@ func scanAccountRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Account,
 	// Perform the row scan
 	err := row.Scan(scanArgs...)
 	if err != nil {
-		fmt.Println("Error: ", err)
+		logrus.Error("Error: ", err)
 		_ = tx.Rollback()
 		return nil, err
 	}

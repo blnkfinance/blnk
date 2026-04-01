@@ -19,14 +19,13 @@ package notification
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/request"
-	"github.com/sirupsen/logrus"
 
 	"github.com/blnkfinance/blnk/config"
+	"github.com/sirupsen/logrus"
 )
 
 // SlackNotification sends an error message to a Slack webhook.
@@ -73,21 +72,21 @@ func SlackNotification(err error) {
 	// Fetch the configuration, including the Slack webhook URL
 	conf, err := config.Fetch()
 	if err != nil {
-		log.Println(err)
+		logrus.Error(err)
 		return
 	}
 
 	// Convert the Slack message to a JSON request payload
 	payload, err := request.ToJsonReq(&data)
 	if err != nil {
-		log.Println(err)
+		logrus.Error(err)
 		return
 	}
 
 	// Create an HTTP request to send the Slack notification
 	req, err := http.NewRequest("POST", conf.Notification.Slack.WebhookUrl, payload)
 	if err != nil {
-		log.Println(err)
+		logrus.Error(err)
 		return
 	}
 
@@ -95,7 +94,7 @@ func SlackNotification(err error) {
 	var response map[string]interface{}
 	_, err = request.Call(req, &response)
 	if err != nil {
-		log.Println(err)
+		logrus.Error(err)
 	}
 }
 
@@ -124,7 +123,7 @@ func NotifyError(systemError error) {
 		// Fetch the configuration
 		conf, err := config.Fetch()
 		if err != nil {
-			log.Println(err)
+			logrus.Error(err)
 			return
 		}
 
@@ -141,7 +140,7 @@ func NotifyError(systemError error) {
 			}
 			err := webhookSender("system.error", payload)
 			if err != nil {
-				log.Printf("Error sending webhook notification: %v", err)
+				logrus.Errorf("Error sending webhook notification: %v", err)
 			}
 		}
 	}(systemError)

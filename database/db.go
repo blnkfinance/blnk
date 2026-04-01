@@ -19,12 +19,12 @@ package database
 import (
 	"context"
 	"database/sql"
-	"log"
 	"sync"
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/cache"
 	pgconn "github.com/blnkfinance/blnk/internal/pg-conn"
+	"github.com/sirupsen/logrus"
 )
 
 // Declare a package-level variable to hold the singleton instance.
@@ -72,7 +72,7 @@ func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
 
 		cacheInstance, errCache := cache.NewCache()
 		if errCache != nil {
-			log.Printf("Error creating cache: %v", errCache)
+			logrus.Errorf("Error creating cache: %v", errCache)
 			// Continue without cache instead of failing completely.
 		}
 

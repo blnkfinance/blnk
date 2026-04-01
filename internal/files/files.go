@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -36,6 +35,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/model"
+	"github.com/sirupsen/logrus"
 )
 
 // StoreFunc defines the function signature for storing transactions.
@@ -157,10 +157,10 @@ func cleanupTempFile(file *os.File) {
 	if file != nil {
 		filename := file.Name()
 		if err := file.Close(); err != nil {
-			log.Printf("Error closing temporary file %s: %v", filename, err)
+			logrus.Errorf("Error closing temporary file %s: %v", filename, err)
 		}
 		if err := os.Remove(filename); err != nil {
-			log.Printf("Error removing temporary file %s: %v", filename, err)
+			logrus.Errorf("Error removing temporary file %s: %v", filename, err)
 		}
 	}
 }

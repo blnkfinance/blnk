@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/sirupsen/logrus"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/lib/pq"
@@ -525,7 +525,7 @@ func (d Datasource) GetExistingTransactionReferences(ctx context.Context, refere
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -678,7 +678,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -823,7 +823,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -883,7 +883,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 		err = d.Cache.Set(ctx, cacheKey, transactions, 1*time.Hour) // Cache for 1 hour
 		if err != nil {
 			// Log the error but don't return it since the main operation succeeded
-			log.Printf("Failed to cache transactions: %v", err)
+			logrus.Errorf("Failed to cache transactions: %v", err)
 		}
 	}
 
@@ -932,7 +932,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -990,7 +990,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 	// Cache the fetched data if not empty
 	if len(groupedTransactions) > 0 {
 		if err := d.Cache.Set(ctx, cacheKey, groupedTransactions, 5*time.Minute); err != nil {
-			log.Printf("Failed to cache grouped transactions: %v", err)
+			logrus.Errorf("Failed to cache grouped transactions: %v", err)
 		}
 	}
 
@@ -1147,7 +1147,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -1248,7 +1248,7 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -1336,7 +1336,7 @@ func (d Datasource) GetQueuedAmounts(ctx context.Context, balanceID string) (deb
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -1436,7 +1436,7 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -1492,7 +1492,7 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 	// Cache the results if there are any
 	if len(transactions) > 0 {
 		if err := d.Cache.Set(ctx, cacheKey, transactions, 5*time.Minute); err != nil {
-			log.Printf("Failed to cache transactions by parent: %v", err)
+			logrus.Errorf("Failed to cache transactions by parent: %v", err)
 		}
 	}
 
@@ -1596,7 +1596,7 @@ func (d Datasource) GetTransactionsByCriteria(ctx context.Context, minAmount, ma
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -1919,7 +1919,7 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
@@ -2087,7 +2087,7 @@ func (d Datasource) GetQueuedTransactionsForDestinationCoalescing(ctx context.Co
 func scanQueuedTransactionsForCoalescing(rows *sql.Rows) ([]*model.Transaction, error) {
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("Error closing rows: %v", err)
+			logrus.Errorf("Error closing rows: %v", err)
 		}
 	}()
 
