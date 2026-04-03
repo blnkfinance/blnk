@@ -21,11 +21,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -660,7 +660,7 @@ func (d Datasource) GetExternalTransactionsPaginated(ctx context.Context, upload
 		err = d.Cache.Set(ctx, cacheKey, transactions, 5*time.Minute) // Cache for 5 minutes
 		if err != nil {
 			// Log the error, but don't return it as the main operation succeeded
-			log.Printf("Failed to cache transactions: %v", err)
+			logrus.Errorf("Failed to cache transactions: %v", err)
 		}
 	}
 	return transactions, nil
@@ -789,7 +789,7 @@ func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploa
 	// Cache the fetched data if not empty
 	if len(groupedTransactions) > 0 {
 		if err := d.Cache.Set(ctx, cacheKey, groupedTransactions, 5*time.Minute); err != nil {
-			log.Printf("Failed to cache grouped external transactions: %v", err)
+			logrus.Errorf("Failed to cache grouped external transactions: %v", err)
 		}
 	}
 

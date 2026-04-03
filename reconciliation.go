@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"math/big"
 	"strings"
@@ -168,10 +167,10 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs)
 		if err != nil {
 			// If an error occurs during the reconciliation, log it and update the reconciliation status to "failed".
-			log.Printf("Error in reconciliation process: %v", err)
+			logrus.Errorf("Error in reconciliation process: %v", err)
 			err := s.datasource.UpdateReconciliationStatus(ctxWithTrace, reconciliationID, StatusFailed, 0, 0)
 			if err != nil {
-				log.Printf("Error updating reconciliation status: %v", err)
+				logrus.Errorf("Error updating reconciliation status: %v", err)
 			}
 		}
 	}()
@@ -218,10 +217,10 @@ func (s *Blnk) StartInstantReconciliation(ctx context.Context, externalTransacti
 	for _, txn := range externalTransactions {
 		if err := s.storeExternalTransaction(ctx, tempID, txn); err != nil {
 			// Log error and update reconciliation status
-			log.Printf("Error storing transaction: %v", err)
+			logrus.Errorf("Error storing transaction: %v", err)
 			err := s.datasource.UpdateReconciliationStatus(ctx, reconciliationID, StatusFailed, 0, 0)
 			if err != nil {
-				log.Printf("Error updating reconciliation status: %v", err)
+				logrus.Errorf("Error updating reconciliation status: %v", err)
 				return "", fmt.Errorf("failed to store external transaction: %w", err)
 			}
 			return "", fmt.Errorf("failed to store external transaction: %w", err)
@@ -237,10 +236,10 @@ func (s *Blnk) StartInstantReconciliation(ctx context.Context, externalTransacti
 		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs)
 		if err != nil {
 			// If an error occurs during the reconciliation, log it and update the reconciliation status to "failed"
-			log.Printf("Error in instant reconciliation process: %v", err)
+			logrus.Errorf("Error in instant reconciliation process: %v", err)
 			err := s.datasource.UpdateReconciliationStatus(ctxWithTrace, reconciliationID, StatusFailed, 0, 0)
 			if err != nil {
-				log.Printf("Error updating reconciliation status: %v", err)
+				logrus.Errorf("Error updating reconciliation status: %v", err)
 			}
 		}
 	}()
@@ -390,7 +389,7 @@ func (s *Blnk) updateReconciliationStatus(ctx context.Context, reconciliationID,
 func (s *Blnk) initializeReconciliationProgress(ctx context.Context, reconciliationID string) (model.ReconciliationProgress, error) {
 	progress, err := s.loadReconciliationProgress(ctx, reconciliationID)
 	if err != nil {
-		log.Printf("Error loading reconciliation progress: %v", err)
+		logrus.Errorf("Error loading reconciliation progress: %v", err)
 		return model.ReconciliationProgress{}, nil
 	}
 	return progress, nil
@@ -432,7 +431,7 @@ func (s *Blnk) createReconciler(strategy string, uploadID string, groupCriteria 
 func (s *Blnk) createTransactionProcessor(reconciliation model.Reconciliation, progress model.ReconciliationProgress, reconciler func(ctx context.Context, txns []*model.Transaction) ([]model.Match, []string)) *transactionProcessor {
 	conf, err := config.Fetch()
 	if err != nil {
-		log.Printf("Error fetching configuration: %v", err)
+		logrus.Errorf("Error fetching configuration: %v", err)
 	}
 	return &transactionProcessor{
 		reconciliation:    reconciliation,
@@ -486,7 +485,7 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 	// Periodically save the reconciliation progress.
 	if tp.progress.ProcessedCount%tp.progressSaveCount == 0 {
 		if err := tp.datasource.SaveReconciliationProgress(ctx, tp.reconciliation.ReconciliationID, tp.progress); err != nil {
-			log.Printf("Error saving reconciliation progress: %v", err)
+			logrus.Errorf("Error saving reconciliation progress: %v", err)
 		}
 	}
 
@@ -512,7 +511,7 @@ func (tp *transactionProcessor) updateMatchedTransactionsMetadata(ctx context.Co
 		// Update the internal transaction's metadata
 		err := tp.blnk.updateEntityMetadata(ctx, "transactions", match.InternalTransactionID, metadata)
 		if err != nil {
-			log.Printf("Error updating metadata for transaction %s: %v", match.InternalTransactionID, err)
+			logrus.Errorf("Error updating metadata for transaction %s: %v", match.InternalTransactionID, err)
 		}
 	}
 }
@@ -559,19 +558,19 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 			defer wg.Done()
 			for txn := range txns {
 				if err := processor.process(ctx, txn); err != nil {
-					log.Printf("Error processing transaction %s: %v", txn.TransactionID, err)
+					logrus.Errorf("Error processing transaction %s: %v", txn.TransactionID, err)
 					results <- BatchJobResult{Error: err}
 					return
 				}
 				processedCount++
 				if processedCount%10 == 0 {
-					log.Printf("Processed %d transactions", processedCount)
+					logrus.Errorf("Processed %d transactions", processedCount)
 				}
 				results <- BatchJobResult{}
 			}
 		},
 	)
-	log.Printf("Total transactions processed: %d", processedCount)
+	logrus.Errorf("Total transactions processed: %d", processedCount)
 	return err
 }
 
@@ -590,22 +589,22 @@ func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.
 	reconciliation.MatchedTransactions = matchCount
 	reconciliation.CompletedAt = ptr.Time(time.Now())
 
-	log.Printf("Finalizing reconciliation. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
+	logrus.Errorf("Finalizing reconciliation. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 
 	if !reconciliation.IsDryRun {
 		s.postReconciliationActions(ctx, reconciliation)
 	} else {
-		log.Printf("Dry run completed. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
+		logrus.Errorf("Dry run completed. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 	}
 
 	// Update the final reconciliation status and counts in the data source.
 	err := s.datasource.UpdateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusCompleted, matchCount, unmatchedCount)
 	if err != nil {
-		log.Printf("Error updating reconciliation status: %v", err)
+		logrus.Errorf("Error updating reconciliation status: %v", err)
 		return err
 	}
 
-	log.Printf("Reconciliation %s completed. Total matches: %d, Total unmatched: %d", reconciliation.ReconciliationID, matchCount, unmatchedCount)
+	logrus.Errorf("Reconciliation %s completed. Total matches: %d, Total unmatched: %d", reconciliation.ReconciliationID, matchCount, unmatchedCount)
 
 	return nil
 }
@@ -622,7 +621,7 @@ func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.
 func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model.Transaction, matchingRules []model.MatchingRule) ([]model.Match, []string) {
 	conf, err := config.Fetch()
 	if err != nil {
-		log.Printf("Error fetching configuration: %v", err)
+		logrus.Errorf("Error fetching configuration: %v", err)
 	}
 	maxWorkers := 10 // Default
 	if conf != nil {
@@ -648,7 +647,7 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 			err := s.findMatchingInternalTransaction(ctx, extTxn, matchingRules, matchChan, unmatchedChan)
 			if err != nil {
 				unmatchedChan <- extTxn.TransactionID
-				log.Printf("No match found for external transaction %s: %v", extTxn.TransactionID, err)
+				logrus.Errorf("No match found for external transaction %s: %v", extTxn.TransactionID, err)
 			}
 		}(externalTxn)
 	}
@@ -681,7 +680,7 @@ func (s *Blnk) oneToOneReconciliation(ctx context.Context, externalTxns []*model
 func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*model.Transaction, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	conf, err := config.Fetch()
 	if err != nil {
-		log.Printf("Error fetching configuration: %v", err)
+		logrus.Errorf("Error fetching configuration: %v", err)
 	}
 
 	var matches []model.Match
@@ -694,7 +693,7 @@ func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*mode
 	// Initiate the one-to-many reconciliation process.
 	err = s.oneToMany(ctx, externalTxns, matchingRules, isExternalGrouped, &wg, groupCriteria, conf.Transaction.BatchSize, matchChan, unmatchedChan)
 	if err != nil {
-		log.Printf("Error in one-to-many reconciliation: %v", err)
+		logrus.Errorf("Error in one-to-many reconciliation: %v", err)
 	}
 
 	go func() {
@@ -722,7 +721,7 @@ func (s *Blnk) oneToManyReconciliation(ctx context.Context, externalTxns []*mode
 func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*model.Transaction, uploadID string, groupCriteria string, matchingRules []model.MatchingRule, isExternalGrouped bool) ([]model.Match, []string) {
 	conf, err := config.Fetch()
 	if err != nil {
-		log.Printf("Error fetching configuration: %v", err)
+		logrus.Errorf("Error fetching configuration: %v", err)
 	}
 
 	var matches []model.Match
@@ -735,7 +734,7 @@ func (s *Blnk) manyToOneReconciliation(ctx context.Context, internalTxns []*mode
 	// Initiate the many-to-one reconciliation process.
 	err = s.manyToOne(ctx, internalTxns, uploadID, matchingRules, isExternalGrouped, &wg, groupCriteria, conf.Transaction.BatchSize, matchChan, unmatchedChan)
 	if err != nil {
-		log.Printf("Error in many-to-one reconciliation: %v", err)
+		logrus.Errorf("Error in many-to-one reconciliation: %v", err)
 	}
 
 	// Close channels after processing.
@@ -778,7 +777,7 @@ func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction,
 	for {
 		groupedExternalTxns, err := s.groupExternalTransactions(ctx, uploadID, groupingCriteria, batchSize, offset)
 		if err != nil {
-			log.Printf("Error grouping external transactions: %v", err)
+			logrus.Errorf("Error grouping external transactions: %v", err)
 			break
 		}
 		if len(groupedExternalTxns) == 0 {
@@ -788,7 +787,7 @@ func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction,
 		groupMap := s.buildGroupMap(groupedExternalTxns)
 		err = s.processGroupedTransactions(internalTxns, groupedExternalTxns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
 		if err != nil {
-			log.Printf("Error processing grouped transactions: %v", err)
+			logrus.Errorf("Error processing grouped transactions: %v", err)
 		}
 		if len(groupMap) == 0 {
 			break
@@ -828,7 +827,7 @@ func (s *Blnk) groupExternalTransactions(ctx context.Context, uploadID string, g
 func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, matchChan chan model.Match, unMatchChan chan string) error {
 	conf, err := config.Fetch()
 	if err != nil {
-		log.Printf("Error fetching configuration: %v", err)
+		logrus.Errorf("Error fetching configuration: %v", err)
 	}
 	maxWorkers := 10 // Default
 	if conf != nil {
@@ -903,7 +902,7 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 	for {
 		txns, err := s.groupInternalTransactions(ctx, groupingCriteria, batchSize, offset)
 		if err != nil {
-			log.Printf("Error grouping internal transactions: %v", err)
+			logrus.Errorf("Error grouping internal transactions: %v", err)
 			break
 		}
 		if len(txns) == 0 {
@@ -913,7 +912,7 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 		groupMap := s.buildGroupMap(txns)
 		err = s.processGroupedTransactions(singleTxn, txns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
 		if err != nil {
-			log.Printf("Error in one-to-many reconciliation: %v", err)
+			logrus.Errorf("Error in one-to-many reconciliation: %v", err)
 		}
 		if len(groupMap) == 0 {
 			break
@@ -1021,13 +1020,13 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 // - []*model.Transaction: A list of external transactions converted to internal transactions.
 // - error: If any error occurs during retrieval.
 func (s *Blnk) getExternalTransactionsPaginated(ctx context.Context, uploadID string, limit int, offset int64) ([]*model.Transaction, error) {
-	log.Printf("Fetching external transactions: uploadID=%s, limit=%d, offset=%d", uploadID, limit, offset)
+	logrus.Errorf("Fetching external transactions: uploadID=%s, limit=%d, offset=%d", uploadID, limit, offset)
 	externalTransaction, err := s.datasource.GetExternalTransactionsPaginated(ctx, uploadID, limit, int64(offset))
 	if err != nil {
-		log.Printf("Error fetching external transactions: %v", err)
+		logrus.Errorf("Error fetching external transactions: %v", err)
 		return nil, err
 	}
-	log.Printf("Fetched %d external transactions", len(externalTransaction))
+	logrus.Errorf("Fetched %d external transactions", len(externalTransaction))
 	transactions := make([]*model.Transaction, len(externalTransaction))
 
 	for i, txn := range externalTransaction {

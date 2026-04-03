@@ -22,13 +22,11 @@ This includes commands for applying and rolling back migrations.
 package main
 
 import (
-	"fmt"
-	"log"
-
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
 	migrate "github.com/rubenv/sql-migrate"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -60,14 +58,14 @@ func migrateUpCommands() *cobra.Command {
 			// Fetch the configuration.
 			cnf, err := config.Fetch()
 			if err != nil {
-				log.Printf("Error fetching config: %v", err)
+				logrus.Errorf("Error fetching config: %v", err)
 				return
 			}
 
 			// Connect to the database.
 			db, err := database.ConnectDB(cnf.DataSource)
 			if err != nil {
-				log.Printf("Error connecting to database: %v", err)
+				logrus.Errorf("Error connecting to database: %v", err)
 				return
 			}
 
@@ -77,9 +75,9 @@ func migrateUpCommands() *cobra.Command {
 			// Apply the migrations.
 			n, err := migrate.Exec(db, "postgres", migrations, migrate.Up)
 			if err != nil {
-				log.Printf("Error migrating up: %v", err)
+				logrus.Errorf("Error migrating up: %v", err)
 			} else {
-				fmt.Printf("Applied %d migrations!\n", n)
+				logrus.Infof("Applied %d migrations!\n", n)
 			}
 		},
 	}
@@ -101,23 +99,23 @@ func migrateDownCommands() *cobra.Command {
 			// Fetch the configuration.
 			cnf, err := config.Fetch()
 			if err != nil {
-				log.Printf("Error fetching config: %v", err)
+				logrus.Errorf("Error fetching config: %v", err)
 				return
 			}
 
 			// Connect to the database.
 			db, err := database.ConnectDB(cnf.DataSource)
 			if err != nil {
-				log.Printf("Error connecting to database: %v", err)
+				logrus.Errorf("Error connecting to database: %v", err)
 				return
 			}
 
 			// Roll back the migrations.
 			n, err := migrate.Exec(db, "postgres", migrations, migrate.Down)
 			if err != nil {
-				log.Printf("Error migrating down: %v", err)
+				logrus.Errorf("Error migrating down: %v", err)
 			} else {
-				fmt.Printf("Rolled back %d migrations!\n", n)
+				logrus.Infof("Rolled back %d migrations!\n", n)
 			}
 		},
 	}

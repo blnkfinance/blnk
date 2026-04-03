@@ -21,7 +21,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"sync"
 	"time"
@@ -497,7 +496,7 @@ func (l *Blnk) fetchAndValidateInflightTransaction(ctx context.Context, transact
 			span.RecordError(err)
 			return nil, err
 		}
-		log.Println("found inflight transaction in queue using it for commit/void", transactionID, queuedTxn.TransactionID)
+		logrus.Info("found inflight transaction in queue using it for commit/void", transactionID, queuedTxn.TransactionID)
 		transaction = queuedTxn
 	default:
 		span.RecordError(err)

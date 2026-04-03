@@ -28,36 +28,35 @@ import (
 )
 
 type QueuedTransactionRecoveryProcessor struct {
-	blnk                *Blnk
-	batchSize           int
-	maxWorkers          int
-	pollInterval        time.Duration
-	stuckThreshold      time.Duration
-	maxRecoveryAttempts int
-	stopCh              chan struct{}
-	wg                  sync.WaitGroup
-	running             bool
-	mu                  sync.Mutex
-	tryBatch            func(ctx context.Context, txn *model.Transaction) (bool, error)
-	tryHotBatch         func(ctx context.Context, txn *model.Transaction) (bool, error)
-	recordTransaction   func(ctx context.Context, txn *model.Transaction) (*model.Transaction, error)
+	blnk                     *Blnk
+	batchSize                int
+	maxWorkers               int
+	pollInterval             time.Duration
+	stuckThreshold           time.Duration
+	maxRecoveryAttempts      int
+	stopCh                   chan struct{}
+	wg                       sync.WaitGroup
+	running                  bool
+	mu                       sync.Mutex
+	processQueuedTransaction func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error)
 }
 
+// NewQueuedTransactionRecoveryProcessor creates the stuck queued-transaction recovery loop
+// with conservative single-worker defaults to avoid recovery-induced lock storms.
 func NewQueuedTransactionRecoveryProcessor(blnk *Blnk) *QueuedTransactionRecoveryProcessor {
 	return &QueuedTransactionRecoveryProcessor{
-		blnk:                blnk,
-		batchSize:           100,
-		maxWorkers:          1,
-		pollInterval:        30 * time.Second,
-		stuckThreshold:      2 * time.Hour,
-		maxRecoveryAttempts: 3,
-		stopCh:              make(chan struct{}),
-		tryBatch:            blnk.TryRecordQueuedTransactionBatch,
-		tryHotBatch:         blnk.TryRecordQueuedTransactionBatchForHotLane,
-		recordTransaction:   blnk.RecordTransaction,
+		blnk:                     blnk,
+		batchSize:                100,
+		maxWorkers:               1,
+		pollInterval:             30 * time.Second,
+		stuckThreshold:           2 * time.Hour,
+		maxRecoveryAttempts:      3,
+		stopCh:                   make(chan struct{}),
+		processQueuedTransaction: blnk.processQueuedTransaction,
 	}
 }
 
+// Start begins the background recovery loop for stuck queued transactions.
 func (p *QueuedTransactionRecoveryProcessor) Start(ctx context.Context) {
 	p.mu.Lock()
 	if p.running {
@@ -77,6 +76,7 @@ func (p *QueuedTransactionRecoveryProcessor) Start(ctx context.Context) {
 	logrus.Info("Queued transaction recovery processor started")
 }
 
+// Stop shuts down the background recovery loop and waits for the worker goroutine to exit.
 func (p *QueuedTransactionRecoveryProcessor) Stop() {
 	p.mu.Lock()
 	if !p.running {
@@ -91,12 +91,14 @@ func (p *QueuedTransactionRecoveryProcessor) Stop() {
 	logrus.Info("Queued transaction recovery processor stopped")
 }
 
+// IsRunning reports whether the recovery processor is currently active.
 func (p *QueuedTransactionRecoveryProcessor) IsRunning() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.running
 }
 
+// run executes the poll loop that periodically scans for stuck queued transactions.
 func (p *QueuedTransactionRecoveryProcessor) run(ctx context.Context) {
 	ticker := time.NewTicker(p.pollInterval)
 	defer ticker.Stop()
@@ -115,6 +117,7 @@ func (p *QueuedTransactionRecoveryProcessor) run(ctx context.Context) {
 	}
 }
 
+// processBatch performs one periodic stuck-queue recovery pass using the configured threshold.
 func (p *QueuedTransactionRecoveryProcessor) processBatch(ctx context.Context) {
 	p.recoverWithThreshold(ctx, p.stuckThreshold)
 }
@@ -130,6 +133,7 @@ func (b *Blnk) RecoverQueuedTransactions(ctx context.Context, threshold time.Dur
 	return processor.recoverWithThreshold(ctx, threshold), nil
 }
 
+// recoverWithThreshold loads currently stuck queued transactions and reprocesses them serially.
 func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Context, threshold time.Duration) int {
 	stuckTxns, err := p.blnk.datasource.GetStuckQueuedTransactions(ctx, threshold, p.batchSize)
 	if err != nil {
@@ -152,6 +156,8 @@ func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Co
 	return len(stuckTxns)
 }
 
+// processStuckTransaction replays one stuck queued transaction, preserving the existing recovery
+// attempt tracking and rejection semantics while preferring the shared queued executor path.
 func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context.Context, stuckTxn *model.Transaction) error {
 	restoreTransactionFlagsFromMetadata(stuckTxn)
 
@@ -197,7 +203,7 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	}
 
 	queueCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
-	handled, err := p.tryRecordRecoveredTransaction(ctx, queueCopy)
+	result, err := p.tryRecordRecoveredTransaction(ctx, queueCopy)
 	if err != nil {
 		if isReferenceAlreadyUsedError(err) {
 			logrus.Infof("Stuck transaction %s already processed (reference %s already used)", stuckTxn.TransactionID, queueCopy.Reference)
@@ -209,7 +215,7 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 		return err
 	}
 
-	if handled {
+	if result.usedCoalescing() {
 		logrus.Infof("Successfully recovered stuck transaction %s via coalesced batch", stuckTxn.TransactionID)
 	} else {
 		logrus.Infof("Successfully recovered stuck transaction %s via queue copy %s", stuckTxn.TransactionID, queueCopy.TransactionID)
@@ -218,29 +224,15 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	return nil
 }
 
-func (p *QueuedTransactionRecoveryProcessor) tryRecordRecoveredTransaction(ctx context.Context, queueCopy *model.Transaction) (bool, error) {
-	if hotpairs.QueueLaneFromMetadata(queueCopy.MetaData) == hotpairs.LaneHot {
-		handled, err := p.tryHotBatch(ctx, queueCopy)
-		if err != nil {
-			logrus.WithError(err).Warnf("coalesced hot-lane recovery attempt failed for transaction %s", queueCopy.TransactionID)
-		}
-		if handled {
-			return true, nil
-		}
-	} else {
-		handled, err := p.tryBatch(ctx, queueCopy)
-		if err != nil {
-			logrus.WithError(err).Warnf("coalesced recovery attempt failed for transaction %s", queueCopy.TransactionID)
-		}
-		if handled {
-			return true, nil
-		}
-	}
-
-	_, err := p.recordTransaction(ctx, queueCopy)
-	return false, err
+// tryRecordRecoveredTransaction routes stuck-transaction replay through the shared queued
+// processing path, selecting hot-lane execution when the queued metadata requires it.
+func (p *QueuedTransactionRecoveryProcessor) tryRecordRecoveredTransaction(ctx context.Context, queueCopy *model.Transaction) (transactionExecutionResult, error) {
+	hotLane := hotpairs.QueueLaneFromMetadata(queueCopy.MetaData) == hotpairs.LaneHot
+	return p.processQueuedTransaction(ctx, queueCopy, hotLane)
 }
 
+// updateRecoveryMetadata stores recovery attempt and status information on the stuck parent
+// transaction so later recovery passes can make bounded retry decisions.
 func (p *QueuedTransactionRecoveryProcessor) updateRecoveryMetadata(ctx context.Context, txn *model.Transaction, attempts int, status string) {
 	if txn.MetaData == nil {
 		txn.MetaData = make(map[string]interface{})

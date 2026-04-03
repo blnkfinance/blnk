@@ -251,7 +251,7 @@ func (m *redisHookManager) ExecutePreHooks(ctx context.Context, transactionID st
 		return err
 	}
 
-	return m.executeHooks(ctx, hooks, PreTransaction, transactionID, data)
+	return m.ExecuteHooks(ctx, hooks, PreTransaction, transactionID, data)
 }
 
 // ExecutePostHooks queues all active post-transaction hooks for execution.
@@ -270,10 +270,10 @@ func (m *redisHookManager) ExecutePostHooks(ctx context.Context, transactionID s
 		return err
 	}
 
-	return m.executeHooks(ctx, hooks, PostTransaction, transactionID, data)
+	return m.ExecuteHooks(ctx, hooks, PostTransaction, transactionID, data)
 }
 
-// executeHooks marshals the hook data and queues each active hook for execution.
+// ExecuteHooks marshals the hook data and queues each active hook for execution.
 //
 // Parameters:
 // - ctx: The context for the operation.
@@ -284,7 +284,7 @@ func (m *redisHookManager) ExecutePostHooks(ctx context.Context, transactionID s
 //
 // Returns:
 // - error: An error if data marshalling fails.
-func (m *redisHookManager) executeHooks(ctx context.Context, hooks []*Hook, hookType HookType, transactionID string, data interface{}) error {
+func (m *redisHookManager) ExecuteHooks(ctx context.Context, hooks []*Hook, hookType HookType, transactionID string, data interface{}) error {
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("failed to marshal hook data: %w", err)
@@ -332,9 +332,13 @@ func (m *redisHookManager) queueHook(ctx context.Context, hook *Hook, payload Ho
 		return fmt.Errorf("failed to marshal hook task payload: %w", err)
 	}
 
-	conf, err := config.Fetch()
-	if err != nil {
-		return fmt.Errorf("failed to fetch config: %w", err)
+	conf := m.config
+	if conf == nil {
+		conf, err = config.Fetch()
+		if err != nil {
+			return fmt.Errorf("failed to fetch config: %w", err)
+		}
+		m.config = conf
 	}
 
 	// Use webhook queue from config
