@@ -3,10 +3,17 @@ package metrics
 import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+	"log"
 )
 
 // meter is the package-level OTel meter used to create all instruments.
 var meter = otel.Meter("blnk")
+
+func init() {
+	if err := Init(); err != nil {
+		log.Fatalf("failed to initialize metrics instruments: %v", err)
+	}
+}
 
 // TransactionTotal counts transactions that reach a terminal or significant state.
 // Attributes: status (APPLIED, REJECTED, INFLIGHT, VOID, COMMIT), currency

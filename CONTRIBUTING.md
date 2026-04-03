@@ -87,6 +87,22 @@ When your change affects schema or persistence behavior:
 - Follow the existing migration naming pattern.
 - Include tests that validate the new behavior.
 
+## Running CI Locally with `act`
+
+You can run the GitHub Actions CI pipeline locally using [`act`](https://github.com/nektos/act) before pushing:
+
+1. Install `act`:
+
+```bash
+brew install act    # macOS
+```
+
+2. Make sure Docker is running, then execute the test workflow:
+
+```bash
+act -W .github/workflows/go.yml
+```
+
 ## Pull Request Checklist
 
 Before opening a PR, ensure:

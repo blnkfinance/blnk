@@ -32,7 +32,6 @@ import (
 	"github.com/blnkfinance/blnk/api/middleware"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
-	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/blnkfinance/blnk/internal/search"
 	trace "github.com/blnkfinance/blnk/internal/traces"
 	"github.com/caddyserver/certmagic"
@@ -334,11 +333,6 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			}
 			if phClient != nil {
 				defer phClient.Close()
-			}
-
-			// Initialize metric instruments (safe to call even when observability is disabled).
-			if err := metrics.Init(); err != nil {
-				log.Fatalf("failed to initialize metrics: %v", err)
 			}
 
 			// Initialize router (after OTel so /metrics handler is available)
