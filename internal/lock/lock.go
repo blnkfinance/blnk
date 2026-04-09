@@ -18,6 +18,7 @@ package redlock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -25,6 +26,24 @@ import (
 
 	"github.com/redis/go-redis/v9"
 )
+
+var (
+	ErrLockHeld        = errors.New("lock already held")
+	ErrLockWaitTimeout = errors.New("lock wait timeout")
+)
+
+type lockError struct {
+	err error
+	msg string
+}
+
+func (e *lockError) Error() string {
+	return e.msg
+}
+
+func (e *lockError) Unwrap() error {
+	return e.err
+}
 
 // Locker represents a distributed lock using Redis.
 // The lock is identified by a unique key and value, where the value is used
@@ -71,7 +90,10 @@ func (l *Locker) Lock(ctx context.Context, timeout time.Duration) error {
 		return err
 	}
 	if !success {
-		return fmt.Errorf("lock for key %s is already held", l.key)
+		return &lockError{
+			err: ErrLockHeld,
+			msg: fmt.Sprintf("lock for key %s is already held", l.key),
+		}
 	}
 	return nil
 }
@@ -123,16 +145,30 @@ func (l *Locker) ExtendLock(ctx context.Context, extension time.Duration) error 
 // - waitTimeout: The maximum time to wait for the lock to become available.
 // Returns an error if the lock could not be acquired within the wait timeout.
 func (l *Locker) WaitLock(ctx context.Context, lockTimeout, waitTimeout time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("lock wait cancelled for key %s: %w", l.key, err)
+	}
+
 	deadline := time.Now().Add(waitTimeout)
 	for time.Now().Before(deadline) {
 		err := l.Lock(ctx, lockTimeout)
 		if err == nil {
 			return nil
 		}
-		// Implementing exponential backoff to avoid busy-waiting.
-		time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
+		if !errors.Is(err, ErrLockHeld) {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("lock wait cancelled for key %s: %w", l.key, ctxErr)
+			}
+			return err
+		}
+		if err := sleepWithJitter(ctx, deadline); err != nil {
+			return fmt.Errorf("lock wait cancelled for key %s: %w", l.key, err)
+		}
 	}
-	return fmt.Errorf("failed to acquire lock for key %s within the wait timeout", l.key)
+	return &lockError{
+		err: ErrLockWaitTimeout,
+		msg: fmt.Sprintf("failed to acquire lock for key %s within the wait timeout", l.key),
+	}
 }
 
 // NewMultiLocker creates a new MultiLocker instance that manages locks for multiple keys.
@@ -202,6 +238,10 @@ func (m *MultiLocker) Lock(ctx context.Context, timeout time.Duration) error {
 // - waitTimeout: The maximum time to wait for all locks to become available.
 // Returns an error if all locks could not be acquired within the wait timeout.
 func (m *MultiLocker) WaitLock(ctx context.Context, lockTimeout, waitTimeout time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("lock wait cancelled: %w", err)
+	}
+
 	deadline := time.Now().Add(waitTimeout)
 
 	for time.Now().Before(deadline) {
@@ -209,11 +249,21 @@ func (m *MultiLocker) WaitLock(ctx context.Context, lockTimeout, waitTimeout tim
 		if err == nil {
 			return nil
 		}
-		// Implementing exponential backoff to avoid busy-waiting.
-		time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
+		if !errors.Is(err, ErrLockHeld) {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("lock wait cancelled: %w", ctxErr)
+			}
+			return err
+		}
+		if err := sleepWithJitter(ctx, deadline); err != nil {
+			return fmt.Errorf("lock wait cancelled: %w", err)
+		}
 	}
 
-	return fmt.Errorf("failed to acquire all locks within the wait timeout")
+	return &lockError{
+		err: ErrLockWaitTimeout,
+		msg: "failed to acquire all locks within the wait timeout",
+	}
 }
 
 // Unlock releases all locks in reverse order of acquisition.
@@ -248,4 +298,29 @@ func (m *MultiLocker) rollback(ctx context.Context, count int) {
 // Keys returns the deduplicated and sorted keys that this MultiLocker manages.
 func (m *MultiLocker) Keys() []string {
 	return m.keys
+}
+
+func sleepWithJitter(ctx context.Context, deadline time.Time) error {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return nil
+	}
+
+	delay := time.Duration(rand.Intn(100)) * time.Millisecond
+	if delay <= 0 {
+		delay = 10 * time.Millisecond
+	}
+	if delay > remaining {
+		delay = remaining
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

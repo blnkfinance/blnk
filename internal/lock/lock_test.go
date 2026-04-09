@@ -110,14 +110,24 @@ func TestLocker_WaitLock_Success(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestLocker_WaitLock_ContextCanceled(t *testing.T) {
+	db, mock := redismock.NewClientMock()
+	locker := NewLocker(db, "test-key", "test-value")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := locker.WaitLock(ctx, 5*time.Second, 2*time.Second)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestLocker_WaitLock_Failure(t *testing.T) {
 	db, mock := redismock.NewClientMock()
 	locker := NewLocker(db, "test-key", "test-value")
 
-	// Simulate failure to acquire the lock within the wait timeout
-	mock.ExpectSetNX("test-key", "test-value", 5*time.Second).SetVal(false)
-
-	err := locker.WaitLock(context.Background(), 5*time.Second, 500*time.Millisecond)
+	err := locker.WaitLock(context.Background(), 5*time.Second, time.Nanosecond)
+	assert.ErrorIs(t, err, ErrLockWaitTimeout)
 	assert.EqualError(t, err, "failed to acquire lock for key test-key within the wait timeout")
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -247,6 +257,18 @@ func TestMultiLocker_WaitLock_Success(t *testing.T) {
 
 	err := multiLocker.WaitLock(context.Background(), 5*time.Second, 2*time.Second)
 	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestMultiLocker_WaitLock_ContextCanceled(t *testing.T) {
+	db, mock := redismock.NewClientMock()
+	multiLocker := NewMultiLocker(db, []string{"key-b", "key-a"}, "test-value")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := multiLocker.WaitLock(ctx, 5*time.Second, 2*time.Second)
+	assert.ErrorIs(t, err, context.Canceled)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 

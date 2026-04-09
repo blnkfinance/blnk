@@ -31,8 +31,10 @@ import (
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/database/mocks"
+	redlock "github.com/blnkfinance/blnk/internal/lock"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/go-redis/redismock/v9"
 	"github.com/hibiken/asynq"
 
 	"github.com/brianvoe/gofakeit/v6"
@@ -43,6 +45,50 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAcquireTransactionLocker(t *testing.T) {
+	t.Run("fail fast when wait timeout disabled", func(t *testing.T) {
+		db, mock := redismock.NewClientMock()
+		blnk := &Blnk{
+			redis: db,
+			config: &config.Configuration{
+				Transaction: config.TransactionConfig{
+					LockDuration: 5 * time.Second,
+				},
+			},
+		}
+		locker := redlock.NewMultiLocker(db, []string{"key-b", "key-a"}, "test-value")
+
+		mock.ExpectSetNX("key-a", "test-value", 5*time.Second).SetVal(true)
+		mock.ExpectSetNX("key-b", "test-value", 5*time.Second).SetVal(true)
+
+		err := blnk.acquireTransactionLocker(context.Background(), locker)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("waits when configured", func(t *testing.T) {
+		db, mock := redismock.NewClientMock()
+		blnk := &Blnk{
+			redis: db,
+			config: &config.Configuration{
+				Transaction: config.TransactionConfig{
+					LockDuration:    5 * time.Second,
+					LockWaitTimeout: time.Second,
+				},
+			},
+		}
+		locker := redlock.NewMultiLocker(db, []string{"key-b", "key-a"}, "test-value")
+
+		mock.ExpectSetNX("key-a", "test-value", 5*time.Second).SetVal(false)
+		mock.ExpectSetNX("key-a", "test-value", 5*time.Second).SetVal(true)
+		mock.ExpectSetNX("key-b", "test-value", 5*time.Second).SetVal(true)
+
+		err := blnk.acquireTransactionLocker(context.Background(), locker)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+}
 
 // pollForTransactionStatus polls for a transaction until it reaches the expected status or a timeout occurs.
 func pollForTransactionStatus(ctx context.Context, ds database.IDataSource, transactionRef string, expectedStatus string, pollInterval time.Duration, timeoutDuration time.Duration) (*model.Transaction, error) {

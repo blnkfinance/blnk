@@ -43,8 +43,9 @@ var (
 		MaxQueueSize:               1000,
 		MaxWorkers:                 10,
 		LockDuration:               30 * time.Minute,
+		LockWaitTimeout:            3 * time.Second,
 		IndexQueuePrefix:           "transactions",
-		EnableCoalescing:           false,
+		EnableCoalescing:           true,
 		EnableQueuedChecks:         false,
 		DisableBatchReferenceCheck: false,
 	}
@@ -156,6 +157,7 @@ type TransactionConfig struct {
 	MaxQueueSize               int           `json:"max_queue_size" envconfig:"BLNK_TRANSACTION_MAX_QUEUE_SIZE"`
 	MaxWorkers                 int           `json:"max_workers" envconfig:"BLNK_TRANSACTION_MAX_WORKERS"`
 	LockDuration               time.Duration `json:"lock_duration" envconfig:"BLNK_TRANSACTION_LOCK_DURATION"`
+	LockWaitTimeout            time.Duration `json:"lock_wait_timeout" envconfig:"BLNK_TRANSACTION_LOCK_WAIT_TIMEOUT"`
 	IndexQueuePrefix           string        `json:"index_queue_prefix" envconfig:"BLNK_TRANSACTION_INDEX_QUEUE_PREFIX"`
 	EnableCoalescing           bool          `json:"enable_coalescing" envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
 	EnableQueuedChecks         bool          `json:"enable_queued_checks" envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
@@ -338,6 +340,14 @@ func (cnf *Configuration) setTransactionDefaults() {
 		cnf.Transaction.LockDuration = defaultTransaction.LockDuration
 	} else {
 		cnf.Transaction.LockDuration = cnf.Transaction.LockDuration * time.Second
+	}
+	if cnf.Transaction.LockWaitTimeout == 0 {
+		cnf.Transaction.LockWaitTimeout = defaultTransaction.LockWaitTimeout
+	} else if cnf.Transaction.LockWaitTimeout > 0 && cnf.Transaction.LockWaitTimeout < time.Second {
+		cnf.Transaction.LockWaitTimeout = cnf.Transaction.LockWaitTimeout * time.Second
+	}
+	if !cnf.Transaction.EnableCoalescing {
+		cnf.Transaction.EnableCoalescing = defaultTransaction.EnableCoalescing
 	}
 	if cnf.Transaction.IndexQueuePrefix == "" {
 		cnf.Transaction.IndexQueuePrefix = defaultTransaction.IndexQueuePrefix

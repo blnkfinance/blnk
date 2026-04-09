@@ -79,6 +79,10 @@ func (a Api) StartReconciliation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if len(req.MatchingRuleIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "matching_rule_ids is required"})
+		return
+	}
 
 	reconciliationID, err := a.blnk.StartReconciliation(c.Request.Context(), req.UploadID, req.Strategy, req.GroupingCriteria, req.MatchingRuleIDs, req.DryRun)
 	if err != nil {
@@ -112,6 +116,14 @@ func (a Api) InstantReconciliation(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.ExternalTransactions) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "external_transactions is required"})
+		return
+	}
+	if len(req.MatchingRuleIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "matching_rule_ids is required"})
 		return
 	}
 

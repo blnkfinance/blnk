@@ -2,8 +2,10 @@ package hotpairs
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
 )
@@ -162,6 +164,12 @@ func RecordContention(ctx context.Context, manager *Manager, source, destination
 
 func IsLockContentionError(err error) bool {
 	if err == nil {
+		return false
+	}
+	if errors.Is(err, redlock.ErrLockHeld) || errors.Is(err, redlock.ErrLockWaitTimeout) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 	msg := strings.ToLower(err.Error())

@@ -2,10 +2,12 @@ package hotpairs
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -155,4 +157,10 @@ func TestResolveQueueLanePromotesOnlyAfterNormalDrain(t *testing.T) {
 func TestQueueLaneFromMetadata(t *testing.T) {
 	require.Equal(t, LaneNormal, QueueLaneFromMetadata(nil))
 	require.Equal(t, LaneHot, QueueLaneFromMetadata(map[string]interface{}{QueueLaneMetaKey: LaneHot}))
+}
+
+func TestIsLockContentionError(t *testing.T) {
+	require.True(t, IsLockContentionError(fmt.Errorf("wrapped: %w", redlock.ErrLockHeld)))
+	require.True(t, IsLockContentionError(fmt.Errorf("wrapped: %w", redlock.ErrLockWaitTimeout)))
+	require.False(t, IsLockContentionError(context.DeadlineExceeded))
 }

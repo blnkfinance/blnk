@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestValidateAndAddDefaults(t *testing.T) {
@@ -76,6 +77,36 @@ func TestValidateAndAddDefaults(t *testing.T) {
 	if cnf.Server.Port != DEFAULT_PORT {
 		t.Errorf("Expected default port %s, got %s", DEFAULT_PORT, cnf.Server.Port)
 	}
+	if cnf.Transaction.LockWaitTimeout != 3*time.Second {
+		t.Errorf("Expected default lock wait timeout %s, got %s", 3*time.Second, cnf.Transaction.LockWaitTimeout)
+	}
+	if !cnf.Transaction.EnableCoalescing {
+		t.Errorf("Expected coalescing to default to enabled")
+	}
+}
+
+func TestValidateAndAddDefaults_TransactionLockWaitTimeout(t *testing.T) {
+	cnf := Configuration{
+		ProjectName: "Test Project",
+		DataSource: DataSourceConfig{
+			Dns: "some-dns",
+		},
+		Redis: RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Transaction: TransactionConfig{
+			LockWaitTimeout: 12,
+		},
+	}
+
+	err := cnf.validateAndAddDefaults()
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if cnf.Transaction.LockWaitTimeout != 12*time.Second {
+		t.Fatalf("Expected LockWaitTimeout to be 12s, got %s", cnf.Transaction.LockWaitTimeout)
+	}
 }
 
 func TestLoadConfigFromFile(t *testing.T) {
@@ -94,6 +125,9 @@ func TestLoadConfigFromFile(t *testing.T) {
 		},
 		Redis: RedisConfig{
 			Dns: "temp-redis",
+		},
+		Transaction: TransactionConfig{
+			LockWaitTimeout: 7,
 		},
 	}
 	if err := json.NewEncoder(tmpFile).Encode(sampleConfig); err != nil {
@@ -124,6 +158,9 @@ func TestLoadConfigFromFile(t *testing.T) {
 	// Check if the DNS was loaded correctly from the file
 	if loadedConfig.DataSource.Dns != "temp-dns" {
 		t.Errorf("Expected DataSource.Dns to be 'temp-dns', got '%s'", loadedConfig.DataSource.Dns)
+	}
+	if loadedConfig.Transaction.LockWaitTimeout != 7*time.Second {
+		t.Errorf("Expected LockWaitTimeout to be '7s', got '%s'", loadedConfig.Transaction.LockWaitTimeout)
 	}
 }
 

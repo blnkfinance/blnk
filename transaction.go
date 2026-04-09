@@ -272,7 +272,7 @@ func (l *Blnk) acquireLock(ctx context.Context, sourceBalanceID, destinationBala
 	// Create a MultiLocker with both balance IDs
 	// MultiLocker handles deduplication (if source == destination) and sorts keys lexicographically
 	locker := redlock.NewMultiLocker(l.redis, []string{sourceBalanceID, destinationBalanceID}, model.GenerateUUIDWithSuffix("loc"))
-	err := locker.Lock(ctx, l.Config().Transaction.LockDuration)
+	err := l.acquireTransactionLocker(ctx, locker)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -1431,7 +1431,7 @@ func (l *Blnk) acquireBalanceSetLock(ctx context.Context, balanceIDs []string) (
 	defer span.End()
 
 	locker := redlock.NewMultiLocker(l.redis, balanceIDs, model.GenerateUUIDWithSuffix("loc"))
-	if err := locker.Lock(ctx, l.Config().Transaction.LockDuration); err != nil {
+	if err := l.acquireTransactionLocker(ctx, locker); err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
@@ -1440,6 +1440,14 @@ func (l *Blnk) acquireBalanceSetLock(ctx context.Context, balanceIDs []string) (
 		attribute.StringSlice("locked.keys", locker.Keys()),
 	))
 	return locker, nil
+}
+
+func (l *Blnk) acquireTransactionLocker(ctx context.Context, locker *redlock.MultiLocker) error {
+	lockCfg := l.Config().Transaction
+	if lockCfg.LockWaitTimeout > 0 {
+		return locker.WaitLock(ctx, lockCfg.LockDuration, lockCfg.LockWaitTimeout)
+	}
+	return locker.Lock(ctx, lockCfg.LockDuration)
 }
 
 func (l *Blnk) loadBalancesForQueuedBatch(ctx context.Context, balanceIDs []string) (map[string]*model.Balance, []*model.Balance, error) {

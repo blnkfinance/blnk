@@ -41,7 +41,7 @@ func TestStartReconciliation(t *testing.T) {
 			Strategy: "",
 		}
 		payloadBytes, _ := request.ToJsonReq(&payload)
-		req := httptest.NewRequest("POST", "/reconciliations", payloadBytes)
+		req := httptest.NewRequest("POST", "/reconciliation/start", payloadBytes)
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -49,7 +49,7 @@ func TestStartReconciliation(t *testing.T) {
 	})
 
 	t.Run("Invalid JSON", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/reconciliations", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest("POST", "/reconciliation/start", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -74,7 +74,7 @@ func TestInstantReconciliation(t *testing.T) {
 			MatchingRuleIDs:      []string{"mr_test"},
 		}
 		payloadBytes, _ := request.ToJsonReq(&payload)
-		req := httptest.NewRequest("POST", "/reconciliations/instant", payloadBytes)
+		req := httptest.NewRequest("POST", "/reconciliation/start-instant", payloadBytes)
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -82,7 +82,7 @@ func TestInstantReconciliation(t *testing.T) {
 	})
 
 	t.Run("Invalid JSON", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/reconciliations/instant", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest("POST", "/reconciliation/start-instant", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -97,7 +97,7 @@ func TestGetReconciliation(t *testing.T) {
 	}
 
 	t.Run("Reconciliation not found", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/reconciliations/rec_nonexistent", nil)
+		req := httptest.NewRequest("GET", "/reconciliation/rec_nonexistent", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 		assert.Equal(t, http.StatusNotFound, resp.Code)
@@ -111,7 +111,7 @@ func TestCreateMatchingRule(t *testing.T) {
 	}
 
 	t.Run("Invalid JSON", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/matching-rules", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest("POST", "/reconciliation/matching-rules", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -134,7 +134,7 @@ func TestUpdateMatchingRule(t *testing.T) {
 			Description: "Updated description",
 		}
 		payloadBytes, _ := request.ToJsonReq(&payload)
-		req := httptest.NewRequest("PUT", "/matching-rules/", payloadBytes)
+		req := httptest.NewRequest("PUT", "/reconciliation/matching-rules/", payloadBytes)
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -142,7 +142,7 @@ func TestUpdateMatchingRule(t *testing.T) {
 	})
 
 	t.Run("Invalid JSON", func(t *testing.T) {
-		req := httptest.NewRequest("PUT", "/matching-rules/mr_test", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest("PUT", "/reconciliation/matching-rules/mr_test", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -157,14 +157,14 @@ func TestDeleteMatchingRule(t *testing.T) {
 	}
 
 	t.Run("Missing rule ID", func(t *testing.T) {
-		req := httptest.NewRequest("DELETE", "/matching-rules/", nil)
+		req := httptest.NewRequest("DELETE", "/reconciliation/matching-rules/", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 
 	t.Run("Delete non-existent rule", func(t *testing.T) {
-		req := httptest.NewRequest("DELETE", "/matching-rules/mr_nonexistent", nil)
+		req := httptest.NewRequest("DELETE", "/reconciliation/matching-rules/mr_nonexistent", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 		assert.Equal(t, http.StatusInternalServerError, resp.Code)

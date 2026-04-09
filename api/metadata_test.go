@@ -33,7 +33,7 @@ func TestUpdateMetadata(t *testing.T) {
 	}
 
 	t.Run("Missing entity ID", func(t *testing.T) {
-		req := httptest.NewRequest("PATCH", "/metadata/update/", nil)
+		req := httptest.NewRequest("POST", "/metadata", nil)
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -41,7 +41,7 @@ func TestUpdateMetadata(t *testing.T) {
 	})
 
 	t.Run("Invalid JSON body", func(t *testing.T) {
-		req := httptest.NewRequest("PATCH", "/metadata/update/ldg_123", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest("POST", "/ldg_123/metadata", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -55,7 +55,7 @@ func TestUpdateMetadata(t *testing.T) {
 			WrongField: "value",
 		}
 		payloadBytes, _ := request.ToJsonReq(&payload)
-		req := httptest.NewRequest("PATCH", "/metadata/update/ldg_123", payloadBytes)
+		req := httptest.NewRequest("POST", "/ldg_123/metadata", payloadBytes)
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
