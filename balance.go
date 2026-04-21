@@ -146,6 +146,10 @@ func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, cur
 
 	balance, err := l.datasource.GetBalanceByIndicator(indicator, currency)
 	if err != nil {
+		if cfg.Transaction.DisableIndicatorAutoCreate {
+			span.RecordError(err)
+			return nil, fmt.Errorf("balance with indicator '%s' not found and auto-creation is disabled", indicator)
+		}
 		span.AddEvent("Creating new balance")
 		balance = &model.Balance{
 			Indicator: indicator,

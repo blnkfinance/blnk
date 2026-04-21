@@ -162,6 +162,7 @@ type TransactionConfig struct {
 	EnableCoalescing           bool          `json:"enable_coalescing" envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
 	EnableQueuedChecks         bool          `json:"enable_queued_checks" envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
 	DisableBatchReferenceCheck bool          `json:"disable_batch_reference_check" envconfig:"BLNK_TRANSACTION_DISABLE_BATCH_REFERENCE_CHECK"`
+	DisableIndicatorAutoCreate bool          `json:"disable_indicator_auto_create" envconfig:"BLNK_TRANSACTION_DISABLE_INDICATOR_AUTO_CREATE"`
 }
 
 type ReconciliationConfig struct {
