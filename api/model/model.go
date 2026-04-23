@@ -175,6 +175,14 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 			return validateDateFormat("2006-01-02T15:04:05Z07:00", dateStr)
 		})),
 		),
+		validation.Field(&t.InflightCommitDate, validation.When(t.InflightCommitDate != "", validation.By(func(value interface{}) error {
+			dateStr, ok := value.(string)
+			if !ok {
+				return errors.New("invalid type for scheduled date")
+			}
+			return validateDateFormat("2006-01-02T15:04:05Z07:00", dateStr)
+		})),
+		),
 	)
 }
 
@@ -226,6 +234,7 @@ func (a *CreateAccount) ToAccount() model.Account {
 func (t *RecordTransaction) ToTransaction() *model.Transaction {
 	var scheduledFor time.Time
 	var inflightExpiryDate time.Time
+	var inflightCommitDate time.Time
 
 	if t.ScheduledFor != "" {
 		scheduledTime, err := time.Parse("2006-01-02T15:04:05Z07:00", t.ScheduledFor)
@@ -247,5 +256,14 @@ func (t *RecordTransaction) ToTransaction() *model.Transaction {
 
 	}
 
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: inflightExpiryDate, Rate: t.Rate, SkipQueue: t.SkipQueue, EffectiveDate: t.EffectiveDate, OverdraftLimit: t.OverdraftLimit, PreciseAmount: t.PreciseAmount, Atomic: t.Atomic}
+	if t.InflightCommitDate != "" {
+		inflightCommit, err := time.Parse("2006-01-02T15:04:05Z07:00", t.InflightCommitDate)
+		if err != nil {
+			logrus.Error(err)
+		}
+
+		inflightCommitDate = inflightCommit
+	}
+
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: inflightExpiryDate, InflightCommitDate: inflightCommitDate, Rate: t.Rate, SkipQueue: t.SkipQueue, EffectiveDate: t.EffectiveDate, OverdraftLimit: t.OverdraftLimit, PreciseAmount: t.PreciseAmount, Atomic: t.Atomic}
 }

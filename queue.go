@@ -295,3 +295,49 @@ func (q *Queue) GetTransactionFromQueue(transactionID string) (*model.Transactio
 	}
 	return nil, nil // Return nil if transaction is not found in any queue
 }
+
+// queueInflightCommit enqueues a task to handle inflight commit for a transaction.
+//
+// Parameters:
+// - transactionID string: The ID of the transaction.
+// - commitAt time.Time: The scheduled time to automatically commit the inflight transaction.
+//
+// Returns:
+// - error: An error if the task could not be enqueued.
+func (q *Queue) queueInflightCommit(transactionID string, commitAt time.Time) error {
+	IPayload, err := json.Marshal(transactionID)
+	if err != nil {
+		return err
+	}
+
+	taskOptions := []asynq.Option{
+		asynq.TaskID(transactionID),
+		asynq.Queue(q.config.Queue.InflightCommitQueue),
+		asynq.ProcessIn(time.Until(commitAt)),
+	}
+
+	task := asynq.NewTask(q.config.Queue.InflightCommitQueue, IPayload, taskOptions...)
+	_, err = q.Client.Enqueue(task)
+	if err != nil {
+		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to enqueue inflight commit")
+		return err
+	}
+
+	logrus.WithField("transaction_id", transactionID).Debug("successfully enqueued inflight commit")
+	return nil
+}
+
+// QueueInflightCommit schedules an automatic commit for an inflight transaction at the specified date.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - transaction *model.Transaction: The transaction to be committed automatically.
+//
+// Returns:
+// - error: An error if the task could not be enqueued.
+func (q *Queue) QueueInflightCommit(ctx context.Context, transaction *model.Transaction) error {
+	if !transaction.InflightCommitDate.IsZero() {
+		return q.queueInflightCommit(transaction.TransactionID, transaction.InflightCommitDate)
+	}
+	return nil
+}

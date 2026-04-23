@@ -109,6 +109,30 @@ func TestValidateAndAddDefaults_TransactionLockWaitTimeout(t *testing.T) {
 	}
 }
 
+func TestValidateAndAddDefaults_TransactionLockWaitTimeoutAlreadyDuration(t *testing.T) {
+	cnf := Configuration{
+		ProjectName: "Test Project",
+		DataSource: DataSourceConfig{
+			Dns: "some-dns",
+		},
+		Redis: RedisConfig{
+			Dns: "localhost:6379",
+		},
+		Transaction: TransactionConfig{
+			LockWaitTimeout: 5 * time.Second,
+		},
+	}
+
+	err := cnf.validateAndAddDefaults()
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if cnf.Transaction.LockWaitTimeout != 5*time.Second {
+		t.Fatalf("Expected LockWaitTimeout to remain 5s, got %s", cnf.Transaction.LockWaitTimeout)
+	}
+}
+
 func TestLoadConfigFromFile(t *testing.T) {
 	// Create a temporary file
 	tmpFile, err := os.CreateTemp("", "blnk.json")

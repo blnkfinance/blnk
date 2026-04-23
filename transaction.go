@@ -1828,10 +1828,21 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		attribute.String("transaction.id", transaction.TransactionID),
 	))
 
-	err = l.queue.QueueInflightExpiry(ctx, transaction)
-	if err != nil {
-		span.RecordError(err)
-		return nil, l.logAndRecordError(span, "failed to queue inflight expiry", err)
+	if !transaction.InflightExpiryDate.IsZero() {
+		err = l.queue.QueueInflightExpiry(ctx, transaction)
+		if err != nil {
+			span.RecordError(err)
+			return nil, l.logAndRecordError(span, "failed to queue inflight expiry", err)
+		}
+	}
+
+	// Queue an automatic commit task if inflight_commit_date is set.
+	if !transaction.InflightCommitDate.IsZero() {
+		err = l.queue.QueueInflightCommit(ctx, transaction)
+		if err != nil {
+			span.RecordError(err)
+			return nil, l.logAndRecordError(span, "failed to queue inflight commit", err)
+		}
 	}
 
 	return transaction, nil

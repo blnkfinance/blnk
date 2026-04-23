@@ -40,6 +40,7 @@ type RecordTransaction struct {
 	BalanceId          string                 `json:"balance_id"`
 	ScheduledFor       string                 `json:"scheduled_for"`
 	InflightExpiryDate string                 `json:"inflight_expiry_date,omitempty"`
+	InflightCommitDate string                 `json:"inflight_commit_date,omitempty"`
 	Sources            []model.Distribution   `json:"sources"`
 	Destinations       []model.Distribution   `json:"destinations"`
 	MetaData           map[string]interface{} `json:"meta_data"`

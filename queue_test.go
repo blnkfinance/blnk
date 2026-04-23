@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/blnkfinance/blnk/config"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
@@ -97,6 +98,49 @@ func TestEnqueueScheduledTransaction(t *testing.T) {
 		return
 	}
 	assert.Equal(t, "tx_123", task.ID)
+}
+
+func TestQueueInflightCommitSkipsWhenDateIsZero(t *testing.T) {
+	conf := &config.Configuration{
+		Queue: config.QueueConfig{
+			InflightCommitQueue: "inflight_commit_queue",
+		},
+	}
+	q := &Queue{config: conf}
+
+	transaction := getTransactionMock(100, false)
+	transaction.InflightCommitDate = time.Time{}
+
+	err := q.QueueInflightCommit(context.Background(), &transaction)
+	assert.NoError(t, err)
+}
+
+func TestQueueInflightCommitEnqueuesTask(t *testing.T) {
+	conf := &config.Configuration{
+		Queue: config.QueueConfig{
+			InflightCommitQueue: "inflight_commit_queue",
+			NumberOfQueues:      1,
+		},
+	}
+	config.ConfigStore.Store(conf)
+
+	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
+
+	q := NewQueue(conf, client)
+	q.Inspector = inspector
+
+	transaction := getTransactionMock(100, false)
+	transaction.InflightCommitDate = time.Now().Add(1 * time.Hour)
+
+	err := q.QueueInflightCommit(context.Background(), &transaction)
+	assert.NoError(t, err)
+
+	task, err := inspector.GetTaskInfo(conf.Queue.InflightCommitQueue, transaction.TransactionID)
+	if err != nil {
+		return
+	}
+	assert.Equal(t, transaction.TransactionID, task.ID)
 }
 
 func TestEnqueueWithAsynqClientEnqueueError(t *testing.T) {

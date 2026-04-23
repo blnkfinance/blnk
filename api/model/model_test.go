@@ -289,6 +289,34 @@ func TestValidateRecordTransaction(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "Valid Transaction - Valid InflightCommitDate",
+			transaction: RecordTransaction{
+				Amount:             100,
+				Currency:           "USD",
+				Reference:          "ref1",
+				Description:        "Test transaction",
+				Source:             "source1",
+				Destination:        "dest1",
+				Inflight:           true,
+				InflightCommitDate: "2024-04-22T15:28:03+00:00",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Invalid Transaction - Invalid InflightCommitDate",
+			transaction: RecordTransaction{
+				Amount:             100,
+				Currency:           "USD",
+				Reference:          "ref1",
+				Description:        "Test transaction",
+				Source:             "source1",
+				Destination:        "dest1",
+				Inflight:           true,
+				InflightCommitDate: "invalid-date",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -359,6 +387,7 @@ func TestToTransaction(t *testing.T) {
 	now := time.Now()
 	scheduledFor := now.Add(24 * time.Hour)
 	inflightExpiryDate := now.Add(48 * time.Hour)
+	inflightCommitDate := now.Add(72 * time.Hour)
 
 	recordTransaction := RecordTransaction{
 		Currency:           "USD",
@@ -375,6 +404,7 @@ func TestToTransaction(t *testing.T) {
 		Inflight:           true,
 		Precision:          2,
 		InflightExpiryDate: inflightExpiryDate.Format(time.RFC3339),
+		InflightCommitDate: inflightCommitDate.Format(time.RFC3339),
 		Rate:               1.5,
 		SkipQueue:          true,
 	}
@@ -395,6 +425,24 @@ func TestToTransaction(t *testing.T) {
 	assert.Equal(t, recordTransaction.Precision, transaction.Precision)
 	assert.Equal(t, recordTransaction.Rate, transaction.Rate)
 	assert.Equal(t, recordTransaction.SkipQueue, transaction.SkipQueue)
+	assert.False(t, transaction.InflightCommitDate.IsZero(), "InflightCommitDate should be parsed and set")
+	assert.WithinDuration(t, inflightCommitDate, transaction.InflightCommitDate, time.Second)
+}
+
+func TestToTransactionInflightCommitDateEmpty(t *testing.T) {
+	recordTransaction := RecordTransaction{
+		Currency:    "USD",
+		Source:      "source1",
+		Description: "Test transaction",
+		Reference:   "ref1",
+		Destination: "dest1",
+		Amount:      100,
+		Inflight:    true,
+	}
+
+	transaction := recordTransaction.ToTransaction()
+
+	assert.True(t, transaction.InflightCommitDate.IsZero(), "InflightCommitDate should be zero when not provided")
 }
 
 func TestValidateCreateBalanceMonitor(t *testing.T) {

@@ -82,6 +82,7 @@ type Transaction struct {
 	EffectiveDate      *time.Time             `json:"effective_date,omitempty"`
 	ScheduledFor       time.Time              `json:"scheduled_for,omitempty"`
 	InflightExpiryDate time.Time              `json:"inflight_expiry_date,omitempty"`
+	InflightCommitDate time.Time              `json:"inflight_commit_date,omitempty"`
 	MetaData           map[string]interface{} `json:"meta_data,omitempty"`
 }
 
