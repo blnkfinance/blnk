@@ -325,6 +325,57 @@ func TestValidate(t *testing.T) {
 			t.Error("expected error for invalid logical_operator")
 		}
 	})
+
+	t.Run("rejects unknown filter operator", func(t *testing.T) {
+		// e.g. clients sending "equals" instead of "eq" used to be silently
+		// dropped, leaving the query unfiltered (issue #282).
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "status", Operator: Operator("equals"), Value: "APPLIED"},
+			},
+		}
+
+		err := Validate(filters, "transactions")
+		if err == nil {
+			t.Error("expected error for unknown operator 'equals'")
+		}
+	})
+
+	t.Run("rejects empty filter operator", func(t *testing.T) {
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "status", Operator: Operator(""), Value: "APPLIED"},
+			},
+		}
+
+		err := Validate(filters, "transactions")
+		if err == nil {
+			t.Error("expected error for empty operator")
+		}
+	})
+}
+
+func TestIsValidOperator(t *testing.T) {
+	valid := []Operator{
+		OpEqual, OpNotEqual,
+		OpGreaterThan, OpGreaterThanOrEqual,
+		OpLessThan, OpLessThanOrEqual,
+		OpIn, OpBetween,
+		OpLike, OpILike,
+		OpIsNull, OpIsNotNull,
+	}
+	for _, op := range valid {
+		if !IsValidOperator(op) {
+			t.Errorf("expected %q to be a valid operator", op)
+		}
+	}
+
+	invalid := []Operator{"", "equals", "EQ", "==", "not_equals", "contains"}
+	for _, op := range invalid {
+		if IsValidOperator(op) {
+			t.Errorf("expected %q to be invalid", op)
+		}
+	}
 }
 
 func TestValidateSortField(t *testing.T) {
@@ -587,6 +638,23 @@ func TestBuild(t *testing.T) {
 		_, err := Build(filters, "transactions", "t", 1)
 		if err == nil {
 			t.Error("expected error for invalid field")
+		}
+	})
+
+	t.Run("returns error for unknown operator instead of silently dropping filter", func(t *testing.T) {
+		// Regression for issue #282: a filter with an unknown operator (e.g.
+		// "equals" rather than "eq") used to fall through buildStandardCondition's
+		// default branch, returning an empty condition. The filter was silently
+		// dropped and the query ran unfiltered, returning a misleading first row.
+		filters := &QueryFilterSet{
+			Filters: []QueryFilter{
+				{Field: "status", Operator: Operator("equals"), Value: "APPLIED"},
+			},
+		}
+
+		_, err := Build(filters, "transactions", "t", 1)
+		if err == nil {
+			t.Error("expected error for unknown operator 'equals'; instead the filter was likely silently dropped")
 		}
 	})
 }

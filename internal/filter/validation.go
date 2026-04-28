@@ -23,6 +23,10 @@ func Validate(filters *QueryFilterSet, table string) error {
 	}
 
 	for _, f := range filters.Filters {
+		if !IsValidOperator(f.Operator) {
+			return fmt.Errorf("invalid operator '%s' for field '%s': must be one of eq, ne, gt, gte, lt, lte, in, between, like, ilike, isnull, isnotnull", f.Operator, f.Field)
+		}
+
 		if strings.HasPrefix(f.Field, "meta_data.") && validFields["meta_data"] {
 			jsonKey := strings.TrimPrefix(f.Field, "meta_data.")
 			if !jsonKeyRegex.MatchString(jsonKey) {

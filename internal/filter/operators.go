@@ -47,3 +47,17 @@ func ResolveLogicalOperator(s string) LogicalOperator {
 func IsValidLogicalOperator(op LogicalOperator) bool {
 	return op == "" || op == LogicalAnd || op == LogicalOr
 }
+
+// IsValidOperator reports whether op is one of the supported filter operators.
+func IsValidOperator(op Operator) bool {
+	switch op {
+	case OpEqual, OpNotEqual,
+		OpGreaterThan, OpGreaterThanOrEqual,
+		OpLessThan, OpLessThanOrEqual,
+		OpIn, OpBetween,
+		OpLike, OpILike,
+		OpIsNull, OpIsNotNull:
+		return true
+	}
+	return false
+}
