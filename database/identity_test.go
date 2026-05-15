@@ -26,6 +26,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -91,6 +92,105 @@ func TestCreateIdentity_Fail(t *testing.T) {
 	_, err = ds.CreateIdentity(identity)
 	assert.Error(t, err)
 	assert.Equal(t, apierror.ErrInternalServer, err.(apierror.APIError).Code)
+}
+
+func TestCreateIdentity_CallerSuppliedID_Preserved(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	const callerID = "idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2c"
+	identity := model.Identity{
+		IdentityID:   callerID,
+		IdentityType: "individual",
+		FirstName:    "John",
+		LastName:     "Doe",
+	}
+
+	mock.ExpectExec("INSERT INTO blnk.identity").
+		WithArgs(callerID, identity.IdentityType, identity.FirstName, identity.LastName, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	created, err := ds.CreateIdentity(identity)
+	assert.NoError(t, err)
+	assert.Equal(t, callerID, created.IdentityID, "caller-supplied identity_id must be preserved")
+}
+
+func TestCreateIdentity_CallerSuppliedID_BadPrefix(t *testing.T) {
+	db, _, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	identity := model.Identity{
+		IdentityID:   "user_123", // missing idt_ prefix
+		IdentityType: "individual",
+		FirstName:    "John",
+		LastName:     "Doe",
+	}
+
+	_, err = ds.CreateIdentity(identity)
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrBadRequest, err.(apierror.APIError).Code)
+}
+
+func TestCreateIdentity_CallerSuppliedID_BadUUID(t *testing.T) {
+	db, _, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	cases := []string{
+		"idt_",                                       // empty suffix
+		"idt_not-a-uuid",                             // non-UUID suffix
+		"idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2",    // truncated UUID
+		"idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2cZZ", // trailing garbage
+		"idt_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",   // non-hex chars
+	}
+
+	for _, id := range cases {
+		identity := model.Identity{
+			IdentityID:   id,
+			IdentityType: "individual",
+			FirstName:    "John",
+			LastName:     "Doe",
+		}
+		_, err := ds.CreateIdentity(identity)
+		assert.Error(t, err, "expected error for id %q", id)
+		if apiErr, ok := err.(apierror.APIError); ok {
+			assert.Equal(t, apierror.ErrBadRequest, apiErr.Code, "expected 400 for id %q", id)
+		} else {
+			t.Errorf("expected apierror.APIError for id %q, got %T", id, err)
+		}
+	}
+}
+
+func TestCreateIdentity_CallerSuppliedID_DuplicateConflict(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	const callerID = "idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2c"
+	identity := model.Identity{
+		IdentityID:   callerID,
+		IdentityType: "individual",
+		FirstName:    "John",
+		LastName:     "Doe",
+	}
+
+	mock.ExpectExec("INSERT INTO blnk.identity").
+		WithArgs(callerID, identity.IdentityType, identity.FirstName, identity.LastName, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnError(&pq.Error{Code: "23505", Message: "unique_violation"})
+
+	_, err = ds.CreateIdentity(identity)
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrConflict, err.(apierror.APIError).Code)
 }
 
 func TestGetIdentityByID_NotFound(t *testing.T) {

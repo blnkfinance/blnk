@@ -24,13 +24,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/lib/pq"
+
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/model"
 )
 
 // CreateIdentity inserts a new identity record into the database.
-// It generates a unique IdentityID, sets the creation timestamp, and stores the identity metadata.
+//
+// IdentityID handling:
+//   - If the caller supplies identity.IdentityID, it is preserved as-is.
+//     The value must carry the canonical "idt_" prefix followed by a valid
+//     UUID; otherwise the request is rejected with a 400. This lets callers
+//     derive deterministic identity ids (e.g. UUIDv5 of an external holder
+//     key) and rely on the UNIQUE constraint on identity_id for safe
+//     concurrent creation: parallel requests for the same external holder
+//     produce identical ids, one wins the insert, the others receive 409
+//     Conflict and can fetch the existing row.
+//   - If identity.IdentityID is empty, a fresh id is generated (existing
+//     behaviour).
+//
 // Parameters:
 // - identity: The identity object to be inserted.
 // Returns:
@@ -42,8 +57,17 @@ func (d Datasource) CreateIdentity(identity model.Identity) (model.Identity, err
 		return identity, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
-	// Generate a unique identity ID and set the creation timestamp
-	identity.IdentityID = model.GenerateUUIDWithSuffix("idt")
+	// Honor a caller-supplied id when present; otherwise generate one.
+	if identity.IdentityID == "" {
+		identity.IdentityID = model.GenerateUUIDWithSuffix("idt")
+	} else {
+		if !strings.HasPrefix(identity.IdentityID, "idt_") {
+			return identity, apierror.NewAPIError(apierror.ErrBadRequest, "identity_id must start with the 'idt_' prefix", nil)
+		}
+		if _, err := uuid.Parse(strings.TrimPrefix(identity.IdentityID, "idt_")); err != nil {
+			return identity, apierror.NewAPIError(apierror.ErrBadRequest, "identity_id suffix after 'idt_' must be a valid UUID", err)
+		}
+	}
 	identity.CreatedAt = time.Now()
 
 	// Insert the identity record into the database
@@ -51,8 +75,13 @@ func (d Datasource) CreateIdentity(identity model.Identity) (model.Identity, err
 		INSERT INTO blnk.identity (identity_id, identity_type, first_name, last_name, other_names, gender, dob, email_address, phone_number, nationality, organization_name, category, street, country, state, post_code, city, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`, identity.IdentityID, identity.IdentityType, identity.FirstName, identity.LastName, identity.OtherNames, identity.Gender, identity.DOB, identity.EmailAddress, identity.PhoneNumber, identity.Nationality, identity.OrganizationName, identity.Category, identity.Street, identity.Country, identity.State, identity.PostCode, identity.City, identity.CreatedAt, metaDataJSON)
-	// Handle any errors that occur during insertion
 	if err != nil {
+		// Surface unique_violation on identity_id as 409 so callers using
+		// deterministic ids can detect "already created by a concurrent
+		// request" and fetch the existing row.
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code.Name() == "unique_violation" {
+			return identity, apierror.NewAPIError(apierror.ErrConflict, fmt.Sprintf("Identity already exists: %s", identity.IdentityID), err)
+		}
 		return identity, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to create identity", err)
 	}
 
