@@ -52,3 +52,52 @@ type InflightUpdate struct {
 	Amount        float64  `json:"amount"`
 	PreciseAmount *big.Int `json:"precise_amount,omitempty"`
 }
+
+// MaxBulkInflightItems caps the number of transactions accepted in a single
+// bulk-commit or bulk-void call. Bulk calls are processed synchronously, so
+// the cap exists to keep request latency and lock-holding bounded.
+const MaxBulkInflightItems = 100
+
+// BulkInflightVoidRequest voids many independently-created inflight
+// transactions in one call. Each id is processed independently; partial
+// failures are reported per-item in the response and do not abort the rest
+// of the batch.
+type BulkInflightVoidRequest struct {
+	TransactionIDs []string `json:"transaction_ids"`
+}
+
+// BulkInflightCommitItem describes one transaction in a bulk-commit request.
+// Amount/PreciseAmount carry the same semantics as the single-tx endpoint:
+// zero means commit the full remaining inflight amount; non-zero performs a
+// partial commit. PreciseAmount, when set, wins over Amount.
+type BulkInflightCommitItem struct {
+	TransactionID string   `json:"transaction_id"`
+	Amount        float64  `json:"amount,omitempty"`
+	PreciseAmount *big.Int `json:"precise_amount,omitempty"`
+}
+
+// BulkInflightCommitRequest commits many independently-created inflight
+// transactions in one call. Unlike the void variant, each item can carry
+// its own amount for partial commits.
+type BulkInflightCommitRequest struct {
+	Items []BulkInflightCommitItem `json:"items"`
+}
+
+// BulkInflightResult is the per-item outcome reported in BulkInflightResponse.
+// On success Status == "succeeded" and Code is empty. On failure Status ==
+// "failed" with a stable Code (e.g. "ALREADY_VOIDED", "NOT_FOUND") that
+// callers can branch on, plus a human-readable Message.
+type BulkInflightResult struct {
+	TransactionID string `json:"transaction_id"`
+	Status        string `json:"status"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
+// BulkInflightResponse is the envelope returned by both bulk endpoints.
+// Succeeded + Failed == len(Results).
+type BulkInflightResponse struct {
+	Succeeded int                  `json:"succeeded"`
+	Failed    int                  `json:"failed"`
+	Results   []BulkInflightResult `json:"results"`
+}

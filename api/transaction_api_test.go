@@ -32,6 +32,7 @@ import (
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/brianvoe/gofakeit/v6"
+	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
 
 	"github.com/blnkfinance/blnk/model"
@@ -932,4 +933,165 @@ func TestRefundTransaction_API(t *testing.T) {
 // does not depend on the unexported refundTransactionRequest type.
 type refundBody struct {
 	SkipQueue bool `json:"skip_queue"`
+}
+
+// createInflightForBulk is a small helper that mirrors the inflight-creation
+// dance used elsewhere in this file, returning the resulting transaction id.
+func createInflightForBulk(t *testing.T, router *gin.Engine, source, dest, currency string, amount float64) string {
+	t.Helper()
+	payload := model2.RecordTransaction{
+		Amount:         amount,
+		Precision:      100,
+		Reference:      "inflight_bulk_" + gofakeit.UUID(),
+		Description:    "bulk inflight seed",
+		Currency:       currency,
+		Source:         source,
+		Destination:    dest,
+		AllowOverDraft: true,
+		Inflight:       true,
+		SkipQueue:      true,
+	}
+	payloadBytes, _ := request.ToJsonReq(&payload)
+	var resp model.Transaction
+	req := TestRequest{
+		Payload:  payloadBytes,
+		Response: &resp,
+		Method:   "POST",
+		Route:    "/transactions",
+		Router:   router,
+	}
+	rec, err := SetUpTestRequest(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	require.Equal(t, "INFLIGHT", resp.Status)
+	return resp.TransactionID
+}
+
+// TestBulkVoidInflight_Integration end-to-end verifies that the bulk-void
+// endpoint voids N independently-created inflight transactions in one call
+// and reports per-item success in the response body.
+func TestBulkVoidInflight_Integration(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	ctx := context.Background()
+	ledger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+	assert.NoError(t, err)
+
+	src, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "USD"})
+	assert.NoError(t, err)
+	dst, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "USD"})
+	assert.NoError(t, err)
+
+	// 1. Create 3 independent inflight transactions
+	ids := []string{
+		createInflightForBulk(t, router, src.BalanceID, dst.BalanceID, "USD", 100),
+		createInflightForBulk(t, router, src.BalanceID, dst.BalanceID, "USD", 200),
+		createInflightForBulk(t, router, src.BalanceID, dst.BalanceID, "USD", 50),
+	}
+
+	// 2. Bulk-void them
+	voidReq := model2.BulkInflightVoidRequest{TransactionIDs: ids}
+	voidBytes, _ := request.ToJsonReq(&voidReq)
+	var voidResp model2.BulkInflightResponse
+	rec, err := SetUpTestRequest(TestRequest{
+		Payload:  voidBytes,
+		Response: &voidResp,
+		Method:   "POST",
+		Route:    "/transactions/inflight/bulk-void",
+		Router:   router,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 3, voidResp.Succeeded)
+	assert.Equal(t, 0, voidResp.Failed)
+	require.Len(t, voidResp.Results, 3)
+	for _, r := range voidResp.Results {
+		assert.Equal(t, "succeeded", r.Status, "transaction %s should have succeeded", r.TransactionID)
+	}
+
+	// 3. Double-void: every id should now report ALREADY_VOIDED (per-item
+	//    idempotency, not a bulk-level error). voidBytes is a *bytes.Buffer
+	//    drained by the first ServeHTTP, so rebuild it for the retry.
+	voidBytes2, _ := request.ToJsonReq(&voidReq)
+	rec2, err := SetUpTestRequest(TestRequest{
+		Payload:  voidBytes2,
+		Response: &voidResp,
+		Method:   "POST",
+		Route:    "/transactions/inflight/bulk-void",
+		Router:   router,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+	assert.Equal(t, 0, voidResp.Succeeded)
+	assert.Equal(t, 3, voidResp.Failed)
+	for _, r := range voidResp.Results {
+		assert.Equal(t, "failed", r.Status)
+		assert.Equal(t, "ALREADY_VOIDED", r.Code, "expected stable code on retry of voided txn")
+	}
+
+	// 4. Balances are back to zero (all inflight cleared)
+	sb, _ := b.GetBalanceByID(ctx, src.BalanceID, nil, false)
+	db, _ := b.GetBalanceByID(ctx, dst.BalanceID, nil, false)
+	assert.Equal(t, int64(0), sb.InflightBalance.Int64())
+	assert.Equal(t, int64(0), db.InflightBalance.Int64())
+}
+
+// TestBulkCommitInflight_Integration end-to-end verifies that the
+// bulk-commit endpoint commits N independent inflight transactions and
+// surfaces per-id errors (e.g. NOT_FOUND for an unknown id mixed in)
+// without aborting the rest of the batch.
+func TestBulkCommitInflight_Integration(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	cnf, err := config.Fetch()
+	require.NoError(t, err)
+	cleanup := StartTestAsynqWorker(t, cnf, b, fmt.Sprintf("%s_%d", cnf.Queue.TransactionQueue, 1))
+	defer cleanup()
+
+	ctx := context.Background()
+	ledger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+	assert.NoError(t, err)
+
+	src, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "GBP"})
+	assert.NoError(t, err)
+	dst, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "GBP"})
+	assert.NoError(t, err)
+
+	// 1. Create 2 independent inflight transactions
+	id1 := createInflightForBulk(t, router, src.BalanceID, dst.BalanceID, "GBP", 100)
+	id2 := createInflightForBulk(t, router, src.BalanceID, dst.BalanceID, "GBP", 200)
+
+	// 2. Bulk-commit them, plus a deliberately-unknown id to verify partial
+	//    failure handling.
+	commitReq := model2.BulkInflightCommitRequest{
+		Items: []model2.BulkInflightCommitItem{
+			{TransactionID: id1},
+			{TransactionID: id2},
+			{TransactionID: "txn_does_not_exist"},
+		},
+	}
+	commitBytes, _ := request.ToJsonReq(&commitReq)
+	var resp model2.BulkInflightResponse
+	rec, err := SetUpTestRequest(TestRequest{
+		Payload:  commitBytes,
+		Response: &resp,
+		Method:   "POST",
+		Route:    "/transactions/inflight/bulk-commit",
+		Router:   router,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 2, resp.Succeeded)
+	assert.Equal(t, 1, resp.Failed)
+	require.Len(t, resp.Results, 3)
+	assert.Equal(t, "succeeded", resp.Results[0].Status)
+	assert.Equal(t, "succeeded", resp.Results[1].Status)
+	assert.Equal(t, "failed", resp.Results[2].Status)
+	assert.Equal(t, "NOT_FOUND", resp.Results[2].Code)
 }

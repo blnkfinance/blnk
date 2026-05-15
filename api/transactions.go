@@ -25,6 +25,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	blnk "github.com/blnkfinance/blnk"
 	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
@@ -558,4 +559,129 @@ func (a Api) RecoverQueuedTransactions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"recovered": recovered, "threshold": threshold.String()})
+}
+
+// bulkInflightMaxWorkers caps the worker-pool size used by the bulk handlers.
+// 8 is a deliberate compromise: large enough to win meaningful concurrency
+// vs sequential N round-trips, small enough not to flood the lock service or
+// connection pool when many bulk calls are in flight.
+const bulkInflightMaxWorkers = 8
+
+// toAPIResults converts service-layer BulkInflightOutcome values to the
+// public BulkInflightResult shape returned by the handlers.
+func toAPIResults(outcomes []blnk.BulkInflightOutcome) (model2.BulkInflightResponse, int) {
+	resp := model2.BulkInflightResponse{
+		Results: make([]model2.BulkInflightResult, len(outcomes)),
+	}
+	for i, o := range outcomes {
+		r := model2.BulkInflightResult{TransactionID: o.TransactionID}
+		if o.Err == nil {
+			r.Status = "succeeded"
+			resp.Succeeded++
+		} else {
+			r.Status = "failed"
+			r.Code = o.Code
+			r.Message = o.Err.Error()
+			resp.Failed++
+		}
+		resp.Results[i] = r
+	}
+	return resp, resp.Failed
+}
+
+// BulkVoidInflight voids many independently-created inflight transactions
+// in a single call. Each id is processed in its own worker; per-item
+// failures are reported in the response body and do not abort the rest of
+// the batch. Returns 200 with the breakdown even when some items fail.
+//
+// Responses:
+// - 400 Bad Request: malformed payload, empty list, or > MaxBulkInflightItems.
+// - 200 OK: bulk processed; see succeeded/failed counts in body.
+func (a Api) BulkVoidInflight(c *gin.Context) {
+	var req model2.BulkInflightVoidRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.TransactionIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "transaction_ids cannot be empty"})
+		return
+	}
+	if len(req.TransactionIDs) > model2.MaxBulkInflightItems {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "too many transaction_ids; max is " + strconv.Itoa(model2.MaxBulkInflightItems),
+		})
+		return
+	}
+
+	items := make([]blnk.BulkInflightItem, len(req.TransactionIDs))
+	for i, id := range req.TransactionIDs {
+		items[i] = blnk.BulkInflightItem{TransactionID: id}
+	}
+
+	outcomes, err := a.blnk.BulkInflightUpdate(c.Request.Context(), blnk.BulkInflightVoid, items, bulkInflightMaxWorkers)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	resp, _ := toAPIResults(outcomes)
+	c.JSON(http.StatusOK, resp)
+}
+
+// BulkCommitInflight commits many independently-created inflight
+// transactions in a single call. Unlike the void variant, each item may
+// carry an optional `amount` / `precise_amount` for partial commits; zero
+// or missing means commit the full remaining inflight amount.
+//
+// Responses:
+// - 400 Bad Request: malformed payload, empty list, or > MaxBulkInflightItems.
+// - 200 OK: bulk processed; see succeeded/failed counts in body.
+func (a Api) BulkCommitInflight(c *gin.Context) {
+	var req model2.BulkInflightCommitRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "items cannot be empty"})
+		return
+	}
+	if len(req.Items) > model2.MaxBulkInflightItems {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "too many items; max is " + strconv.Itoa(model2.MaxBulkInflightItems),
+		})
+		return
+	}
+
+	cnf, err := config.Fetch()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ds, err := database.GetDBConnection(cnf)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	items := make([]blnk.BulkInflightItem, len(req.Items))
+	for i, it := range req.Items {
+		// Match single-tx semantics: precise_amount wins; else apply precision
+		// via the same DB-lookup helper used by UpdateInflightStatus.
+		var amount *big.Int
+		if it.PreciseAmount != nil {
+			amount = it.PreciseAmount
+		} else {
+			amount = model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: it.Amount, TransactionID: it.TransactionID}, ds.Conn)
+		}
+		items[i] = blnk.BulkInflightItem{TransactionID: it.TransactionID, Amount: amount}
+	}
+
+	outcomes, err := a.blnk.BulkInflightUpdate(c.Request.Context(), blnk.BulkInflightCommit, items, bulkInflightMaxWorkers)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	resp, _ := toAPIResults(outcomes)
+	c.JSON(http.StatusOK, resp)
 }
