@@ -6949,3 +6949,125 @@ func TestGetBalanceAtTime_Mock(t *testing.T) {
 		mockDS.AssertExpectations(t)
 	})
 }
+
+// TestRefundWorkerWithOptions verifies that RefundWorkerWithOptions
+// honors an explicit skipQueue decision regardless of the SkipQueue
+// value on the queued job.
+//
+// This is the regression guard for the /refund-transaction API gap:
+// skip_queue is a request-time routing flag and is not persisted, so a
+// transaction fetched from storage for a refund always has
+// SkipQueue=false. The plain RefundWorker therefore can never produce a
+// synchronous refund. RefundWorkerWithOptions(true) must apply the
+// refund immediately (APPLIED) even though the job's own SkipQueue is
+// false.
+func TestRefundWorkerWithOptions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping refund worker test in short mode")
+	}
+
+	ctx := context.Background()
+	cnf := &config.Configuration{
+		Redis: config.RedisConfig{
+			Dns: "localhost:6379",
+		},
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
+		},
+		Queue: config.QueueConfig{
+			WebhookQueue:     "webhook_queue_test",
+			IndexQueue:       "index_queue_test",
+			TransactionQueue: "transaction_queue_test",
+			NumberOfQueues:   1,
+		},
+		Server: config.ServerConfig{
+			SecretKey: "test-secret",
+		},
+		Transaction: config.TransactionConfig{
+			BatchSize:        100,
+			MaxQueueSize:     1000,
+			LockDuration:     time.Second * 30,
+			IndexQueuePrefix: "test_index",
+		},
+	}
+	config.ConfigStore.Store(cnf)
+
+	ds, err := database.NewDataSource(cnf)
+	require.NoError(t, err, "Failed to create datasource")
+
+	blnk, err := NewBlnk(ds)
+	require.NoError(t, err, "Failed to create Blnk instance")
+
+	source, err := ds.CreateBalance(model.Balance{Currency: "USD", LedgerID: "general_ledger_id"})
+	require.NoError(t, err, "Failed to create source balance")
+	dest, err := ds.CreateBalance(model.Balance{Currency: "USD", LedgerID: "general_ledger_id"})
+	require.NoError(t, err, "Failed to create destination balance")
+
+	// Apply an original transaction synchronously.
+	txnRef := "txn_" + model.GenerateUUIDWithSuffix("refund_opts_test")
+	queuedTxn, err := blnk.QueueTransaction(ctx, &model.Transaction{
+		Reference:      txnRef,
+		Source:         source.BalanceID,
+		Destination:    dest.BalanceID,
+		Amount:         500,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		Precision:      100,
+		SkipQueue:      true,
+	})
+	require.NoError(t, err, "Failed to queue transaction")
+	require.Equal(t, StatusApplied, queuedTxn.Status, "Original transaction should be APPLIED")
+
+	appliedEntry, err := ds.GetTransactionByRef(ctx, txnRef)
+	require.NoError(t, err, "Failed to get transaction by reference")
+
+	// Fetch the transaction object the way the API path does. As
+	// documented, SkipQueue is NOT persisted, so this is false here —
+	// that is precisely the condition under which the plain
+	// RefundWorker cannot produce a synchronous refund.
+	txnObj, err := ds.GetTransaction(ctx, appliedEntry.TransactionID)
+	require.NoError(t, err, "Failed to get transaction by ID")
+	require.False(t, txnObj.SkipQueue,
+		"DB-fetched transaction must have SkipQueue=false (skip_queue is not persisted)")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	jobs := make(chan *model.Transaction, 1)
+	results := make(chan BatchJobResult, 1)
+	jobs <- txnObj
+	close(jobs)
+
+	// RefundWorkerWithOptions(true) must override the job's SkipQueue
+	// and process the refund synchronously.
+	go blnk.RefundWorkerWithOptions(true)(ctx, jobs, results, &wg, big.NewInt(0))
+	wg.Wait()
+	close(results)
+
+	var result BatchJobResult
+	select {
+	case result = <-results:
+	default:
+		t.Fatal("No results received from refund worker")
+	}
+
+	require.NoError(t, result.Error, "Refund worker should not return an error")
+	require.NotNil(t, result.Txn, "Refund worker should return a transaction")
+	require.Equal(t, StatusApplied, result.Txn.Status,
+		"RefundWorkerWithOptions(true) must apply the refund synchronously even when the job's SkipQueue is false")
+	require.Equal(t, appliedEntry.TransactionID, result.Txn.ParentTransaction,
+		"Refund transaction should reference the original as parent")
+	require.Equal(t, appliedEntry.Source, result.Txn.Destination,
+		"Refund transaction should swap source and destination")
+	require.Equal(t, appliedEntry.Destination, result.Txn.Source,
+		"Refund transaction should swap source and destination")
+
+	// Balances are back to zero — the refund settled immediately.
+	finalSource, err := ds.GetBalanceByIDLite(source.BalanceID)
+	require.NoError(t, err, "Failed to get final source balance")
+	finalDest, err := ds.GetBalanceByIDLite(dest.BalanceID)
+	require.NoError(t, err, "Failed to get final destination balance")
+	require.Equal(t, "0", finalSource.Balance.String(),
+		"Source balance should be zero after a synchronous refund")
+	require.Equal(t, "0", finalDest.Balance.String(),
+		"Destination balance should be zero after a synchronous refund")
+}
