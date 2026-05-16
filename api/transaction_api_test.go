@@ -834,3 +834,102 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 	assert.Equal(t, originalPreciseAmount.Neg(originalPreciseAmount).String(), dbAfterFullCommit.Balance.String(), "Destination balance incorrect after full commit")
 	assert.Equal(t, int64(0), dbAfterFullCommit.InflightBalance.Int64(), "Destination inflight balance should be 0 after full commit")
 }
+
+// TestRefundTransaction_API exercises the POST /refund-transaction/:id
+// handler — specifically the optional skip_queue body added so callers
+// can request a synchronous refund.
+//
+// Three cases:
+//   - no body  → backward-compatible, refund is queued (default).
+//   - {"skip_queue": true} → refund is processed synchronously (APPLIED).
+//   - malformed body → 400, not a panic or a silent default.
+func TestRefundTransaction_API(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+	ctx := context.Background()
+
+	ledger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+	require.NoError(t, err)
+
+	// applyTxn records a fresh, immediately-applied transaction and
+	// returns its id — the thing a refund operates on.
+	applyTxn := func(t *testing.T) string {
+		t.Helper()
+		src, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "EUR"})
+		require.NoError(t, err)
+		dst, err := b.CreateBalance(ctx, model.Balance{LedgerID: ledger.LedgerID, Currency: "EUR"})
+		require.NoError(t, err)
+
+		payload := model2.RecordTransaction{
+			Amount:         100,
+			Precision:      100,
+			Reference:      "refund_api_" + gofakeit.UUID(),
+			Description:    "refund API test",
+			Currency:       "EUR",
+			Source:         src.BalanceID,
+			Destination:    dst.BalanceID,
+			AllowOverDraft: true,
+			SkipQueue:      true,
+		}
+		body, _ := request.ToJsonReq(&payload)
+		var txn model.Transaction
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload: body, Response: &txn, Method: "POST", Route: "/transactions", Router: router,
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusCreated, resp.Code)
+		require.Equal(t, "APPLIED", txn.Status)
+		return txn.TransactionID
+	}
+
+	t.Run("no body keeps the default (queued) behavior", func(t *testing.T) {
+		id := applyTxn(t)
+		var refund model.Transaction
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  nil, // bodiless — the historical call shape
+			Response: &refund, Method: "POST",
+			Route: "/refund-transaction/" + id, Router: router,
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusCreated, resp.Code,
+			"a bodiless refund must still succeed")
+		require.Equal(t, id, refund.ParentTransaction,
+			"refund must reference the original as parent")
+	})
+
+	t.Run("skip_queue true processes synchronously", func(t *testing.T) {
+		id := applyTxn(t)
+		body, _ := request.ToJsonReq(&refundBody{SkipQueue: true})
+		var refund model.Transaction
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload: body, Response: &refund, Method: "POST",
+			Route: "/refund-transaction/" + id, Router: router,
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusCreated, resp.Code)
+		require.Equal(t, "APPLIED", refund.Status,
+			"skip_queue=true must apply the refund synchronously")
+		require.Equal(t, id, refund.ParentTransaction)
+	})
+
+	t.Run("malformed body is rejected with 400", func(t *testing.T) {
+		id := applyTxn(t)
+		var out map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  strings.NewReader(`{"skip_queue": not-json`),
+			Response: &out, Method: "POST",
+			Route: "/refund-transaction/" + id, Router: router,
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, resp.Code,
+			"a malformed body must be rejected, not silently defaulted")
+	})
+}
+
+// refundBody mirrors the handler's optional request shape so the test
+// does not depend on the unexported refundTransactionRequest type.
+type refundBody struct {
+	SkipQueue bool `json:"skip_queue"`
+}

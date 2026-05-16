@@ -17,6 +17,7 @@ package api
 
 import (
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -206,15 +207,16 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		return
 	}
 
-	// The body is optional. Bind it only when one was actually sent so
-	// the long-standing bodiless `POST /refund-transaction/:id` keeps
-	// working unchanged.
+	// The body is optional — the long-standing bodiless
+	// `POST /refund-transaction/:id` must keep working unchanged. An
+	// empty body makes encoding/json (via ShouldBindJSON) return io.EOF;
+	// treat ONLY that as "no options supplied" and reject any other
+	// bind error. Detecting emptiness via io.EOF is reliable regardless
+	// of Content-Length / chunked transfer encoding.
 	var req refundTransactionRequest
-	if c.Request.ContentLength != 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorkerWithOptions(req.SkipQueue))
