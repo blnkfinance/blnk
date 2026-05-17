@@ -17,6 +17,7 @@ package api
 
 import (
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -175,9 +176,23 @@ func (a Api) QueueTransaction(c *gin.Context) {
 	c.JSON(http.StatusCreated, transformTransaction(resp))
 }
 
+// refundTransactionRequest is the optional JSON body of a refund
+// request. It is OPTIONAL: an empty body keeps the default behavior
+// (the refund is queued for asynchronous processing).
+type refundTransactionRequest struct {
+	// SkipQueue, when true, processes the refund synchronously instead
+	// of placing it on the transaction queue — useful for time-sensitive
+	// refunds where the caller needs immediate confirmation. Mirrors the
+	// skip_queue flag on Create Transaction.
+	SkipQueue bool `json:"skip_queue"`
+}
+
 // RefundTransaction processes a refund for a transaction based on the given ID.
 // It retrieves the transaction to be refunded and processes it in batches. If any errors
 // occur during retrieval or processing, it responds with an appropriate error message.
+//
+// An optional JSON body {"skip_queue": true} processes the refund
+// synchronously; an absent or empty body queues it (the default).
 //
 // Parameters:
 // - c: The Gin context containing the request and response.
@@ -191,7 +206,20 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
 		return
 	}
-	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorker)
+
+	// The body is optional — the long-standing bodiless
+	// `POST /refund-transaction/:id` must keep working unchanged. An
+	// empty body makes encoding/json (via ShouldBindJSON) return io.EOF;
+	// treat ONLY that as "no options supplied" and reject any other
+	// bind error. Detecting emptiness via io.EOF is reliable regardless
+	// of Content-Length / chunked transfer encoding.
+	var req refundTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorkerWithOptions(req.SkipQueue))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

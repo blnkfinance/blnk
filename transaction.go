@@ -749,6 +749,40 @@ func (l *Blnk) RefundWorker(ctx context.Context, jobs <-chan *model.Transaction,
 	}
 }
 
+// RefundWorkerWithOptions returns a transactionWorker that refunds each
+// job with an explicit skipQueue decision, rather than inheriting it
+// from the original transaction.
+//
+// This exists because skip_queue is a request-time routing flag and is
+// deliberately NOT persisted (see Transaction Lifecycle docs). The
+// original transaction fetched from storage for a refund therefore
+// always deserializes SkipQueue=false, so the plain RefundWorker can
+// never produce a synchronous refund. RefundWorkerWithOptions lets the
+// caller — e.g. the /refund-transaction API handler honoring a
+// "skip_queue" field in the request body — choose synchronous
+// processing for time-sensitive refunds.
+//
+// RefundWorker is left unchanged; this is purely additive.
+func (l *Blnk) RefundWorkerWithOptions(skipQueue bool) transactionWorker {
+	return func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
+		ctx, span := tracer.Start(ctx, "RefundWorkerWithOptions")
+		defer span.End()
+		span.SetAttributes(attribute.Bool("refund.skip_queue", skipQueue))
+
+		defer wg.Done()
+		for originalTxn := range jobs {
+			queuedRefundTxn, err := l.RefundTransaction(ctx, originalTxn.TransactionID, skipQueue)
+			if err != nil {
+				results <- BatchJobResult{Error: err}
+				span.RecordError(err)
+				continue
+			}
+			results <- BatchJobResult{Txn: queuedRefundTxn}
+			span.AddEvent("Refund processed", trace.WithAttributes(attribute.String("transaction.id", queuedRefundTxn.TransactionID)))
+		}
+	}
+}
+
 // ProcessQueuedTransaction preserves the existing queued-worker behavior while routing the
 // decision through the shared internal transaction executor.
 func (l *Blnk) ProcessQueuedTransaction(ctx context.Context, transaction *model.Transaction, hotLane bool) (*model.Transaction, error) {
