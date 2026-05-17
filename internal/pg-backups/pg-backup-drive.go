@@ -59,12 +59,14 @@ func NewBackupManager() (*BackupManager, error) {
 		return nil, errors.Wrap(err, "failed to fetch config")
 	}
 
+	disableSSL := shouldDisableS3SSL(cfg.S3Endpoint)
+
 	// Prepare AWS S3 configuration with access credentials and endpoint.
 	s3Config := &aws.Config{
 		Credentials:      credentials.NewStaticCredentials(cfg.AwsAccessKeyId, cfg.AwsSecretAccessKey, ""),
 		Endpoint:         aws.String(cfg.S3Endpoint),
 		Region:           aws.String(cfg.S3Region),
-		DisableSSL:       aws.Bool(true), // Disable SSL to use HTTP
+		DisableSSL:       aws.Bool(disableSSL),
 		S3ForcePathStyle: aws.Bool(true), // Force path style for certain S3-compatible services
 	}
 
@@ -78,6 +80,14 @@ func NewBackupManager() (*BackupManager, error) {
 		Config:   cfg,
 		S3Client: s3.New(newSession),
 	}, nil
+}
+
+func shouldDisableS3SSL(endpoint string) bool {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "http"
 }
 
 // BackupToDisk creates a backup of the PostgreSQL database and stores it locally on disk.

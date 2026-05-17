@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
@@ -31,9 +32,13 @@ import (
 )
 
 const (
-	hookKeyPrefix     = "hooks:"
-	preHookKeyPrefix  = "hooks:pre"
-	postHookKeyPrefix = "hooks:post"
+	hookKeyPrefix         = "hooks:"
+	preHookKeyPrefix      = "hooks:pre"
+	postHookKeyPrefix     = "hooks:post"
+	defaultHookTimeoutSec = 30
+	maxHookTimeoutSec     = 60
+	defaultHookRetryCount = 3
+	maxHookRetryCount     = 10
 )
 
 type redisHookManager struct {
@@ -127,6 +132,10 @@ func (m *redisHookManager) UpdateHook(ctx context.Context, hookID string, hook *
 	hook.CreatedAt = existing.CreatedAt
 	hook.LastRun = existing.LastRun
 	hook.LastSuccess = existing.LastSuccess
+
+	if err := validateHook(hook); err != nil {
+		return err
+	}
 
 	// Handle type change
 	if existing.Type != hook.Type {
@@ -364,14 +373,27 @@ func validateHook(hook *Hook) error {
 	if hook.URL == "" {
 		return fmt.Errorf("hook URL is required")
 	}
+	parsedURL, err := url.ParseRequestURI(hook.URL)
+	if err != nil || parsedURL.Host == "" {
+		return fmt.Errorf("invalid hook URL")
+	}
+	if parsedURL.Scheme != "https" && parsedURL.Scheme != "http" {
+		return fmt.Errorf("hook URL must use http or https")
+	}
 	if hook.Type != PreTransaction && hook.Type != PostTransaction {
 		return fmt.Errorf("invalid hook type: %s", hook.Type)
 	}
 	if hook.Timeout <= 0 {
-		hook.Timeout = 30 // Default timeout
+		hook.Timeout = defaultHookTimeoutSec
+	}
+	if hook.Timeout > maxHookTimeoutSec {
+		return fmt.Errorf("hook timeout must not exceed %d seconds", maxHookTimeoutSec)
 	}
 	if hook.RetryCount < 0 {
-		hook.RetryCount = 3 // Default retry count
+		hook.RetryCount = defaultHookRetryCount
+	}
+	if hook.RetryCount > maxHookRetryCount {
+		return fmt.Errorf("hook retry_count must not exceed %d", maxHookRetryCount)
 	}
 	return nil
 }

@@ -289,10 +289,10 @@ func TestGetEffectiveDate(t *testing.T) {
 	yesterday := now.Add(-24 * time.Hour)
 
 	tests := []struct {
-		name          string
-		transaction   Transaction
-		expectedTime  time.Time
-		description   string
+		name         string
+		transaction  Transaction
+		expectedTime time.Time
+		description  string
 	}{
 		{
 			name: "EffectiveDate is set - should return EffectiveDate",

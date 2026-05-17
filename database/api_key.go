@@ -326,6 +326,7 @@ func (s *Datasource) ListAPIKeys(ctx context.Context, ownerID string) ([]*model.
 		if err != nil {
 			return nil, err
 		}
+		apiKey.Key = ""
 		apiKeys = append(apiKeys, apiKey)
 	}
 

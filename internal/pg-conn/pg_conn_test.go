@@ -50,4 +50,3 @@ func TestConnectDB_UnreachableHost(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, db)
 }
-

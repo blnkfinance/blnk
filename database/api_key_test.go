@@ -302,7 +302,7 @@ func TestListAPIKeys_Success(t *testing.T) {
 
 	// Check first API key
 	assert.Equal(t, "api_key_1", apiKeys[0].APIKeyID)
-	assert.Equal(t, "key1", apiKeys[0].Key)
+	assert.Empty(t, apiKeys[0].Key)
 	assert.Equal(t, "API Key 1", apiKeys[0].Name)
 	assert.Equal(t, ownerID, apiKeys[0].OwnerID)
 	assert.Equal(t, []string{"read"}, apiKeys[0].Scopes)
@@ -311,7 +311,7 @@ func TestListAPIKeys_Success(t *testing.T) {
 
 	// Check second API key
 	assert.Equal(t, "api_key_2", apiKeys[1].APIKeyID)
-	assert.Equal(t, "key2", apiKeys[1].Key)
+	assert.Empty(t, apiKeys[1].Key)
 	assert.Equal(t, "API Key 2", apiKeys[1].Name)
 	assert.Equal(t, ownerID, apiKeys[1].OwnerID)
 	assert.Equal(t, []string{"read", "write"}, apiKeys[1].Scopes)

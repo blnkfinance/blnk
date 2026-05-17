@@ -32,6 +32,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const maxHookResponseBytes = 1 << 20
+
 // ExecuteHook is a public wrapper for processing a hook task.
 // It executes the webhook by sending an HTTP POST request to the configured URL.
 //
@@ -117,10 +119,14 @@ func (m *redisHookManager) executeHook(ctx context.Context, hook *Hook, payload 
 	}()
 
 	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHookResponseBytes+1))
 	if err != nil {
 		_ = m.updateHookStatus(ctx, hook, false)
 		return fmt.Errorf("failed to read response body: %w", err)
+	}
+	if len(body) > maxHookResponseBytes {
+		_ = m.updateHookStatus(ctx, hook, false)
+		return fmt.Errorf("hook response body exceeds maximum size")
 	}
 
 	logrus.WithFields(logrus.Fields{

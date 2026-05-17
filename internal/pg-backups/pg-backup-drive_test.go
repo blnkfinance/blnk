@@ -37,6 +37,41 @@ func TestBackupManager_Struct(t *testing.T) {
 	assert.Nil(t, bm.S3Client)
 }
 
+func TestShouldDisableS3SSL(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		want     bool
+	}{
+		{
+			name:     "http endpoint",
+			endpoint: "http://localhost:9000",
+			want:     true,
+		},
+		{
+			name:     "https endpoint",
+			endpoint: "https://s3.amazonaws.com",
+			want:     false,
+		},
+		{
+			name:     "empty endpoint",
+			endpoint: "",
+			want:     false,
+		},
+		{
+			name:     "invalid endpoint",
+			endpoint: "://bad",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldDisableS3SSL(tt.endpoint))
+		})
+	}
+}
+
 func TestBackupManager_BackupToDisk_InvalidDSN(t *testing.T) {
 	cfg := &config.Configuration{
 		DataSource: config.DataSourceConfig{
