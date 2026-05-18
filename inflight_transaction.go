@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -586,4 +587,133 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 
 	span.AddEvent("Void transaction finalized", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 	return transaction, nil
+}
+
+// BulkInflightAction discriminates between the two operations supported by
+// BulkInflightUpdate.
+type BulkInflightAction int
+
+const (
+	BulkInflightVoid BulkInflightAction = iota
+	BulkInflightCommit
+)
+
+// BulkInflightItem is the internal per-item shape consumed by
+// BulkInflightUpdate. For void calls only TransactionID is used.
+type BulkInflightItem struct {
+	TransactionID string
+	Amount        *big.Int
+}
+
+// BulkInflightOutcome is the per-item outcome from BulkInflightUpdate.
+// On success Err is nil; on failure Code carries a stable classification
+// (see classifyInflightError) and Err preserves the original message.
+type BulkInflightOutcome struct {
+	TransactionID string
+	Txn           *model.Transaction
+	Err           error
+	Code          string
+}
+
+// classifyInflightError maps the unstructured errors emitted by
+// CommitInflightTransaction / VoidInflightTransaction to stable codes so
+// bulk callers can branch on them programmatically instead of regex-matching
+// human-readable messages.
+//
+// Codes are intentionally action-agnostic where possible. ALREADY_VOIDED and
+// ALREADY_COMMITTED are reported as observed — a void on an already-committed
+// txn surfaces ALREADY_COMMITTED, and vice versa.
+func classifyInflightError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "transaction not found"),
+		strings.Contains(msg, "no rows in result set"),
+		strings.Contains(msg, "not found"):
+		return "NOT_FOUND"
+	case strings.Contains(msg, "has already been voided"):
+		return "ALREADY_VOIDED"
+	case strings.Contains(msg, "Transaction already committed"),
+		strings.Contains(msg, "cannot void. Transaction already committed"):
+		return "ALREADY_COMMITTED"
+	case strings.Contains(msg, "not in inflight status"):
+		return "NOT_INFLIGHT"
+	case strings.Contains(msg, "cannot commit more than"):
+		return "INVALID_AMOUNT"
+	case strings.Contains(msg, "failed to acquire lock"):
+		return "LOCKED"
+	default:
+		return "INTERNAL_ERROR"
+	}
+}
+
+// BulkInflightUpdate voids or commits a list of independently-created
+// inflight transactions in parallel.
+//
+// Each id is processed in its own goroutine via a worker pool of size
+// `maxWorkers` (clamped to [1, 16]). Per-item failures are reported in the
+// returned result slice and do not abort the rest of the batch; the returned
+// error is non-nil only for input validation failures (empty list, too many
+// items).
+//
+// Idempotency: bulk has no batch-wide idempotency key. Retries that include
+// already-processed ids will see those ids surface as ALREADY_VOIDED /
+// ALREADY_COMMITTED, which callers should treat as success-equivalent for
+// retry semantics.
+//
+// Results are returned in the same order as the input.
+func (l *Blnk) BulkInflightUpdate(ctx context.Context, action BulkInflightAction, items []BulkInflightItem, maxWorkers int) ([]BulkInflightOutcome, error) {
+	if len(items) == 0 {
+		return nil, errors.New("transaction_ids cannot be empty")
+	}
+	if maxWorkers < 1 {
+		maxWorkers = 4
+	}
+	if maxWorkers > 16 {
+		maxWorkers = 16
+	}
+	if maxWorkers > len(items) {
+		maxWorkers = len(items)
+	}
+
+	results := make([]BulkInflightOutcome, len(items))
+	type job struct {
+		idx  int
+		item BulkInflightItem
+	}
+	jobs := make(chan job, len(items))
+	for i, it := range items {
+		jobs <- job{idx: i, item: it}
+	}
+	close(jobs)
+
+	var wg sync.WaitGroup
+	for w := 0; w < maxWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				var txn *model.Transaction
+				var err error
+				switch action {
+				case BulkInflightCommit:
+					txn, err = l.CommitInflightTransaction(ctx, j.item.TransactionID, j.item.Amount)
+				case BulkInflightVoid:
+					txn, err = l.VoidInflightTransaction(ctx, j.item.TransactionID)
+				default:
+					err = fmt.Errorf("unknown bulk inflight action: %d", action)
+				}
+				results[j.idx] = BulkInflightOutcome{
+					TransactionID: j.item.TransactionID,
+					Txn:           txn,
+					Err:           err,
+					Code:          classifyInflightError(err),
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return results, nil
 }

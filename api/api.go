@@ -79,6 +79,8 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/transactions/:id", a.GetTransaction)
 	router.GET("/transactions/reference/:reference", a.GetTransactionByRef)
 	router.PUT("/transactions/inflight/:txID", a.UpdateInflightStatus)
+	router.POST("/transactions/inflight/bulk/void", a.BulkVoidInflight)
+	router.POST("/transactions/inflight/bulk/commit", a.BulkCommitInflight)
 	router.GET("/transactions/:id/lineage", a.GetTransactionLineage)
 
 	// Recovery routes
