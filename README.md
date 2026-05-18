@@ -13,98 +13,90 @@
 
 ## Open-Source Financial Ledger for Developers
 
-Blnk Finance provides a double-entry, production-grade ledger and tools to help developers **build/ship fintech products fast** without compromising compliance and correctness. 
+Blnk is an open-source, double-entry ledger for teams building fintech products, wallets, banking infrastructure, payment systems, lending products, rewards programs, and other transaction-heavy financial applications.
 
-[Read developer docs](https://docs.blnkfinance.com/home/install)
+It gives developers the core primitives needed to record transactions, manage balances, reconcile external records, and keep financial state accurate as products scale.
 
-Want dedicated Support while you integrate Blnk? [view our Support plans](https://blnkfinance.com/pricing#support-plans)
-
-<br/>
-
-## Installation
-
-To install Blnk, make sure you have [Docker Compose](https://docs.docker.com/compose/) installed and running on your machine, or [deploy on Cloud](https://cloud.blnkfinance.com/auth/sign-up).
-
-1. Clone the repository into your machine:
-   
-   ```
-   git clone https://github.com/blnkledger/blnk && cd blnk
-   ```
-   
-2. Create a configuration file, `blnk.json`, copy the following configuration and save:
-
-   ```json
-   {
-      "project_name": "Blnk",
-      "data_source": {
-         "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
-      },
-      "redis": {
-         "dns": "redis:6379"
-      },
-      "server": {
-         "port": "5001"
-      }
-   }
-   ```
-
-3. Start your Blnk server with Docker Compose:
-
-   ```
-   docker compose up
-   ```
+[Read the developer docs](https://docs.blnkfinance.com/home/install?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing) | [Deploy on Blnk Cloud](https://cloud.blnkfinance.com/auth/sign-up?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing) | [View Support plans](https://blnkfinance.com/pricing#support-plans?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing) 
 
 <br/>
 
-## About the ledger
+## Quick start
 
-At its core, the Blnk Ledger consists of:
+The fastest way to understand Blnk is to deploy a sandbox and follow the developer docs.
 
-* **Ledger:** Our open-source double-entry ledger for managing balances and recording any transaction workflow. Features include balance monitoring, balance snapshots, historical balances, inflight transactions, scheduling and overdrafts, bulk transactions, and so much more.
+Start here:
 
-* **Reconciliation:** Automatically match external records like bank statements to your internal ledger with custom matching rules and reconciliation strategies.
-
-* **Identity Management:** Easily create & manage identities with PII tokenization features and the ability to link to balances and transactions.
-
-Here are some ways developers build Blnk:
-
-1. [Wallet Management](https://docs.blnkfinance.com/tutorials/quick-start/wallet-management)
-2. [Deposits & Withdrawals](https://docs.blnkfinance.com/tutorials/digital-banking/deposits-withdrawals)
-3. [Order Exchange](https://docs.blnkfinance.com/tutorials/crypto/order-exchange)
-4. [Lending](https://docs.blnkfinance.com/tutorials/digital-banking/lending)
-5. [Loyalty Points System](https://docs.blnkfinance.com/tutorials/quick-start/loyalty-points)
-6. [AI Billing](https://docs.blnkfinance.com/tutorials/more/ai-billing)
-7. [Escrow Application](https://docs.blnkfinance.com/tutorials/quick-start/escrow-payments)
-
-### Love what we're building?
-
-* Star our repo to help more developers discover Blnk ⭐
-* Join our community on Discord → [Accept Discord invite](https://discord.gg/7WNv94zPpx)
-* Check out Blnk Cloud → [Visit website](https://www.blnkfinance.com)
+- [Install Blnk locally](https://docs.blnkfinance.com/home/install) or [Deploy your sandbox](https://cloud.blnkfinance.com/auth/sign-up?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+- [Create your first ledger, balance, and transaction](https://docs.blnkfinance.com/tutorials/quick-start/create-your-first-ledger-balance-and-transaction?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+- [Explore Blnk tutorials](https://docs.blnkfinance.com/tutorials?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+- [Read the API reference](https://docs.blnkfinance.com/api-reference?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
 
 <br/>
 
-## Quick Start
+## Why teams use Blnk
 
-The quickest way to get acquainted with Blnk is by installing it and diving into [our documentation](https://docs.blnkfinance.com) for a hands-on experience.
+Financial products need more than a database table of balances. They need a reliable ledger that can track every movement of value, preserve transaction history, support reconciliation, and help teams reason about correctness.
 
-Here are a few things to try:
+Blnk helps teams:
 
-1. [Create your first ledger, balance, and transaction](https://docs.blnkfinance.com/home/install#3-create-your-first-ledger)
-2. [Hold an inflight transaction and commit/void](https://docs.blnkfinance.com/transactions/inflight)
-3. [Record a transaction from one balance to 2 or more balances](https://docs.blnkfinance.com/transactions/multiple-destinations)
-4. [Record multiple transactions at once](https://docs.blnkfinance.com/transactions/bulk-transactions)
-5. [Record backdated transactions](https://docs.blnkfinance.com/transactions/backdated-transactions)
-6. [Create an identity](https://docs.blnkfinance.com/identities/introduction)
-7. [Link an identity to a balance](https://docs.blnkfinance.com/identities/link-balances)
+- Build on double-entry accounting principles from day one.
+- Record transactions across ledgers, balances, and identities.
+- Monitor balances and historical balance states.
+- Handle inflight transactions, scheduled transactions, overdrafts, and bulk transaction workflows.
+- Reconcile internal ledger records with external statements or provider data.
+- Tokenize and manage identity data linked to balances and transactions.
+- Move faster without hand-rolling critical financial infrastructure.
 
 <br/>
 
-## Contributions
+## What you can build
 
-Contributions and feedback are welcome and encouraged. Join our [Discord community](https://discord.gg/7WNv94zPpx) to do so, and connect with other developers from around the world.
+Developers use Blnk for workflows such as:
 
-Please read our [Contributing Guide](./CONTRIBUTING.md) before opening issues or pull requests.
+1. [Wallet management](https://docs.blnkfinance.com/tutorials/quick-start/wallet-management?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+2. [Deposits and withdrawals](https://docs.blnkfinance.com/tutorials/digital-banking/deposits-withdrawals?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+3. [Order exchange](https://docs.blnkfinance.com/tutorials/crypto/order-exchange?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+4. [Lending](https://docs.blnkfinance.com/tutorials/digital-banking/lending?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+5. [Loyalty points systems](https://docs.blnkfinance.com/tutorials/quick-start/loyalty-points?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+6. [AI billing](https://docs.blnkfinance.com/tutorials/more/ai-billing?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+7. [Escrow applications](https://docs.blnkfinance.com/tutorials/quick-start/escrow-payments?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
+
+<br/>
+
+## Core capabilities
+
+### Ledger
+
+Blnk provides an open-source double-entry ledger for managing balances and recording transaction workflows. It supports balance monitoring, balance snapshots, historical balances, inflight transactions, scheduling, overdrafts, bulk transactions, and other ledger operations needed in production financial systems.
+
+### Reconciliation
+
+Blnk helps teams match external records, such as bank statements or payment processor exports, against internal ledger records using custom matching rules and reconciliation strategies.
+
+### Identity management
+
+Blnk lets teams create and manage identities, tokenize PII, and link identities to balances and transactions.
+
+<br/>
+
+## Managed hosting & support
+
+Blnk is open source, so you can self-host and extend it for your own stack.
+
+If your team wants a managed path, you can use [Blnk Cloud](https://cloud.blnkfinance.com/auth/sign-up?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing).
+
+If you are integrating Blnk into a production product and want dedicated help from the team, you can [view Blnk Support plans](https://blnkfinance.com/pricing#support-plans?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing).
+
+<br/>
+
+## Community
+
+If Blnk is useful to you:
+
+- Star the repository so more developers can discover it.
+- Join the community on Discord: [Accept Discord invite](https://discord.gg/7WNv94zPpx)
+- Visit the website: [blnkfinance.com](https://www.blnkfinance.com?utm_source=github&utm_medium=readme_md&utm_campaign=oss_commercial_routing)
 
 <br/>
 
