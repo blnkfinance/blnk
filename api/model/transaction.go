@@ -54,7 +54,7 @@ type InflightUpdate struct {
 }
 
 // MaxBulkInflightItems caps the number of transactions accepted in a single
-// bulk-commit or bulk-void call. Bulk calls are processed synchronously, so
+// bulk commit or bulk void call. Bulk calls are processed synchronously, so
 // the cap exists to keep request latency and lock-holding bounded.
 const MaxBulkInflightItems = 100
 
@@ -66,7 +66,7 @@ type BulkInflightVoidRequest struct {
 	TransactionIDs []string `json:"transaction_ids"`
 }
 
-// BulkInflightCommitItem describes one transaction in a bulk-commit request.
+// BulkInflightCommitItem describes one transaction in a bulk commit request.
 // Amount/PreciseAmount carry the same semantics as the single-tx endpoint:
 // zero means commit the full remaining inflight amount; non-zero performs a
 // partial commit. PreciseAmount, when set, wins over Amount.
@@ -80,7 +80,7 @@ type BulkInflightCommitItem struct {
 // transactions in one call. Unlike the void variant, each item can carry
 // its own amount for partial commits.
 type BulkInflightCommitRequest struct {
-	Items []BulkInflightCommitItem `json:"items"`
+	Transactions []BulkInflightCommitItem `json:"transactions"`
 }
 
 // BulkInflightResult is the per-item outcome reported in BulkInflightResponse.

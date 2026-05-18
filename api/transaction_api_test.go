@@ -967,7 +967,7 @@ func createInflightForBulk(t *testing.T, router *gin.Engine, source, dest, curre
 	return resp.TransactionID
 }
 
-// TestBulkVoidInflight_Integration end-to-end verifies that the bulk-void
+// TestBulkVoidInflight_Integration end-to-end verifies that the bulk void
 // endpoint voids N independently-created inflight transactions in one call
 // and reports per-item success in the response body.
 func TestBulkVoidInflight_Integration(t *testing.T) {
@@ -1000,7 +1000,7 @@ func TestBulkVoidInflight_Integration(t *testing.T) {
 		Payload:  voidBytes,
 		Response: &voidResp,
 		Method:   "POST",
-		Route:    "/transactions/inflight/bulk-void",
+		Route:    "/transactions/inflight/bulk/void",
 		Router:   router,
 	})
 	assert.NoError(t, err)
@@ -1020,7 +1020,7 @@ func TestBulkVoidInflight_Integration(t *testing.T) {
 		Payload:  voidBytes2,
 		Response: &voidResp,
 		Method:   "POST",
-		Route:    "/transactions/inflight/bulk-void",
+		Route:    "/transactions/inflight/bulk/void",
 		Router:   router,
 	})
 	assert.NoError(t, err)
@@ -1040,7 +1040,7 @@ func TestBulkVoidInflight_Integration(t *testing.T) {
 }
 
 // TestBulkCommitInflight_Integration end-to-end verifies that the
-// bulk-commit endpoint commits N independent inflight transactions and
+// bulk commit endpoint commits N independent inflight transactions and
 // surfaces per-id errors (e.g. NOT_FOUND for an unknown id mixed in)
 // without aborting the rest of the batch.
 func TestBulkCommitInflight_Integration(t *testing.T) {
@@ -1070,7 +1070,7 @@ func TestBulkCommitInflight_Integration(t *testing.T) {
 	// 2. Bulk-commit them, plus a deliberately-unknown id to verify partial
 	//    failure handling.
 	commitReq := model2.BulkInflightCommitRequest{
-		Items: []model2.BulkInflightCommitItem{
+		Transactions: []model2.BulkInflightCommitItem{
 			{TransactionID: id1},
 			{TransactionID: id2},
 			{TransactionID: "txn_does_not_exist"},
@@ -1082,7 +1082,7 @@ func TestBulkCommitInflight_Integration(t *testing.T) {
 		Payload:  commitBytes,
 		Response: &resp,
 		Method:   "POST",
-		Route:    "/transactions/inflight/bulk-commit",
+		Route:    "/transactions/inflight/bulk/commit",
 		Router:   router,
 	})
 	assert.NoError(t, err)

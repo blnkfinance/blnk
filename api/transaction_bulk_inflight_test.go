@@ -32,8 +32,8 @@ func newBulkTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	a := Api{} // blnk service intentionally nil; validation paths must not touch it.
-	r.POST("/transactions/inflight/bulk-void", a.BulkVoidInflight)
-	r.POST("/transactions/inflight/bulk-commit", a.BulkCommitInflight)
+	r.POST("/transactions/inflight/bulk/void", a.BulkVoidInflight)
+	r.POST("/transactions/inflight/bulk/commit", a.BulkCommitInflight)
 	return r
 }
 
@@ -51,7 +51,7 @@ func doJSON(r *gin.Engine, method, path string, body interface{}) *httptest.Resp
 
 func TestBulkVoidInflight_RejectsEmptyList(t *testing.T) {
 	r := newBulkTestRouter()
-	w := doJSON(r, "POST", "/transactions/inflight/bulk-void",
+	w := doJSON(r, "POST", "/transactions/inflight/bulk/void",
 		model2.BulkInflightVoidRequest{TransactionIDs: []string{}})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "cannot be empty")
@@ -63,7 +63,7 @@ func TestBulkVoidInflight_RejectsOversizedList(t *testing.T) {
 	for i := range ids {
 		ids[i] = fmt.Sprintf("txn_%d", i)
 	}
-	w := doJSON(r, "POST", "/transactions/inflight/bulk-void",
+	w := doJSON(r, "POST", "/transactions/inflight/bulk/void",
 		model2.BulkInflightVoidRequest{TransactionIDs: ids})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "too many transaction_ids")
@@ -71,7 +71,7 @@ func TestBulkVoidInflight_RejectsOversizedList(t *testing.T) {
 
 func TestBulkVoidInflight_RejectsMalformedJSON(t *testing.T) {
 	r := newBulkTestRouter()
-	req := httptest.NewRequest("POST", "/transactions/inflight/bulk-void",
+	req := httptest.NewRequest("POST", "/transactions/inflight/bulk/void",
 		strings.NewReader(`{"transaction_ids": "not-an-array"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -81,8 +81,8 @@ func TestBulkVoidInflight_RejectsMalformedJSON(t *testing.T) {
 
 func TestBulkCommitInflight_RejectsEmptyList(t *testing.T) {
 	r := newBulkTestRouter()
-	w := doJSON(r, "POST", "/transactions/inflight/bulk-commit",
-		model2.BulkInflightCommitRequest{Items: nil})
+	w := doJSON(r, "POST", "/transactions/inflight/bulk/commit",
+		model2.BulkInflightCommitRequest{Transactions: nil})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "cannot be empty")
 }
@@ -93,8 +93,8 @@ func TestBulkCommitInflight_RejectsOversizedList(t *testing.T) {
 	for i := range items {
 		items[i] = model2.BulkInflightCommitItem{TransactionID: fmt.Sprintf("txn_%d", i)}
 	}
-	w := doJSON(r, "POST", "/transactions/inflight/bulk-commit",
-		model2.BulkInflightCommitRequest{Items: items})
+	w := doJSON(r, "POST", "/transactions/inflight/bulk/commit",
+		model2.BulkInflightCommitRequest{Transactions: items})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "too many items")
+	assert.Contains(t, w.Body.String(), "too many transactions")
 }

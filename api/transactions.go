@@ -642,13 +642,13 @@ func (a Api) BulkCommitInflight(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if len(req.Items) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "items cannot be empty"})
+	if len(req.Transactions) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "transactions cannot be empty"})
 		return
 	}
-	if len(req.Items) > model2.MaxBulkInflightItems {
+	if len(req.Transactions) > model2.MaxBulkInflightItems {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "too many items; max is " + strconv.Itoa(model2.MaxBulkInflightItems),
+			"error": "too many transactions; max is " + strconv.Itoa(model2.MaxBulkInflightItems),
 		})
 		return
 	}
@@ -664,8 +664,8 @@ func (a Api) BulkCommitInflight(c *gin.Context) {
 		return
 	}
 
-	items := make([]blnk.BulkInflightItem, len(req.Items))
-	for i, it := range req.Items {
+	items := make([]blnk.BulkInflightItem, len(req.Transactions))
+	for i, it := range req.Transactions {
 		// Match single-tx semantics: precise_amount wins; else apply precision
 		// via the same DB-lookup helper used by UpdateInflightStatus.
 		var amount *big.Int
