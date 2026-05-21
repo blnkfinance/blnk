@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/blnkfinance/blnk/model"
 )
 
 // classifyInflightError is a pure function: a focused unit test verifies
@@ -48,6 +50,34 @@ func TestClassifyInflightError(t *testing.T) {
 				t.Errorf("classifyInflightError(%q) = %q, want %q", errString(tc.err), got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClearTerminalInflightFlagPreventsMetadataRestore(t *testing.T) {
+	txn := &model.Transaction{
+		Inflight:       true,
+		AllowOverdraft: true,
+		MetaData: map[string]interface{}{
+			"inflight":        true,
+			"allow_overdraft": true,
+			"source":          "test",
+		},
+	}
+
+	clearTerminalInflightFlag(txn)
+	setTransactionMetadata(txn)
+
+	if txn.Inflight {
+		t.Fatal("terminal transaction should not keep Inflight=true")
+	}
+	if _, ok := txn.MetaData["inflight"]; ok {
+		t.Fatal("terminal transaction metadata should not keep inherited inflight flag")
+	}
+	if txn.MetaData["allow_overdraft"] != true {
+		t.Fatal("terminal transaction metadata should keep unrelated flags")
+	}
+	if txn.MetaData["source"] != "test" {
+		t.Fatal("terminal transaction metadata should keep caller metadata")
 	}
 }
 

@@ -380,6 +380,7 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	defer span.End()
 
 	transaction.Status = StatusCommit
+	clearTerminalInflightFlag(transaction)
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.CreatedAt = time.Now()
 	if transaction.EffectiveDate == nil {
@@ -568,6 +569,7 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	defer span.End()
 
 	transaction.Status = StatusVoid
+	clearTerminalInflightFlag(transaction)
 	transaction.PreciseAmount = amountLeft
 	transaction.CreatedAt = time.Now()
 	if transaction.EffectiveDate == nil {
@@ -587,6 +589,13 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 
 	span.AddEvent("Void transaction finalized", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 	return transaction, nil
+}
+
+func clearTerminalInflightFlag(transaction *model.Transaction) {
+	transaction.Inflight = false
+	if transaction.MetaData != nil {
+		delete(transaction.MetaData, "inflight")
+	}
 }
 
 // BulkInflightAction discriminates between the two operations supported by
