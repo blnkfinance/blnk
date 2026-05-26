@@ -887,6 +887,106 @@ func TestParseScope(t *testing.T) {
 	}
 }
 
+func TestScopeCovers(t *testing.T) {
+	tests := []struct {
+		name           string
+		grantedScope   string
+		requestedScope string
+		expected       bool
+	}{
+		{
+			name:           "Exact scope match",
+			grantedScope:   "ledgers:read",
+			requestedScope: "ledgers:read",
+			expected:       true,
+		},
+		{
+			name:           "Resource wildcard covers exact scope",
+			grantedScope:   "*:write",
+			requestedScope: "accounts:write",
+			expected:       true,
+		},
+		{
+			name:           "Action wildcard covers resource action",
+			grantedScope:   "ledgers:*",
+			requestedScope: "ledgers:delete",
+			expected:       true,
+		},
+		{
+			name:           "Exact resource scope does not cover wildcard request",
+			grantedScope:   "ledgers:read",
+			requestedScope: "ledgers:*",
+			expected:       false,
+		},
+		{
+			name:           "Different action is denied",
+			grantedScope:   "ledgers:read",
+			requestedScope: "ledgers:write",
+			expected:       false,
+		},
+		{
+			name:           "Invalid requested scope is denied",
+			grantedScope:   "ledgers:*",
+			requestedScope: "not-a-scope",
+			expected:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ScopeCovers(tt.grantedScope, tt.requestedScope)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestCanGrantScopes(t *testing.T) {
+	tests := []struct {
+		name            string
+		callerScopes    []string
+		requestedScopes []string
+		expected        bool
+	}{
+		{
+			name:            "All requested scopes are covered",
+			callerScopes:    []string{"api-keys:read", "api-keys:write", "ledgers:*"},
+			requestedScopes: []string{"api-keys:read", "ledgers:delete"},
+			expected:        true,
+		},
+		{
+			name:            "Wildcard caller can grant wildcard request",
+			callerScopes:    []string{"*:*"},
+			requestedScopes: []string{"accounts:delete"},
+			expected:        true,
+		},
+		{
+			name:            "Broader requested scope is denied",
+			callerScopes:    []string{"api-keys:write"},
+			requestedScopes: []string{"*:*"},
+			expected:        false,
+		},
+		{
+			name:            "Different resource is denied",
+			callerScopes:    []string{"ledgers:*"},
+			requestedScopes: []string{"accounts:read"},
+			expected:        false,
+		},
+		{
+			name:            "Invalid requested scope is denied",
+			callerScopes:    []string{"ledgers:*"},
+			requestedScopes: []string{"invalid"},
+			expected:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CanGrantScopes(tt.callerScopes, tt.requestedScopes)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestRateLimitMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -100,3 +100,43 @@ func HasPermission(scopes []string, resource Resource, method string) bool {
 	}
 	return false
 }
+
+// ScopeCovers reports whether a granted scope is broad enough to authorize a requested scope.
+func ScopeCovers(grantedScope, requestedScope string) bool {
+	grantedResource, grantedAction := ParseScope(grantedScope)
+	requestedResource, requestedAction := ParseScope(requestedScope)
+
+	if grantedResource == "" || grantedAction == "" || requestedResource == "" || requestedAction == "" {
+		return false
+	}
+
+	if grantedResource == ResourceAll {
+		return grantedAction == ActionAll || grantedAction == requestedAction
+	}
+
+	if grantedResource != requestedResource {
+		return false
+	}
+
+	return grantedAction == ActionAll || grantedAction == requestedAction
+}
+
+// CanGrantScopes reports whether all requested scopes are covered by the caller's scopes.
+func CanGrantScopes(callerScopes, requestedScopes []string) bool {
+	for _, requestedScope := range requestedScopes {
+		covered := false
+
+		for _, callerScope := range callerScopes {
+			if ScopeCovers(callerScope, requestedScope) {
+				covered = true
+				break
+			}
+		}
+
+		if !covered {
+			return false
+		}
+	}
+
+	return true
+}
