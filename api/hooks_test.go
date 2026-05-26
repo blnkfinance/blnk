@@ -22,16 +22,72 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/hooks"
 	"github.com/blnkfinance/blnk/internal/request"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRegisterHook(t *testing.T) {
-	router, _, err := setupRouter()
+func setupHookRouter(t *testing.T, isMaster bool) *gin.Engine {
+	t.Helper()
+
+	config.MockConfig(&config.Configuration{
+		Queue: config.QueueConfig{
+			TransactionQueue: "transaction_queue_test_api_md_async",
+			NumberOfQueues:   1,
+		},
+		Redis:      config.RedisConfig{Dns: "localhost:6379"},
+		DataSource: config.DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
+	})
+	cnf, err := config.Fetch()
 	if err != nil {
 		t.Fatalf("Failed to setup router: %v", err)
 	}
+
+	db, err := database.NewDataSource(cnf)
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newBlnk, err := blnk.NewBlnk(db)
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	apiInstance := NewAPI(newBlnk)
+	apiInstance.router.Use(func(c *gin.Context) {
+		c.Set("isMasterKey", isMaster)
+		c.Next()
+	})
+
+	return apiInstance.Router()
+}
+
+func TestEnsureHookManagementAuthorized(t *testing.T) {
+	t.Run("Master key is allowed", func(t *testing.T) {
+		resp := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(resp)
+		c.Set("isMasterKey", true)
+
+		assert.True(t, ensureHookManagementAuthorized(c))
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("API key is denied", func(t *testing.T) {
+		resp := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(resp)
+
+		assert.False(t, ensureHookManagementAuthorized(c))
+		assert.Equal(t, http.StatusForbidden, resp.Code)
+		assert.Contains(t, resp.Body.String(), errHooksRequireMasterKey.Error())
+	})
+}
+
+func TestRegisterHook(t *testing.T) {
+	router := setupHookRouter(t, true)
 
 	t.Run("Invalid JSON", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "/hooks", bytes.NewReader([]byte("invalid json")))
@@ -59,10 +115,7 @@ func TestRegisterHook(t *testing.T) {
 }
 
 func TestUpdateHook(t *testing.T) {
-	router, _, err := setupRouter()
-	if err != nil {
-		t.Fatalf("Failed to setup router: %v", err)
-	}
+	router := setupHookRouter(t, true)
 
 	t.Run("Invalid JSON", func(t *testing.T) {
 		req := httptest.NewRequest("PUT", "/hooks/hk_test123", bytes.NewReader([]byte("invalid json")))
@@ -74,10 +127,7 @@ func TestUpdateHook(t *testing.T) {
 }
 
 func TestGetHook(t *testing.T) {
-	router, _, err := setupRouter()
-	if err != nil {
-		t.Fatalf("Failed to setup router: %v", err)
-	}
+	router := setupHookRouter(t, true)
 
 	t.Run("Hook not found", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/hooks/hk_nonexistent", nil)
@@ -88,10 +138,7 @@ func TestGetHook(t *testing.T) {
 }
 
 func TestListHooks(t *testing.T) {
-	router, _, err := setupRouter()
-	if err != nil {
-		t.Fatalf("Failed to setup router: %v", err)
-	}
+	router := setupHookRouter(t, true)
 
 	t.Run("List all hooks", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/hooks", nil)
@@ -109,10 +156,7 @@ func TestListHooks(t *testing.T) {
 }
 
 func TestDeleteHook(t *testing.T) {
-	router, _, err := setupRouter()
-	if err != nil {
-		t.Fatalf("Failed to setup router: %v", err)
-	}
+	router := setupHookRouter(t, true)
 
 	t.Run("Delete non-existent hook", func(t *testing.T) {
 		req := httptest.NewRequest("DELETE", "/hooks/hk_nonexistent", nil)
