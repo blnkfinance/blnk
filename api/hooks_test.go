@@ -22,6 +22,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/hooks"
 	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/gin-gonic/gin"
@@ -31,17 +34,36 @@ import (
 func setupHookRouter(t *testing.T, isMaster bool) *gin.Engine {
 	t.Helper()
 
-	router, _, err := setupRouter()
+	config.MockConfig(&config.Configuration{
+		Queue: config.QueueConfig{
+			TransactionQueue: "transaction_queue_test_api_md_async",
+			NumberOfQueues:   1,
+		},
+		Redis:      config.RedisConfig{Dns: "localhost:6379"},
+		DataSource: config.DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
+	})
+	cnf, err := config.Fetch()
 	if err != nil {
 		t.Fatalf("Failed to setup router: %v", err)
 	}
 
-	router.Use(func(c *gin.Context) {
+	db, err := database.NewDataSource(cnf)
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newBlnk, err := blnk.NewBlnk(db)
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	apiInstance := NewAPI(newBlnk)
+	apiInstance.router.Use(func(c *gin.Context) {
 		c.Set("isMasterKey", isMaster)
 		c.Next()
 	})
 
-	return router
+	return apiInstance.Router()
 }
 
 func TestEnsureHookManagementAuthorized(t *testing.T) {
