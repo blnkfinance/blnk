@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
@@ -8,8 +9,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var errHooksRequireMasterKey = errors.New("hook management requires master key")
+
+func isHookMasterKeyRequest(c *gin.Context) bool {
+	isMasterKey, _ := c.Get("isMasterKey")
+	isMaster, _ := isMasterKey.(bool)
+	return isMaster
+}
+
+func ensureHookManagementAuthorized(c *gin.Context) bool {
+	if isHookMasterKeyRequest(c) {
+		return true
+	}
+
+	c.JSON(http.StatusForbidden, gin.H{"error": errHooksRequireMasterKey.Error()})
+	return false
+}
+
 // RegisterHook handles the registration of a new webhook.
 func (a *Api) RegisterHook(c *gin.Context) {
+	if !ensureHookManagementAuthorized(c) {
+		return
+	}
+
 	var hook hooks.Hook
 	if err := c.ShouldBindJSON(&hook); err != nil {
 		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "invalid hook data", err))
@@ -26,6 +48,10 @@ func (a *Api) RegisterHook(c *gin.Context) {
 
 // UpdateHook handles updating an existing webhook.
 func (a *Api) UpdateHook(c *gin.Context) {
+	if !ensureHookManagementAuthorized(c) {
+		return
+	}
+
 	hookID := c.Param("id")
 	var hook hooks.Hook
 	if err := c.ShouldBindJSON(&hook); err != nil {
@@ -43,6 +69,10 @@ func (a *Api) UpdateHook(c *gin.Context) {
 
 // GetHook retrieves a specific webhook by ID.
 func (a *Api) GetHook(c *gin.Context) {
+	if !ensureHookManagementAuthorized(c) {
+		return
+	}
+
 	hookID := c.Param("id")
 	hook, err := a.blnk.Hooks.GetHook(c.Request.Context(), hookID)
 	if err != nil {
@@ -55,6 +85,10 @@ func (a *Api) GetHook(c *gin.Context) {
 
 // ListHooks retrieves all hooks of a specific type.
 func (a *Api) ListHooks(c *gin.Context) {
+	if !ensureHookManagementAuthorized(c) {
+		return
+	}
+
 	hookType := hooks.HookType(c.Query("type"))
 	hooks, err := a.blnk.Hooks.ListHooks(c.Request.Context(), hookType)
 	if err != nil {
@@ -67,6 +101,10 @@ func (a *Api) ListHooks(c *gin.Context) {
 
 // DeleteHook removes a webhook by ID.
 func (a *Api) DeleteHook(c *gin.Context) {
+	if !ensureHookManagementAuthorized(c) {
+		return
+	}
+
 	hookID := c.Param("id")
 	if err := a.blnk.Hooks.DeleteHook(c.Request.Context(), hookID); err != nil {
 		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to delete hook", err))
