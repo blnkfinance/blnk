@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"os/signal"
 	"strings"
@@ -241,6 +242,24 @@ func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error 
 	return nil
 }
 
+// processInflightCommit handles scheduled auto-commits for inflight transactions.
+// amount=0 means "commit the full remaining amount" per updateTransactionAmount semantics.
+func (b *blnkInstance) processInflightCommit(ctx context.Context, t *asynq.Task) error {
+	var txnID string
+	if err := json.Unmarshal(t.Payload(), &txnID); err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	_, err := b.blnk.CommitInflightTransaction(ctx, txnID, big.NewInt(0))
+	if err != nil {
+		return err
+	}
+
+	logrus.Printf(" [*] Inflight Transaction Committed %s", txnID)
+	return nil
+}
+
 // processInflightExpiry handles the expiry of inflight transactions.
 // It voids the transaction by its ID and logs the action.
 func (b *blnkInstance) processInflightExpiry(cxt context.Context, t *asynq.Task) error {
@@ -270,6 +289,7 @@ func initializeQueues() map[string]int {
 
 	queues := make(map[string]int)
 	queues[cfg.Queue.InflightExpiryQueue] = 1
+	queues[cfg.Queue.InflightCommitQueue] = 1
 
 	for i := 1; i <= cfg.Queue.NumberOfQueues; i++ {
 		queueName := fmt.Sprintf("%s_%d", cfg.Queue.TransactionQueue, i)
@@ -388,6 +408,7 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 		mux.HandleFunc(cfg.Queue.HotQueueName, b.processTransaction)
 	}
 	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
+	mux.HandleFunc(cfg.Queue.InflightCommitQueue, b.processInflightCommit)
 }
 
 func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
