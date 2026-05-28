@@ -62,6 +62,7 @@ var (
 		WebhookQueue:                    "new:webhook",
 		IndexQueue:                      "new:index",
 		InflightExpiryQueue:             "new:inflight-expiry",
+		InflightCommitQueue:             "new:inflight-commit",
 		NumberOfQueues:                  20,
 		EnableHotLane:                   false,
 		HotQueueName:                    "hot_transactions",
@@ -382,6 +383,9 @@ func (cnf *Configuration) setQueueDefaults() {
 	}
 	if cnf.Queue.InflightExpiryQueue == "" {
 		cnf.Queue.InflightExpiryQueue = defaultQueue.InflightExpiryQueue
+	}
+	if cnf.Queue.InflightCommitQueue == "" {
+		cnf.Queue.InflightCommitQueue = defaultQueue.InflightCommitQueue
 	}
 	if cnf.Queue.NumberOfQueues == 0 {
 		cnf.Queue.NumberOfQueues = defaultQueue.NumberOfQueues
