@@ -350,6 +350,17 @@ func (l *Blnk) updateTransactionAmount(transaction *model.Transaction, amount *b
 	}
 }
 
+func clearTerminalInflightFlag(transaction *model.Transaction) {
+	if transaction == nil {
+		return
+	}
+
+	transaction.Inflight = false
+	if transaction.MetaData != nil {
+		delete(transaction.MetaData, "inflight")
+	}
+}
+
 // convertPreciseToFloat converts a precise amount (big.Int) to a floating-point representation.
 //
 // Parameters:
@@ -387,6 +398,7 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	}
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	clearTerminalInflightFlag(transaction)
 	transaction.Hash = transaction.HashTxn()
 
 	if withQueue {
@@ -576,6 +588,7 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	clearTerminalInflightFlag(transaction)
 	transaction.Hash = transaction.HashTxn()
 	model.ApplyPrecision(transaction)
 

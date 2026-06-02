@@ -1290,6 +1290,8 @@ func (l *Blnk) processBalances(ctx context.Context, transaction *model.Transacti
 // buildTransactionExecutionWork converts an in-memory-applied transaction into the shared
 // persistence and post-commit work shape used by both single and batched execution paths.
 func (l *Blnk) buildTransactionExecutionWork(ctx context.Context, transaction *model.Transaction, sourceBalance, destinationBalance *model.Balance) (queuedBatchPostCommitWork, bool) {
+	// StatusCommit is normalized to APPLIED below; capture it first for lineage handling.
+	isInflightCommit := transaction.Status == StatusCommit && transaction.ParentTransaction != ""
 	transaction = l.updateTransactionDetails(ctx, transaction, sourceBalance, destinationBalance)
 	if transaction.PreciseAmount != nil && transaction.PreciseAmount.Cmp(big.NewInt(0)) == 0 {
 		return queuedBatchPostCommitWork{
@@ -1299,11 +1301,16 @@ func (l *Blnk) buildTransactionExecutionWork(ctx context.Context, transaction *m
 		}, true
 	}
 
+	var outbox *model.LineageOutbox
+	if !isInflightCommit {
+		outbox = l.prepareTransactionOutbox(ctx, transaction, sourceBalance, destinationBalance)
+	}
+
 	return queuedBatchPostCommitWork{
 		transaction:        transaction,
 		sourceBalance:      sourceBalance,
 		destinationBalance: destinationBalance,
-		outbox:             l.prepareTransactionOutbox(ctx, transaction, sourceBalance, destinationBalance),
+		outbox:             outbox,
 	}, false
 }
 
