@@ -576,8 +576,8 @@ func getTransactionSchema() *api.CollectionSchema {
 	facet := true
 	sortBy := "created_at"
 	enableNested := true
-	sourceId := "balances.balance_id"
-	destinationId := "balances.balance_id"
+	sourceId := "balances.id"
+	destinationId := "balances.id"
 	return &api.CollectionSchema{
 		Name: "transactions",
 		Fields: []api.Field{
