@@ -193,7 +193,7 @@ func TestLoadConfigFromFileMonitoringDSN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to create temporary file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	sampleConfig := Configuration{
 		ProjectName:         "Monitoring DSN Test",
@@ -209,7 +209,9 @@ func TestLoadConfigFromFileMonitoringDSN(t *testing.T) {
 	if err := json.NewEncoder(tmpFile).Encode(sampleConfig); err != nil {
 		t.Fatalf("Unable to write to temporary file: %v", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Unable to close temporary file: %v", err)
+	}
 
 	if err := loadConfigFromFile(tmpFile.Name()); err != nil {
 		t.Fatalf("loadConfigFromFile failed: %v", err)
