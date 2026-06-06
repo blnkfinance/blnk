@@ -18,6 +18,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/typesense/typesense-go/typesense/api"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -26,6 +27,7 @@ import (
 	"github.com/blnkfinance/blnk/api/middleware"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // Api represents the API structure for handling requests.
@@ -158,7 +160,9 @@ func NewAPI(b *blnk.Blnk) *Api {
 	if err != nil {
 		return nil
 	}
-	r := gin.Default()
+	r := gin.New()
+	r.Use(logrusAccessLogger())
+	r.Use(logrusRecovery())
 	auth := middleware.NewAuthMiddleware(b)
 	r.Use(middleware.RateLimitMiddleware(conf))
 	r.Use(middleware.SecurityHeaders())
@@ -175,6 +179,39 @@ func NewAPI(b *blnk.Blnk) *Api {
 	})
 
 	return &Api{blnk: b, router: r, auth: auth}
+}
+
+func logrusAccessLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		clientIP := c.ClientIP()
+
+		c.Next()
+
+		logrus.WithFields(logrus.Fields{
+			"method":       method,
+			"path":         path,
+			"status":       c.Writer.Status(),
+			"latency_ms":   time.Since(start).Milliseconds(),
+			"client_ip":    clientIP,
+			"error_count":  len(c.Errors),
+			"response_len": c.Writer.Size(),
+		}).Info("http request")
+	}
+}
+
+func logrusRecovery() gin.HandlerFunc {
+	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
+		logrus.WithFields(logrus.Fields{
+			"method":    c.Request.Method,
+			"path":      c.Request.URL.Path,
+			"client_ip": c.ClientIP(),
+			"panic":     recovered,
+		}).Error("panic recovered")
+		c.AbortWithStatus(http.StatusInternalServerError)
+	})
 }
 
 // Search performs a search query on a specified collection.

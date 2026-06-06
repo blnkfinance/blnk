@@ -19,8 +19,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 	"fmt"
+	"math/big"
 	"net/http"
 	"os/signal"
 	"strings"
@@ -74,6 +74,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 	if err != nil {
 		logrus.WithError(err).Warnf("failed pre-checking transaction reference %s", txn.Reference)
 	} else if exists {
+		notification.NotifyError(fmt.Errorf("reference %s has already been used", txn.Reference))
 		return nil
 	}
 
@@ -93,7 +94,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 	_, err = b.blnk.ProcessQueuedTransaction(ctx, &txn, b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName)
 	if err != nil {
 		// Handle reference already used error
-		if strings.Contains(strings.ToLower(err.Error()), "reference") && strings.Contains(strings.ToLower(err.Error()), "already been used") {
+		if blnk.IsDuplicateReferenceError(err) {
 			notification.NotifyError(err)
 			return nil
 		}
@@ -497,7 +498,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			// Wait for SIGINT/SIGTERM.
 			<-ctx.Done()
 
-			logrus.Errorf("Shutdown signal received. Shutting down...")
+			logrus.Info("Shutdown signal received. Shutting down...")
 
 			recoveryProcessor.Stop()
 
@@ -515,7 +516,7 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 			}
 			srv.Shutdown()
 
-			logrus.Errorf("Shutdown complete.")
+			logrus.Info("Shutdown complete.")
 		},
 	}
 
@@ -587,7 +588,7 @@ func startMonitoringServer(conf *config.Configuration) *http.Server {
 	}
 
 	go func() {
-		logrus.Errorf("Worker monitoring server listening on %s (health: /health, dashboard: /monitoring)", monitoringAddr)
+		logrus.Infof("Worker monitoring server listening on %s (health: /health, dashboard: /monitoring)", monitoringAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logrus.Fatalf("could not start monitoring server: %v", err)
 		}

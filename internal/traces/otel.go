@@ -24,6 +24,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/blnkfinance/blnk/internal/monitoringexporter"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -52,7 +54,7 @@ func MetricsHandler() http.Handler {
 
 // SetupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
-func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(context.Context) error, err error) {
+func SetupOTelSDK(ctx context.Context, serviceName, monitoringDSN string) (shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 
 	// shutdown calls cleanup functions registered via shutdownFuncs.
@@ -78,12 +80,14 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 		return shutdown, err
 	}
 
+	exporterCfg, exporterEnabled := monitoringExporterConfigFromDSN(monitoringDSN)
+
 	// Set up propagator.
 	prop := newPropagator()
 	otel.SetTextMapPropagator(prop)
 
 	// Set up trace provider.
-	tracerProvider, err := newTraceProvider(ctx, res)
+	tracerProvider, err := newTraceProvider(ctx, res, exporterCfg, exporterEnabled)
 	if err != nil {
 		handleErr(err)
 		return
@@ -92,7 +96,7 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 	otel.SetTracerProvider(tracerProvider)
 
 	// Set up meter provider (dual-mode: Prometheus pull + OTLP push).
-	meterProvider, err := newMeterProvider(ctx, res)
+	meterProvider, err := newMeterProvider(ctx, res, exporterCfg, exporterEnabled)
 	if err != nil {
 		handleErr(err)
 		return
@@ -108,6 +112,12 @@ func SetupOTelSDK(ctx context.Context, serviceName string) (shutdown func(contex
 	}
 	shutdownFuncs = append(shutdownFuncs, loggerProvider.Shutdown)
 	global.SetLoggerProvider(loggerProvider)
+
+	if exporterEnabled {
+		exporterLogs := monitoringexporter.InstallLogHook(exporterCfg)
+		shutdownFuncs = append(shutdownFuncs, exporterLogs.Shutdown)
+		logrus.Info("monitoring exporter enabled")
+	}
 
 	return
 }
@@ -128,17 +138,28 @@ func newPropagator() propagation.TextMapPropagator {
 	)
 }
 
-func newTraceProvider(ctx context.Context, res *resource.Resource) (*sdktrace.TracerProvider, error) {
+func newTraceProvider(ctx context.Context, res *resource.Resource, exporterCfg monitoringexporter.Config, exporterEnabled bool) (*sdktrace.TracerProvider, error) {
 	exporter, err := newTraceExporter(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	traceProvider := sdktrace.NewTracerProvider(
+	opts := []sdktrace.TracerProviderOption{
 		sdktrace.WithBatcher(exporter,
 			sdktrace.WithBatchTimeout(5*time.Second)),
 		sdktrace.WithResource(res),
-	)
+	}
+	if exporterEnabled {
+		exporter, err := monitoringexporter.NewTraceExporter(ctx, exporterCfg)
+		if err != nil {
+			logrus.WithError(err).Warn("monitoring trace exporter unavailable")
+		} else {
+			opts = append(opts, sdktrace.WithBatcher(exporter,
+				sdktrace.WithBatchTimeout(5*time.Second)))
+		}
+	}
+
+	traceProvider := sdktrace.NewTracerProvider(opts...)
 	return traceProvider, nil
 }
 
@@ -146,7 +167,7 @@ func newTraceProvider(ctx context.Context, res *resource.Resource) (*sdktrace.Tr
 //   - Pull (Prometheus): always active — exposes metrics via /metrics endpoint for scraping.
 //   - Push (OTLP HTTP): opt-in — enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set.
 //     Uses the standard OTel env var, so it works automatically with any OTel Collector.
-func newMeterProvider(ctx context.Context, res *resource.Resource) (*sdkmetric.MeterProvider, error) {
+func newMeterProvider(ctx context.Context, res *resource.Resource, exporterCfg monitoringexporter.Config, exporterEnabled bool) (*sdkmetric.MeterProvider, error) {
 	// Pull exporter: Prometheus scrape endpoint (always active).
 	promExp, err := promexporter.New()
 	if err != nil {
@@ -173,6 +194,15 @@ func newMeterProvider(ctx context.Context, res *resource.Resource) (*sdkmetric.M
 		opts = append(opts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(otlpExp,
 			sdkmetric.WithInterval(60*time.Second),
 		)))
+	}
+
+	if exporterEnabled {
+		exporterReader, err := monitoringexporter.NewMetricReader(ctx, exporterCfg)
+		if err != nil {
+			logrus.WithError(err).Warn("monitoring metric exporter unavailable")
+		} else {
+			opts = append(opts, sdkmetric.WithReader(exporterReader))
+		}
 	}
 
 	meterProvider := sdkmetric.NewMeterProvider(opts...)
@@ -223,4 +253,13 @@ func parseOTLPEndpoint(endpoint string) (hostPort string, insecure bool) {
 		return endpoint, true
 	}
 	return parsed.Host, parsed.Scheme != "https"
+}
+
+func monitoringExporterConfigFromDSN(dsn string) (monitoringexporter.Config, bool) {
+	cfg, enabled, err := monitoringexporter.FromDSN(dsn)
+	if err != nil {
+		logrus.WithError(err).Warn("monitoring exporter disabled")
+		return monitoringexporter.Config{}, false
+	}
+	return cfg, enabled
 }

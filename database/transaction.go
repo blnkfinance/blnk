@@ -48,7 +48,7 @@ import (
 // - The recorded transaction if successful, or an error if the recording fails.
 func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
 	// Start a new tracing span for the database operation
-	ctx, span := otel.Tracer("transaction.database").Start(ctx, "RecordTransaction")
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "PersistTransaction")
 	defer span.End()
 
 	// Marshal transaction metadata into JSON format

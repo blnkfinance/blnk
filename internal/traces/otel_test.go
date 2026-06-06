@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blnkfinance/blnk/internal/monitoringexporter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -26,7 +27,7 @@ func TestNewMeterProvider_PrometheusOnlyWhenNoOTLPEndpoint(t *testing.T) {
 	))
 	require.NoError(t, err)
 
-	mp, err := newMeterProvider(ctx, res)
+	mp, err := newMeterProvider(ctx, res, monitoringExporterConfigForTest(), false)
 	require.NoError(t, err)
 	require.NotNil(t, mp)
 	t.Cleanup(func() { _ = mp.Shutdown(ctx) })
@@ -48,7 +49,7 @@ func TestMetricsHandler_ServesPrometheusFormat(t *testing.T) {
 	))
 	require.NoError(t, err)
 
-	mp, err := newMeterProvider(ctx, res)
+	mp, err := newMeterProvider(ctx, res, monitoringExporterConfigForTest(), false)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = mp.Shutdown(ctx) })
 
@@ -109,4 +110,34 @@ func TestParseOTLPEndpoint(t *testing.T) {
 			assert.Equal(t, tt.wantInsecure, insecure)
 		})
 	}
+}
+
+func TestCloudConfigFromDSN(t *testing.T) {
+	cfg, enabled := monitoringExporterConfigFromDSN("")
+	if enabled {
+		t.Fatalf("expected cloud config to be disabled without DSN")
+	}
+	if cfg.ProjectID != "" {
+		t.Fatalf("expected empty cloud config without DSN")
+	}
+
+	cfg, enabled = monitoringExporterConfigFromDSN("not-a-dsn")
+	if enabled {
+		t.Fatalf("expected invalid cloud config to be disabled")
+	}
+	if cfg.ProjectID != "" {
+		t.Fatalf("expected empty cloud config for invalid DSN")
+	}
+
+	cfg, enabled = monitoringExporterConfigFromDSN("https://pk_test@observe.blnk.cloud/project_123")
+	if !enabled {
+		t.Fatalf("expected valid cloud config to be enabled")
+	}
+	if cfg.ProjectID != "project_123" {
+		t.Fatalf("expected project_123, got %s", cfg.ProjectID)
+	}
+}
+
+func monitoringExporterConfigForTest() monitoringexporter.Config {
+	return monitoringexporter.Config{}
 }

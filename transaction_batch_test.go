@@ -7,6 +7,7 @@ import (
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database/mocks"
+	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -272,6 +273,41 @@ func TestValidateQueuedBatchTransactionReferenceUsesPrefetchedSet(t *testing.T) 
 	}, prefetched, existing, batch)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already been used")
+}
+
+func TestValidateQueuedBatchTransactionReferenceNotifiesDuplicateReference(t *testing.T) {
+	if currentConfig, err := config.Fetch(); err == nil {
+		t.Cleanup(func() { config.MockConfig(currentConfig) })
+	}
+	config.MockConfig(&config.Configuration{
+		DataSource: config.DataSourceConfig{Dns: "postgres://test"},
+		Redis:      config.RedisConfig{Dns: "redis://test"},
+		Notification: config.Notification{
+			Webhook: config.WebhookConfig{Url: "http://example.com/system-error"},
+		},
+	})
+
+	events := make(chan string, 1)
+	notification.RegisterWebhookSender(func(event string, payload interface{}) error {
+		events <- event
+		return nil
+	})
+	t.Cleanup(func() { notification.RegisterWebhookSender(nil) })
+
+	blnkInstance := &Blnk{}
+	err := blnkInstance.validateQueuedBatchTransactionReference(context.Background(), &model.Transaction{
+		Reference: "duplicate_ref_q",
+	}, map[string]struct{}{"duplicate_ref_q": {}}, map[string]struct{}{"duplicate_ref_q": {}}, map[string]struct{}{})
+
+	assert.Error(t, err)
+	assert.True(t, IsDuplicateReferenceError(err))
+
+	select {
+	case event := <-events:
+		assert.Equal(t, "system.error", event)
+	case <-time.After(time.Second):
+		t.Fatal("expected system.error webhook event for duplicate reference")
+	}
 }
 
 func TestBatchReferenceCheckEnabled(t *testing.T) {

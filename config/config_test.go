@@ -188,6 +188,45 @@ func TestLoadConfigFromFile(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromFileMonitoringDSN(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "blnk.json")
+	if err != nil {
+		t.Fatalf("Unable to create temporary file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	sampleConfig := Configuration{
+		ProjectName:         "Monitoring DSN Test",
+		MonitoringDSN:       "https://blnk_obs_test@observe.blnk.cloud/monproj_test",
+		EnableObservability: true,
+		DataSource: DataSourceConfig{
+			Dns: "temp-dns",
+		},
+		Redis: RedisConfig{
+			Dns: "temp-redis",
+		},
+	}
+	if err := json.NewEncoder(tmpFile).Encode(sampleConfig); err != nil {
+		t.Fatalf("Unable to write to temporary file: %v", err)
+	}
+	tmpFile.Close()
+
+	if err := loadConfigFromFile(tmpFile.Name()); err != nil {
+		t.Fatalf("loadConfigFromFile failed: %v", err)
+	}
+
+	loadedConfig, err := Fetch()
+	if err != nil {
+		t.Fatalf("Fetch failed: %v", err)
+	}
+	if loadedConfig.MonitoringDSN != "https://blnk_obs_test@observe.blnk.cloud/monproj_test" {
+		t.Fatalf("Expected MonitoringDSN from config file, got %q", loadedConfig.MonitoringDSN)
+	}
+	if loadedConfig.RemoteMonitoringDSN() != "https://blnk_obs_test@observe.blnk.cloud/monproj_test" {
+		t.Fatalf("Expected remote monitoring DSN from config file, got %q", loadedConfig.RemoteMonitoringDSN())
+	}
+}
+
 func TestInitConfig(t *testing.T) {
 	// Create a temporary file
 	tmpFile, err := os.CreateTemp("", "blnk.json")
