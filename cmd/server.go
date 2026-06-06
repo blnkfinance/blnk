@@ -195,8 +195,8 @@ func initializeRouter(b *blnkInstance) *gin.Engine {
 	return router
 }
 
-func initializeOpenTelemetry(ctx context.Context) (func(context.Context) error, error) {
-	shutdown, err := trace.SetupOTelSDK(ctx, "BLNK")
+func initializeOpenTelemetry(ctx context.Context, monitoringDSN string) (func(context.Context) error, error) {
+	shutdown, err := trace.SetupOTelSDK(ctx, "BLNK", monitoringDSN)
 	if err != nil {
 		return nil, fmt.Errorf("error setting up OTel SDK: %w", err)
 	}
@@ -285,7 +285,7 @@ func initializeTelemetryAndObservability(ctx context.Context, cfg *config.Config
 
 	// Initialize tracing if observability is enabled
 	if cfg.EnableObservability {
-		tracingShutdown, err = initializeOpenTelemetry(ctx)
+		tracingShutdown, err = initializeOpenTelemetry(ctx, cfg.RemoteMonitoringDSN())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize tracing: %w", err)
 		}

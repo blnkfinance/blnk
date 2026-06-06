@@ -391,11 +391,20 @@ func (l *Blnk) validateTxn(ctx context.Context, transaction *model.Transaction) 
 	if txn {
 		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
 		span.RecordError(err)
+		notification.NotifyError(err)
 		return err
 	}
 
 	span.AddEvent("Transaction validated")
 	return nil
+}
+
+func IsDuplicateReferenceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "reference") && strings.Contains(msg, "already been used")
 }
 
 // applyTransactionToBalances applies a transaction to the provided balances.
@@ -1562,11 +1571,15 @@ func (l *Blnk) validateQueuedBatchTransactionReference(ctx context.Context, tran
 	}
 
 	if _, ok := batchReferences[transaction.Reference]; ok {
-		return fmt.Errorf("reference %s has already been used", transaction.Reference)
+		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
+		notification.NotifyError(err)
+		return err
 	}
 
 	if _, ok := existingReferences[transaction.Reference]; ok {
-		return fmt.Errorf("reference %s has already been used", transaction.Reference)
+		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
+		notification.NotifyError(err)
+		return err
 	}
 
 	if len(prefetchedReferences) == 0 {

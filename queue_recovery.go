@@ -48,7 +48,7 @@ func NewQueuedTransactionRecoveryProcessor(blnk *Blnk) *QueuedTransactionRecover
 		blnk:                     blnk,
 		batchSize:                100,
 		maxWorkers:               1,
-		pollInterval:             30 * time.Second,
+		pollInterval:             30 * time.Minute,
 		stuckThreshold:           2 * time.Hour,
 		maxRecoveryAttempts:      3,
 		stopCh:                   make(chan struct{}),

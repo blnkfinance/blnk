@@ -211,9 +211,17 @@ type Configuration struct {
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
 	EnableTelemetry         bool                          `json:"enable_telemetry" envconfig:"BLNK_ENABLE_TELEMETRY"`
 	EnableObservability     bool                          `json:"enable_observability" envconfig:"BLNK_ENABLE_OBSERVABILITY"`
+	MonitoringDSN           string                        `json:"monitoring_dsn" envconfig:"BLNK_MONITORING_DSN"`
 	Transaction             TransactionConfig             `json:"transaction"`
 	Reconciliation          ReconciliationConfig          `json:"reconciliation"`
 	Queue                   QueueConfig                   `json:"queue"`
+}
+
+func (cnf *Configuration) RemoteMonitoringDSN() string {
+	if strings.TrimSpace(cnf.MonitoringDSN) != "" {
+		return cnf.MonitoringDSN
+	}
+	return ""
 }
 
 func loadConfigFromFile(file string) error {
