@@ -47,6 +47,33 @@ type RecordTransaction struct {
 	EffectiveDate      *time.Time             `json:"effective_date,omitempty"`
 }
 
+// BulkTransactionRequest is the public API request shape for creating a batch
+// of transactions. Each item mirrors the single transaction create payload.
+type BulkTransactionRequest struct {
+	Transactions []*RecordTransaction `json:"transactions"`
+	Inflight     bool                 `json:"inflight"`
+	Atomic       bool                 `json:"atomic"`
+	RunAsync     bool                 `json:"run_async"`
+	SkipQueue    bool                 `json:"skip_queue"`
+}
+
+func (r *BulkTransactionRequest) ToBulkTransactionRequest() *model.BulkTransactionRequest {
+	transactions := make([]*model.Transaction, len(r.Transactions))
+	for i, transaction := range r.Transactions {
+		if transaction != nil {
+			transactions[i] = transaction.ToTransaction()
+		}
+	}
+
+	return &model.BulkTransactionRequest{
+		Transactions: transactions,
+		Inflight:     r.Inflight,
+		Atomic:       r.Atomic,
+		RunAsync:     r.RunAsync,
+		SkipQueue:    r.SkipQueue,
+	}
+}
+
 type InflightUpdate struct {
 	Status        string   `json:"status"`
 	Amount        float64  `json:"amount"`

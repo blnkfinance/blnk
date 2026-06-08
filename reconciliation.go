@@ -564,13 +564,13 @@ func (s *Blnk) processTransactions(ctx context.Context, uploadID string, process
 				}
 				processedCount++
 				if processedCount%10 == 0 {
-					logrus.Errorf("Processed %d transactions", processedCount)
+					logrus.Infof("Processed %d transactions", processedCount)
 				}
 				results <- BatchJobResult{}
 			}
 		},
 	)
-	logrus.Errorf("Total transactions processed: %d", processedCount)
+	logrus.Infof("Total transactions processed: %d", processedCount)
 	return err
 }
 
@@ -589,12 +589,12 @@ func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.
 	reconciliation.MatchedTransactions = matchCount
 	reconciliation.CompletedAt = ptr.Time(time.Now())
 
-	logrus.Errorf("Finalizing reconciliation. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
+	logrus.Infof("Finalizing reconciliation. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 
 	if !reconciliation.IsDryRun {
 		s.postReconciliationActions(ctx, reconciliation)
 	} else {
-		logrus.Errorf("Dry run completed. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
+		logrus.Infof("Dry run completed. Matches: %d, Unmatched: %d", matchCount, unmatchedCount)
 	}
 
 	// Update the final reconciliation status and counts in the data source.
@@ -604,7 +604,7 @@ func (s *Blnk) finalizeReconciliation(ctx context.Context, reconciliation model.
 		return err
 	}
 
-	logrus.Errorf("Reconciliation %s completed. Total matches: %d, Total unmatched: %d", reconciliation.ReconciliationID, matchCount, unmatchedCount)
+	logrus.Infof("Reconciliation %s completed. Total matches: %d, Total unmatched: %d", reconciliation.ReconciliationID, matchCount, unmatchedCount)
 
 	return nil
 }
@@ -1020,13 +1020,13 @@ func (s *Blnk) findMatchingInternalTransaction(ctx context.Context, externalTxn 
 // - []*model.Transaction: A list of external transactions converted to internal transactions.
 // - error: If any error occurs during retrieval.
 func (s *Blnk) getExternalTransactionsPaginated(ctx context.Context, uploadID string, limit int, offset int64) ([]*model.Transaction, error) {
-	logrus.Errorf("Fetching external transactions: uploadID=%s, limit=%d, offset=%d", uploadID, limit, offset)
+	logrus.Infof("Fetching external transactions: uploadID=%s, limit=%d, offset=%d", uploadID, limit, offset)
 	externalTransaction, err := s.datasource.GetExternalTransactionsPaginated(ctx, uploadID, limit, int64(offset))
 	if err != nil {
 		logrus.Errorf("Error fetching external transactions: %v", err)
 		return nil, err
 	}
-	logrus.Errorf("Fetched %d external transactions", len(externalTransaction))
+	logrus.Infof("Fetched %d external transactions", len(externalTransaction))
 	transactions := make([]*model.Transaction, len(externalTransaction))
 
 	for i, txn := range externalTransaction {

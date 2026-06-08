@@ -483,15 +483,28 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 // It parses the request, calls the Blnk service to handle the core logic,
 // and returns the appropriate HTTP response based on the result.
 func (a Api) CreateBulkTransactions(c *gin.Context) {
-	// Parse the request into the model struct
-	var req model.BulkTransactionRequest
+	var req model2.BulkTransactionRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
 
+	for i, transaction := range req.Transactions {
+		if transaction == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": "transactions[" + strconv.Itoa(i) + "] is required"})
+			return
+		}
+
+		if err := transaction.ValidateRecordTransaction(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": "transactions[" + strconv.Itoa(i) + "]: " + err.Error()})
+			return
+		}
+	}
+
+	bulkReq := req.ToBulkTransactionRequest()
+
 	// Call the service layer method to handle bulk transaction creation
-	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), &req)
+	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), bulkReq)
 	// Handle the response based on the result and error from the service layer
 	if err != nil {
 		// If there was an error during synchronous processing
@@ -504,7 +517,7 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 	}
 
 	// Handle successful responses
-	if req.RunAsync {
+	if bulkReq.RunAsync {
 		// Async request acknowledged
 		c.JSON(http.StatusAccepted, gin.H{
 			"message":  "Bulk transaction processing started",

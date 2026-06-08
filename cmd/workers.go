@@ -220,7 +220,7 @@ func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	logrus.Error(" [*] Data indexed", collection)
+	logrus.Infof(" [*] Data indexed: %s", collection)
 	return nil
 }
 
@@ -255,7 +255,7 @@ func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error 
 		return err
 	}
 
-	logrus.Errorf(" [*] Batch indexed: %s (deps: %d)", batch.ID, len(batch.Dependencies))
+	logrus.Infof(" [*] Batch indexed: %s (deps: %d)", batch.ID, len(batch.Dependencies))
 	return nil
 }
 

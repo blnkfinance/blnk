@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 */
 package api
 
@@ -32,6 +32,7 @@ func newBulkTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	a := Api{} // blnk service intentionally nil; validation paths must not touch it.
+	r.POST("/transactions/bulk", a.CreateBulkTransactions)
 	r.POST("/transactions/inflight/bulk/void", a.BulkVoidInflight)
 	r.POST("/transactions/inflight/bulk/commit", a.BulkCommitInflight)
 	return r
@@ -97,4 +98,25 @@ func TestBulkCommitInflight_RejectsOversizedList(t *testing.T) {
 		model2.BulkInflightCommitRequest{Transactions: items})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "too many transactions")
+}
+
+func TestCreateBulkTransactions_ValidatesRecordTransactionItems(t *testing.T) {
+	r := newBulkTestRouter()
+	w := doJSON(r, "POST", "/transactions/bulk", model2.BulkTransactionRequest{
+		Transactions: []*model2.RecordTransaction{
+			{
+				Amount:      100,
+				Precision:   10.5,
+				Reference:   "bulk_precision_invalid",
+				Description: "invalid fractional precision",
+				Currency:    "USD",
+				Source:      "source_balance",
+				Destination: "destination_balance",
+			},
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "transactions[0]")
+	assert.Contains(t, w.Body.String(), "precision must be an integer value")
 }
