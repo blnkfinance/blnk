@@ -611,10 +611,3 @@ func restoreTransactionFlagsFromMetadata(transaction *model.Transaction) {
 		transaction.AllowOverdraft = v
 	}
 }
-
-// releaseLock releases the distributed locks acquired for a transaction.
-// It starts a tracing span, attempts to release all locks, and records relevant events and errors.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - locker *redlock.MultiLocker: The MultiLocker object representing the acquired locks.

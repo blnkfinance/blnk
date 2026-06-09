@@ -207,5 +207,3 @@ func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string, skip
 	span.AddEvent("Refund transaction queued", trace.WithAttributes(attribute.String("refund.transaction.id", queuedRefundTxn.TransactionID)))
 	return queuedRefundTxn, nil
 }
-
-// processBulkTransactions prepares and queues all transactions in a batch with the given batch ID
