@@ -187,8 +187,6 @@ func TestGetBalanceByID(t *testing.T) {
 	}
 	balanceID := gofakeit.UUID()
 
-	mock.ExpectBegin()
-
 	// Adjust the expected SQL to match the actual SQL output.
 	expectedSQL := `SELECT b\.balance_id, b\.balance, b\.credit_balance, b\.debit_balance, b\.currency, b\.currency_multiplier, b\.ledger_id, COALESCE\(b\.identity_id, ''\) as identity_id, b\.created_at, b\.meta_data, b\.inflight_balance, b\.inflight_credit_balance, b\.inflight_debit_balance, b\.version, b\.indicator, b\.track_fund_lineage, COALESCE\(b\.allocation_strategy, 'FIFO'\) as allocation_strategy FROM \( SELECT \* FROM blnk\.balances WHERE balance_id = \$1 \) AS b`
 	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator", "track_fund_lineage", "allocation_strategy"}).
@@ -209,8 +207,6 @@ func TestGetBalanceByID(t *testing.T) {
 	mock.ExpectQuery(expectedSQL).
 		WithArgs(balanceID).
 		WillReturnRows(rows)
-
-	mock.ExpectCommit()
 
 	result, err := d.GetBalanceByID(context.Background(), balanceID, nil, false)
 	assert.NoError(t, err)

@@ -107,7 +107,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 
 // Scans a SQL row result and maps it into a Balance object, including optional identity and ledger data.
 // Converts string representations of big.Int fields into actual big.Int objects.
-func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error) {
+func scanRow(row *sql.Row, include []string) (*model.Balance, error) {
 	balance := &model.Balance{}
 	identity := &model.Identity{}
 	ledger := &model.Ledger{}
@@ -139,41 +139,32 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 
 	err := row.Scan(scanArgs...)
 	if err != nil {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			return nil, fmt.Errorf("scanRow: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
-		}
 		return nil, err
 	}
 
 	// Convert string representations to big.Int
 	balance.Balance, err = parseBigInt(balanceStr)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("failed to parse balance: %w", err)
 	}
 	balance.CreditBalance, err = parseBigInt(creditBalanceStr)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("failed to parse credit_balance: %w", err)
 	}
 	balance.DebitBalance, err = parseBigInt(debitBalanceStr)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("failed to parse debit_balance: %w", err)
 	}
 	balance.InflightBalance, err = parseBigInt(inflightBalanceStr)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("failed to parse inflight_balance: %w", err)
 	}
 	balance.InflightCreditBalance, err = parseBigInt(inflightCreditBalanceStr)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("failed to parse inflight_credit_balance: %w", err)
 	}
 	balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceStr)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
 	}
 
@@ -187,9 +178,6 @@ func scanRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Balance, error)
 	// Unmarshal metadata JSON
 	err = json.Unmarshal(metaDataJSON, &balance.MetaData)
 	if err != nil {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			return nil, fmt.Errorf("scanRow: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
-		}
 		return nil, err
 	}
 
@@ -306,26 +294,14 @@ func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool)
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	// Start a transaction
-	tx, err := d.Conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to begin transaction", err)
-	}
-	defer func() {
-		if err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				err = fmt.Errorf("GetBalanceByID: failed to rollback transaction: %v, original error: %v", rollbackErr, err)
-			}
-		}
-	}()
-
-	// Prepare and execute the query
+	// Prepare and execute the query. No explicit DB transaction is needed for
+	// these independent reads; avoiding one keeps pool connections free.
 	var queryBuilder strings.Builder
 	query := prepareQueries(queryBuilder, include)
-	row := tx.QueryRow(query, id)
+	row := d.Conn.QueryRowContext(ctx, query, id)
 
 	// Scan the result into a Balance object
-	balance, err := scanRow(row, tx, include)
+	balance, err := scanRow(row, include)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// If no balance is found
@@ -338,18 +314,12 @@ func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool)
 
 	// Get queued amounts only if requested
 	if withQueued {
-		queuedDebit, queuedCredit, err := d.GetQueuedAmounts(context.Background(), id)
+		queuedDebit, queuedCredit, err := d.GetQueuedAmounts(ctx, id)
 		if err != nil {
 			return nil, err
 		}
 		balance.QueuedDebitBalance = queuedDebit
 		balance.QueuedCreditBalance = queuedCredit
-	}
-
-	// Commit the transaction
-	err = tx.Commit()
-	if err != nil {
-		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to commit transaction", err)
 	}
 
 	return balance, nil

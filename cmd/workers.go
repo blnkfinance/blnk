@@ -70,14 +70,6 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		return err
 	}
 
-	exists, err := b.blnk.GetDataSource().TransactionExistsByRef(ctx, txn.Reference)
-	if err != nil {
-		logrus.WithError(err).Warnf("failed pre-checking transaction reference %s", txn.Reference)
-	} else if exists {
-		notification.NotifyError(fmt.Errorf("reference %s has already been used", txn.Reference))
-		return nil
-	}
-
 	handled, err := b.blnk.TryRecordQueuedTransactionBatch(ctx, &txn)
 	if b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName {
 		handled, err = b.blnk.TryRecordQueuedTransactionBatchForHotLane(ctx, &txn)
