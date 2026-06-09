@@ -18,7 +18,6 @@ package blnk
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -247,5 +246,5 @@ func (p *QueuedTransactionRecoveryProcessor) updateRecoveryMetadata(ctx context.
 }
 
 func isReferenceAlreadyUsedError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "has already been used")
+	return IsDuplicateReferenceError(err)
 }

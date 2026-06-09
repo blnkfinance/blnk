@@ -2,6 +2,8 @@ package blnk
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/blnkfinance/blnk/database/mocks"
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -307,6 +310,61 @@ func TestValidateQueuedBatchTransactionReferenceNotifiesDuplicateReference(t *te
 		assert.Equal(t, "system.error", event)
 	case <-time.After(time.Second):
 		t.Fatal("expected system.error webhook event for duplicate reference")
+	}
+}
+
+func TestIsDuplicateReferenceError(t *testing.T) {
+	rawPQErr := &pq.Error{
+		Code:       "23505",
+		Constraint: "idx_transactions_reference_unique",
+		Message:    "duplicate key value violates unique constraint \"idx_transactions_reference_unique\"",
+	}
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "application duplicate message",
+			err:  errors.New("reference ref_1 has already been used"),
+			want: true,
+		},
+		{
+			name: "raw pq unique violation",
+			err:  rawPQErr,
+			want: true,
+		},
+		{
+			name: "wrapped pq unique violation",
+			err:  fmt.Errorf("failed to persist transaction: %w", rawPQErr),
+			want: true,
+		},
+		{
+			name: "wrapped duplicate string without unwrap chain",
+			err:  errors.New("INTERNAL_SERVER_ERROR: pq: duplicate key value violates unique constraint \"idx_transactions_reference_unique\""),
+			want: true,
+		},
+		{
+			name: "non-reference unique violation",
+			err: &pq.Error{
+				Code:       "23505",
+				Constraint: "transactions_pkey",
+				Message:    "duplicate key value violates unique constraint \"transactions_pkey\"",
+			},
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsDuplicateReferenceError(tt.err))
+		})
 	}
 }
 

@@ -15,10 +15,10 @@ version: "3.8"
 
 services:
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.14.0}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.14.5}
     container_name: server
     restart: on-failure
-    entrypoint: [ "/bin/sh", "-c" ]
+    entrypoint: ["/bin/sh", "-c"]
     command:
       - "blnk migrate up && blnk start"
     environment:
@@ -36,10 +36,10 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.14.0}
+    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.14.5}
     container_name: worker
     restart: on-failure
-    entrypoint: [ "blnk", "workers" ]
+    entrypoint: ["blnk", "workers"]
     environment:
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
@@ -70,7 +70,7 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER:-postgres}" ]
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -78,13 +78,14 @@ services:
   typesense:
     image: typesense/typesense:29.0
     container_name: typesense
-    command: [ "--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108" ]
+    command:
+      ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
     volumes:
       - typesense_data:/data
     logging:
       driver: "none"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8108/health" ]
+      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -99,7 +100,7 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     healthcheck:
-      test: [ "CMD", "wget", "--spider", "http://localhost:16686" ]
+      test: ["CMD", "wget", "--spider", "http://localhost:16686"]
       interval: 10s
       timeout: 5s
       retries: 3

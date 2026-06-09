@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/lib/pq"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -293,7 +295,16 @@ func IsDuplicateReferenceError(err error) bool {
 	if err == nil {
 		return false
 	}
+
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "23505" && strings.Contains(strings.ToLower(pqErr.Constraint), "reference")
+	}
+
 	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate key value violates unique constraint") && strings.Contains(msg, "reference") {
+		return true
+	}
 	return strings.Contains(msg, "reference") && strings.Contains(msg, "already been used")
 }
 
@@ -540,6 +551,7 @@ func (l *Blnk) runTransactionPostCommitWork(ctx context.Context, span trace.Span
 // runTransactionPostCommitWorkWithHooks executes monitor checks, post-hooks, and
 // post-transaction actions for persisted work items, optionally reusing a preloaded hook set.
 func (l *Blnk) runTransactionPostCommitWorkWithHooks(ctx context.Context, span trace.Span, orderedBalances []*model.Balance, postCommitWork []queuedBatchPostCommitWork, postHooks []*blnkhooks.Hook) {
+	monitorCtx := context.WithoutCancel(ctx)
 	for _, balance := range orderedBalances {
 		balance := balance
 		// Bound concurrent monitor checks instead of spawning one unbounded
@@ -548,7 +560,7 @@ func (l *Blnk) runTransactionPostCommitWorkWithHooks(ctx context.Context, span t
 		balanceMonitorSem <- struct{}{}
 		go func() {
 			defer func() { <-balanceMonitorSem }()
-			l.checkBalanceMonitors(ctx, balance)
+			l.checkBalanceMonitors(monitorCtx, balance)
 		}()
 	}
 
