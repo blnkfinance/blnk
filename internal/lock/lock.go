@@ -150,7 +150,7 @@ func (l *Locker) WaitLock(ctx context.Context, lockTimeout, waitTimeout time.Dur
 	}
 
 	deadline := time.Now().Add(waitTimeout)
-	for time.Now().Before(deadline) {
+	for attempt := 0; time.Now().Before(deadline); attempt++ {
 		err := l.Lock(ctx, lockTimeout)
 		if err == nil {
 			return nil
@@ -161,7 +161,7 @@ func (l *Locker) WaitLock(ctx context.Context, lockTimeout, waitTimeout time.Dur
 			}
 			return err
 		}
-		if err := sleepWithJitter(ctx, deadline); err != nil {
+		if err := sleepWithJitter(ctx, deadline, attempt); err != nil {
 			return fmt.Errorf("lock wait cancelled for key %s: %w", l.key, err)
 		}
 	}
@@ -244,7 +244,7 @@ func (m *MultiLocker) WaitLock(ctx context.Context, lockTimeout, waitTimeout tim
 
 	deadline := time.Now().Add(waitTimeout)
 
-	for time.Now().Before(deadline) {
+	for attempt := 0; time.Now().Before(deadline); attempt++ {
 		err := m.Lock(ctx, lockTimeout)
 		if err == nil {
 			return nil
@@ -255,7 +255,7 @@ func (m *MultiLocker) WaitLock(ctx context.Context, lockTimeout, waitTimeout tim
 			}
 			return err
 		}
-		if err := sleepWithJitter(ctx, deadline); err != nil {
+		if err := sleepWithJitter(ctx, deadline, attempt); err != nil {
 			return fmt.Errorf("lock wait cancelled: %w", err)
 		}
 	}
@@ -300,15 +300,33 @@ func (m *MultiLocker) Keys() []string {
 	return m.keys
 }
 
-func sleepWithJitter(ctx context.Context, deadline time.Time) error {
+const (
+	lockBackoffBase = 5 * time.Millisecond
+	lockBackoffMax  = 100 * time.Millisecond
+)
+
+// sleepWithJitter sleeps for an exponentially growing, jittered backoff period:
+// the cap starts at lockBackoffBase and doubles per attempt up to lockBackoffMax,
+// with the actual delay drawn uniformly from (0, cap] (full jitter). Short
+// initial delays let waiters re-acquire quickly after brief critical sections,
+// while the jittered growth avoids thundering herds under contention.
+func sleepWithJitter(ctx context.Context, deadline time.Time, attempt int) error {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		return nil
 	}
 
-	delay := time.Duration(rand.Intn(100)) * time.Millisecond
+	backoff := lockBackoffBase
+	for i := 0; i < attempt && backoff < lockBackoffMax; i++ {
+		backoff *= 2
+	}
+	if backoff > lockBackoffMax {
+		backoff = lockBackoffMax
+	}
+
+	delay := time.Duration(rand.Int63n(int64(backoff)))
 	if delay <= 0 {
-		delay = 10 * time.Millisecond
+		delay = time.Millisecond
 	}
 	if delay > remaining {
 		delay = remaining

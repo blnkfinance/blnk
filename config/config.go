@@ -73,7 +73,7 @@ var (
 		MaxRetryAttempts:                5,
 		MonitoringPort:                  DEFAULT_MONITORING_PORT,
 		WebhookConcurrency:              20,
-		TransactionWorkerConcurrency:    1,
+		TransactionWorkerConcurrency:    4,
 	}
 
 	defaultRedis = RedisConfig{
@@ -82,8 +82,8 @@ var (
 	}
 
 	defaultDatabase = DataSourceConfig{
-		MaxOpenConns:    25,
-		MaxIdleConns:    10,
+		MaxOpenConns:    50,
+		MaxIdleConns:    25,
 		ConnMaxLifetime: 30 * time.Minute,
 		ConnMaxIdleTime: 5 * time.Minute,
 	}

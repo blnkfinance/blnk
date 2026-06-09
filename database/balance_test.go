@@ -125,9 +125,6 @@ func TestGetBalanceByID_Success(t *testing.T) {
 
 	ds := Datasource{Conn: db}
 
-	// Mock the transaction Begin call
-	mock.ExpectBegin()
-
 	balance := model.Balance{
 		BalanceID:          "bln1",
 		Balance:            big.NewInt(1000),
@@ -157,9 +154,6 @@ func TestGetBalanceByID_Success(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator", "track_fund_lineage", "allocation_strategy",
 		}).AddRow(balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, "", time.Now(), metaDataJSON, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO"))
-
-	// Mock the transaction commit call
-	mock.ExpectCommit()
 
 	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{}, false)
 	assert.NoError(t, err)
@@ -456,8 +450,6 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 
 	ds := Datasource{Conn: db}
 
-	mock.ExpectBegin() // Start transaction
-
 	balance := model.Balance{
 		BalanceID:          "bln1",
 		Balance:            big.NewInt(0),
@@ -492,20 +484,6 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO",
 		))
 
-	// Then expect the queued transactions query with the correct SQL
-	queuedTxnQuery := `
-        SELECT t.precise_amount, t.source, t.destination 
-        FROM blnk.transactions t 
-        WHERE (t.source = $1 OR t.destination = $1) 
-        AND t.status = 'QUEUED' 
-        AND NOT EXISTS (
-            SELECT 1 
-            FROM blnk.transactions child 
-            WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
-        )
-    `
-
 	queuedTxn := model.Transaction{
 		TransactionID: "txn1",
 		Source:        "bln1",
@@ -521,16 +499,14 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 		MetaData:      map[string]interface{}{"key": "value"},
 	}
 
-	mock.ExpectQuery(regexp.QuoteMeta(queuedTxnQuery)).
+	// Then expect the aggregated queued amounts query
+	mock.ExpectQuery(regexp.QuoteMeta(`::text AS queued_credit`)).
 		WithArgs("bln1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"precise_amount", "source", "destination",
+			"queued_debit", "queued_credit",
 		}).AddRow(
-			queuedTxn.PreciseAmount.String(), queuedTxn.Source, queuedTxn.Destination,
+			queuedTxn.PreciseAmount.String(), "0",
 		))
-
-	// Finally, expect the commit
-	mock.ExpectCommit()
 
 	// Execute the function
 	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{}, true)
@@ -558,8 +534,6 @@ func TestGetBalanceByID_WithoutQueuedTransactions(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
-
-	mock.ExpectBegin()
 
 	balance := model.Balance{
 		BalanceID:          "bln1",
@@ -598,8 +572,6 @@ func TestGetBalanceByID_WithoutQueuedTransactions(t *testing.T) {
 			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO",
 		))
 
-	mock.ExpectCommit()
-
 	// Execute GetBalanceByID with withQueued=false
 	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{}, false)
 	assert.NoError(t, err)
@@ -628,8 +600,6 @@ func TestGetBalanceByID_WithQueuedTransactions_HasAppliedChild(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	ds := Datasource{Conn: db}
-
-	mock.ExpectBegin()
 
 	balance := model.Balance{
 		BalanceID:          "bln1",
@@ -665,28 +635,12 @@ func TestGetBalanceByID_WithQueuedTransactions_HasAppliedChild(t *testing.T) {
 			balance.CreditBalance.String(), balance.DebitBalance.String(), 1, balance.Indicator, false, "FIFO",
 		))
 
-	// Set up the queued transactions query that checks for applied children
-	queuedTxnQuery := `
-        SELECT t.precise_amount, t.source, t.destination 
-        FROM blnk.transactions t 
-        WHERE (t.source = $1 OR t.destination = $1) 
-        AND t.status = 'QUEUED' 
-        AND NOT EXISTS (
-            SELECT 1 
-            FROM blnk.transactions child 
-            WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
-        )
-    `
-
-	// This should return empty rows because all QUEUED transactions have APPLIED children
-	mock.ExpectQuery(regexp.QuoteMeta(queuedTxnQuery)).
+	// All QUEUED transactions have APPLIED children, so sums are zero
+	mock.ExpectQuery(regexp.QuoteMeta(`::text AS queued_credit`)).
 		WithArgs("bln1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"precise_amount", "source", "destination",
-		}))
-
-	mock.ExpectCommit()
+			"queued_debit", "queued_credit",
+		}).AddRow("0", "0"))
 
 	// Execute the function
 	retrievedBalance, err := ds.GetBalanceByID("bln1", []string{}, true)

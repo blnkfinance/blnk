@@ -1650,20 +1650,10 @@ func TestGetQueuedAmounts_Success(t *testing.T) {
 	ctx := context.Background()
 	balanceID := "bln_test123"
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
-        FROM blnk.transactions t
-        WHERE (t.source = $1 OR t.destination = $1) 
-        AND t.status = 'QUEUED'
-        AND NOT EXISTS (
-            SELECT 1 
-            FROM blnk.transactions child 
-            WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
-        )`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`::text AS queued_credit`)).
 		WithArgs(balanceID).
-		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination"}).
-			AddRow("1000", balanceID, "dest123").
-			AddRow("500", "src123", balanceID))
+		WillReturnRows(sqlmock.NewRows([]string{"queued_debit", "queued_credit"}).
+			AddRow("1000", "500"))
 
 	debit, credit, err := ds.GetQueuedAmounts(ctx, balanceID)
 	assert.NoError(t, err)
@@ -1682,18 +1672,10 @@ func TestGetQueuedAmounts_NoTransactions(t *testing.T) {
 	ctx := context.Background()
 	balanceID := "bln_test123"
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
-        FROM blnk.transactions t
-        WHERE (t.source = $1 OR t.destination = $1) 
-        AND t.status = 'QUEUED'
-        AND NOT EXISTS (
-            SELECT 1 
-            FROM blnk.transactions child 
-            WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
-        )`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`::text AS queued_credit`)).
 		WithArgs(balanceID).
-		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination"}))
+		WillReturnRows(sqlmock.NewRows([]string{"queued_debit", "queued_credit"}).
+			AddRow("0", "0"))
 
 	debit, credit, err := ds.GetQueuedAmounts(ctx, balanceID)
 	assert.NoError(t, err)
@@ -1712,16 +1694,7 @@ func TestGetQueuedAmounts_QueryError(t *testing.T) {
 	ctx := context.Background()
 	balanceID := "bln_test123"
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
-        FROM blnk.transactions t
-        WHERE (t.source = $1 OR t.destination = $1) 
-        AND t.status = 'QUEUED'
-        AND NOT EXISTS (
-            SELECT 1 
-            FROM blnk.transactions child 
-            WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
-        )`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`::text AS queued_credit`)).
 		WithArgs(balanceID).
 		WillReturnError(sql.ErrConnDone)
 
@@ -1740,19 +1713,10 @@ func TestGetQueuedAmounts_InvalidAmount(t *testing.T) {
 	ctx := context.Background()
 	balanceID := "bln_test123"
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.precise_amount, t.source, t.destination 
-        FROM blnk.transactions t
-        WHERE (t.source = $1 OR t.destination = $1) 
-        AND t.status = 'QUEUED'
-        AND NOT EXISTS (
-            SELECT 1 
-            FROM blnk.transactions child 
-            WHERE child.parent_transaction = t.transaction_id 
-            AND (child.status = 'APPLIED' OR child.status = 'REJECTED' OR child.status = 'VOID' or child.status = 'INFLIGHT')
-        )`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`::text AS queued_credit`)).
 		WithArgs(balanceID).
-		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination"}).
-			AddRow("invalid_amount", balanceID, "dest123"))
+		WillReturnRows(sqlmock.NewRows([]string{"queued_debit", "queued_credit"}).
+			AddRow("invalid_amount", "0"))
 
 	debit, credit, err := ds.GetQueuedAmounts(ctx, balanceID)
 	assert.Error(t, err)
