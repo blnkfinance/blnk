@@ -151,6 +151,3 @@ func (l *Blnk) UpdateTransactionStatus(ctx context.Context, id string, status st
 	span.AddEvent("Transaction status updated", trace.WithAttributes(attribute.String("transaction.id", id), attribute.String("transaction.status", status)))
 	return nil
 }
-
-// getOriginalTransactionForRefund retrieves the original transaction to be refunded,
-// checking both the database and the queue if necessary.

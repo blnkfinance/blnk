@@ -96,6 +96,3 @@ func categorizeRejectionReason(reason string) string {
 		return "other"
 	}
 }
-
-// prepareTransactionForQueue prepares a transaction for queueing by setting status, metadata,
-// and resolving source/destination balances.

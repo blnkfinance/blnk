@@ -774,15 +774,3 @@ func (l *Blnk) logAndRecordError(span trace.Span, msg string, err error) error {
 	logrus.WithError(err).Error(msg)
 	return fmt.Errorf("%s: %w", msg, err)
 }
-
-// RejectTransaction rejects a transaction by updating its status and recording the rejection reason.
-// It starts a tracing span, updates the transaction status and metadata, persists the transaction, and records relevant events and errors.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction to be rejected.
-// - reason string: The reason for rejecting the transaction.
-//
-// Returns:
-// - *model.Transaction: A pointer to the rejected Transaction model.
-// - error: An error if the transaction could not be recorded.

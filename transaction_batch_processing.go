@@ -220,6 +220,3 @@ func fetchTransactions(ctx context.Context, parentTransactionID string, batchSiz
 		}
 	}
 }
-
-// usedCoalescing reports whether the execution result came from a queued batch path
-// instead of the single-transaction executor.

@@ -395,14 +395,3 @@ func enqueueTransactions(ctx context.Context, queue *Queue, originalTransaction 
 
 	return nil
 }
-
-// GetTransaction retrieves a transaction by its ID from the datasource.
-// It starts a tracing span, fetches the transaction, and records relevant events and errors.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - TransactionID string: The ID of the transaction to be retrieved.
-//
-// Returns:
-// - *model.Transaction: A pointer to the retrieved Transaction model.
-// - error: An error if the transaction could not be retrieved.

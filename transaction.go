@@ -116,17 +116,3 @@ type BatchJobResult struct {
 	Txn   *model.Transaction
 	Error error
 }
-
-// getSourceAndDestination retrieves the source and destination balances for a transaction.
-// It checks if the source or destination starts with "@", indicating the need to create or retrieve a balance by indicator.
-// If not, it retrieves the balances by their IDs. When EnableQueuedChecks is enabled in the transaction config,
-// it will use GetBalanceByID with queued balances included instead of GetBalanceByIDLite.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - transaction *model.Transaction: The transaction for which to retrieve the balances.
-//
-// Returns:
-// - source *model.Balance: A pointer to the source Balance model.
-// - destination *model.Balance: A pointer to the destination Balance model.
-// - err error: An error if the balances could not be retrieved.
