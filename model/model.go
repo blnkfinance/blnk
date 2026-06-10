@@ -391,22 +391,6 @@ func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 	return result
 }
 
-// ApplyRate applies the exchange rate to the precise amount and returns a *big.Int.
-// The rate is applied after precision to maintain accuracy.
-func ApplyRate(preciseAmount *big.Int, rate float64) *big.Int {
-	if rate == 0 {
-		rate = 1
-	}
-
-	// Multiply with decimal arithmetic and round to the nearest minor unit.
-	// The previous big.Float path truncated toward zero, so a rate like
-	// 1.0001 on 10000 units yielded 10000 instead of 10001 — silently
-	// losing a minor unit on every FX leg.
-	amountDec := decimal.NewFromBigInt(preciseAmount, 0)
-	rateDec := decimal.NewFromFloat(rate)
-	return amountDec.Mul(rateDec).Round(0).BigInt()
-}
-
 // validate checks if the transaction is valid (e.g., ensuring positive amount).
 func (transaction *Transaction) validate() error {
 	if transaction.Amount <= 0 && transaction.PreciseAmount == nil {
@@ -438,11 +422,11 @@ func UpdateBalances(transaction *Transaction, source, destination *Balance) erro
 	source.addDebit(transaction.PreciseAmount, transaction.Inflight)
 	source.computeBalance(transaction.Inflight)
 
-	// Calculate destination amount with rate
-	destinationAmount := ApplyRate(transaction.PreciseAmount, transaction.Rate)
-
-	// Update destination balance with rate-adjusted amount
-	destination.addCredit(destinationAmount, transaction.Inflight)
+	// Credit the destination the same precise amount that was debited from
+	// the source. (A per-transaction FX rate was removed: it was unused in
+	// practice and broke inflight commit, which credited the rated amount on
+	// hold but the un-rated amount on commit.)
+	destination.addCredit(transaction.PreciseAmount, transaction.Inflight)
 	destination.computeBalance(transaction.Inflight)
 
 	return nil

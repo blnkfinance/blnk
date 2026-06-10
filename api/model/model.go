@@ -215,7 +215,7 @@ func (b *CreateBalance) ToBalance() model.Balance {
 	if allocationStrategy == "" {
 		allocationStrategy = "FIFO"
 	}
-	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, CurrencyMultiplier: b.Precision, TrackFundLineage: b.TrackFundLineage, AllocationStrategy: allocationStrategy}
+	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, TrackFundLineage: b.TrackFundLineage, AllocationStrategy: allocationStrategy}
 }
 
 func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
@@ -265,5 +265,5 @@ func (t *RecordTransaction) ToTransaction() *model.Transaction {
 		inflightCommitDate = inflightCommit
 	}
 
-	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: inflightExpiryDate, InflightCommitDate: inflightCommitDate, Rate: t.Rate, SkipQueue: t.SkipQueue, EffectiveDate: t.EffectiveDate, OverdraftLimit: t.OverdraftLimit, PreciseAmount: t.PreciseAmount, Atomic: t.Atomic}
+	return &model.Transaction{Currency: t.Currency, Source: t.Source, Description: t.Description, Reference: t.Reference, ScheduledFor: scheduledFor, Destination: t.Destination, Amount: t.Amount, AllowOverdraft: t.AllowOverDraft, MetaData: t.MetaData, Sources: t.Sources, Destinations: t.Destinations, Inflight: t.Inflight, Precision: t.Precision, InflightExpiryDate: inflightExpiryDate, InflightCommitDate: inflightCommitDate, SkipQueue: t.SkipQueue, EffectiveDate: t.EffectiveDate, OverdraftLimit: t.OverdraftLimit, PreciseAmount: t.PreciseAmount, Atomic: t.Atomic}
 }

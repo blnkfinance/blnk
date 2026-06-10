@@ -583,7 +583,6 @@ func getTransactionSchema() *api.CollectionSchema {
 		Fields: []api.Field{
 			{Name: "precise_amount", Type: "string", Facet: &facet},
 			{Name: "amount", Type: "float", Facet: &facet},
-			{Name: "rate", Type: "float", Facet: &facet},
 			{Name: "precision", Type: "float", Facet: &facet},
 			{Name: "transaction_id", Type: "string", Facet: &facet},
 			{Name: "parent_transaction", Type: "string", Facet: &facet},

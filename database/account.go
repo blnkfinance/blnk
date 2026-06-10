@@ -122,7 +122,7 @@ func prepareAccountQueries(queryBuilder strings.Builder, include []string) strin
 	if contains(include, "balance") {
 		selectFields = append(selectFields,
 			"b.balance_id", "b.balance", "b.credit_balance", "b.debit_balance",
-			"b.currency", "b.currency_multiplier", "b.ledger_id",
+			"b.currency", "b.ledger_id",
 			"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data")
 	}
 
@@ -199,8 +199,7 @@ func scanAccountRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Account,
 	// Add fields for balance if included
 	if contains(include, "balance") {
 		scanArgs = append(scanArgs, &balance.BalanceID, &balance.Balance, &balance.CreditBalance,
-			&balance.DebitBalance, &balance.Currency, &balance.CurrencyMultiplier,
-			&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON)
+			&balance.DebitBalance, &balance.Currency,			&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON)
 	}
 
 	// Add fields for identity if included
