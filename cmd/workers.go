@@ -475,7 +475,7 @@ func runWorkers(ctx context.Context, b *blnkInstance, conf *config.Configuration
 		}()
 	}
 	if phClient != nil {
-		defer phClient.Close()
+		defer func() { _ = phClient.Close() }()
 	}
 
 	srv, hotSrv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
