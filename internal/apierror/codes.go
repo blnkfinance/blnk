@@ -34,6 +34,7 @@ const (
 	ErrGenNotFound         ErrorCode = "GEN_NOT_FOUND"
 	ErrGenConflict         ErrorCode = "GEN_CONFLICT"
 	ErrGenResourceLocked   ErrorCode = "GEN_RESOURCE_LOCKED"
+	ErrGenPayloadTooLarge  ErrorCode = "GEN_PAYLOAD_TOO_LARGE"
 	ErrGenRateLimited      ErrorCode = "GEN_RATE_LIMITED"
 	ErrGenInternal         ErrorCode = "GEN_INTERNAL"
 
@@ -137,6 +138,7 @@ var statusByCode = map[ErrorCode]int{
 	ErrGenNotFound:         http.StatusNotFound,
 	ErrGenConflict:         http.StatusConflict,
 	ErrGenResourceLocked:   http.StatusLocked,
+	ErrGenPayloadTooLarge:  http.StatusRequestEntityTooLarge,
 	ErrGenRateLimited:      http.StatusTooManyRequests,
 	ErrGenInternal:         http.StatusInternalServerError,
 

@@ -164,6 +164,8 @@ func NewAPI(b *blnk.Blnk) *Api {
 		return nil
 	}
 	r := gin.New()
+
+	r.MaxMultipartMemory = 8 << 20 // 8 MiB
 	r.Use(logrusAccessLogger())
 	r.Use(logrusRecovery())
 	auth := middleware.NewAuthMiddleware(b)

@@ -30,10 +30,11 @@ import (
 
 // Default constants
 const (
-	DEFAULT_PORT            = "5001"
-	DEFAULT_CLEANUP_SEC     = 10800 // 3 hours in seconds
-	DEFAULT_TYPESENSE_KEY   = "blnk-api-key"
-	DEFAULT_MONITORING_PORT = "5004"
+	DEFAULT_PORT               = "5001"
+	DEFAULT_CLEANUP_SEC        = 10800 // 3 hours in seconds
+	DEFAULT_TYPESENSE_KEY      = "blnk-api-key"
+	DEFAULT_MONITORING_PORT    = "5004"
+	DEFAULT_MAX_UPLOAD_SIZE_MB = 256 // caps reconciliation file uploads
 )
 
 // Default values for different configurations
@@ -100,6 +101,7 @@ type ServerConfig struct {
 	Email              string `json:"ssl_email" envconfig:"BLNK_SERVER_SSL_EMAIL"`
 	Port               string `json:"port" envconfig:"BLNK_SERVER_PORT"`
 	MetricsBearerToken string `json:"metrics_bearer_token" envconfig:"BLNK_METRICS_BEARER_TOKEN"`
+	MaxUploadSizeMB    int64  `json:"max_upload_size_mb" envconfig:"BLNK_SERVER_MAX_UPLOAD_SIZE_MB"`
 }
 
 type DataSourceConfig struct {
@@ -310,6 +312,10 @@ func (cnf *Configuration) setDefaultValues() {
 	if cnf.Server.Port == "" {
 		cnf.Server.Port = DEFAULT_PORT
 		logrus.WithField("port", DEFAULT_PORT).Warn("port not specified in config, setting default")
+	}
+
+	if cnf.Server.MaxUploadSizeMB <= 0 {
+		cnf.Server.MaxUploadSizeMB = DEFAULT_MAX_UPLOAD_SIZE_MB
 	}
 
 	if cnf.TypeSenseKey == "" {

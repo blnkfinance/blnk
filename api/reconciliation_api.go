@@ -17,7 +17,11 @@ package api
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
+	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
@@ -36,9 +40,20 @@ import (
 // - 500 Internal Server Error: If there is an error processing the upload.
 // - 200 OK: If the upload is successful.
 func (a Api) UploadExternalData(c *gin.Context) {
+	// Bound the request body so an oversized upload can't exhaust disk/memory.
+	if cfg, cfgErr := config.Fetch(); cfgErr == nil && cfg.Server.MaxUploadSizeMB > 0 {
+		maxBytes := cfg.Server.MaxUploadSizeMB * 1024 * 1024
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	}
+
 	source := c.PostForm("source")
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
+		// http.MaxBytesReader surfaces oversized bodies here; report 413.
+		if strings.Contains(err.Error(), "request body too large") {
+			respondCode(c, apierror.ErrGenPayloadTooLarge, "upload exceeds the maximum allowed size", nil)
+			return
+		}
 		respondCode(c, apierror.ErrReconUploadFailed, "File upload failed", nil)
 		return
 	}
@@ -120,6 +135,11 @@ func (a Api) InstantReconciliation(c *gin.Context) {
 	}
 	if len(req.ExternalTransactions) == 0 {
 		respondCode(c, apierror.ErrReconExternalTxnsRequired, "external_transactions is required", nil)
+		return
+	}
+	if len(req.ExternalTransactions) > model2.MaxInstantReconciliationItems {
+		respondCode(c, apierror.ErrGenValidation,
+			"too many external_transactions; max is "+strconv.Itoa(model2.MaxInstantReconciliationItems), nil)
 		return
 	}
 	if len(req.MatchingRuleIDs) == 0 {

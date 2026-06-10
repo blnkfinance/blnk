@@ -33,6 +33,7 @@ import (
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestContains_Found(t *testing.T) {
@@ -2129,4 +2130,29 @@ func TestCalculateBalanceFromTransactions_QueryError(t *testing.T) {
 
 	_, _, err = ds.calculateBalanceFromTransactions(ctx, tx, balanceID, startTime, targetTime, initialCredit, initialDebit)
 	assert.Error(t, err)
+}
+
+// TestParseBigInt covers the helper used by GetTransactionsByShadowFor: a
+// malformed precise amount must surface an error instead of silently yielding
+// a nil/zero amount (which previously corrupted lineage records).
+func TestParseBigInt(t *testing.T) {
+	t.Run("valid integer string", func(t *testing.T) {
+		got, err := parseBigInt("10050")
+		require.NoError(t, err)
+		assert.Equal(t, "10050", got.String())
+	})
+
+	t.Run("negative integer", func(t *testing.T) {
+		got, err := parseBigInt("-42")
+		require.NoError(t, err)
+		assert.Equal(t, "-42", got.String())
+	})
+
+	for _, bad := range []string{"", "abc", "10.5", "1e3", " 12"} {
+		t.Run("rejects "+bad, func(t *testing.T) {
+			got, err := parseBigInt(bad)
+			require.Error(t, err, "malformed precise amount %q must error", bad)
+			assert.Nil(t, got)
+		})
+	}
 }

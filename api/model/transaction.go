@@ -85,6 +85,17 @@ type InflightUpdate struct {
 // the cap exists to keep request latency and lock-holding bounded.
 const MaxBulkInflightItems = 100
 
+// MaxBulkTransactionItems caps the number of transactions accepted in a single
+// CreateBulkTransactions request. The whole payload is held in memory, so the
+// cap bounds memory use; it is larger than the inflight cap because bulk
+// creates can run asynchronously.
+const MaxBulkTransactionItems = 10000
+
+// MaxInstantReconciliationItems caps the number of external_transactions
+// accepted in a single instant-reconciliation request. The whole array is
+// held in memory, so the cap bounds memory use.
+const MaxInstantReconciliationItems = 10000
+
 // BulkInflightVoidRequest voids many independently-created inflight
 // transactions in one call. Each id is processed independently; partial
 // failures are reported per-item in the response and do not abort the rest

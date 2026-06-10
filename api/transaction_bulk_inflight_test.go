@@ -100,6 +100,28 @@ func TestBulkCommitInflight_RejectsOversizedList(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "too many transactions")
 }
 
+func TestCreateBulkTransactions_RejectsEmptyList(t *testing.T) {
+	r := newBulkTestRouter()
+	w := doJSON(r, "POST", "/transactions/bulk",
+		model2.BulkTransactionRequest{Transactions: []*model2.RecordTransaction{}})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "transactions cannot be empty")
+	assert.Contains(t, w.Body.String(), "TXN_BULK_EMPTY")
+}
+
+func TestCreateBulkTransactions_RejectsOversizedList(t *testing.T) {
+	r := newBulkTestRouter()
+	txns := make([]*model2.RecordTransaction, model2.MaxBulkTransactionItems+1)
+	for i := range txns {
+		txns[i] = &model2.RecordTransaction{Amount: 1, Reference: fmt.Sprintf("r%d", i)}
+	}
+	w := doJSON(r, "POST", "/transactions/bulk",
+		model2.BulkTransactionRequest{Transactions: txns})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "too many transactions")
+	assert.Contains(t, w.Body.String(), "TXN_BULK_LIMIT_EXCEEDED")
+}
+
 func TestCreateBulkTransactions_ValidatesRecordTransactionItems(t *testing.T) {
 	r := newBulkTestRouter()
 	w := doJSON(r, "POST", "/transactions/bulk", model2.BulkTransactionRequest{
