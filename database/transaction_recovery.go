@@ -37,7 +37,7 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 	cutoff := time.Now().UTC().Add(-threshold)
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions t
 		WHERE t.status = 'QUEUED'
 		  AND t.created_at < $1
@@ -65,7 +65,7 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 		var preciseAmountStr string
 		err = rows.Scan(
 			&txn.TransactionID, &txn.ParentTransaction, &txn.Source, &txn.Reference,
-			&txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Rate,
+			&txn.Amount, &preciseAmountStr, &txn.Precision,
 			&txn.Currency, &txn.Destination, &txn.Description, &txn.Status,
 			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor, &txn.Hash,
 		)

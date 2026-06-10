@@ -314,9 +314,6 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	if transaction.TransactionID == "" {
 		transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	}
-	if transaction.Rate == 0 {
-		transaction.Rate = 1
-	}
 
 	// Initialize metadata if it doesn't exist
 	if transaction.MetaData == nil {

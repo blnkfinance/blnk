@@ -49,7 +49,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 
 	// If not found in cache, fetch from the database
 	rows, err := d.Conn.QueryContext(ctx, `
-        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         ORDER BY created_at ASC
         LIMIT $1 OFFSET $2
@@ -79,7 +79,6 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 			&transaction.Amount,
 			&preciseAmountStr,
 			&transaction.Precision,
-			&transaction.Rate,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,
@@ -190,7 +189,6 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			&transaction.Amount,
 			&preciseAmountStr,
 			&transaction.Precision,
-			&transaction.Rate,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,
@@ -242,7 +240,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "transaction_id":
 		return `
         SELECT transaction_id::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE transaction_id::text IS NOT NULL AND transaction_id::text != ''
@@ -252,7 +250,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "parent_transaction":
 		return `
         SELECT parent_transaction::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE parent_transaction::text IS NOT NULL AND parent_transaction::text != ''
@@ -262,7 +260,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "source":
 		return `
         SELECT source::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE source::text IS NOT NULL AND source::text != ''
@@ -272,7 +270,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "reference":
 		return `
         SELECT reference::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE reference::text IS NOT NULL AND reference::text != ''
@@ -282,7 +280,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "currency":
 		return `
         SELECT currency::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE currency::text IS NOT NULL AND currency::text != ''
@@ -292,7 +290,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "destination":
 		return `
         SELECT destination::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE destination::text IS NOT NULL AND destination::text != ''
@@ -302,7 +300,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "status":
 		return `
         SELECT status::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE status::text IS NOT NULL AND status::text != ''
@@ -312,7 +310,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 	case "created_at":
 		return `
         SELECT created_at::text AS group_key, transaction_id, parent_transaction, source, reference,
-               amount, precise_amount, precision, rate, currency, destination,
+               amount, precise_amount, precision, currency, destination,
                description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         WHERE created_at::text IS NOT NULL AND created_at::text != ''
@@ -344,14 +342,14 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	rows, err := d.Conn.QueryContext(ctx, `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -403,7 +401,6 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			&transaction.Amount,
 			&preciseAmountStr,
 			&transaction.Precision,
-			&transaction.Rate,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,
