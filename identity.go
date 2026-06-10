@@ -291,18 +291,28 @@ func (l *Blnk) DetokenizeIdentity(identityID string) (map[string]string, error) 
 
 	result := make(map[string]string)
 
-	// Check each tokenized field in metadata
+	// Check each tokenized field in metadata. The map is stored as
+	// map[string]bool in memory but unmarshals from the database as
+	// map[string]interface{}, so both shapes must be handled.
 	if identity.MetaData != nil {
-		tokenizedFields, ok := identity.MetaData["tokenized_fields"].(map[string]bool)
-		if ok {
-			for fieldName, isTokenized := range tokenizedFields {
-				if isTokenized {
-					originalValue, err := l.DetokenizeIdentityField(identityID, fieldName)
-					if err != nil {
-						return nil, err
-					}
-					result[fieldName] = originalValue
+		tokenized := make(map[string]bool)
+		switch fields := identity.MetaData["tokenized_fields"].(type) {
+		case map[string]bool:
+			tokenized = fields
+		case map[string]interface{}:
+			for fieldName, val := range fields {
+				if boolVal, ok := val.(bool); ok {
+					tokenized[fieldName] = boolVal
 				}
+			}
+		}
+		for fieldName, isTokenized := range tokenized {
+			if isTokenized {
+				originalValue, err := l.DetokenizeIdentityField(identityID, fieldName)
+				if err != nil {
+					return nil, err
+				}
+				result[fieldName] = originalValue
 			}
 		}
 	}

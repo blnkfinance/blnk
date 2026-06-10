@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
@@ -173,4 +175,88 @@ func TestGenerateMockAccount(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, "Blnk Bank", response["bank_name"])
 	assert.NotEmpty(t, response["account_number"])
+}
+
+func TestFilterAccounts(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newBalance := createTestBalanceWithLedger(t, b, gofakeit.CurrencyShort(), nil)
+	newIdentity := createTestIdentity(t, b)
+
+	// UUID as bank name guarantees a unique filter match
+	uniqueBankName := gofakeit.UUID()
+	newAccount, err := b.CreateAccount(model.Account{
+		BankName:   uniqueBankName,
+		Number:     gofakeit.AchAccount(),
+		LedgerID:   newBalance.LedgerID,
+		BalanceID:  newBalance.BalanceID,
+		IdentityID: newIdentity.IdentityID,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create account: %v", err)
+	}
+
+	t.Run("Filter by bank_name eq", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "bank_name", "operator": "eq", "value": "%s"}]}`, uniqueBankName)
+		var response []model.Account
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/accounts/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		if assert.Equal(t, 1, len(response)) {
+			assert.Equal(t, newAccount.AccountID, response[0].AccountID)
+		}
+	})
+
+	t.Run("Include count", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "bank_name", "operator": "eq", "value": "%s"}], "include_count": true}`, uniqueBankName)
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/accounts/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Contains(t, response, "data")
+		assert.Equal(t, float64(1), response["total_count"])
+	})
+
+	t.Run("Malformed JSON body", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/accounts/filter", bytes.NewReader([]byte("{bad")))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Invalid filter operator", func(t *testing.T) {
+		body := `{"filters": [{"field": "bank_name", "operator": "badop", "value": "x"}]}`
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/accounts/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
 }

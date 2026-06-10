@@ -55,6 +55,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      typesense:
+        image: typesense/typesense:29.0
+        env:
+          TYPESENSE_API_KEY: blnk-api-key
+          TYPESENSE_DATA_DIR: /tmp
+        ports:
+          - 8108:8108
+        options: >-
+          --health-cmd "curl -f http://localhost:8108/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -74,3 +87,5 @@ jobs:
 
       - name: Test
         run: go test -v ./...
+        env:
+          BLNK_TYPESENSE_DNS: http://localhost:8108

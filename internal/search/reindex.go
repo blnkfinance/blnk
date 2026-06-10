@@ -395,10 +395,15 @@ func (r *ReindexService) indexTransactions(ctx context.Context) error {
 	return nil
 }
 
-// DropCollection deletes a collection from Typesense.
+// DropCollection deletes a collection from Typesense. A missing collection is
+// not an error; Typesense reports it variously as "not found", "Not Found",
+// or a 404 with "No collection with name X found." depending on version.
 func (t *TypesenseClient) DropCollection(ctx context.Context, collectionName string) error {
 	_, err := t.Client.Collection(collectionName).Delete(ctx)
-	if err != nil && !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "Not Found") {
+	if err != nil &&
+		!strings.Contains(err.Error(), "not found") &&
+		!strings.Contains(err.Error(), "Not Found") &&
+		!strings.Contains(err.Error(), "status: 404") {
 		return err
 	}
 	return nil
