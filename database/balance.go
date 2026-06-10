@@ -120,7 +120,7 @@ func scanRow(row *sql.Row, include []string) (*model.Balance, error) {
 	var scanArgs []interface{}
 	// Add scan arguments for default balance fields
 	scanArgs = append(scanArgs, &balance.BalanceID, &balanceStr, &creditBalanceStr,
-		&debitBalanceStr, &balance.Currency,		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON,
+		&debitBalanceStr, &balance.Currency, &balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON,
 		&inflightBalanceStr, &inflightCreditBalanceStr, &inflightDebitBalanceStr, &balance.Version, &indicator, &balance.TrackFundLineage, &balance.AllocationStrategy)
 
 	// Conditionally scan for identity fields
@@ -251,7 +251,7 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 	// Insert the balance into the database
 	_, err = d.Conn.ExecContext(context.Background(), `
 		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, ledger_id, identity_id, indicator, created_at, meta_data, track_fund_lineage, allocation_strategy)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON, balance.TrackFundLineage, allocationStrategy)
 	if err != nil {
 		// Handle specific PostgreSQL errors (e.g., unique or foreign key violations)

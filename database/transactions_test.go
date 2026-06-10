@@ -291,12 +291,12 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 
 	mockRows := sqlmock.NewRows([]string{
 		"transaction_id", "parent_transaction", "source", "reference",
-		"amount", "precise_amount", "precision", "rate", "currency",
+		"amount", "precise_amount", "precision", "currency",
 		"destination", "description", "status", "created_at",
 		"meta_data", "scheduled_for", "hash",
 	}).AddRow(
 		"txn123", parentID, "source1", "ref123",
-		1000, 1000, 2, 1.0, "USD",
+		1000, 1000, 2, "USD",
 		"dest1", "Test Transaction", "INFLIGHT", time.Now(),
 		metaDataJSON, time.Now(), "hash123",
 	)
@@ -306,14 +306,14 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -368,14 +368,14 @@ func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -428,14 +428,14 @@ func TestGetInflightTransactionsByParentID_Error(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.rate, t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -1197,7 +1197,7 @@ func TestGetRefundableTransactionsByParentID_Success(t *testing.T) {
 	query := `
 		SELECT 
 			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
 			t.meta_data, t.scheduled_for, t.hash
 		FROM 
 			blnk.transactions t
@@ -1220,11 +1220,11 @@ func TestGetRefundableTransactionsByParentID_Success(t *testing.T) {
 		WithArgs("parent_txn_123", 100, int64(0)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
-			"precision", "rate", "currency", "destination", "description", "status", "created_at",
+			"precision", "currency", "destination", "description", "status", "created_at",
 			"meta_data", "scheduled_for", "hash",
 		}).
-			AddRow("txn_1", "parent_txn_123", "bln_src", "ref_1", 1000.0, "100000", 100, 1.0, "USD", "bln_dest", "Desc 1", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1").
-			AddRow("txn_2", "parent_txn_123", "bln_src", "ref_2", 500.0, "50000", 100, 1.0, "USD", "bln_dest", "Desc 2", "VOID", time.Now(), metaDataJSON, time.Now(), "hash2"))
+			AddRow("txn_1", "parent_txn_123", "bln_src", "ref_1", 1000.0, "100000", 100, "USD", "bln_dest", "Desc 1", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1").
+			AddRow("txn_2", "parent_txn_123", "bln_src", "ref_2", 500.0, "50000", 100, "USD", "bln_dest", "Desc 2", "VOID", time.Now(), metaDataJSON, time.Now(), "hash2"))
 
 	transactions, err := ds.GetRefundableTransactionsByParentID(ctx, "parent_txn_123", 100, 0)
 	assert.NoError(t, err)
@@ -1249,7 +1249,7 @@ func TestGetRefundableTransactionsByParentID_Empty(t *testing.T) {
 	query := `
 		SELECT 
 			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
 			t.meta_data, t.scheduled_for, t.hash
 		FROM 
 			blnk.transactions t
@@ -1272,7 +1272,7 @@ func TestGetRefundableTransactionsByParentID_Empty(t *testing.T) {
 		WithArgs("nonexistent_parent", 100, int64(0)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
-			"precision", "rate", "currency", "destination", "description", "status", "created_at",
+			"precision", "currency", "destination", "description", "status", "created_at",
 			"meta_data", "scheduled_for", "hash",
 		}))
 
@@ -1295,7 +1295,7 @@ func TestGetRefundableTransactionsByParentID_QueryError(t *testing.T) {
 	query := `
 		SELECT 
 			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
 			t.meta_data, t.scheduled_for, t.hash
 		FROM 
 			blnk.transactions t
@@ -1508,11 +1508,11 @@ func TestGroupTransactions_Success(t *testing.T) {
 		WithArgs(10, int64(0)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_key", "transaction_id", "parent_transaction", "source", "reference",
-			"amount", "precise_amount", "precision", "rate", "currency", "destination",
+			"amount", "precise_amount", "precision", "currency", "destination",
 			"description", "status", "created_at", "meta_data", "scheduled_for", "hash",
 		}).
-			AddRow("parent-1", "txn_1", "parent-1", "bln_src", "ref_1", 1000.0, "100000", 100, 1.0, "USD", "bln_dest", "Desc 1", "APPLIED", now, metaDataJSON, now, "hash1").
-			AddRow("parent-1", "txn_2", "parent-1", "bln_src", "ref_2", 500.0, "50000", 100, 1.0, "USD", "bln_dest", "Desc 2", "APPLIED", now, metaDataJSON, now, "hash2"))
+			AddRow("parent-1", "txn_1", "parent-1", "bln_src", "ref_1", 1000.0, "100000", 100, "USD", "bln_dest", "Desc 1", "APPLIED", now, metaDataJSON, now, "hash1").
+			AddRow("parent-1", "txn_2", "parent-1", "bln_src", "ref_2", 500.0, "50000", 100, "USD", "bln_dest", "Desc 2", "APPLIED", now, metaDataJSON, now, "hash2"))
 
 	txns, err := ds.GroupTransactions(ctx, "parent_transaction", 10, 0)
 	assert.NoError(t, err)
@@ -1539,14 +1539,14 @@ func TestGetTransactionsByCriteria_Success(t *testing.T) {
 	maxAmount := 5000.0
 	currency := "USD"
 
-	mock.ExpectQuery("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash FROM blnk.transactions").
+	mock.ExpectQuery("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash FROM blnk.transactions").
 		WithArgs(minAmount, maxAmount, currency, 10, int64(0)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
-			"precision", "rate", "currency", "destination", "description", "status", "created_at",
+			"precision", "currency", "destination", "description", "status", "created_at",
 			"meta_data", "scheduled_for", "hash",
 		}).
-			AddRow("txn_1", "", "bln_src", "ref_1", 1000.0, "100000", 100, 1.0, "USD", "bln_dest", "Desc", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1"))
+			AddRow("txn_1", "", "bln_src", "ref_1", 1000.0, "100000", 100, "USD", "bln_dest", "Desc", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1"))
 
 	txns, err := ds.GetTransactionsByCriteria(ctx, &minAmount, &maxAmount, &currency, nil, nil, 10, 0)
 	assert.NoError(t, err)
@@ -1735,13 +1735,13 @@ func TestGetTransactionsPaginated_Success(t *testing.T) {
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         ORDER BY created_at ASC
         LIMIT $1 OFFSET $2`)).
 		WithArgs(10, int64(0)).
-		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "rate", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
-			AddRow("txn_123", "", "bln_source", "ref_123", 100.0, "10000", 100, 1.0, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
+			AddRow("txn_123", "", "bln_source", "ref_123", 100.0, "10000", 100, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
 
 	txns, err := ds.GetTransactionsPaginated(ctx, "", 10, 0)
 	assert.NoError(t, err)
@@ -1758,7 +1758,7 @@ func TestGetTransactionsPaginated_QueryError(t *testing.T) {
 	ds := Datasource{Conn: db, Cache: mc}
 	ctx := context.Background()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
         FROM blnk.transactions
         ORDER BY created_at ASC
         LIMIT $1 OFFSET $2`)).
@@ -1789,14 +1789,14 @@ func TestGetTransactionsByParent_DatabaseSuccess(t *testing.T) {
 	parentID := "txn_parent_123"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3`)).
 		WithArgs(parentID, 10, int64(0)).
-		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "rate", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
-			AddRow("txn_child_123", parentID, "bln_source", "ref_123", 100.0, "10000", 100, 1.0, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
+			AddRow("txn_child_123", parentID, "bln_source", "ref_123", 100.0, "10000", 100, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
 
 	txns, err := ds.GetTransactionsByParent(ctx, parentID, 10, 0)
 	assert.NoError(t, err)
@@ -1816,7 +1816,7 @@ func TestGetTransactionsByParent_DatabaseError(t *testing.T) {
 	parentID := "txn_parent_123"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
@@ -1843,13 +1843,13 @@ func TestGetTransactionsByParent_EmptyResults(t *testing.T) {
 	parentID := "txn_parent_123"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3`)).
 		WithArgs(parentID, 10, int64(0)).
-		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "rate", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}))
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}))
 
 	txns, err := ds.GetTransactionsByParent(ctx, parentID, 10, 0)
 	assert.NoError(t, err)
@@ -2126,7 +2126,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 		"amount",
 		"precise_amount",
 		"precision",
-		"rate",
 		"currency",
 		"destination",
 		"description",
@@ -2144,12 +2143,12 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 	copyPrepare := mock.ExpectPrepare(regexp.QuoteMeta(copySQL))
 	copyPrepare.ExpectExec().
 		WithArgs(
-			"txn_1", "", "bln_source", "ref_1_q", "10.00", "1000", float64(100), float64(1), "USD", "bln_dest", "first", "APPLIED", now, sqlmock.AnyArg(), time.Time{}, "hash_1", &now,
+			"txn_1", "", "bln_source", "ref_1_q", "10.00", "1000", float64(100), "USD", "bln_dest", "first", "APPLIED", now, sqlmock.AnyArg(), time.Time{}, "hash_1", &now,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	copyPrepare.ExpectExec().
 		WithArgs(
-			"txn_2", "txn_parent", "bln_source", "ref_2_q", "20.00", "2000", float64(100), float64(1), "USD", "bln_dest", "second", "APPLIED", now.Add(time.Second), sqlmock.AnyArg(), time.Time{}, "hash_2", &now,
+			"txn_2", "txn_parent", "bln_source", "ref_2_q", "20.00", "2000", float64(100), "USD", "bln_dest", "second", "APPLIED", now.Add(time.Second), sqlmock.AnyArg(), time.Time{}, "hash_2", &now,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	copyPrepare.ExpectExec().
@@ -2236,7 +2235,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_BatchesLineageOutboxes(t *tes
 		"amount",
 		"precise_amount",
 		"precision",
-		"rate",
 		"currency",
 		"destination",
 		"description",
@@ -2254,7 +2252,7 @@ func TestRecordTransactionsWithBalancesAndOutboxes_BatchesLineageOutboxes(t *tes
 	copyPrepare := mock.ExpectPrepare(regexp.QuoteMeta(copySQL))
 	copyPrepare.ExpectExec().
 		WithArgs(
-			"txn_1", "", "bln_source", "ref_1_q", "10.00", "1000", float64(100), float64(1), "USD", "bln_dest", "first", "APPLIED", now, sqlmock.AnyArg(), time.Time{}, "hash_1", &now,
+			"txn_1", "", "bln_source", "ref_1_q", "10.00", "1000", float64(100), "USD", "bln_dest", "first", "APPLIED", now, sqlmock.AnyArg(), time.Time{}, "hash_1", &now,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	copyPrepare.ExpectExec().

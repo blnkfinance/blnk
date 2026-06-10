@@ -119,10 +119,10 @@ const (
 	ErrHookOperationFailed ErrorCode = "HOOK_OPERATION_FAILED"
 
 	// SRCH — search & reindex
-	ErrSrchQueryInvalid       ErrorCode = "SRCH_QUERY_INVALID"
-	ErrSrchFailed             ErrorCode = "SRCH_FAILED"
-	ErrSrchReindexInProgress  ErrorCode = "SRCH_REINDEX_IN_PROGRESS"
-	ErrSrchReindexNotStarted  ErrorCode = "SRCH_REINDEX_NOT_STARTED"
+	ErrSrchQueryInvalid      ErrorCode = "SRCH_QUERY_INVALID"
+	ErrSrchFailed            ErrorCode = "SRCH_FAILED"
+	ErrSrchReindexInProgress ErrorCode = "SRCH_REINDEX_IN_PROGRESS"
+	ErrSrchReindexNotStarted ErrorCode = "SRCH_REINDEX_NOT_STARTED"
 
 	// ADMIN — administrative operations
 	ErrAdminBackupFailed ErrorCode = "ADMIN_BACKUP_FAILED"

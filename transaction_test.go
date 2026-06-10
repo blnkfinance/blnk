@@ -168,11 +168,11 @@ func TestRecordTransaction(t *testing.T) {
 
 	// Set up source balance response
 	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "NGN", "", 1, "ledger-id-source", int64(10000), int64(10000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(source, "NGN", "", "ledger-id-source", int64(10000), int64(10000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	// Set up destination balance response
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
@@ -222,7 +222,7 @@ func TestRecordTransaction(t *testing.T) {
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect transaction insertion within the same atomic transaction
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(), // transaction_id
 		sqlmock.AnyArg(), // parent_transaction
@@ -231,7 +231,6 @@ func TestRecordTransaction(t *testing.T) {
 		txn.AmountString, // amount
 		"1000",           // precise amount
 		txn.Precision,    // precision
-		float64(1),       // rate
 		txn.Currency,     // currency
 		destination,      // destination
 		sqlmock.AnyArg(), // description
@@ -259,149 +258,6 @@ func TestRecordTransaction(t *testing.T) {
 
 	// Optionally check the result if needed
 	assert.NotNil(t, result)
-}
-
-func TestRecordTransactionWithRate(t *testing.T) {
-	cnf := &config.Configuration{
-		Redis: config.RedisConfig{
-			Dns: "localhost:6379",
-		},
-		Queue: config.QueueConfig{
-			WebhookQueue:     "webhook_queue",
-			TransactionQueue: "transaction_queue",
-			NumberOfQueues:   1,
-		},
-		Server: config.ServerConfig{SecretKey: "some-secret"},
-		AccountNumberGeneration: config.AccountNumberGenerationConfig{
-			HttpService: config.AccountGenerationHttpService{
-				Url: "http://example.com/generateAccount",
-			},
-		},
-	}
-
-	config.ConfigStore.Store(cnf)
-	datasource, mock, err := newTestDataSource()
-	assert.NoError(t, err)
-
-	// Important: Set ExpectationsWereMet to ensure execution occurs in order of appearance
-	mock.MatchExpectationsInOrder(false)
-
-	d, err := NewBlnk(datasource)
-	assert.NoError(t, err)
-
-	// Use fixed UUIDs for better predictability
-	source := "source-balance-id-123"
-	destination := "destination-balance-id-456"
-	reference := "transaction-reference-789"
-
-	txn := &model.Transaction{
-		Reference:      reference,
-		Source:         source,
-		Destination:    destination,
-		Amount:         1000000,
-		AllowOverdraft: true,
-		Precision:      100,
-		Currency:       "NGN",
-	}
-
-	// First, check if transaction exists
-	mock.ExpectQuery(regexp.QuoteMeta(`
-        SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
-    `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-
-	// Set up source balance response - Note this is USD
-	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "", "USD", 1, "ledger-id-source", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
-
-	// Set up destination balance response - This is NGN
-	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
-
-	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
-	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
-
-	// Expect balance queries with the source/destination IDs (order can vary)
-	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
-	mock.ExpectQuery(balanceQueryPattern).WithArgs(destination).WillReturnRows(destinationBalanceRows)
-
-	// Start atomic transaction for balance updates AND transaction insert
-	mock.ExpectBegin()
-
-	// Update source balance
-	mock.ExpectExec(regexp.QuoteMeta(`
-        UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
-    `)).WithArgs(
-		source,                          // $1
-		big.NewInt(-100000000).String(), // $2
-		big.NewInt(0).String(),          // $3
-		big.NewInt(100000000).String(),  // $4
-		big.NewInt(0).String(),          // $5
-		big.NewInt(0).String(),          // $6
-		big.NewInt(0).String(),          // $7
-		"USD",                           // $8
-		float64(1),                      // $9
-		"ledger-id-source",              // $10
-		sqlmock.AnyArg(),                // $11
-		0,                               // $12
-	).WillReturnResult(sqlmock.NewResult(1, 1))
-
-	// Update destination balance
-	mock.ExpectExec(regexp.QuoteMeta(`
-        UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
-    `)).WithArgs(
-		destination,                       // $1
-		big.NewInt(130000000000).String(), // $2
-		big.NewInt(130000000000).String(), // $3
-		big.NewInt(0).String(),            // $4
-		big.NewInt(0).String(),            // $5
-		big.NewInt(0).String(),            // $6
-		big.NewInt(0).String(),            // $7
-		"NGN",                             // $8
-		float64(1),                        // $9
-		"ledger-id-destination",           // $10
-		sqlmock.AnyArg(),                  // $11
-		0,                                 // $12
-	).WillReturnResult(sqlmock.NewResult(1, 1))
-
-	// Expect transaction insertion within the same atomic transaction
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
-	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
-		sqlmock.AnyArg(), // transaction_id
-		sqlmock.AnyArg(), // parent_transaction
-		source,           // source
-		reference,        // reference
-		txn.AmountString, // amount
-		"100000000",      // precise amount
-		txn.Precision,    // precision
-		float64(1300),    // rate
-		txn.Currency,     // currency
-		destination,      // destination
-		sqlmock.AnyArg(), // description
-		sqlmock.AnyArg(), // status
-		sqlmock.AnyArg(), // created_at
-		sqlmock.AnyArg(), // meta_data
-		sqlmock.AnyArg(), // scheduled_for
-		sqlmock.AnyArg(), // hash
-		sqlmock.AnyArg(), // effective_date
-	).WillReturnResult(sqlmock.NewResult(1, 1))
-
-	// Commit atomic transaction (balance updates + transaction insert)
-	mock.ExpectCommit()
-
-	// Execute the function being tested
-	_, err = d.RecordTransaction(context.Background(), txn)
-
-	// Assert no errors
-	assert.NoError(t, err)
-
-	// Check if all expectations were met
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("there were unfulfilled expectations: %s", err)
-	}
 }
 
 func TestRecordTransaction_AtomicRollback_InsertFails(t *testing.T) {
@@ -451,10 +307,10 @@ func TestRecordTransaction_AtomicRollback_InsertFails(t *testing.T) {
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
 	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "", "NGN", 1, "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
@@ -472,7 +328,7 @@ func TestRecordTransaction_AtomicRollback_InsertFails(t *testing.T) {
 		source,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(), sqlmock.AnyArg(),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec(regexp.QuoteMeta(`
@@ -483,14 +339,14 @@ func TestRecordTransaction_AtomicRollback_InsertFails(t *testing.T) {
 		destination,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(), sqlmock.AnyArg(),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(), sqlmock.AnyArg(), source, reference,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), destination, sqlmock.AnyArg(), sqlmock.AnyArg(),
+		destination, sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 	).WillReturnError(fmt.Errorf("database connection lost - simulated failure"))
 
@@ -553,10 +409,10 @@ func TestRecordTransaction_AtomicRollback_SecondBalanceUpdateFails(t *testing.T)
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
 	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "", "NGN", 1, "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
@@ -574,7 +430,7 @@ func TestRecordTransaction_AtomicRollback_SecondBalanceUpdateFails(t *testing.T)
 		source,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(), sqlmock.AnyArg(),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec(regexp.QuoteMeta(`
@@ -585,7 +441,7 @@ func TestRecordTransaction_AtomicRollback_SecondBalanceUpdateFails(t *testing.T)
 		destination,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(), sqlmock.AnyArg(),
 	).WillReturnError(fmt.Errorf("optimistic lock failure - balance was modified by another transaction"))
 
 	mock.ExpectRollback()
@@ -647,10 +503,10 @@ func TestRecordTransaction_AtomicRollback_FirstBalanceUpdateFails(t *testing.T) 
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
 	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "", "NGN", 1, "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", 1, "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
 
 	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
@@ -668,7 +524,7 @@ func TestRecordTransaction_AtomicRollback_FirstBalanceUpdateFails(t *testing.T) 
 		source,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(), sqlmock.AnyArg(),
 	).WillReturnError(fmt.Errorf("database write error - disk full"))
 
 	mock.ExpectRollback()

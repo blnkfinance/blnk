@@ -967,17 +967,17 @@ func TestLineageE2E_GetBalanceLineage_API(t *testing.T) {
 	}
 
 	stripeShadow := &model.Balance{
-		BalanceID:          "bln_stripe_shadow",
-		Currency:           "USD",
-		DebitBalance:       big.NewInt(5000),
-		CreditBalance:      big.NewInt(2000),
+		BalanceID:     "bln_stripe_shadow",
+		Currency:      "USD",
+		DebitBalance:  big.NewInt(5000),
+		CreditBalance: big.NewInt(2000),
 	}
 
 	paypalShadow := &model.Balance{
-		BalanceID:          "bln_paypal_shadow",
-		Currency:           "USD",
-		DebitBalance:       big.NewInt(3000),
-		CreditBalance:      big.NewInt(0),
+		BalanceID:     "bln_paypal_shadow",
+		Currency:      "USD",
+		DebitBalance:  big.NewInt(3000),
+		CreditBalance: big.NewInt(0),
 	}
 
 	mappings := []model.LineageMapping{

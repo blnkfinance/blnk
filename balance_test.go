@@ -194,7 +194,7 @@ func TestGetBalanceByID(t *testing.T) {
 			BigIntString{big.NewInt(100)},
 			BigIntString{big.NewInt(50)},
 			BigIntString{big.NewInt(50)},
-			"USD", 100, "test-ledger", "test-identity", time.Now(),
+			"USD", "test-ledger", "test-identity", time.Now(),
 			`{"key":"value"}`,
 			BigIntString{big.NewInt(0)},
 			BigIntString{big.NewInt(0)},
@@ -239,7 +239,7 @@ func TestGetAllBalances(t *testing.T) {
 		"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "currency", "ledger_id", "identity_id", "created_at", "meta_data",
 	}).
 		AddRow(
-			"test-balance", "test-indicator", 100, 50, 50, 0, 0, 0, "USD", 1.0, "test-ledger", "",
+			"test-balance", "test-indicator", 100, 50, 50, 0, 0, 0, "USD", "test-ledger", "",
 			time.Now(), `{"key":"value"}`,
 		)
 
@@ -268,14 +268,14 @@ func TestUpdateBalance(t *testing.T) {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
 	balance := &model.Balance{
-		BalanceID:          "test-balance",
-		Balance:            big.NewInt(100),
-		CreditBalance:      big.NewInt(50),
-		DebitBalance:       big.NewInt(50),
-		Currency:           "USD",
-		LedgerID:           gofakeit.UUID(),
-		CreatedAt:          time.Time{},              // Assuming CreatedAt is properly initialized elsewhere
-		MetaData:           map[string]interface{}{}, // Assuming MetaData is initialized, even if empty
+		BalanceID:     "test-balance",
+		Balance:       big.NewInt(100),
+		CreditBalance: big.NewInt(50),
+		DebitBalance:  big.NewInt(50),
+		Currency:      "USD",
+		LedgerID:      gofakeit.UUID(),
+		CreatedAt:     time.Time{},              // Assuming CreatedAt is properly initialized elsewhere
+		MetaData:      map[string]interface{}{}, // Assuming MetaData is initialized, even if empty
 	}
 
 	// Assuming metaDataJSON is what you expect to be passed as the last argument
