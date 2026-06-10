@@ -26,6 +26,18 @@ generate:
 test:
 	go test -short  ./...
 
+# Mutation testing on the money-critical fast packages (model, filter).
+# Plants hundreds of one-line bugs and re-runs the tests against each one;
+# a "LIVED" mutant is a bug the test suite would not catch. Fails when test
+# efficacy (killed/viable mutants) drops below the threshold. Takes ~10 min.
+# Triage survivors by reading the LIVED lines; model/mutation_killers_test.go
+# has examples of boundary tests written to kill them.
+MUTATION_THRESHOLD=85
+mutate:
+	@command -v gremlins >/dev/null 2>&1 || go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+	cd model && gremlins unleash --workers 2 --timeout-coefficient 8 --threshold-efficacy ${MUTATION_THRESHOLD}
+	cd internal/filter && gremlins unleash --workers 2 --timeout-coefficient 8 --threshold-efficacy ${MUTATION_THRESHOLD}
+
 build:
 	go build -o ${PROJECT} ./cmd/*.go
 

@@ -80,6 +80,8 @@ services:
     container_name: typesense
     command:
       ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
+    ports:
+      - "8108:8108"
     volumes:
       - typesense_data:/data
     logging:

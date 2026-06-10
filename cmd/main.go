@@ -49,33 +49,42 @@ func recoverPanic() {
 	}
 }
 
+// loadInstance loads the configuration file and initializes the Blnk
+// instance into app. Extracted from preRun so the initialization sequence
+// returns errors instead of exiting, keeping the Fatal at the command layer.
+func loadInstance(app *blnkInstance, configFile string) error {
+	// Initialize configuration from the specified configuration file.
+	if err := config.InitConfig(configFile); err != nil {
+		return fmt.Errorf("error loading config: %w", err)
+	}
+
+	// Fetch the configuration settings.
+	cnf, err := config.Fetch()
+	if err != nil {
+		return err
+	}
+
+	// Initialize the Blnk instance using the fetched configuration.
+	newBlnk, err := setupBlnk(cnf)
+	if err != nil {
+		notification.NotifyError(err) // Notify via the internal notification system
+		return err
+	}
+
+	// Assign the new Blnk instance and configuration to the app struct.
+	app.blnk = newBlnk
+	app.cnf = cnf
+
+	return nil
+}
+
 // preRun sets up the configuration and initializes the Blnk instance before running any command.
 // It ensures that the configuration is loaded, and the Blnk instance is initialized properly.
 func preRun(app *blnkInstance) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		// Initialize configuration from the specified configuration file.
-		err := config.InitConfig("blnk.json")
-		if err != nil {
-			log.Fatal("error loading config", err)
+		if err := loadInstance(app, "blnk.json"); err != nil {
+			log.Fatal(err)
 		}
-
-		// Fetch the configuration settings.
-		cnf, err := config.Fetch()
-		if err != nil {
-			return err
-		}
-
-		// Initialize the Blnk instance using the fetched configuration.
-		newBlnk, err := setupBlnk(cnf)
-		if err != nil {
-			notification.NotifyError(err) // Notify via the internal notification system
-			log.Fatal(err)                // Log the fatal error
-		}
-
-		// Assign the new Blnk instance and configuration to the app struct.
-		app.blnk = newBlnk
-		app.cnf = cnf
-
 		return nil
 	}
 }
