@@ -24,6 +24,7 @@ import (
 
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -31,6 +32,17 @@ import (
 const (
 	KeyHeader = "X-Blnk-Key"
 )
+
+// abortWithCode writes the standard dual error payload (legacy flat "error"
+// string + structured "error_detail") and aborts the request. The status is
+// resolved from the error-code catalog.
+func abortWithCode(c *gin.Context, code apierror.ErrorCode, message string) {
+	resp := apierror.NewErrorResponse(code, message, nil)
+	c.AbortWithStatusJSON(apierror.StatusForCode(resp.Error.Code), gin.H{
+		"error":        message,
+		"error_detail": resp.Error,
+	})
+}
 
 // pathToResource maps URL paths to their corresponding resource types.
 // This is used by the authentication middleware to determine the required permissions.
@@ -208,8 +220,7 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 
 		key := extractKey(c)
 		if key == "" {
-			c.JSON(401, gin.H{"error": "Authentication required. Use X-Blnk-Key header"})
-			c.Abort()
+			abortWithCode(c, apierror.ErrAuthMissingAPIKey, "Authentication required. Use X-Blnk-Key header")
 			return
 		}
 
@@ -224,28 +235,24 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		// If not master key, try API key authentication
 		apiKey, err := m.service.GetAPIKeyByKey(c.Request.Context(), key)
 		if err != nil {
-			c.JSON(401, gin.H{"error": "Invalid API key"})
-			c.Abort()
+			abortWithCode(c, apierror.ErrAuthInvalidAPIKey, "Invalid API key")
 			return
 		}
 
 		if !apiKey.IsValid() {
-			c.JSON(401, gin.H{"error": "API key is expired or revoked"})
-			c.Abort()
+			abortWithCode(c, apierror.ErrAuthExpiredAPIKey, "API key is expired or revoked")
 			return
 		}
 
 		// Determine required resource from path
 		if c.Request == nil || c.Request.URL == nil {
-			c.JSON(500, gin.H{"error": "Invalid request"})
-			c.Abort()
+			abortWithCode(c, apierror.ErrGenInternal, "Invalid request")
 			return
 		}
 
 		resource := getResourceFromPath(c.Request.URL.Path)
 		if resource == "" {
-			c.JSON(403, gin.H{"error": "Unknown resource type"})
-			c.Abort()
+			abortWithCode(c, apierror.ErrAuthUnknownResource, "Unknown resource type")
 			return
 		}
 
@@ -253,8 +260,7 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		if !HasPermission(apiKey.Scopes, resource, c.Request.Method) {
 			// Get the required action for this method
 			action := methodToAction[c.Request.Method]
-			c.JSON(403, gin.H{"error": "Insufficient permissions for " + string(resource) + ":" + string(action)})
-			c.Abort()
+			abortWithCode(c, apierror.ErrAuthInsufficientPermissions, "Insufficient permissions for "+string(resource)+":"+string(action))
 			return
 		}
 

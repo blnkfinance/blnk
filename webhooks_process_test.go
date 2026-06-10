@@ -314,10 +314,11 @@ func TestSendWebhook_UnmarshalablePayloadReturnsError(t *testing.T) {
 	}
 }
 
-func TestProcessWebhook_SignaturePresentEvenWithEmptySecret(t *testing.T) {
-	// An empty Server.SecretKey still produces a deterministic HMAC over a
-	// well-known (empty) key, which any third party can forge. The headers are
-	// still sent; receivers must not treat them as authentication in that case.
+func TestProcessWebhook_NoSignatureHeadersWithEmptySecret(t *testing.T) {
+	// Regression: an empty Server.SecretKey used to produce an HMAC over the
+	// empty key — computable (and forgeable) by anyone. The delivery is now
+	// sent unsigned so receivers cannot mistake a forgeable header for
+	// authentication.
 	server, received := newWebhookReceiver(http.StatusOK)
 	defer server.Close()
 	storeWebhookTestConfig(server.URL, "", nil)
@@ -332,13 +333,6 @@ func TestProcessWebhook_SignaturePresentEvenWithEmptySecret(t *testing.T) {
 
 	reqs := received()
 	require.Len(t, reqs, 1)
-	sig := reqs[0].headers.Get("X-Blnk-Signature")
-	ts := reqs[0].headers.Get("X-Blnk-Timestamp")
-	require.NotEmpty(t, sig)
-	require.NotEmpty(t, ts)
-
-	mac := hmac.New(sha256.New, []byte(""))
-	mac.Write([]byte(ts + "." + string(reqs[0].body)))
-	assert.Equal(t, hex.EncodeToString(mac.Sum(nil)), sig,
-		"with no secret configured the signature is HMAC over the empty key (forgeable; documented behavior)")
+	assert.Empty(t, reqs[0].headers.Get("X-Blnk-Signature"), "no signature header may be sent without a configured secret")
+	assert.Empty(t, reqs[0].headers.Get("X-Blnk-Timestamp"), "no timestamp header may be sent without a configured secret")
 }

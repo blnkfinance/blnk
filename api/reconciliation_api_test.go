@@ -172,7 +172,7 @@ func TestDeleteMatchingRule(t *testing.T) {
 		req := httptest.NewRequest("DELETE", "/reconciliation/matching-rules/mr_nonexistent", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
-		assert.Equal(t, http.StatusInternalServerError, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 

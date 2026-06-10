@@ -22,6 +22,8 @@ This includes commands for applying and rolling back migrations.
 package main
 
 import (
+	"fmt"
+
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
@@ -44,41 +46,48 @@ func migrateCommands(_ *blnkInstance) *cobra.Command {
 	return cmd
 }
 
+// runMigrations fetches the configuration, connects to the database, and
+// applies (or rolls back) the embedded SQL migrations in the "blnk" schema.
+// It returns the number of migrations applied.
+func runMigrations(direction migrate.MigrationDirection) (int, error) {
+	// Define the source of the migrations.
+	migrations := migrate.EmbedFileSystemMigrationSource{
+		FileSystem: blnk.SQLFiles,
+		Root:       "sql",
+	}
+
+	// Fetch the configuration.
+	cnf, err := config.Fetch()
+	if err != nil {
+		return 0, fmt.Errorf("error fetching config: %w", err)
+	}
+
+	// Connect to the database.
+	db, err := database.ConnectDB(cnf.DataSource)
+	if err != nil {
+		return 0, fmt.Errorf("error connecting to database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Set the schema for the migrations. (Previously only the up path set
+	// this; a standalone `migrate down` would have targeted the default
+	// search_path instead of the blnk schema.)
+	migrate.SetSchema("blnk")
+
+	return migrate.Exec(db, "postgres", migrations, direction)
+}
+
 // migrateUpCommands creates the command for applying migrations.
 func migrateUpCommands() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "up",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Define the source of the migrations.
-			migrations := migrate.EmbedFileSystemMigrationSource{
-				FileSystem: blnk.SQLFiles,
-				Root:       "sql",
-			}
-
-			// Fetch the configuration.
-			cnf, err := config.Fetch()
-			if err != nil {
-				logrus.Errorf("Error fetching config: %v", err)
-				return
-			}
-
-			// Connect to the database.
-			db, err := database.ConnectDB(cnf.DataSource)
-			if err != nil {
-				logrus.Errorf("Error connecting to database: %v", err)
-				return
-			}
-
-			// Set the schema for the migrations.
-			migrate.SetSchema("blnk")
-
-			// Apply the migrations.
-			n, err := migrate.Exec(db, "postgres", migrations, migrate.Up)
+			n, err := runMigrations(migrate.Up)
 			if err != nil {
 				logrus.Errorf("Error migrating up: %v", err)
-			} else {
-				logrus.Infof("Applied %d migrations!\n", n)
+				return
 			}
+			logrus.Infof("Applied %d migrations!\n", n)
 		},
 	}
 
@@ -90,33 +99,12 @@ func migrateDownCommands() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "down",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Define the source of the migrations.
-			migrations := migrate.EmbedFileSystemMigrationSource{
-				FileSystem: blnk.SQLFiles,
-				Root:       "sql",
-			}
-
-			// Fetch the configuration.
-			cnf, err := config.Fetch()
-			if err != nil {
-				logrus.Errorf("Error fetching config: %v", err)
-				return
-			}
-
-			// Connect to the database.
-			db, err := database.ConnectDB(cnf.DataSource)
-			if err != nil {
-				logrus.Errorf("Error connecting to database: %v", err)
-				return
-			}
-
-			// Roll back the migrations.
-			n, err := migrate.Exec(db, "postgres", migrations, migrate.Down)
+			n, err := runMigrations(migrate.Down)
 			if err != nil {
 				logrus.Errorf("Error migrating down: %v", err)
-			} else {
-				logrus.Infof("Rolled back %d migrations!\n", n)
+				return
 			}
+			logrus.Infof("Rolled back %d migrations!\n", n)
 		},
 	}
 

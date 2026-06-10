@@ -586,7 +586,7 @@ func TestGetBalanceAtTime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -626,7 +626,7 @@ func TestGetBalanceByIndicator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -735,7 +735,7 @@ func TestUpdateBalanceIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 
 	t.Run("Nonexistent balance", func(t *testing.T) {
@@ -751,7 +751,7 @@ func TestUpdateBalanceIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -803,7 +803,7 @@ func TestGetBalanceLineage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -900,6 +900,6 @@ func TestDeleteBalanceMonitor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }

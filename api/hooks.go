@@ -11,6 +11,15 @@ import (
 
 var errHooksRequireMasterKey = errors.New("hook management requires master key")
 
+// hookFailureCode distinguishes a missing hook (the manager returns
+// "hook not found: <id>") from genuine infrastructure failures.
+func hookFailureCode(err error) apierror.ErrorCode {
+	if code, ok := classifyMessage(err.Error()); ok && apierror.StatusForCode(code) == http.StatusNotFound {
+		return apierror.ErrHookNotFound
+	}
+	return apierror.ErrHookOperationFailed
+}
+
 func isHookMasterKeyRequest(c *gin.Context) bool {
 	isMasterKey, _ := c.Get("isMasterKey")
 	isMaster, _ := isMasterKey.(bool)
@@ -22,7 +31,7 @@ func ensureHookManagementAuthorized(c *gin.Context) bool {
 		return true
 	}
 
-	c.JSON(http.StatusForbidden, gin.H{"error": errHooksRequireMasterKey.Error()})
+	respondCode(c, apierror.ErrAuthMasterKeyRequired, errHooksRequireMasterKey.Error(), nil)
 	return false
 }
 
@@ -34,12 +43,12 @@ func (a *Api) RegisterHook(c *gin.Context) {
 
 	var hook hooks.Hook
 	if err := c.ShouldBindJSON(&hook); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "invalid hook data", err))
+		respondBareAPIError(c, apierror.NewAPIError(apierror.ErrInvalidInput, "invalid hook data", err), apierror.ErrHookInvalid)
 		return
 	}
 
 	if err := a.blnk.Hooks.RegisterHook(c.Request.Context(), &hook); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to register hook", err))
+		respondBareAPIError(c, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to register hook", err), apierror.ErrHookOperationFailed)
 		return
 	}
 
@@ -55,12 +64,12 @@ func (a *Api) UpdateHook(c *gin.Context) {
 	hookID := c.Param("id")
 	var hook hooks.Hook
 	if err := c.ShouldBindJSON(&hook); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "invalid hook data", err))
+		respondBareAPIError(c, apierror.NewAPIError(apierror.ErrInvalidInput, "invalid hook data", err), apierror.ErrHookInvalid)
 		return
 	}
 
 	if err := a.blnk.Hooks.UpdateHook(c.Request.Context(), hookID, &hook); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to update hook", err))
+		respondBareAPIError(c, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to update hook", err), hookFailureCode(err))
 		return
 	}
 
@@ -76,7 +85,7 @@ func (a *Api) GetHook(c *gin.Context) {
 	hookID := c.Param("id")
 	hook, err := a.blnk.Hooks.GetHook(c.Request.Context(), hookID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, apierror.NewAPIError(apierror.ErrNotFound, "hook not found", err))
+		respondBareAPIError(c, apierror.NewAPIError(apierror.ErrNotFound, "hook not found", err), apierror.ErrHookNotFound)
 		return
 	}
 
@@ -92,7 +101,7 @@ func (a *Api) ListHooks(c *gin.Context) {
 	hookType := hooks.HookType(c.Query("type"))
 	hooks, err := a.blnk.Hooks.ListHooks(c.Request.Context(), hookType)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to list hooks", err))
+		respondBareAPIError(c, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to list hooks", err), apierror.ErrHookOperationFailed)
 		return
 	}
 
@@ -107,7 +116,7 @@ func (a *Api) DeleteHook(c *gin.Context) {
 
 	hookID := c.Param("id")
 	if err := a.blnk.Hooks.DeleteHook(c.Request.Context(), hookID); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to delete hook", err))
+		respondBareAPIError(c, apierror.NewAPIError(apierror.ErrInvalidInput, "failed to delete hook", err), hookFailureCode(err))
 		return
 	}
 

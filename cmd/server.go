@@ -47,24 +47,37 @@ serveTLS starts an HTTPS server with TLS enabled using CertMagic for automatic c
 It accepts a gin.Engine instance as the router and a ServerConfig struct for server configurations.
 If no domain is specified, the server will default to running on localhost.
 */
+// resolveCertStoragePath returns the configured certificate storage path,
+// falling back to the default location when unset.
+func resolveCertStoragePath(conf config.ServerConfig) string {
+	if conf.CertStoragePath == "" {
+		return "/var/lib/blnk/certs"
+	}
+	return conf.CertStoragePath
+}
+
+// resolveTLSDomains returns the certificate domains, defaulting to localhost
+// when no domain is configured.
+func resolveTLSDomains(conf config.ServerConfig) []string {
+	if conf.Domain == "" {
+		return []string{"localhost"}
+	}
+	return []string{conf.Domain}
+}
+
 func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
 	// Configure CertMagic's ACME (Automatic Certificate Management Environment) for automatic TLS
 	certmagic.DefaultACME.Agreed = true      // Agree to ACME TOS
 	certmagic.DefaultACME.Email = conf.Email // Set email for certificate recovery/notifications
 	cfg := certmagic.NewDefault()
 
-	certPath := conf.CertStoragePath
-	if certPath == "" {
-		certPath = "/var/lib/blnk/certs"
-	}
-	cfg.Storage = &certmagic.FileStorage{Path: certPath}
+	cfg.Storage = &certmagic.FileStorage{Path: resolveCertStoragePath(conf)}
 
 	// Define domain(s) for the certificate
-	domains := []string{conf.Domain}
 	if conf.Domain == "" {
 		logrus.Error("No domain specified, defaulting to localhost")
-		domains = []string{"localhost"} // Use localhost if no domain is provided
 	}
+	domains := resolveTLSDomains(conf)
 
 	// Manage TLS certificates for the specified domains
 	if err := cfg.ManageSync(context.Background(), domains); err != nil {
@@ -107,7 +120,14 @@ func migrateTypeSenseSchema(ctx context.Context, t *search.TypesenseClient) erro
 }
 
 func getOrCreateHeartbeatID() string {
-	db, err := sql.Open("sqlite3", "./heartbeat.db")
+	return getOrCreateHeartbeatIDAt("./heartbeat.db")
+}
+
+// getOrCreateHeartbeatIDAt persists a stable heartbeat UUID in a SQLite file
+// at the given path, creating it on first use. Any storage failure falls
+// back to a fresh (non-persistent) UUID.
+func getOrCreateHeartbeatIDAt(path string) string {
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		logrus.Errorf("Failed to open SQLite DB: %v", err)
 		return uuid.New().String() // fallback to temp UUID
@@ -211,28 +231,39 @@ func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*searc
 
 	newSearch := search.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns})
 
-	const maxRetries = 5
-	var retryDelay = 2 * time.Second
-	var err error
+	err := retryWithBackoff(ctx, 5, 2*time.Second, func() error {
+		if err := newSearch.EnsureCollectionsExist(ctx); err != nil {
+			return err
+		}
+		return migrateTypeSenseSchema(ctx, newSearch)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newSearch, nil
+}
 
-	for i := 0; i < maxRetries; i++ {
-		if err = newSearch.EnsureCollectionsExist(ctx); err == nil {
-			if err = migrateTypeSenseSchema(ctx, newSearch); err == nil {
-				return newSearch, nil
-			}
+// retryWithBackoff runs fn up to attempts times with exponential backoff
+// starting at baseDelay. It stops early when the context is canceled and
+// returns the last error when all attempts fail.
+func retryWithBackoff(ctx context.Context, attempts int, baseDelay time.Duration, fn func() error) error {
+	retryDelay := baseDelay
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = fn(); err == nil {
+			return nil
 		}
 
-		logrus.Errorf("TypeSense initialization failed (attempt %d/%d): %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
+		logrus.Errorf("TypeSense initialization failed (attempt %d/%d): %v. Retrying in %v...", i+1, attempts, err, retryDelay)
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-time.After(retryDelay):
 			retryDelay *= 2
 		}
 	}
-
-	return nil, fmt.Errorf("failed to initialize TypeSense after %d attempts: %v", maxRetries, err)
+	return fmt.Errorf("failed to initialize TypeSense after %d attempts: %v", attempts, err)
 }
 
 func initializePostHog() (posthog.Client, string) {
@@ -244,10 +275,7 @@ func initializePostHog() (posthog.Client, string) {
 }
 
 func startServer(router *gin.Engine, port string) error {
-	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: router,
-	}
+	server := newHTTPServer(router, port)
 
 	// Start server in goroutine
 	go func() {
@@ -260,12 +288,25 @@ func startServer(router *gin.Engine, port string) error {
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	return gracefulShutdown(server, quit, 30*time.Second)
+}
+
+// newHTTPServer builds the API HTTP server for the given router and port.
+func newHTTPServer(router *gin.Engine, port string) *http.Server {
+	return &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
+	}
+}
+
+// gracefulShutdown blocks until a signal arrives on quit, then shuts the
+// server down, giving outstanding requests up to timeout to complete.
+func gracefulShutdown(server *http.Server, quit <-chan os.Signal, timeout time.Duration) error {
 	<-quit
 
 	logrus.Info("Shutting down server...")
 
-	// Give outstanding requests 30 seconds to complete
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {

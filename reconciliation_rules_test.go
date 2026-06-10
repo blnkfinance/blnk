@@ -130,13 +130,13 @@ func TestRecon_ValidateDrift(t *testing.T) {
 		criteria model.MatchingCriteria
 		wantErr  string
 	}{
-		// amount + equals: drift is a percentage, bounded [0, 100]
+		// amount + equals: drift is a fraction, bounded [0, 1] (0.01 = 1%)
 		{"amount drift 0 (boundary low)", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 0}, ""},
-		{"amount drift 100 (boundary high)", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 100}, ""},
-		{"amount drift 50 (interior)", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 50}, ""},
-		{"amount drift just below 0", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: -0.000001}, "drift for amount must be between 0 and 100 (percentage)"},
-		{"amount drift just above 100", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 100.000001}, "drift for amount must be between 0 and 100 (percentage)"},
-		{"amount drift -1", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: -1}, "drift for amount must be between 0 and 100 (percentage)"},
+		{"amount drift 1 (boundary high)", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 1}, ""},
+		{"amount drift 0.5 (interior)", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 0.5}, ""},
+		{"amount drift just below 0", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: -0.000001}, "drift for amount must be between 0 and 1 (fraction, e.g. 0.01 = 1%)"},
+		{"amount drift just above 1", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 1.000001}, "drift for amount must be between 0 and 1 (fraction, e.g. 0.01 = 1%)"},
+		{"amount drift -1", model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: -1}, "drift for amount must be between 0 and 1 (fraction, e.g. 0.01 = 1%)"},
 
 		// date + equals: drift is seconds, must be non-negative, unbounded above
 		{"date drift 0 (boundary)", model.MatchingCriteria{Field: "date", Operator: "equals", AllowableDrift: 0}, ""},

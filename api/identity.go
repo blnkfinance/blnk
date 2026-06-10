@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	apimodel "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
 )
@@ -39,13 +40,13 @@ import (
 func (a Api) CreateIdentity(c *gin.Context) {
 	var identity model.Identity
 	if err := c.ShouldBindJSON(&identity); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	resp, err := a.blnk.CreateIdentity(identity)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenConflict, apierror.ErrIdtValidation), withUpgrade(apierror.ErrGenBadRequest, apierror.ErrIdtValidation))
 		return
 	}
 
@@ -66,13 +67,13 @@ func (a Api) CreateIdentity(c *gin.Context) {
 func (a Api) GetIdentity(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	resp, err := a.blnk.GetIdentity(id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 		return
 	}
 
@@ -94,19 +95,19 @@ func (a Api) UpdateIdentity(c *gin.Context) {
 	var identity model.Identity
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	if err := c.ShouldBindJSON(&identity); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	identity.IdentityID = id
 	err := a.blnk.UpdateIdentity(&identity)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 		return
 	}
 
@@ -126,13 +127,13 @@ func (a Api) UpdateIdentity(c *gin.Context) {
 func (a Api) DeleteIdentity(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	err := a.blnk.DeleteIdentity(id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 		return
 	}
 
@@ -174,14 +175,15 @@ func (a Api) GetAllIdentities(c *gin.Context) {
 	if HasFilters(c) {
 		filters, parseErrors := ParseFiltersFromContext(c, nil)
 		if len(parseErrors) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			respondCode(c, apierror.ErrGenValidation, "invalid filter parameters", parseErrors,
+				withLegacyKey("errors"), withLegacyValue(parseErrors))
 			return
 		}
 
 		// Use the new filter method
 		resp, err := a.blnk.GetAllIdentitiesWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 
@@ -192,7 +194,7 @@ func (a Api) GetAllIdentities(c *gin.Context) {
 	// Fall back to the legacy method when no filters are present
 	identities, err := a.blnk.GetAllIdentities()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -222,13 +224,13 @@ func (a Api) GetAllIdentities(c *gin.Context) {
 func (a Api) FilterIdentities(c *gin.Context) {
 	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "identity")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil)
 		return
 	}
 
 	resp, count, err := a.blnk.GetAllIdentitiesWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -254,18 +256,18 @@ func (a Api) TokenizeIdentityField(c *gin.Context) {
 	field, fieldExists := c.Params.Get("field")
 
 	if !idExists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "identity ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "identity ID is required", nil)
 		return
 	}
 
 	if !fieldExists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "field name is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "field name is required", nil)
 		return
 	}
 
 	err := a.blnk.TokenizeIdentityField(id, field)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 		return
 	}
 
@@ -287,18 +289,18 @@ func (a Api) DetokenizeIdentityField(c *gin.Context) {
 	field, fieldExists := c.Params.Get("field")
 
 	if !idExists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "identity ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "identity ID is required", nil)
 		return
 	}
 
 	if !fieldExists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "field name is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "field name is required", nil)
 		return
 	}
 
 	originalValue, err := a.blnk.DetokenizeIdentityField(id, field)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 		return
 	}
 
@@ -318,24 +320,24 @@ func (a Api) DetokenizeIdentityField(c *gin.Context) {
 func (a Api) TokenizeIdentity(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "identity ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "identity ID is required", nil)
 		return
 	}
 
 	var request apimodel.TokenizeRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	if len(request.Fields) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "at least one field must be specified"})
+		respondCode(c, apierror.ErrGenValidation, "at least one field must be specified", nil)
 		return
 	}
 
 	err := a.blnk.TokenizeIdentity(id, request.Fields)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 		return
 	}
 
@@ -355,13 +357,13 @@ func (a Api) TokenizeIdentity(c *gin.Context) {
 func (a Api) DetokenizeIdentity(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "identity ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "identity ID is required", nil)
 		return
 	}
 
 	var request apimodel.DetokenizeRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
@@ -369,7 +371,7 @@ func (a Api) DetokenizeIdentity(c *gin.Context) {
 	if len(request.Fields) == 0 {
 		detokenizedFields, err := a.blnk.DetokenizeIdentity(id)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 			return
 		}
 
@@ -382,7 +384,7 @@ func (a Api) DetokenizeIdentity(c *gin.Context) {
 	for _, field := range request.Fields {
 		value, err := a.blnk.DetokenizeIdentityField(id, field)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 			return
 		}
 		result[field] = value
@@ -402,13 +404,13 @@ func (a Api) DetokenizeIdentity(c *gin.Context) {
 func (a Api) GetTokenizedFields(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "identity ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "identity ID is required", nil)
 		return
 	}
 
 	identity, err := a.blnk.GetIdentity(id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrIdtNotFound))
 		return
 	}
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
@@ -40,19 +41,19 @@ import (
 func (a Api) CreateBalance(c *gin.Context) {
 	var newBalance model2.CreateBalance
 	if err := c.ShouldBindJSON(&newBalance); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	err := newBalance.ValidateCreateBalance()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil, withLegacyKey("errors"))
 		return
 	}
 
 	resp, err := a.blnk.CreateBalance(c.Request.Context(), newBalance.ToBalance())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenValidation, apierror.ErrBalValidation))
 		return
 	}
 
@@ -73,7 +74,7 @@ func (a Api) CreateBalance(c *gin.Context) {
 func (a Api) GetBalance(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
@@ -85,7 +86,7 @@ func (a Api) GetBalance(c *gin.Context) {
 
 	resp, err := a.blnk.GetBalanceByID(c.Request.Context(), id, includes, withQueued)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalNotFound))
 		return
 	}
 
@@ -111,13 +112,13 @@ func (a Api) GetBalances(c *gin.Context) {
 	// Extract pagination parameters (limit and offset)
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "10")) // Default to 10 if not specified
 	if err != nil || limit <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit value"})
+		respondCode(c, apierror.ErrGenValidation, "invalid limit value", nil)
 		return
 	}
 
 	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0")) // Default to 0 if not specified
 	if err != nil || offset < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid offset value"})
+		respondCode(c, apierror.ErrGenValidation, "invalid offset value", nil)
 		return
 	}
 
@@ -125,14 +126,15 @@ func (a Api) GetBalances(c *gin.Context) {
 	if HasFilters(c) {
 		filters, parseErrors := ParseFiltersFromContext(c, nil)
 		if len(parseErrors) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			respondCode(c, apierror.ErrGenValidation, "invalid filter parameters", parseErrors,
+				withLegacyKey("errors"), withLegacyValue(parseErrors))
 			return
 		}
 
 		// Use the new filter method
 		resp, err := a.blnk.GetAllBalancesWithFilter(c.Request.Context(), filters, limit, offset)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 
@@ -143,7 +145,7 @@ func (a Api) GetBalances(c *gin.Context) {
 	// Fetch balances with pagination
 	resp, err := a.blnk.GetAllBalances(c.Request.Context(), limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -173,13 +175,13 @@ func (a Api) GetBalances(c *gin.Context) {
 func (a Api) FilterBalances(c *gin.Context) {
 	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "balances")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil)
 		return
 	}
 
 	resp, count, err := a.blnk.GetAllBalancesWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -204,19 +206,19 @@ func (a Api) FilterBalances(c *gin.Context) {
 func (a Api) CreateBalanceMonitor(c *gin.Context) {
 	var newMonitor model2.CreateBalanceMonitor
 	if err := c.ShouldBindJSON(&newMonitor); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	err := newMonitor.ValidateCreateBalanceMonitor()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil, withLegacyKey("errors"))
 		return
 	}
 
 	resp, err := a.blnk.CreateMonitor(c.Request.Context(), newMonitor.ToBalanceMonitor())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -236,13 +238,13 @@ func (a Api) CreateBalanceMonitor(c *gin.Context) {
 func (a Api) GetBalanceMonitor(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	resp, err := a.blnk.GetMonitorByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalMonitorNotFound))
 		return
 	}
 
@@ -262,7 +264,7 @@ func (a Api) GetBalanceMonitor(c *gin.Context) {
 func (a Api) GetAllBalanceMonitors(c *gin.Context) {
 	monitors, err := a.blnk.GetAllMonitors(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -282,13 +284,13 @@ func (a Api) GetAllBalanceMonitors(c *gin.Context) {
 func (a Api) GetBalanceMonitorsByBalanceID(c *gin.Context) {
 	balanceID, passed := c.Params.Get("balance_id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "balance_id is required. pass balance_id in the route /:balance_id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "balance_id is required. pass balance_id in the route /:balance_id", nil)
 		return
 	}
 
 	monitors, err := a.blnk.GetBalanceMonitors(c.Request.Context(), balanceID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -310,19 +312,19 @@ func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 	var monitor model.BalanceMonitor
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	if err := c.ShouldBindJSON(&monitor); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	monitor.MonitorID = id
 	err := a.blnk.UpdateMonitor(c.Request.Context(), &monitor)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalMonitorNotFound))
 		return
 	}
 
@@ -342,13 +344,13 @@ func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 func (a Api) DeleteBalanceMonitor(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	err := a.blnk.DeleteMonitor(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalMonitorNotFound))
 		return
 	}
 
@@ -368,7 +370,7 @@ func (a Api) TakeBalanceSnapshots(c *gin.Context) {
 	// Get batch size from query parameter, default to 1000 if not specified
 	batchSize, err := strconv.Atoi(c.DefaultQuery("batch_size", "1000"))
 	if err != nil || batchSize <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batch_size value"})
+		respondCode(c, apierror.ErrGenValidation, "invalid batch_size value", nil)
 		return
 	}
 
@@ -394,7 +396,7 @@ func (a Api) TakeBalanceSnapshots(c *gin.Context) {
 func (a Api) GetBalanceAtTime(c *gin.Context) {
 	balanceID, exists := c.Params.Get("id")
 	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "balance ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "balance ID is required", nil)
 		return
 	}
 
@@ -407,9 +409,7 @@ func (a Api) GetBalanceAtTime(c *gin.Context) {
 		var err error
 		timestamp, err = time.Parse(time.RFC3339, timestampStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid timestamp format. Please use ISO 8601 format (e.g., 2024-01-01T15:04:05Z)",
-			})
+			respondCode(c, apierror.ErrBalInvalidTimestamp, "invalid timestamp format. Please use ISO 8601 format (e.g., 2024-01-01T15:04:05Z)", nil)
 			return
 		}
 	}
@@ -420,7 +420,7 @@ func (a Api) GetBalanceAtTime(c *gin.Context) {
 
 	balance, err := a.blnk.GetBalanceAtTime(c.Request.Context(), balanceID, timestamp, fromSource)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalNotFound))
 		return
 	}
 
@@ -453,19 +453,19 @@ func (a Api) GetBalanceAtTime(c *gin.Context) {
 func (a Api) GetBalanceByIndicator(c *gin.Context) {
 	indicator, indicatorPassed := c.Params.Get("indicator")
 	if !indicatorPassed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "indicator is required. pass indicator in the route /indicator/:indicator"})
+		respondCode(c, apierror.ErrGenMissingParameter, "indicator is required. pass indicator in the route /indicator/:indicator", nil)
 		return
 	}
 
 	currency, currencyPassed := c.Params.Get("currency")
 	if !currencyPassed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "currency is required. pass currency in the route /currency/:currency"})
+		respondCode(c, apierror.ErrGenMissingParameter, "currency is required. pass currency in the route /currency/:currency", nil)
 		return
 	}
 
 	resp, err := a.blnk.GetBalanceByIndicator(c.Request.Context(), indicator, currency)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalNotFound))
 		return
 	}
 
@@ -477,23 +477,23 @@ func (a Api) GetBalanceByIndicator(c *gin.Context) {
 func (a Api) UpdateBalanceIdentity(c *gin.Context) {
 	balanceID, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "balance id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "balance id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	var request model2.UpdateBalanceIdentity
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	if request.IdentityId == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "identity_id is required"})
+		respondCode(c, apierror.ErrGenValidation, "identity_id is required", nil)
 		return
 	}
 
 	if err := a.blnk.UpdateBalanceIdentity(balanceID, request.IdentityId); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalNotFound))
 		return
 	}
 
@@ -503,13 +503,13 @@ func (a Api) UpdateBalanceIdentity(c *gin.Context) {
 func (a Api) GetBalanceLineage(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	lineage, err := a.blnk.GetBalanceLineage(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrBalNotFound))
 		return
 	}
 

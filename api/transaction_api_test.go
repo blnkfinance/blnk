@@ -396,7 +396,7 @@ func TestRecordTransactionPrecisionValidation(t *testing.T) {
 		}
 
 		payloadBytes, _ := request.ToJsonReq(&invalidPayload)
-		response := map[string]string{}
+		response := map[string]interface{}{}
 		testRequest := TestRequest{
 			Payload:  payloadBytes,
 			Response: &response,

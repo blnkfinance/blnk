@@ -41,8 +41,7 @@ func Int64ToBigInt(value int64) *big.Int {
 // HashTxn generates a SHA-256 hash of a transaction's relevant fields.
 // This ensures the integrity of the transaction by creating a unique hash from its details.
 func (transaction *Transaction) HashTxn() string {
-	// Concatenate the transaction's fields into a single string.
-	data := fmt.Sprintf("%f%s%s%s%s", transaction.Amount, transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
+	data := fmt.Sprintf("%s%s%s%s%s", strconv.FormatFloat(transaction.Amount, 'f', -1, 64), transaction.Reference, transaction.Currency, transaction.Source, transaction.Destination)
 	hash := sha256.Sum256([]byte(data)) // Hash the concatenated data.
 	return hex.EncodeToString(hash[:])  // Return the hex-encoded hash.
 }
@@ -161,8 +160,12 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 		// Calculate the resulting balance after transaction, considering inflight and queued debits
 		resultingBalance := new(big.Int).Sub(availableBalance, transactionAmount)
 
-		// Convert overdraft limit to big.Int with precision applied
-		overdraftLimitPrecise := int64(transaction.OverdraftLimit * transaction.Precision)
+		// Convert overdraft limit to big.Int with precision applied using
+		// decimal arithmetic: int64(limit*precision) truncates binary-float
+		// products (0.29*100 -> 28), rejecting transactions exactly at the
+		// configured limit.
+		overdraftLimitPrecise := decimal.NewFromFloat(transaction.OverdraftLimit).
+			Mul(decimal.NewFromFloat(transaction.Precision)).Round(0).IntPart()
 		overdraftLimitBigInt := new(big.Int).SetInt64(overdraftLimitPrecise)
 
 		// Negative of overdraft limit (as balance will be negative)
@@ -376,7 +379,10 @@ func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 	amountDec, _ := decimal.NewFromString(amountStr)
 	precisionDec, _ := decimal.NewFromString(precisionStr)
 
-	preciseAmount := amountDec.Mul(precisionDec)
+	// Round to the nearest minor unit: an amount finer than the precision
+	// (e.g. 1.005 at precision 100) would otherwise produce a non-integer
+	// string that big.Int.SetString silently rejects, yielding zero.
+	preciseAmount := amountDec.Mul(precisionDec).Round(0)
 
 	// Convert to big.Int
 	result := new(big.Int)
@@ -392,20 +398,13 @@ func ApplyRate(preciseAmount *big.Int, rate float64) *big.Int {
 		rate = 1
 	}
 
-	// Create a new big.Float from the precise amount
-	preciseAmountFloat := new(big.Float).SetInt(preciseAmount)
-
-	// Create a big.Float for the rate
-	rateFloat := new(big.Float).SetFloat64(rate)
-
-	// Multiply the amount by the rate
-	result := new(big.Float).Mul(preciseAmountFloat, rateFloat)
-
-	// Convert back to big.Int (rounding if necessary)
-	resultBigInt := new(big.Int)
-	result.Int(resultBigInt)
-
-	return resultBigInt
+	// Multiply with decimal arithmetic and round to the nearest minor unit.
+	// The previous big.Float path truncated toward zero, so a rate like
+	// 1.0001 on 10000 units yielded 10000 instead of 10001 — silently
+	// losing a minor unit on every FX leg.
+	amountDec := decimal.NewFromBigInt(preciseAmount, 0)
+	rateDec := decimal.NewFromFloat(rate)
+	return amountDec.Mul(rateDec).Round(0).BigInt()
 }
 
 // validate checks if the transaction is valid (e.g., ensuring positive amount).

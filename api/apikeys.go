@@ -7,6 +7,7 @@ import (
 	authz "github.com/blnkfinance/blnk/api/middleware"
 	"github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	coremodel "github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
 )
@@ -75,12 +76,16 @@ func writeAPIKeyAuthorizationError(c *gin.Context, err error) bool {
 	}
 
 	switch err {
-	case errAPIKeyOwnerRequired, errMissingAPIKeyPrincipal:
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-	case errAPIKeyCrossOwnerAccess, errAPIKeyScopeEscalation:
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+	case errAPIKeyOwnerRequired:
+		respondCode(c, apierror.ErrAPIKeyOwnerRequired, err.Error(), nil)
+	case errMissingAPIKeyPrincipal:
+		respondCode(c, apierror.ErrAuthMissingPrincipal, err.Error(), nil)
+	case errAPIKeyCrossOwnerAccess:
+		respondCode(c, apierror.ErrAuthCrossOwnerAccess, err.Error(), nil)
+	case errAPIKeyScopeEscalation:
+		respondCode(c, apierror.ErrAuthScopeEscalation, err.Error(), nil)
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 	}
 
 	return true
@@ -97,7 +102,7 @@ func writeAPIKeyAuthorizationError(c *gin.Context, err error) bool {
 func (a Api) CreateAPIKey(c *gin.Context) {
 	var req model.CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
@@ -115,7 +120,7 @@ func (a Api) CreateAPIKey(c *gin.Context) {
 
 	apiKey, err := a.blnk.CreateAPIKey(c.Request.Context(), req.Name, ownerID, req.Scopes, req.ExpiresAt)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -141,7 +146,7 @@ func (a Api) ListAPIKeys(c *gin.Context) {
 
 	keys, err := a.blnk.ListAPIKeys(c.Request.Context(), ownerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -170,11 +175,13 @@ func (a Api) RevokeAPIKey(c *gin.Context) {
 	if err := a.blnk.RevokeAPIKey(c.Request.Context(), id, ownerID); err != nil {
 		switch err {
 		case database.ErrAPIKeyNotFound:
-			c.JSON(http.StatusNotFound, gin.H{"error": "API key not found"})
+			respondCode(c, apierror.ErrAPIKeyNotFound, "API key not found", nil)
 		case database.ErrInvalidAPIKey:
-			c.JSON(http.StatusForbidden, gin.H{"error": "unauthorized"})
+			// In the revoke flow this means the key belongs to another owner —
+			// an authorization failure, so 403 (not 401) stays correct.
+			respondCode(c, apierror.ErrAuthCrossOwnerAccess, "unauthorized", nil)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}

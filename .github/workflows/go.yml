@@ -86,6 +86,6 @@ jobs:
           BLNK_REDIS_DNS: localhost:6379
 
       - name: Test
-        run: go test -v ./...
+        run: go test -v -p 1 ./...
         env:
           BLNK_TYPESENSE_DNS: http://localhost:8108

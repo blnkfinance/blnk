@@ -174,7 +174,7 @@ func TestGetTransactionByID(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -212,7 +212,7 @@ func TestGetTransactionByReference(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -320,7 +320,7 @@ func TestGetTransactionLineage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 

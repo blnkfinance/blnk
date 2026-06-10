@@ -45,7 +45,7 @@ func TestDeleteIdentityAPI(t *testing.T) {
 
 	t.Run("Delete nonexistent identity", func(t *testing.T) {
 		resp := doJSONRequest(router, "DELETE", "/identities/idt_nonexistent", nil)
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 

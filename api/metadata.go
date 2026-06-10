@@ -1,10 +1,9 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 
-	"github.com/blnkfinance/blnk"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,23 +28,22 @@ func (a Api) UpdateMetadata(c *gin.Context) {
 	entityID := c.Param("entity-id")
 
 	if entityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "entity ID is required"})
+		respondCode(c, apierror.ErrMetaInvalidEntityID, "entity ID is required", nil)
 		return
 	}
 
 	var req MetadataRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
+	// Known conditions (entity not found, unsupported entity type, invalid
+	// entity ID) classify to META_* codes; anything else is an internal
+	// failure (e.g. database error) and falls back to a sanitized 500.
 	updatedMetadata, err := a.blnk.UpdateMetadata(c.Request.Context(), entityID, req.Metadata)
 	if err != nil {
-		if errors.Is(err, blnk.ErrEntityNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "entity not found"})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

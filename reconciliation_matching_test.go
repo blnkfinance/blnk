@@ -36,10 +36,9 @@ var reconBaseTime = time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 func TestRecon_MatchesGroupAmount_EqualsBoundaries(t *testing.T) {
 	b := &Blnk{}
 
-	// NOTE: matchesGroupAmount currently treats AllowableDrift as a FRACTION of the
-	// internal amount (0.25 => 25%). These cases pin the exact <= boundary under
-	// that interpretation; the unit inconsistency with validateDrift and
-	// calculateMatchingBounds is covered by TestRecon_SuspectedBug_AmountDriftUnitsInconsistent.
+	// AllowableDrift is a FRACTION of the internal amount (0.25 => 25%); the
+	// validator and SQL prefilter use the same unit. These cases pin the
+	// exact <= boundary.
 	tests := []struct {
 		name     string
 		external float64
@@ -90,20 +89,28 @@ func TestRecon_MatchesGroupAmount_UnknownOperatorNeverMatches(t *testing.T) {
 	assert.False(t, b.matchesGroupAmount(100, 100, model.MatchingCriteria{Field: "amount", Operator: "bogus"}))
 }
 
-func TestRecon_SuspectedBug_AmountDriftUnitsInconsistent(t *testing.T) {
-	t.Skip("SUSPECTED BUG: drift units are inconsistent. validateDrift (reconciliation.go:1282) validates amount drift as a PERCENTAGE in [0,100] and calculateMatchingBounds (reconciliation.go:1439) computes query bounds as amt*(drift/100), but matchesGroupAmount (reconciliation.go:1387) computes allowableDrift = groupAmount*AllowableDrift, i.e. treats it as a FRACTION. A validated rule with drift=1 (1%) therefore tolerates a 100% amount deviation in the matcher, while the SQL prefilter only fetches candidates within 1% — the matcher and the prefilter disagree by a factor of 100. Pick one unit (percentage) and apply it in both places.")
+func TestRecon_AmountDriftFractionSemantics(t *testing.T) {
+	// Regression: drift units used to disagree — the validator/SQL prefilter
+	// treated AllowableDrift as a percentage while the matcher treated it as
+	// a fraction, a 100x mismatch. The canonical unit is now a FRACTION
+	// (0.01 = 1%) in all three places.
 	b := &Blnk{}
-	criteria := model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 1} // 1% under validated semantics
+	criteria := model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 0.01} // 1%
 	assert.False(t, b.matchesGroupAmount(150, 100, criteria), "a 50%% deviation must not satisfy a 1%% drift rule")
 	assert.True(t, b.matchesGroupAmount(100.5, 100, criteria), "a 0.5%% deviation must satisfy a 1%% drift rule")
+	assert.True(t, b.matchesGroupAmount(101, 100, criteria), "exactly 1%% deviation must satisfy a 1%% drift rule")
+	assert.False(t, b.matchesGroupAmount(101.001, 100, criteria), "just past 1%% must not match")
 }
 
-func TestRecon_SuspectedBug_NegativeAmountsNeverMatch(t *testing.T) {
-	t.Skip("SUSPECTED BUG: matchesGroupAmount (reconciliation.go:1387) computes allowableDrift = groupAmount*AllowableDrift without taking the absolute value. For negative internal amounts (refunds, debits) the allowable drift is negative, so math.Abs(diff) <= allowableDrift is false even when the amounts are identical — negative-amount transactions can never be reconciled with a non-zero drift. Use math.Abs(groupAmount).")
+func TestRecon_NegativeAmountsMatchWithinDrift(t *testing.T) {
+	// Regression: the matcher used to compute groupAmount*AllowableDrift
+	// without abs(), so negative internal amounts (refunds, debits) produced
+	// a negative tolerance and could never reconcile.
 	b := &Blnk{}
 	criteria := model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 0.01}
 	assert.True(t, b.matchesGroupAmount(-100, -100, criteria), "identical negative amounts must match")
 	assert.True(t, b.matchesGroupAmount(-100.5, -100, criteria), "negative amounts within drift must match")
+	assert.False(t, b.matchesGroupAmount(-150, -100, criteria), "negative amounts past drift must not match")
 }
 
 // --- date matching ---
@@ -151,8 +158,9 @@ func TestRecon_MatchesGroupDate_AfterBefore(t *testing.T) {
 	assert.False(t, b.matchesGroupDate(reconBaseTime, reconBaseTime, model.MatchingCriteria{Field: "date", Operator: "bogus"}))
 }
 
-func TestRecon_SuspectedBug_DateDriftTruncatesSubSecond(t *testing.T) {
-	t.Skip("SUSPECTED BUG: matchesGroupDate (reconciliation.go:1407) computes math.Abs(float64(difference/time.Second)), an INTEGER division that truncates the sub-second remainder before comparison. A 60.9s difference passes a 60s drift rule and a 0.99s difference passes a 0s (exact-match) rule. Use difference.Seconds() to compare fractional seconds.")
+func TestRecon_DateDriftComparesFractionalSeconds(t *testing.T) {
+	// Regression: integer Duration division used to truncate the sub-second
+	// remainder, so a 60.9s difference passed a 60s drift rule.
 	b := &Blnk{}
 
 	drift60 := model.MatchingCriteria{Field: "date", Operator: "equals", AllowableDrift: 60}
@@ -164,8 +172,11 @@ func TestRecon_SuspectedBug_DateDriftTruncatesSubSecond(t *testing.T) {
 		"0.99s difference must not satisfy an exact (0s drift) rule")
 }
 
-func TestRecon_SuspectedBug_DateOperatorsUnreachable(t *testing.T) {
-	t.Skip("SUSPECTED BUG: operator sets disagree. validateOperator (reconciliation.go:1254) accepts equals/greater_than/less_than/contains, but matchesGroupDate (reconciliation.go:1403) implements equals/after/before. A validated date rule using greater_than or less_than always evaluates to false (silently failing every comparison), while after/before rules can never be created through the validated API. Align the two operator sets.")
+func TestRecon_DateOperatorsAlignedWithValidation(t *testing.T) {
+	// Regression: the validator accepts greater_than/less_than but the
+	// matcher only implemented after/before, so every validated date
+	// comparison rule silently evaluated to false. greater_than/less_than
+	// now alias after/before.
 	b := &Blnk{}
 
 	// greater_than is accepted by validation for the date field...
@@ -369,9 +380,9 @@ func TestRecon_CalculateMatchingBounds(t *testing.T) {
 		assert.Equal(t, "USD", *currency)
 	})
 
-	t.Run("amount equals drift is a percentage of the external amount", func(t *testing.T) {
+	t.Run("amount equals drift is a fraction of the external amount", func(t *testing.T) {
 		minA, maxA, _, _, _ := b.calculateMatchingBounds(external, []model.MatchingRule{
-			rule(model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 10}),
+			rule(model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 0.1}),
 		})
 		require.NotNil(t, minA)
 		require.NotNil(t, maxA)
@@ -391,8 +402,8 @@ func TestRecon_CalculateMatchingBounds(t *testing.T) {
 
 	t.Run("multiple rules take the widest amount range", func(t *testing.T) {
 		minA, maxA, _, _, _ := b.calculateMatchingBounds(external, []model.MatchingRule{
-			rule(model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 10}),
-			rule(model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 50}),
+			rule(model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 0.1}),
+			rule(model.MatchingCriteria{Field: "amount", Operator: "equals", AllowableDrift: 0.5}),
 		})
 		require.NotNil(t, minA)
 		require.NotNil(t, maxA)
@@ -608,8 +619,11 @@ func TestRecon_MatchSingleTransaction_ConsumesGroupAndOrientsIDs(t *testing.T) {
 	})
 }
 
-func TestRecon_SuspectedBug_OneToManyDropsTxnsWhenNoGroupsExist(t *testing.T) {
-	t.Skip("SUSPECTED BUG: oneToMany (reconciliation.go:897) and manyToOne (reconciliation.go:771) break out of the pagination loop when grouping returns zero groups (or when the grouping query errors -- the error is logged and swallowed, returning nil). In that case processGroupedTransactions is never invoked, so the input transactions are neither matched nor reported as unmatched: they silently vanish from the reconciliation results and the run completes as 0 matched / 0 unmatched. Financially, every unprocessed transaction must be reported unmatched (or the run must fail). The existing test 'One-to-many with no matching group' even says 'Expected 1 unmatched transaction' in its assertion message while asserting 0.")
+func TestRecon_OneToManyReportsUnmatchedWhenNoGroupsExist(t *testing.T) {
+	// Regression: oneToMany/manyToOne used to break out of the pagination
+	// loop when grouping returned zero groups, so the input transactions
+	// were neither matched nor reported unmatched — they silently vanished
+	// from the reconciliation results.
 	storeReconEngineConfig()
 	mockDS := new(mocks.MockDataSource)
 	b := &Blnk{datasource: mockDS}

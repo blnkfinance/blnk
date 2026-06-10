@@ -402,7 +402,13 @@ func TestMetricsAuthHandler_LockdownResponseIsJSON(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 	assert.JSONEq(t,
-		`{"error":"Metrics endpoint unavailable: metrics_bearer_token must be configured when secure mode is enabled"}`,
+		`{
+			"error": "Metrics endpoint unavailable: metrics_bearer_token must be configured when secure mode is enabled",
+			"error_detail": {
+				"code": "AUTH_METRICS_DISABLED",
+				"message": "Metrics endpoint unavailable: metrics_bearer_token must be configured when secure mode is enabled"
+			}
+		}`,
 		w.Body.String())
 }
 

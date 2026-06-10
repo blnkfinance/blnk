@@ -446,73 +446,85 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 				logrus.Fatal("Error fetching config:", err)
 			}
 
-			phClient, shutdown, err := initializeTelemetryAndObservability(context.Background(), conf)
-			if err != nil {
+			if err := runWorkers(ctx, b, conf); err != nil {
 				logrus.Fatal(err)
 			}
-			if shutdown != nil {
-				defer func() {
-					tctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-					defer cancel()
-					if err := shutdown(tctx); err != nil {
-						logrus.Errorf("Error during shutdown: %v", err)
-					}
-				}()
-			}
-			if phClient != nil {
-				defer phClient.Close()
-			}
-
-			srv, hotSrv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
-			if err != nil {
-				logrus.Fatal(err)
-			}
-
-			monitoringSrv := startMonitoringServer(conf)
-
-			if err := srv.Start(mux); err != nil {
-				logrus.Fatalf("could not start transaction worker server: %v", err)
-			}
-			if hotSrv != nil {
-				if err := hotSrv.Start(mux); err != nil {
-					logrus.Fatalf("could not start hot transaction worker server: %v", err)
-				}
-			}
-			if err := webhookSrv.Start(webhookMux); err != nil {
-				logrus.Fatalf("could not start webhook worker server: %v", err)
-			}
-
-			recoveryProcessor := blnk.NewQueuedTransactionRecoveryProcessor(b.blnk)
-			recoveryProcessor.Start(ctx)
-
-			logrus.Info("Workers started.")
-
-			// Wait for SIGINT/SIGTERM.
-			<-ctx.Done()
-
-			logrus.Info("Shutdown signal received. Shutting down...")
-
-			recoveryProcessor.Stop()
-
-			if monitoringSrv != nil {
-				sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := monitoringSrv.Shutdown(sctx); err != nil {
-					logrus.Errorf("monitoring shutdown error: %v", err)
-				}
-			}
-
-			webhookSrv.Shutdown()
-			if hotSrv != nil {
-				hotSrv.Shutdown()
-			}
-			srv.Shutdown()
-
-			logrus.Info("Shutdown complete.")
 		},
 	}
 
 	return cmd
+}
+
+// runWorkers starts the transaction, hot-lane (optional), and webhook worker
+// servers plus the monitoring HTTP server, then blocks until ctx is canceled
+// and shuts everything down gracefully. Extracted from the cobra Run closure
+// so the full worker lifecycle is testable; startup failures are returned to
+// the caller, which keeps the process-exit decision at the command layer.
+func runWorkers(ctx context.Context, b *blnkInstance, conf *config.Configuration) error {
+	phClient, shutdown, err := initializeTelemetryAndObservability(context.Background(), conf)
+	if err != nil {
+		return err
+	}
+	if shutdown != nil {
+		defer func() {
+			tctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := shutdown(tctx); err != nil {
+				logrus.Errorf("Error during shutdown: %v", err)
+			}
+		}()
+	}
+	if phClient != nil {
+		defer func() { _ = phClient.Close() }()
+	}
+
+	srv, hotSrv, webhookSrv, mux, webhookMux, err := setupWorkerServers(b, conf)
+	if err != nil {
+		return err
+	}
+
+	monitoringSrv := startMonitoringServer(conf)
+
+	if err := srv.Start(mux); err != nil {
+		return fmt.Errorf("could not start transaction worker server: %w", err)
+	}
+	if hotSrv != nil {
+		if err := hotSrv.Start(mux); err != nil {
+			return fmt.Errorf("could not start hot transaction worker server: %w", err)
+		}
+	}
+	if err := webhookSrv.Start(webhookMux); err != nil {
+		return fmt.Errorf("could not start webhook worker server: %w", err)
+	}
+
+	recoveryProcessor := blnk.NewQueuedTransactionRecoveryProcessor(b.blnk)
+	recoveryProcessor.Start(ctx)
+
+	logrus.Info("Workers started.")
+
+	// Wait for SIGINT/SIGTERM (or test-driven context cancellation).
+	<-ctx.Done()
+
+	logrus.Info("Shutdown signal received. Shutting down...")
+
+	recoveryProcessor.Stop()
+
+	if monitoringSrv != nil {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := monitoringSrv.Shutdown(sctx); err != nil {
+			logrus.Errorf("monitoring shutdown error: %v", err)
+		}
+	}
+
+	webhookSrv.Shutdown()
+	if hotSrv != nil {
+		hotSrv.Shutdown()
+	}
+	srv.Shutdown()
+
+	logrus.Info("Shutdown complete.")
+	return nil
 }
 
 func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Server, *asynq.Server, *asynq.Server, *asynq.ServeMux, *asynq.ServeMux, error) {

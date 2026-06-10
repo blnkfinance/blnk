@@ -20,6 +20,7 @@ import (
 	"strconv"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,19 +39,19 @@ import (
 func (a Api) CreateLedger(c *gin.Context) {
 	var newLedger model2.CreateLedger
 	if err := c.ShouldBindJSON(&newLedger); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil, withLegacyKey("errors"))
 		return
 	}
 
 	err := newLedger.ValidateCreateLedger()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil, withLegacyKey("errors"))
 		return
 	}
 
 	resp, err := a.blnk.CreateLedger(newLedger.ToLedger())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenConflict, apierror.ErrLgrDuplicate))
 		return
 	}
 
@@ -72,13 +73,13 @@ func (a Api) GetLedger(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. Pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. Pass id in the route /:id", nil)
 		return
 	}
 
 	resp, err := a.blnk.GetLedgerByID(id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrLgrNotFound))
 		return
 	}
 
@@ -109,13 +110,13 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 	// Convert limit and offset to integers
 	limitInt, err := strconv.Atoi(limit)
 	if err != nil || limitInt < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit value"})
+		respondCode(c, apierror.ErrGenValidation, "Invalid limit value", nil)
 		return
 	}
 
 	offsetInt, err := strconv.Atoi(offset)
 	if err != nil || offsetInt < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid offset value"})
+		respondCode(c, apierror.ErrGenValidation, "Invalid offset value", nil)
 		return
 	}
 
@@ -123,14 +124,15 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 	if HasFilters(c) {
 		filters, parseErrors := ParseFiltersFromContext(c, nil)
 		if len(parseErrors) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			respondCode(c, apierror.ErrGenValidation, "invalid filter parameters", parseErrors,
+				withLegacyKey("errors"), withLegacyValue(parseErrors))
 			return
 		}
 
 		// Use the new filter method
 		resp, err := a.blnk.GetAllLedgersWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 
@@ -141,7 +143,7 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 	// Fall back to the legacy method when no filters are present
 	resp, err := a.blnk.GetAllLedgers(limitInt, offsetInt)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -170,13 +172,13 @@ func (a Api) GetAllLedgers(c *gin.Context) {
 func (a Api) FilterLedgers(c *gin.Context) {
 	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "ledgers")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil)
 		return
 	}
 
 	resp, count, err := a.blnk.GetAllLedgersWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -201,25 +203,25 @@ func (a Api) FilterLedgers(c *gin.Context) {
 func (a Api) UpdateLedger(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. Pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. Pass id in the route /:id", nil)
 		return
 	}
 
 	var updateLedger model2.UpdateLedger
 	if err := c.ShouldBindJSON(&updateLedger); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil, withLegacyKey("errors"))
 		return
 	}
 
 	err := updateLedger.ValidateUpdateLedger()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil, withLegacyKey("errors"))
 		return
 	}
 
 	resp, err := a.blnk.UpdateLedger(id, updateLedger.Name)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrLgrNotFound))
 		return
 	}
 

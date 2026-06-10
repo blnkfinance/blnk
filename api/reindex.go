@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/gin-gonic/gin"
 )
@@ -61,9 +62,11 @@ func (a Api) StartReindex(c *gin.Context) {
 		progress := globalReindexManager.service.GetProgress()
 		if progress.Status == "in_progress" {
 			globalReindexManager.mu.Unlock()
+			msg := "A reindex operation is already in progress"
 			c.JSON(http.StatusConflict, gin.H{
-				"error":    "A reindex operation is already in progress",
-				"progress": progress,
+				"error":        msg,
+				"progress":     progress,
+				"error_detail": apierror.NewErrorResponse(apierror.ErrSrchReindexInProgress, msg, progress).Error,
 			})
 			return
 		}
@@ -104,9 +107,7 @@ func (a Api) GetReindexProgress(c *gin.Context) {
 	defer globalReindexManager.mu.RUnlock()
 
 	if globalReindexManager.service == nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "No reindex operation has been started",
-		})
+		respondCode(c, apierror.ErrSrchReindexNotStarted, "No reindex operation has been started", nil)
 		return
 	}
 
