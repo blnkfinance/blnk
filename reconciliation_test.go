@@ -201,10 +201,15 @@ func TestManyToOneReconciliationUsesUploadID(t *testing.T) {
 func TestMatchingRules(t *testing.T) {
 	blnk := &Blnk{}
 
+	// A single captured timestamp keeps the date-drift case exactly at the
+	// 3600s boundary; two time.Now() calls would add nanoseconds and
+	// (correctly) fail the fractional-seconds comparison.
+	now := time.Now()
+
 	externalTxn := &model.Transaction{
 		TransactionID: "ext1",
 		Amount:        100,
-		CreatedAt:     time.Now(),
+		CreatedAt:     now,
 		Description:   "Test transaction",
 		Reference:     "REF123",
 		Currency:      "USD",
@@ -213,7 +218,7 @@ func TestMatchingRules(t *testing.T) {
 	internalTxn := model.Transaction{
 		TransactionID: "int1",
 		Amount:        101,
-		CreatedAt:     time.Now().Add(1 * time.Hour),
+		CreatedAt:     now.Add(1 * time.Hour),
 		Description:   "Internal test transaction",
 		Reference:     "INT-REF123",
 		Currency:      "USD",
@@ -418,7 +423,9 @@ func TestReconciliationEdgeCases(t *testing.T) {
 		matches, unmatched := blnk.oneToManyReconciliation(ctx, externalTxns, "", matchingRules, false)
 
 		assert.Equal(t, 0, len(matches), "Expected 0 matches")
-		assert.Equal(t, 0, len(unmatched), "Expected 1 unmatched transaction")
+		// Inputs that never get a group batch must be reported unmatched,
+		// not silently dropped from the reconciliation results.
+		assert.Equal(t, 1, len(unmatched), "Expected 1 unmatched transaction")
 
 		mockDS.AssertExpectations(t)
 	})

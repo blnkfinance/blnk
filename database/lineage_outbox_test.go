@@ -33,7 +33,9 @@ import (
 
 // quiesceOutbox parks all unrelated pending outbox rows behind a future lock
 // so that claim assertions only see this test's fixtures. The shared database
-// persists rows between runs, so this keeps claims deterministic.
+// persists rows between runs, so this keeps claims deterministic. It also
+// registers a cleanup that marks this test's fixtures terminal so they never
+// leak into later runs or get chewed by lineage processors started elsewhere.
 func quiesceOutbox(t *testing.T, ds Datasource, markerPrefix string) {
 	t.Helper()
 	_, err := ds.Conn.Exec(`
@@ -44,6 +46,18 @@ func quiesceOutbox(t *testing.T, ds Datasource, markerPrefix string) {
 		  AND transaction_id NOT LIKE $1
 	`, markerPrefix+"%")
 	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_, err := ds.Conn.Exec(`
+			UPDATE blnk.lineage_outbox
+			SET status = 'completed', processed_at = NOW()
+			WHERE transaction_id LIKE $1
+			  AND status IN ('pending', 'processing')
+		`, markerPrefix+"%")
+		if err != nil {
+			t.Logf("failed to retire outbox fixtures: %v", err)
+		}
+	})
 }
 
 func newOutboxEntry(markerPrefix string) *model.LineageOutbox {

@@ -32,7 +32,9 @@ func TestTransaction_HashTxn(t *testing.T) {
 		Source:      "source_account",
 		Destination: "dest_account",
 	}
-	data := "100.000000ref123USDsource_accountdest_account"
+	// Amount is formatted at full precision (shortest round-trip form), so
+	// amounts differing beyond 6 decimals no longer collide.
+	data := "100ref123USDsource_accountdest_account"
 	expectedHash := sha256.Sum256([]byte(data))
 	expectedHashStr := hex.EncodeToString(expectedHash[:])
 

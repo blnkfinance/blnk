@@ -102,8 +102,10 @@ func TestRecordTransaction_Success(t *testing.T) {
 	metaDataJSON, err := json.Marshal(transaction.MetaData)
 	assert.NoError(t, err)
 
+	// Timestamps are normalized to UTC at the insert boundary so the naive
+	// values stored in timestamp-without-time-zone columns are TZ-independent.
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt.UTC(), metaDataJSON, transaction.ScheduledFor.UTC(), transaction.Hash, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := ds.RecordTransaction(ctx, transaction)
