@@ -456,47 +456,46 @@ func getRequiredField(record []string, columnMap map[string]int, field string) (
 	return "", fmt.Errorf("required field '%s' not found in record", field)
 }
 
-// ProcessJSON now uses batch processing
+// ProcessJSON streams a JSON array of external transactions, decoding and
+// storing one element at a time so memory use stays constant regardless of
+// file size (the previous implementation decoded the entire array into a
+// slice first, an unbounded allocation driven by the uploaded file).
 func ProcessJSON(ctx context.Context, uploadID, source string, reader io.Reader, store StoreFunc) (int, error) {
 	bufferedReader := bufio.NewReaderSize(reader, DefaultBufferSize)
 	decoder := json.NewDecoder(bufferedReader)
 
-	var transactions []model.ExternalTransaction
-	if err := decoder.Decode(&transactions); err != nil {
+	// Expect the payload to be a JSON array; read the opening '['.
+	tok, err := decoder.Token()
+	if err != nil {
 		return 0, err
 	}
+	if d, ok := tok.(json.Delim); !ok || d != '[' {
+		return 0, fmt.Errorf("expected a JSON array of transactions")
+	}
 
-	// Process in batches for better performance
-	batchSize := DefaultBatchSize
-	totalProcessed := 0
-
-	for i := 0; i < len(transactions); i += batchSize {
-		end := i + batchSize
-		if end > len(transactions) {
-			end = len(transactions)
+	total := 0
+	for decoder.More() {
+		var txn model.ExternalTransaction
+		if err := decoder.Decode(&txn); err != nil {
+			return total, err
 		}
-
-		batch := transactions[i:end]
-		for j := range batch {
-			batch[j].Source = source
-			if err := store(ctx, uploadID, batch[j]); err != nil {
-				return totalProcessed, err
-			}
+		txn.Source = source
+		if err := store(ctx, uploadID, txn); err != nil {
+			return total, err
 		}
+		total++
 
-		totalProcessed += len(batch)
-
-		// Check context periodically
-		if i%ContextCheckInterval == 0 {
+		// Check context periodically.
+		if total%ContextCheckInterval == 0 {
 			select {
 			case <-ctx.Done():
-				return totalProcessed, ctx.Err()
+				return total, ctx.Err()
 			default:
 			}
 		}
 	}
 
-	return len(transactions), nil
+	return total, nil
 }
 
 func parseFloat(s string) float64 {

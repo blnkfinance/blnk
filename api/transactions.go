@@ -454,6 +454,16 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 		return
 	}
 
+	if len(req.Transactions) == 0 {
+		respondCode(c, apierror.ErrTxnBulkEmpty, "transactions cannot be empty", nil)
+		return
+	}
+	if len(req.Transactions) > model2.MaxBulkTransactionItems {
+		respondCode(c, apierror.ErrTxnBulkLimitExceeded,
+			"too many transactions; max is "+strconv.Itoa(model2.MaxBulkTransactionItems), nil)
+		return
+	}
+
 	for i, transaction := range req.Transactions {
 		if transaction == nil {
 			respondCode(c, apierror.ErrTxnValidation, "transactions["+strconv.Itoa(i)+"] is required",

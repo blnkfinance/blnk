@@ -33,6 +33,7 @@ import (
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestContains_Found(t *testing.T) {
@@ -61,11 +62,11 @@ func TestCreateBalance_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := model.Balance{
-		Balance:            big.NewInt(1000),
-		CreditBalance:      big.NewInt(500),
-		DebitBalance:       big.NewInt(500),
-		Currency:           "USD",
-		LedgerID:           "ldg1",
+		Balance:       big.NewInt(1000),
+		CreditBalance: big.NewInt(500),
+		DebitBalance:  big.NewInt(500),
+		Currency:      "USD",
+		LedgerID:      "ldg1",
 		MetaData: map[string]interface{}{
 			"key": "value",
 		},
@@ -92,11 +93,11 @@ func TestCreateBalance_UniqueViolation(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := model.Balance{
-		Balance:            big.NewInt(1000),
-		CreditBalance:      big.NewInt(500),
-		DebitBalance:       big.NewInt(500),
-		Currency:           "USD",
-		LedgerID:           "ldg1",
+		Balance:       big.NewInt(1000),
+		CreditBalance: big.NewInt(500),
+		DebitBalance:  big.NewInt(500),
+		Currency:      "USD",
+		LedgerID:      "ldg1",
 		MetaData: map[string]interface{}{
 			"key": "value",
 		},
@@ -124,13 +125,13 @@ func TestGetBalanceByID_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := model.Balance{
-		BalanceID:          "bln1",
-		Balance:            big.NewInt(1000),
-		CreditBalance:      big.NewInt(500),
-		DebitBalance:       big.NewInt(500),
-		Currency:           "USD",
-		Indicator:          gofakeit.Name(),
-		LedgerID:           "ldg1",
+		BalanceID:     "bln1",
+		Balance:       big.NewInt(1000),
+		CreditBalance: big.NewInt(500),
+		DebitBalance:  big.NewInt(500),
+		Currency:      "USD",
+		Indicator:     gofakeit.Name(),
+		LedgerID:      "ldg1",
 		MetaData: map[string]interface{}{
 			"key": "value",
 		},
@@ -192,21 +193,21 @@ func TestUpdateBalances_Success(t *testing.T) {
 
 	// Create test balances
 	sourceBalance := &model.Balance{
-		BalanceID:          "bln1",
-		Balance:            big.NewInt(1000),
-		CreditBalance:      big.NewInt(500),
-		DebitBalance:       big.NewInt(500),
-		Version:            1,
-		Currency:           "USD",
+		BalanceID:     "bln1",
+		Balance:       big.NewInt(1000),
+		CreditBalance: big.NewInt(500),
+		DebitBalance:  big.NewInt(500),
+		Version:       1,
+		Currency:      "USD",
 	}
 
 	destBalance := &model.Balance{
-		BalanceID:          "bln2",
-		Balance:            big.NewInt(2000),
-		CreditBalance:      big.NewInt(1000),
-		DebitBalance:       big.NewInt(1000),
-		Version:            1,
-		Currency:           "USD",
+		BalanceID:     "bln2",
+		Balance:       big.NewInt(2000),
+		CreditBalance: big.NewInt(1000),
+		DebitBalance:  big.NewInt(1000),
+		Version:       1,
+		Currency:      "USD",
 	}
 
 	// Set up expectations
@@ -439,13 +440,13 @@ func TestGetBalanceByID_WithQueuedTransactions(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := model.Balance{
-		BalanceID:          "bln1",
-		Balance:            big.NewInt(0),
-		CreditBalance:      big.NewInt(500),
-		DebitBalance:       big.NewInt(500),
-		Currency:           "USD",
-		Indicator:          gofakeit.Name(),
-		LedgerID:           "ldg1",
+		BalanceID:     "bln1",
+		Balance:       big.NewInt(0),
+		CreditBalance: big.NewInt(500),
+		DebitBalance:  big.NewInt(500),
+		Currency:      "USD",
+		Indicator:     gofakeit.Name(),
+		LedgerID:      "ldg1",
 		MetaData: map[string]interface{}{
 			"key": "value",
 		},
@@ -523,13 +524,13 @@ func TestGetBalanceByID_WithoutQueuedTransactions(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := model.Balance{
-		BalanceID:          "bln1",
-		Balance:            big.NewInt(1000),
-		CreditBalance:      big.NewInt(500),
-		DebitBalance:       big.NewInt(500),
-		Currency:           "USD",
-		Indicator:          gofakeit.Name(),
-		LedgerID:           "ldg1",
+		BalanceID:     "bln1",
+		Balance:       big.NewInt(1000),
+		CreditBalance: big.NewInt(500),
+		DebitBalance:  big.NewInt(500),
+		Currency:      "USD",
+		Indicator:     gofakeit.Name(),
+		LedgerID:      "ldg1",
 		MetaData: map[string]interface{}{
 			"key": "value",
 		},
@@ -588,13 +589,13 @@ func TestGetBalanceByID_WithQueuedTransactions_HasAppliedChild(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := model.Balance{
-		BalanceID:          "bln1",
-		Balance:            big.NewInt(0),
-		CreditBalance:      big.NewInt(500),
-		DebitBalance:       big.NewInt(500),
-		Currency:           "USD",
-		Indicator:          gofakeit.Name(),
-		LedgerID:           "ldg1",
+		BalanceID:     "bln1",
+		Balance:       big.NewInt(0),
+		CreditBalance: big.NewInt(500),
+		DebitBalance:  big.NewInt(500),
+		Currency:      "USD",
+		Indicator:     gofakeit.Name(),
+		LedgerID:      "ldg1",
 		MetaData: map[string]interface{}{
 			"key": "value",
 		},
@@ -662,7 +663,7 @@ func TestGetBalanceByIDLite_Success(t *testing.T) {
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
 			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
-			"bln_123", "ACC001", "USD", 100, "ldg_001",
+			"bln_123", "ACC001", "USD", "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
 			time.Now(), 1, false, "FIFO", "",
@@ -732,7 +733,7 @@ func TestGetBalanceByIDLite_NullIndicator(t *testing.T) {
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
 			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
-			"bln_123", nil, "USD", 100, "ldg_001",
+			"bln_123", nil, "USD", "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
 			time.Now(), 1, false, "FIFO", "",
@@ -768,12 +769,12 @@ func TestGetBalancesByIDsLite_Success(t *testing.T) {
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
 			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
-			"bln_123", "ACC001", "USD", 100, "ldg_001",
+			"bln_123", "ACC001", "USD", "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
 			time.Now(), 1, false, "FIFO", "",
 		).AddRow(
-			"bln_456", "ACC002", "USD", 100, "ldg_001",
+			"bln_456", "ACC002", "USD", "ldg_001",
 			"200000", "120000", "80000",
 			"10000", "6000", "4000",
 			time.Now(), 2, true, "LIFO", "idt_001",
@@ -836,7 +837,7 @@ func TestGetBalancesByIDsLite_PartialResults(t *testing.T) {
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
 			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
-			"bln_123", "ACC001", "USD", 100, "ldg_001",
+			"bln_123", "ACC001", "USD", "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
 			time.Now(), 1, false, "FIFO", "",
@@ -874,7 +875,7 @@ func TestGetBalanceByIndicator_Success(t *testing.T) {
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance",
 			"created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id",
 		}).AddRow(
-			"bln_123", "ACC001", "USD", 100, "ldg_001",
+			"bln_123", "ACC001", "USD", "ldg_001",
 			"100000", "60000", "40000",
 			"5000", "3000", "2000",
 			time.Now(), 1, false, "FIFO", "",
@@ -942,8 +943,8 @@ func TestGetAllBalances_Success(t *testing.T) {
 			"balance_id", "indicator", "balance", "credit_balance", "debit_balance",
 			"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "currency", "ledger_id", "identity_id", "created_at", "meta_data",
 		}).
-			AddRow("bln_1", "ACC001", "100000", "60000", "40000", "0", "0", "0", "USD", 100, "ldg_001", "", time.Now(), metaDataJSON).
-			AddRow("bln_2", "ACC002", "200000", "120000", "80000", "0", "0", "0", "EUR", 100, "ldg_001", "", time.Now(), metaDataJSON))
+			AddRow("bln_1", "ACC001", "100000", "60000", "40000", "0", "0", "0", "USD", "ldg_001", "", time.Now(), metaDataJSON).
+			AddRow("bln_2", "ACC002", "200000", "120000", "80000", "0", "0", "0", "EUR", "ldg_001", "", time.Now(), metaDataJSON))
 
 	balances, err := ds.GetAllBalances(10, 0)
 	assert.NoError(t, err)
@@ -1454,14 +1455,14 @@ func TestUpdateBalance_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := &model.Balance{
-		BalanceID:          "bln_test_123",
-		Balance:            big.NewInt(10000),
-		CreditBalance:      big.NewInt(15000),
-		DebitBalance:       big.NewInt(5000),
-		Currency:           "USD",
-		LedgerID:           "ldg_123",
-		CreatedAt:          time.Now(),
-		MetaData:           map[string]interface{}{"key": "value"},
+		BalanceID:     "bln_test_123",
+		Balance:       big.NewInt(10000),
+		CreditBalance: big.NewInt(15000),
+		DebitBalance:  big.NewInt(5000),
+		Currency:      "USD",
+		LedgerID:      "ldg_123",
+		CreatedAt:     time.Now(),
+		MetaData:      map[string]interface{}{"key": "value"},
 	}
 
 	metaDataJSON, _ := json.Marshal(balance.MetaData)
@@ -1500,14 +1501,14 @@ func TestUpdateBalance_NotFound(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := &model.Balance{
-		BalanceID:          "bln_nonexistent",
-		Balance:            big.NewInt(10000),
-		CreditBalance:      big.NewInt(15000),
-		DebitBalance:       big.NewInt(5000),
-		Currency:           "USD",
-		LedgerID:           "ldg_123",
-		CreatedAt:          time.Now(),
-		MetaData:           map[string]interface{}{},
+		BalanceID:     "bln_nonexistent",
+		Balance:       big.NewInt(10000),
+		CreditBalance: big.NewInt(15000),
+		DebitBalance:  big.NewInt(5000),
+		Currency:      "USD",
+		LedgerID:      "ldg_123",
+		CreatedAt:     time.Now(),
+		MetaData:      map[string]interface{}{},
 	}
 
 	metaDataJSON, _ := json.Marshal(balance.MetaData)
@@ -1549,14 +1550,14 @@ func TestUpdateBalance_QueryError(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	balance := &model.Balance{
-		BalanceID:          "bln_test_123",
-		Balance:            big.NewInt(10000),
-		CreditBalance:      big.NewInt(15000),
-		DebitBalance:       big.NewInt(5000),
-		Currency:           "USD",
-		LedgerID:           "ldg_123",
-		CreatedAt:          time.Now(),
-		MetaData:           map[string]interface{}{},
+		BalanceID:     "bln_test_123",
+		Balance:       big.NewInt(10000),
+		CreditBalance: big.NewInt(15000),
+		DebitBalance:  big.NewInt(5000),
+		Currency:      "USD",
+		LedgerID:      "ldg_123",
+		CreatedAt:     time.Now(),
+		MetaData:      map[string]interface{}{},
 	}
 
 	metaDataJSON, _ := json.Marshal(balance.MetaData)
@@ -2108,4 +2109,29 @@ func TestCalculateBalanceFromTransactions_QueryError(t *testing.T) {
 
 	_, _, err = ds.calculateBalanceFromTransactions(ctx, tx, balanceID, startTime, targetTime, initialCredit, initialDebit)
 	assert.Error(t, err)
+}
+
+// TestParseBigInt covers the helper used by GetTransactionsByShadowFor: a
+// malformed precise amount must surface an error instead of silently yielding
+// a nil/zero amount (which previously corrupted lineage records).
+func TestParseBigInt(t *testing.T) {
+	t.Run("valid integer string", func(t *testing.T) {
+		got, err := parseBigInt("10050")
+		require.NoError(t, err)
+		assert.Equal(t, "10050", got.String())
+	})
+
+	t.Run("negative integer", func(t *testing.T) {
+		got, err := parseBigInt("-42")
+		require.NoError(t, err)
+		assert.Equal(t, "-42", got.String())
+	})
+
+	for _, bad := range []string{"", "abc", "10.5", "1e3", " 12"} {
+		t.Run("rejects "+bad, func(t *testing.T) {
+			got, err := parseBigInt(bad)
+			require.Error(t, err, "malformed precise amount %q must error", bad)
+			assert.Nil(t, got)
+		})
+	}
 }

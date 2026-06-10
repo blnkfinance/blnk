@@ -27,6 +27,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/stretchr/testify/assert"
 )
@@ -92,6 +94,25 @@ func TestInstantReconciliation(t *testing.T) {
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Too many external transactions", func(t *testing.T) {
+		txns := make([]map[string]interface{}, model2.MaxInstantReconciliationItems+1)
+		for i := range txns {
+			txns[i] = map[string]interface{}{"id": fmt.Sprintf("ext_%d", i), "amount": 1, "reference": fmt.Sprintf("r%d", i), "currency": "USD"}
+		}
+		payload := map[string]interface{}{
+			"external_transactions": txns,
+			"strategy":              "one_to_one",
+			"matching_rule_ids":     []string{"mr_test"},
+		}
+		payloadBytes, _ := request.ToJsonReq(&payload)
+		req := httptest.NewRequest("POST", "/reconciliation/start-instant", payloadBytes)
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Contains(t, resp.Body.String(), "too many external_transactions")
 	})
 }
 
@@ -253,4 +274,18 @@ func TestUploadExternalData(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, resp.Code)
 		assert.Contains(t, resp.Body.String(), "Failed to process upload")
 	})
+}
+
+func TestUploadExternalData_RejectsOversizedBody(t *testing.T) {
+	// Cap uploads at 1 MB, then send a body larger than that: the request
+	// must be rejected with 413 before the file is processed.
+	router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+		c.Server.MaxUploadSizeMB = 1
+	})
+
+	oversized := bytes.Repeat([]byte("a"), 2*1024*1024) // 2 MB
+	resp := uploadMultipart(t, router, "file", "big.csv", "bank-test", oversized)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.Code)
+	assert.Contains(t, resp.Body.String(), "exceeds the maximum allowed size")
 }

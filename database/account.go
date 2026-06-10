@@ -199,7 +199,7 @@ func scanAccountRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Account,
 	// Add fields for balance if included
 	if contains(include, "balance") {
 		scanArgs = append(scanArgs, &balance.BalanceID, &balance.Balance, &balance.CreditBalance,
-			&balance.DebitBalance, &balance.Currency,			&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON)
+			&balance.DebitBalance, &balance.Currency, &balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON)
 	}
 
 	// Add fields for identity if included

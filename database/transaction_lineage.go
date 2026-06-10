@@ -19,7 +19,6 @@ package database
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
@@ -76,7 +75,11 @@ func (d Datasource) GetTransactionsByShadowFor(ctx context.Context, parentTransa
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
 		}
 
-		transaction.PreciseAmount, _ = new(big.Int).SetString(preciseAmountStr, 10)
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Invalid shadow transaction precise amount", err)
+		}
 		transactions = append(transactions, transaction)
 	}
 
