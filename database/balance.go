@@ -63,7 +63,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	// Default fields for balances
 	selectFields = append(selectFields,
 		"b.balance_id", "b.balance", "b.credit_balance", "b.debit_balance",
-		"b.currency", "b.currency_multiplier", "b.ledger_id",
+		"b.currency", "b.ledger_id",
 		"COALESCE(b.identity_id, '') as identity_id", "b.created_at", "b.meta_data", "b.inflight_balance", "b.inflight_credit_balance", "b.inflight_debit_balance", "b.version", "b.indicator", "b.track_fund_lineage", "COALESCE(b.allocation_strategy, 'FIFO') as allocation_strategy")
 
 	// Conditionally include identity fields
@@ -120,8 +120,7 @@ func scanRow(row *sql.Row, include []string) (*model.Balance, error) {
 	var scanArgs []interface{}
 	// Add scan arguments for default balance fields
 	scanArgs = append(scanArgs, &balance.BalanceID, &balanceStr, &creditBalanceStr,
-		&debitBalanceStr, &balance.Currency, &balance.CurrencyMultiplier,
-		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON,
+		&debitBalanceStr, &balance.Currency,		&balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON,
 		&inflightBalanceStr, &inflightCreditBalanceStr, &inflightDebitBalanceStr, &balance.Version, &indicator, &balance.TrackFundLineage, &balance.AllocationStrategy)
 
 	// Conditionally scan for identity fields
@@ -251,9 +250,9 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 
 	// Insert the balance into the database
 	_, err = d.Conn.ExecContext(context.Background(), `
-		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, identity_id, indicator, created_at, meta_data, track_fund_lineage, allocation_strategy)
+		INSERT INTO blnk.balances (balance_id, balance, credit_balance, debit_balance, currency, ledger_id, identity_id, indicator, created_at, meta_data, track_fund_lineage, allocation_strategy)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON, balance.TrackFundLineage, allocationStrategy)
+	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.LedgerID, identityID, indicator, balance.CreatedAt, &metaDataJSON, balance.TrackFundLineage, allocationStrategy)
 	if err != nil {
 		// Handle specific PostgreSQL errors (e.g., unique or foreign key violations)
 		pqErr, ok := err.(*pq.Error)
@@ -344,7 +343,7 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 
 	// Execute the query
 	row := d.Conn.QueryRowContext(context.Background(), `
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
+       SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE balance_id = $1
     `, id)
@@ -354,7 +353,6 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 		&balance.BalanceID,
 		&indicator,
 		&balance.Currency,
-		&balance.CurrencyMultiplier,
 		&balance.LedgerID,
 		&balanceValue,
 		&creditBalanceValue,
@@ -438,7 +436,7 @@ func (d Datasource) GetBalancesByIDsLite(ctx context.Context, ids []string) (map
 	}
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
+		SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
 		FROM blnk.balances
 		WHERE balance_id = ANY($1)
 	`, pq.Array(ids))
@@ -460,7 +458,6 @@ func (d Datasource) GetBalancesByIDsLite(ctx context.Context, ids []string) (map
 			&balance.BalanceID,
 			&indicator,
 			&balance.Currency,
-			&balance.CurrencyMultiplier,
 			&balance.LedgerID,
 			&balanceValue,
 			&creditBalanceValue,
@@ -545,7 +542,7 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 
 	// Execute query to find the balance with the given indicator and currency
 	row := d.Conn.QueryRowContext(context.Background(), `
-       SELECT balance_id, indicator, currency, currency_multiplier, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
+       SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
        FROM blnk.balances
        WHERE indicator = $1 AND currency = $2
     `, indicator, currency)
@@ -555,7 +552,6 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 		&balance.BalanceID,
 		&balance.Indicator,
 		&balance.Currency,
-		&balance.CurrencyMultiplier,
 		&balance.LedgerID,
 		&balanceValue,
 		&creditBalanceValue,
@@ -637,7 +633,7 @@ func (d Datasource) GetBalanceByIndicator(indicator, currency string) (*model.Ba
 func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 	var indicator sql.NullString
 	rows, err := d.Conn.QueryContext(context.Background(), `
-        SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data
+        SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data
         FROM blnk.balances
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
@@ -670,7 +666,6 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 			&inflightCreditBalanceValue,
 			&inflightDebitBalanceValue,
 			&balance.Currency,
-			&balance.CurrencyMultiplier,
 			&balance.LedgerID,
 			&balance.IdentityID,
 			&balance.CreatedAt,
@@ -737,7 +732,7 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error) {
 	// Execute SQL query to select balances for source and destination using a stored procedure
 	rows, err := d.Conn.QueryContext(context.Background(), `
-		SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+		SELECT balance_id, balance, credit_balance, debit_balance, currency, ledger_id, created_at, meta_data
 		FROM blnk.balances
 		WHERE balance_id IN ($1, $2)
 	`, sourceId, destinationId)
@@ -769,7 +764,6 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 			&creditBalanceValue,
 			&debitBalanceValue,
 			&balance.Currency,
-			&balance.CurrencyMultiplier,
 			&balance.LedgerID,
 			&balance.CreatedAt,
 			&metaDataJSON,
@@ -874,12 +868,12 @@ func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) erro
 	// SQL query to update the balance
 	query := `
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, currency_multiplier = $9, ledger_id = $10, created_at = $11, version = version + 1
-        WHERE balance_id = $1 AND version = $12
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
+        WHERE balance_id = $1 AND version = $11
     `
 
 	// Execute the update query within the provided transaction context
-	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.InflightBalance.String(), balance.InflightCreditBalance.String(), balance.InflightDebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, balance.Version)
+	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.InflightBalance.String(), balance.InflightCreditBalance.String(), balance.InflightDebitBalance.String(), balance.Currency, balance.LedgerID, balance.CreatedAt, balance.Version)
 	if err != nil {
 		// Return an error if the query execution fails
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
@@ -955,21 +949,20 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 		    inflight_credit_balance = v.inflight_credit_balance,
 		    inflight_debit_balance = v.inflight_debit_balance,
 		    currency = v.currency,
-		    currency_multiplier = v.currency_multiplier,
 		    ledger_id = v.ledger_id,
 		    created_at = v.created_at,
 		    version = b.version + 1
 		FROM (VALUES
 	`)
 
-	args := make([]interface{}, 0, len(balances)*12)
+	args := make([]interface{}, 0, len(balances)*11)
 	for i, balance := range balances {
 		if i > 0 {
 			query.WriteString(",")
 		}
-		base := i*12 + 1
+		base := i*11 + 1
 		query.WriteString(fmt.Sprintf(
-			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
 			base,
 			base+1,
 			base+2,
@@ -981,7 +974,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			base+8,
 			base+9,
 			base+10,
-			base+11,
 		))
 		args = append(args,
 			balance.BalanceID,
@@ -992,7 +984,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			balance.InflightCreditBalance.String(),
 			balance.InflightDebitBalance.String(),
 			balance.Currency,
-			balance.CurrencyMultiplier,
 			balance.LedgerID,
 			balance.CreatedAt,
 			balance.Version,
@@ -1009,7 +1000,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			inflight_credit_balance,
 			inflight_debit_balance,
 			currency,
-			currency_multiplier,
 			ledger_id,
 			created_at,
 			expected_version
@@ -1024,7 +1014,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 				raw.inflight_credit_balance::numeric AS inflight_credit_balance,
 				raw.inflight_debit_balance::numeric AS inflight_debit_balance,
 				raw.currency::text AS currency,
-				raw.currency_multiplier::numeric AS currency_multiplier,
 				raw.ledger_id::text AS ledger_id,
 				raw.created_at::timestamp AS created_at,
 				raw.expected_version::integer AS expected_version
@@ -1069,7 +1058,7 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 // It handles both the balance data and the associated metadata.
 //
 // Parameters:
-// - balance: A pointer to the balance object containing the updated balance information. This includes fields such as `balance`, `credit_balance`, `debit_balance`, `currency`, `currency_multiplier`, and `meta_data`.
+// - balance: A pointer to the balance object containing the updated balance information. This includes fields such as `balance`, `credit_balance`, `debit_balance`, `currency`, and `meta_data`.
 //
 // Returns:
 // - error: If the update operation encounters an error, such as a database failure or if the balance ID is not found, an `APIError` is returned.
@@ -1083,9 +1072,9 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 	// Execute the SQL query to update the balance in the database
 	result, err := d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.balances
-		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
+		SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, ledger_id = $6, created_at = $7, meta_data = $8
 		WHERE balance_id = $1
-	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON)
+	`, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.LedgerID, balance.CreatedAt, metaDataJSON)
 	// Handle SQL execution errors
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
@@ -1764,7 +1753,7 @@ func (d Datasource) GetAllBalancesWithFilterAndOptions(ctx context.Context, filt
 	}
 
 	// Determine select fields based on whether count is requested
-	selectFields := "balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data"
+	selectFields := "balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, ledger_id, COALESCE(identity_id, '') as identity_id, created_at, meta_data"
 	if opts != nil && opts.IncludeCount {
 		selectFields += ", COUNT(*) OVER() AS total_count"
 	}
@@ -1823,7 +1812,6 @@ func (d Datasource) GetAllBalancesWithFilterAndOptions(ctx context.Context, filt
 				&inflightCreditBalanceValue,
 				&inflightDebitBalanceValue,
 				&balance.Currency,
-				&balance.CurrencyMultiplier,
 				&balance.LedgerID,
 				&balance.IdentityID,
 				&balance.CreatedAt,
@@ -1844,7 +1832,6 @@ func (d Datasource) GetAllBalancesWithFilterAndOptions(ctx context.Context, filt
 				&inflightCreditBalanceValue,
 				&inflightDebitBalanceValue,
 				&balance.Currency,
-				&balance.CurrencyMultiplier,
 				&balance.LedgerID,
 				&balance.IdentityID,
 				&balance.CreatedAt,

@@ -190,6 +190,62 @@ func TestRefundTransaction_RejectedTransactionFails(t *testing.T) {
 
 // --- inflight void / commit balance integrity ---------------------------------
 
+// TestCommitInflight_CreditEqualsDebitNoResidue locks in the removal of the
+// per-transaction FX rate: on an inflight hold the destination's inflight
+// credit equals the source's inflight debit, and committing moves exactly
+// that amount to the real balance with nothing stranded in inflight credit.
+// Before rate was removed, the hold credited the rated amount but the commit
+// moved the un-rated amount, leaving a residue forever.
+func TestCommitInflight_CreditEqualsDebitNoResidue(t *testing.T) {
+	b, ds := newCoreTestBlnk(t)
+	src, dst := newBalancePair(t, ds)
+
+	draft := &model.Transaction{
+		TransactionID:  model.GenerateUUIDWithSuffix("txn"),
+		Reference:      "ref_" + gofakeit.UUID(),
+		Source:         src.BalanceID,
+		Destination:    dst.BalanceID,
+		Amount:         100,
+		Precision:      100,
+		Currency:       "USD",
+		AllowOverdraft: true,
+		SkipQueue:      true,
+		Inflight:       true,
+		Status:         StatusInflight,
+	}
+	model.ApplyPrecision(draft)
+	inflight, err := b.RecordTransaction(context.Background(), draft)
+	require.NoError(t, err)
+	require.Equal(t, StatusInflight, inflight.Status)
+
+	// On hold: destination inflight credit must equal source inflight debit.
+	srcHold, err := ds.GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	dstHold, err := ds.GetBalanceByIDLite(dst.BalanceID)
+	require.NoError(t, err)
+	require.Equal(t, "10000", srcHold.InflightDebitBalance.String())
+	require.Equal(t, srcHold.InflightDebitBalance.String(), dstHold.InflightCreditBalance.String(),
+		"inflight credit must equal inflight debit (no rate)")
+
+	// Commit the full amount.
+	_, err = b.CommitInflightTransaction(context.Background(), inflight.TransactionID, big.NewInt(0))
+	require.NoError(t, err)
+
+	srcAfter, err := ds.GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	dstAfter, err := ds.GetBalanceByIDLite(dst.BalanceID)
+	require.NoError(t, err)
+
+	// Destination credited exactly the debited amount; zero residue anywhere.
+	assert.Equal(t, srcAfter.DebitBalance.String(), dstAfter.CreditBalance.String(),
+		"destination credit must equal source debit on commit")
+	assert.Equal(t, "10000", dstAfter.CreditBalance.String())
+	assert.Equal(t, "0", dstAfter.InflightCreditBalance.String(),
+		"no amount may be stranded in inflight credit after commit")
+	assert.Equal(t, "0", srcAfter.InflightDebitBalance.String(),
+		"no amount may be stranded in inflight debit after commit")
+}
+
 func TestVoidInflight_ReleasesInflightBalance(t *testing.T) {
 	b, ds := newCoreTestBlnk(t)
 	src, dst := newBalancePair(t, ds)

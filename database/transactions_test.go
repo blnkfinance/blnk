@@ -94,7 +94,6 @@ func TestRecordTransaction_Success(t *testing.T) {
 		Hash:              "hash123",
 		PreciseAmount:     model.Int64ToBigInt(1000),
 		Precision:         2,
-		Rate:              1,
 		ParentTransaction: "parent123",
 		EffectiveDate:     nil,
 	}
@@ -105,7 +104,7 @@ func TestRecordTransaction_Success(t *testing.T) {
 	// Timestamps are normalized to UTC at the insert boundary so the naive
 	// values stored in timestamp-without-time-zone columns are TZ-independent.
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt.UTC(), metaDataJSON, transaction.ScheduledFor.UTC(), transaction.Hash, nil).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt.UTC(), metaDataJSON, transaction.ScheduledFor.UTC(), transaction.Hash, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := ds.RecordTransaction(ctx, transaction)
@@ -139,7 +138,6 @@ func TestRecordTransaction_Failure(t *testing.T) {
 		Hash:              "hash123",
 		PreciseAmount:     model.Int64ToBigInt(1000),
 		Precision:         2,
-		Rate:              1,
 		ParentTransaction: "parent123",
 		EffectiveDate:     nil,
 	}
@@ -148,7 +146,7 @@ func TestRecordTransaction_Failure(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount.String(), transaction.Precision, transaction.Rate, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount.String(), transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
 		WillReturnError(errors.New("db error"))
 
 	_, err = ds.RecordTransaction(ctx, transaction)
@@ -635,7 +633,6 @@ func TestRecordTransactionWithBalances_AtomicSuccess_Integration(t *testing.T) {
 		AmountString:  "500",
 		PreciseAmount: transferAmount,
 		Precision:     100,
-		Rate:          1,
 		Currency:      "USD",
 		Status:        "APPLIED",
 		CreatedAt:     time.Now(),
@@ -733,7 +730,6 @@ func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *te
 		AmountString:  "100",
 		PreciseAmount: big.NewInt(10000),
 		Precision:     100,
-		Rate:          1,
 		Currency:      "USD",
 		Status:        "APPLIED",
 		CreatedAt:     time.Now(),
@@ -778,7 +774,6 @@ func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *te
 		AmountString:  "200",
 		PreciseAmount: big.NewInt(20000),
 		Precision:     100,
-		Rate:          1,
 		Currency:      "USD",
 		Status:        "APPLIED",
 		CreatedAt:     time.Now(),
@@ -1877,7 +1872,6 @@ func TestRecordTransactionWithBalances_Success(t *testing.T) {
 		AmountString:      "100.00",
 		PreciseAmount:     big.NewInt(10000),
 		Precision:         100,
-		Rate:              1.0,
 		Currency:          "USD",
 		Destination:       "bln_dest",
 		Description:       "test transaction",
@@ -1896,7 +1890,6 @@ func TestRecordTransactionWithBalances_Success(t *testing.T) {
 		InflightCreditBalance: big.NewInt(0),
 		InflightDebitBalance:  big.NewInt(0),
 		Currency:              "USD",
-		CurrencyMultiplier:    100,
 		Version:               1,
 	}
 
@@ -1909,7 +1902,6 @@ func TestRecordTransactionWithBalances_Success(t *testing.T) {
 		InflightCreditBalance: big.NewInt(0),
 		InflightDebitBalance:  big.NewInt(0),
 		Currency:              "USD",
-		CurrencyMultiplier:    100,
 		Version:               1,
 	}
 
@@ -2006,7 +1998,6 @@ func TestRecordTransactionWithBalances_CommitError(t *testing.T) {
 		AmountString:      "100.00",
 		PreciseAmount:     big.NewInt(10000),
 		Precision:         100,
-		Rate:              1.0,
 		Currency:          "USD",
 		Destination:       "bln_dest",
 		Description:       "test transaction",
@@ -2073,7 +2064,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 			AmountString:  "10.00",
 			PreciseAmount: big.NewInt(1000),
 			Precision:     100,
-			Rate:          1,
 			Currency:      "USD",
 			Destination:   "bln_dest",
 			Description:   "first",
@@ -2091,7 +2081,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 			AmountString:      "20.00",
 			PreciseAmount:     big.NewInt(2000),
 			Precision:         100,
-			Rate:              1,
 			Currency:          "USD",
 			Destination:       "bln_dest",
 			Description:       "second",
@@ -2112,7 +2101,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 		InflightCreditBalance: big.NewInt(0),
 		InflightDebitBalance:  big.NewInt(0),
 		Currency:              "USD",
-		CurrencyMultiplier:    100,
 		Version:               1,
 	}
 
@@ -2125,7 +2113,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_UsesCopyIn(t *testing.T) {
 		InflightCreditBalance: big.NewInt(0),
 		InflightDebitBalance:  big.NewInt(0),
 		Currency:              "USD",
-		CurrencyMultiplier:    100,
 		Version:               1,
 	}
 
@@ -2195,7 +2182,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_BatchesLineageOutboxes(t *tes
 		AmountString:  "10.00",
 		PreciseAmount: big.NewInt(1000),
 		Precision:     100,
-		Rate:          1,
 		Currency:      "USD",
 		Destination:   "bln_dest",
 		Description:   "first",
@@ -2215,7 +2201,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_BatchesLineageOutboxes(t *tes
 		InflightCreditBalance: big.NewInt(0),
 		InflightDebitBalance:  big.NewInt(0),
 		Currency:              "USD",
-		CurrencyMultiplier:    100,
 		Version:               1,
 	}
 
@@ -2228,7 +2213,6 @@ func TestRecordTransactionsWithBalancesAndOutboxes_BatchesLineageOutboxes(t *tes
 		InflightCreditBalance: big.NewInt(0),
 		InflightDebitBalance:  big.NewInt(0),
 		Currency:              "USD",
-		CurrencyMultiplier:    100,
 		Version:               1,
 	}
 
@@ -2314,7 +2298,6 @@ func TestUpdateBalanceSet_ChunksLargeBalanceSets(t *testing.T) {
 			InflightCreditBalance: big.NewInt(0),
 			InflightDebitBalance:  big.NewInt(0),
 			Currency:              "USD",
-			CurrencyMultiplier:    100,
 			LedgerID:              "ldg_1",
 			CreatedAt:             time.Unix(1700000000, 0).UTC(),
 			Version:               1,
@@ -2368,7 +2351,6 @@ func TestUpdateBalanceSet_ReturnsConflictWhenAChunkMissesABalance(t *testing.T) 
 			InflightCreditBalance: big.NewInt(0),
 			InflightDebitBalance:  big.NewInt(0),
 			Currency:              "USD",
-			CurrencyMultiplier:    100,
 			LedgerID:              "ldg_1",
 			CreatedAt:             time.Unix(1700000000, 0).UTC(),
 			Version:               1,

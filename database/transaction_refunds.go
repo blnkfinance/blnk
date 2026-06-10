@@ -36,7 +36,7 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT 
 			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.rate, t.currency, t.destination, t.description, t.status, t.created_at, 
+			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
 			t.meta_data, t.scheduled_for, t.hash
 		FROM 
 			blnk.transactions t
@@ -79,7 +79,6 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 			&transaction.Amount,
 			&preciseAmountStr,
 			&transaction.Precision,
-			&transaction.Rate,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,

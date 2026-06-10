@@ -32,7 +32,7 @@ func (d Datasource) GetTransactionsByShadowFor(ctx context.Context, parentTransa
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, source, reference, amount, precise_amount, "precision", rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		SELECT transaction_id, source, reference, amount, precise_amount, "precision", currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
 		WHERE meta_data->>'_shadow_for' = $1
 		ORDER BY created_at ASC
@@ -56,7 +56,6 @@ func (d Datasource) GetTransactionsByShadowFor(ctx context.Context, parentTransa
 			&transaction.Amount,
 			&preciseAmountStr,
 			&transaction.Precision,
-			&transaction.Rate,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,

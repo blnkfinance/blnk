@@ -358,7 +358,6 @@ func TestToBalance(t *testing.T) {
 	assert.Equal(t, createBalance.IdentityId, balance.IdentityID)
 	assert.Equal(t, createBalance.Currency, balance.Currency)
 	assert.Equal(t, createBalance.MetaData, balance.MetaData)
-	assert.Equal(t, createBalance.Precision, balance.CurrencyMultiplier)
 }
 
 func TestToAccount(t *testing.T) {
@@ -405,7 +404,6 @@ func TestToTransaction(t *testing.T) {
 		Precision:          2,
 		InflightExpiryDate: inflightExpiryDate.Format(time.RFC3339),
 		InflightCommitDate: inflightCommitDate.Format(time.RFC3339),
-		Rate:               1.5,
 		SkipQueue:          true,
 	}
 
@@ -423,7 +421,6 @@ func TestToTransaction(t *testing.T) {
 	assert.Equal(t, recordTransaction.Destinations, transaction.Destinations)
 	assert.Equal(t, recordTransaction.Inflight, transaction.Inflight)
 	assert.Equal(t, recordTransaction.Precision, transaction.Precision)
-	assert.Equal(t, recordTransaction.Rate, transaction.Rate)
 	assert.Equal(t, recordTransaction.SkipQueue, transaction.SkipQueue)
 	assert.False(t, transaction.InflightCommitDate.IsZero(), "InflightCommitDate should be parsed and set")
 	assert.WithinDuration(t, inflightCommitDate, transaction.InflightCommitDate, time.Second)

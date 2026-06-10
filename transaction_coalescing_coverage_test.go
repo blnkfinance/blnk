@@ -673,7 +673,6 @@ func TestHotLaneCoalescing_EndToEnd(t *testing.T) {
 		Destination:    dest.BalanceID,
 		PreciseAmount:  big.NewInt(333), // 3.33 USD
 		Precision:      100,
-		Rate:           1,
 		Currency:       "USD",
 		Status:         StatusQueued,
 		AllowOverdraft: true,
@@ -695,7 +694,6 @@ func TestHotLaneCoalescing_EndToEnd(t *testing.T) {
 		Destination:       dest.BalanceID,
 		PreciseAmount:     big.NewInt(555), // 5.55 USD
 		Precision:         100,
-		Rate:              1,
 		Currency:          "USD",
 		Status:            StatusQueued,
 		AllowOverdraft:    true,
@@ -778,7 +776,6 @@ func TestHotLaneCoalescing_CurrencyIsolation(t *testing.T) {
 		Destination:    dest.BalanceID,
 		PreciseAmount:  big.NewInt(10000), // 100.00 EUR
 		Precision:      100,
-		Rate:           1,
 		Currency:       "EUR",
 		Status:         StatusQueued,
 		AllowOverdraft: true,
@@ -797,7 +794,6 @@ func TestHotLaneCoalescing_CurrencyIsolation(t *testing.T) {
 		Destination:       dest.BalanceID,
 		PreciseAmount:     big.NewInt(1000), // 10.00 USD
 		Precision:         100,
-		Rate:              1,
 		Currency:          "USD",
 		Status:            StatusQueued,
 		AllowOverdraft:    true,

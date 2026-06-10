@@ -67,7 +67,6 @@ func createTestBalance(id string, balance int64) *model.Balance {
 		InflightCreditBalance: big.NewInt(0),
 		InflightDebitBalance:  big.NewInt(0),
 		Currency:              "USD",
-		CurrencyMultiplier:    1,
 		LedgerID:              "ledger-001",
 		CreatedAt:             time.Now(),
 		Version:               1,
@@ -83,7 +82,6 @@ func createTestTransaction(source, destination, reference string, amount float64
 		Amount:         amount,
 		Precision:      100,
 		Currency:       "USD",
-		Rate:           1,
 		AllowOverdraft: false,
 	}
 }

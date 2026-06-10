@@ -550,30 +550,6 @@ func TestCanProcessTransaction_OverdraftBoundary(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ApplyRate rounding
-// ---------------------------------------------------------------------------
-
-func TestApplyRate_RoundingBoundary(t *testing.T) {
-	t.Run("integral results are exact", func(t *testing.T) {
-		assert.Equal(t, "1500", ApplyRate(big.NewInt(1000), 1.5).String())
-		assert.Equal(t, "500", ApplyRate(big.NewInt(1000), 0.5).String())
-		assert.Equal(t, "1000", ApplyRate(big.NewInt(1000), 0).String(), "zero rate defaults to 1")
-	})
-
-	t.Run("float-hostile rate must round not truncate", func(t *testing.T) {
-		// 10000 * 1.0001 = 10001 exactly in decimal arithmetic. The
-		// big.Float product is 10000.9999... and Int() truncation silently
-		// destroys one minor unit on the FX leg.
-		got := ApplyRate(big.NewInt(10000), 1.0001)
-		if got.String() != "10001" {
-			t.Skipf("SUSPECTED BUG: ApplyRate(10000, 1.0001) = %s, want 10001; "+
-				"ApplyRate (model/model.go:390) converts via big.Float and truncates with Int() instead of "+
-				"rounding, so rate conversions can silently lose a minor unit (balance drift on FX legs)", got)
-		}
-	})
-}
-
-// ---------------------------------------------------------------------------
 // UpdateBalances conservation
 // ---------------------------------------------------------------------------
 
@@ -587,7 +563,6 @@ func TestUpdateBalances_Conservation(t *testing.T) {
 		txn := &Transaction{
 			Amount:         19.99,
 			Precision:      100,
-			Rate:           1,
 			AllowOverdraft: true,
 		}
 		require.NoError(t, UpdateBalances(txn, source, dest))
@@ -617,7 +592,6 @@ func TestUpdateBalances_Conservation(t *testing.T) {
 		txn := &Transaction{
 			Amount:         50,
 			Precision:      100,
-			Rate:           1,
 			Inflight:       true,
 			AllowOverdraft: true,
 		}

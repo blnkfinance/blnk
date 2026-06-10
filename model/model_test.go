@@ -425,41 +425,6 @@ func TestApplyPrecision(t *testing.T) {
 	assert.Equal(t, expected, preciseAmount)
 }
 
-func TestApplyRate(t *testing.T) {
-	tests := []struct {
-		name          string
-		preciseAmount *big.Int
-		rate          float64
-		expected      *big.Int
-	}{
-		{
-			name:          "regular rate",
-			preciseAmount: Int64ToBigInt(1000),
-			rate:          1.5,
-			expected:      big.NewInt(1500),
-		},
-		{
-			name:          "zero rate defaults to 1",
-			preciseAmount: Int64ToBigInt(1000),
-			rate:          0,
-			expected:      big.NewInt(1000),
-		},
-		{
-			name:          "rate less than 1",
-			preciseAmount: Int64ToBigInt(1000),
-			rate:          0.5,
-			expected:      big.NewInt(500),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ApplyRate(tt.preciseAmount, tt.rate)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestTransaction_Validate(t *testing.T) {
 	txn := &Transaction{
 		Amount: 100.0,
@@ -493,7 +458,11 @@ func TestUpdateBalances(t *testing.T) {
 	assert.Equal(t, big.NewInt(200), destinationBalance.Balance)
 }
 
-func TestUpdateBalances_WithRate(t *testing.T) {
+// The destination is always credited exactly the precise amount debited from
+// the source — there is no per-transaction FX rate. (Rate was removed: unused
+// in practice and it broke inflight commit, which credited the rated amount on
+// hold but the un-rated amount on commit.)
+func TestUpdateBalances_CreditEqualsDebit(t *testing.T) {
 	sourceBalance := &Balance{
 		Balance: big.NewInt(0),
 	}
@@ -505,16 +474,15 @@ func TestUpdateBalances_WithRate(t *testing.T) {
 		Amount:         100.0,
 		AllowOverdraft: true,
 		Precision:      100, // Will make precise amount 10000
-		Rate:           1.5, // Should make destination receive 15000
 	}
 
 	err := UpdateBalances(txn, sourceBalance, destinationBalance)
 	assert.NoError(t, err)
 
-	// Source balance should decrease by precise amount
+	// Source decreases by the precise amount; destination increases by the
+	// same precise amount — 1:1, no rate adjustment.
 	assert.Equal(t, big.NewInt(-10000), sourceBalance.Balance)
-	// Destination balance should increase by rate-adjusted amount
-	assert.Equal(t, big.NewInt(15000), destinationBalance.Balance)
+	assert.Equal(t, big.NewInt(10000), destinationBalance.Balance)
 }
 
 func TestBalanceMonitor_CheckCondition(t *testing.T) {

@@ -137,7 +137,7 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 	// If not in cache, query the database
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
@@ -168,7 +168,6 @@ func (d Datasource) GetTransactionsByParent(ctx context.Context, parentID string
 			&transaction.Amount,
 			&preciseAmountStr,
 			&transaction.Precision,
-			&transaction.Rate,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,

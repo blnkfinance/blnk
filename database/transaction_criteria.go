@@ -36,7 +36,7 @@ func (d Datasource) GetTransactionsByCriteria(ctx context.Context, minAmount, ma
 
 	query := `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions
 		WHERE 1=1
 	`
@@ -102,7 +102,6 @@ func (d Datasource) GetTransactionsByCriteria(ctx context.Context, minAmount, ma
 			&transaction.Amount,
 			&preciseAmountStr,
 			&transaction.Precision,
-			&transaction.Rate,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,

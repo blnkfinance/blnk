@@ -36,7 +36,7 @@ func (d Datasource) GetQueuedTransactionsForCoalescing(ctx context.Context, sour
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions t
 		WHERE t.status = 'QUEUED'
 		  AND t.source = $1
@@ -75,7 +75,7 @@ func (d Datasource) GetQueuedTransactionsForSourceCoalescing(ctx context.Context
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions t
 		WHERE t.status = 'QUEUED'
 		  AND t.source = $1
@@ -113,7 +113,7 @@ func (d Datasource) GetQueuedTransactionsForDestinationCoalescing(ctx context.Co
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, rate, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions t
 		WHERE t.status = 'QUEUED'
 		  AND t.destination = $1
@@ -160,7 +160,7 @@ func scanQueuedTransactionsForCoalescing(rows *sql.Rows) ([]*model.Transaction, 
 		var preciseAmountStr string
 		if err := rows.Scan(
 			&txn.TransactionID, &txn.ParentTransaction, &txn.Source, &txn.Reference,
-			&txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Rate,
+			&txn.Amount, &preciseAmountStr, &txn.Precision,
 			&txn.Currency, &txn.Destination, &txn.Description, &txn.Status,
 			&txn.CreatedAt, &metaDataJSON, &txn.ScheduledFor, &txn.Hash,
 		); err != nil {

@@ -971,7 +971,6 @@ func TestLineageE2E_GetBalanceLineage_API(t *testing.T) {
 		Currency:           "USD",
 		DebitBalance:       big.NewInt(5000),
 		CreditBalance:      big.NewInt(2000),
-		CurrencyMultiplier: 1,
 	}
 
 	paypalShadow := &model.Balance{
@@ -979,7 +978,6 @@ func TestLineageE2E_GetBalanceLineage_API(t *testing.T) {
 		Currency:           "USD",
 		DebitBalance:       big.NewInt(3000),
 		CreditBalance:      big.NewInt(0),
-		CurrencyMultiplier: 1,
 	}
 
 	mappings := []model.LineageMapping{

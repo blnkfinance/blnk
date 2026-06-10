@@ -163,7 +163,7 @@ func TestCreateBalance(t *testing.T) {
 	// Convert metadata to JSON for mocking
 	metaDataJSON, _ := json.Marshal(balance.MetaData)
 	mock.ExpectExec("INSERT INTO blnk.balances").
-		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, false, "FIFO").
+		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.LedgerID, balance.IdentityID, sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, false, "FIFO").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	result, err := d.CreateBalance(context.Background(), balance)
@@ -188,8 +188,8 @@ func TestGetBalanceByID(t *testing.T) {
 	balanceID := gofakeit.UUID()
 
 	// Adjust the expected SQL to match the actual SQL output.
-	expectedSQL := `SELECT b\.balance_id, b\.balance, b\.credit_balance, b\.debit_balance, b\.currency, b\.currency_multiplier, b\.ledger_id, COALESCE\(b\.identity_id, ''\) as identity_id, b\.created_at, b\.meta_data, b\.inflight_balance, b\.inflight_credit_balance, b\.inflight_debit_balance, b\.version, b\.indicator, b\.track_fund_lineage, COALESCE\(b\.allocation_strategy, 'FIFO'\) as allocation_strategy FROM \( SELECT \* FROM blnk\.balances WHERE balance_id = \$1 \) AS b`
-	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator", "track_fund_lineage", "allocation_strategy"}).
+	expectedSQL := `SELECT b\.balance_id, b\.balance, b\.credit_balance, b\.debit_balance, b\.currency, b\.ledger_id, COALESCE\(b\.identity_id, ''\) as identity_id, b\.created_at, b\.meta_data, b\.inflight_balance, b\.inflight_credit_balance, b\.inflight_debit_balance, b\.version, b\.indicator, b\.track_fund_lineage, COALESCE\(b\.allocation_strategy, 'FIFO'\) as allocation_strategy FROM \( SELECT \* FROM blnk\.balances WHERE balance_id = \$1 \) AS b`
+	rows := sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "ledger_id", "identity_id", "created_at", "meta_data", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "version", "indicator", "track_fund_lineage", "allocation_strategy"}).
 		AddRow(balanceID,
 			BigIntString{big.NewInt(100)},
 			BigIntString{big.NewInt(50)},
@@ -236,14 +236,14 @@ func TestGetAllBalances(t *testing.T) {
 	// The column order must match the actual SQL generated.
 	rows := sqlmock.NewRows([]string{
 		"balance_id", "indicator", "balance", "credit_balance", "debit_balance",
-		"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "currency", "currency_multiplier", "ledger_id", "identity_id", "created_at", "meta_data",
+		"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "currency", "ledger_id", "identity_id", "created_at", "meta_data",
 	}).
 		AddRow(
 			"test-balance", "test-indicator", 100, 50, 50, 0, 0, 0, "USD", 1.0, "test-ledger", "",
 			time.Now(), `{"key":"value"}`,
 		)
 
-	mock.ExpectQuery(`SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, currency_multiplier, ledger_id, COALESCE\(identity_id, ''\) as identity_id, created_at, meta_data FROM blnk.balances ORDER BY created_at DESC LIMIT \$1 OFFSET \$2`).
+	mock.ExpectQuery(`SELECT balance_id, indicator, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, currency, ledger_id, COALESCE\(identity_id, ''\) as identity_id, created_at, meta_data FROM blnk.balances ORDER BY created_at DESC LIMIT \$1 OFFSET \$2`).
 		WithArgs(1, 1).
 		WillReturnRows(rows)
 
@@ -273,7 +273,6 @@ func TestUpdateBalance(t *testing.T) {
 		CreditBalance:      big.NewInt(50),
 		DebitBalance:       big.NewInt(50),
 		Currency:           "USD",
-		CurrencyMultiplier: 1,
 		LedgerID:           gofakeit.UUID(),
 		CreatedAt:          time.Time{},              // Assuming CreatedAt is properly initialized elsewhere
 		MetaData:           map[string]interface{}{}, // Assuming MetaData is initialized, even if empty
@@ -284,8 +283,8 @@ func TestUpdateBalance(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, currency_multiplier = $6, ledger_id = $7, created_at = $8, meta_data = $9
-        WHERE balance_id = $1`)).WithArgs(balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.CurrencyMultiplier, balance.LedgerID, balance.CreatedAt, metaDataJSON).WillReturnResult(sqlmock.NewResult(1, 1))
+        SET balance = $2, credit_balance = $3, debit_balance = $4, currency = $5, ledger_id = $6, created_at = $7, meta_data = $8
+        WHERE balance_id = $1`)).WithArgs(balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.LedgerID, balance.CreatedAt, metaDataJSON).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.datasource.UpdateBalance(balance)
 	assert.NoError(t, err)
@@ -313,12 +312,12 @@ func TestUpdateBalances(t *testing.T) {
 
 	// Expect the first update (for sourceBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		sourceBalance.BalanceID, sourceBalance.Balance.String(), sourceBalance.CreditBalance.String(), sourceBalance.DebitBalance.String(), sourceBalance.InflightBalance.String(), sourceBalance.InflightCreditBalance.String(), sourceBalance.InflightDebitBalance.String(), sourceBalance.Currency, sourceBalance.CurrencyMultiplier, sourceBalance.LedgerID, sourceBalance.CreatedAt, sourceBalance.Version,
+		sourceBalance.BalanceID, sourceBalance.Balance.String(), sourceBalance.CreditBalance.String(), sourceBalance.DebitBalance.String(), sourceBalance.InflightBalance.String(), sourceBalance.InflightCreditBalance.String(), sourceBalance.InflightDebitBalance.String(), sourceBalance.Currency, sourceBalance.LedgerID, sourceBalance.CreatedAt, sourceBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect the second update (for destinationBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		destinationBalance.BalanceID, destinationBalance.Balance.String(), destinationBalance.CreditBalance.String(), destinationBalance.DebitBalance.String(), destinationBalance.InflightBalance.String(), destinationBalance.InflightCreditBalance.String(), destinationBalance.InflightDebitBalance.String(), destinationBalance.Currency, destinationBalance.CurrencyMultiplier, destinationBalance.LedgerID, destinationBalance.CreatedAt, destinationBalance.Version,
+		destinationBalance.BalanceID, destinationBalance.Balance.String(), destinationBalance.CreditBalance.String(), destinationBalance.DebitBalance.String(), destinationBalance.InflightBalance.String(), destinationBalance.InflightCreditBalance.String(), destinationBalance.InflightDebitBalance.String(), destinationBalance.Currency, destinationBalance.LedgerID, destinationBalance.CreatedAt, destinationBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect transaction commit
