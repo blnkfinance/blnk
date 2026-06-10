@@ -71,6 +71,7 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/balance-monitors", a.GetAllBalanceMonitors)
 	router.GET("/balance-monitors/balances/:balance_id", a.GetBalanceMonitorsByBalanceID)
 	router.PUT("/balance-monitors/:id", a.UpdateBalanceMonitor)
+	router.DELETE("/balance-monitors/:id", a.DeleteBalanceMonitor)
 
 	// Transaction routes
 	router.POST("/transactions", a.QueueTransaction)

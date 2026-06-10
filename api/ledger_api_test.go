@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -181,4 +182,270 @@ func TestGetLedger(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, response.LedgerID, newLedger.LedgerID)
 	assert.Equal(t, response.Name, newLedger.Name)
+}
+
+func TestGetAllLedgers(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.UUID()})
+	if err != nil {
+		t.Fatalf("Failed to create ledger: %v", err)
+	}
+
+	t.Run("Default pagination", func(t *testing.T) {
+		var response []model.Ledger
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    "/ledgers",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.True(t, len(response) >= 1)
+	})
+
+	t.Run("Invalid limit", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    "/ledgers?limit=abc",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Invalid offset", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    "/ledgers?offset=-1",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Query param filter", func(t *testing.T) {
+		var response []model.Ledger
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/ledgers?name_eq=%s", newLedger.Name),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, 1, len(response))
+		assert.Equal(t, newLedger.LedgerID, response[0].LedgerID)
+	})
+
+	t.Run("Malformed filter operator", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    "/ledgers?name_eq=x&logical_operator=xor",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestUpdateLedger(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+	if err != nil {
+		t.Fatalf("Failed to create ledger: %v", err)
+	}
+
+	t.Run("Valid update", func(t *testing.T) {
+		newName := gofakeit.UUID()
+		payloadBytes, _ := request.ToJsonReq(&model2.UpdateLedger{Name: newName})
+		var response model.Ledger
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  payloadBytes,
+			Response: &response,
+			Method:   "PUT",
+			Route:    fmt.Sprintf("/ledgers/%s", newLedger.LedgerID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+
+		ledgerFromDB, err := b.GetLedgerByID(newLedger.LedgerID)
+		if err != nil {
+			t.Fatalf("Failed to retrieve ledger by ID: %v", err)
+		}
+		assert.Equal(t, newName, ledgerFromDB.Name)
+	})
+
+	t.Run("Invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("PUT", fmt.Sprintf("/ledgers/%s", newLedger.LedgerID), bytes.NewReader([]byte("not json")))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Empty name", func(t *testing.T) {
+		payloadBytes, _ := request.ToJsonReq(&model2.UpdateLedger{Name: ""})
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  payloadBytes,
+			Response: &response,
+			Method:   "PUT",
+			Route:    fmt.Sprintf("/ledgers/%s", newLedger.LedgerID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Nonexistent ledger", func(t *testing.T) {
+		payloadBytes, _ := request.ToJsonReq(&model2.UpdateLedger{Name: gofakeit.Name()})
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  payloadBytes,
+			Response: &response,
+			Method:   "PUT",
+			Route:    "/ledgers/ldg_nonexistent",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestFilterLedgers(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.UUID()})
+	if err != nil {
+		t.Fatalf("Failed to create ledger: %v", err)
+	}
+
+	t.Run("Filter by name eq", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "name", "operator": "eq", "value": "%s"}]}`, newLedger.Name)
+		var response []model.Ledger
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/ledgers/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, 1, len(response))
+		assert.Equal(t, newLedger.LedgerID, response[0].LedgerID)
+	})
+
+	t.Run("Include count", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "name", "operator": "eq", "value": "%s"}], "include_count": true}`, newLedger.Name)
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/ledgers/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Contains(t, response, "data")
+		assert.Contains(t, response, "total_count")
+		assert.Equal(t, float64(1), response["total_count"])
+	})
+
+	t.Run("Malformed JSON body", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/ledgers/filter", bytes.NewReader([]byte("{bad json")))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Invalid logical operator", func(t *testing.T) {
+		body := `{"filters": [{"field": "name", "operator": "eq", "value": "x"}], "logical_operator": "xor"}`
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/ledgers/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Invalid filter operator", func(t *testing.T) {
+		body := `{"filters": [{"field": "name", "operator": "badop", "value": "x"}]}`
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/ledgers/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Oversized limit coerced to default", func(t *testing.T) {
+		body := `{"filters": [], "limit": 500}`
+		var response []model.Ledger
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/ledgers/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.LessOrEqual(t, len(response), 20)
+	})
 }

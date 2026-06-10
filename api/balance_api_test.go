@@ -16,11 +16,14 @@ limitations under the License.
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/internal/request"
@@ -411,4 +414,492 @@ func TestUpdateBalanceMonitor(t *testing.T) {
 
 	resp, _ := SetUpTestRequest(testRequest)
 	assert.Equal(t, http.StatusOK, resp.Code)
+}
+
+func TestFilterBalances(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	// A currency unlikely to collide with other test data
+	currency := "XB" + gofakeit.LetterN(6)
+	newBalance := createTestBalanceWithLedger(t, b, currency, nil)
+
+	t.Run("Filter by currency eq", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "currency", "operator": "eq", "value": "%s"}]}`, currency)
+		var response []model.Balance
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/balances/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, 1, len(response))
+		assert.Equal(t, newBalance.BalanceID, response[0].BalanceID)
+	})
+
+	t.Run("Filter with in operator", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "currency", "operator": "in", "values": ["%s", "ZZZ"]}]}`, currency)
+		var response []model.Balance
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/balances/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, 1, len(response))
+	})
+
+	t.Run("Include count", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "currency", "operator": "eq", "value": "%s"}], "include_count": true}`, currency)
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/balances/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Contains(t, response, "data")
+		assert.Equal(t, float64(1), response["total_count"])
+	})
+
+	t.Run("Malformed JSON body", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/balances/filter", bytes.NewReader([]byte("{bad")))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Invalid filter operator", func(t *testing.T) {
+		body := `{"filters": [{"field": "currency", "operator": "badop", "value": "x"}]}`
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/balances/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestGetBalanceAtTime(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newBalance := createTestBalanceWithLedger(t, b, gofakeit.CurrencyShort(), nil)
+
+	t.Run("From source", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/%s/at?from_source=true", newBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, true, response["from_source"])
+		assert.Contains(t, response, "timestamp")
+		balanceResult, ok := response["balance"].(map[string]interface{})
+		if assert.True(t, ok, "balance key should be an object") {
+			assert.Equal(t, newBalance.BalanceID, balanceResult["balance_id"])
+		}
+	})
+
+	t.Run("Invalid timestamp", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/%s/at?timestamp=not-a-time", newBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Contains(t, response["error"], "invalid timestamp format")
+	})
+
+	t.Run("Snapshot path", func(t *testing.T) {
+		var snapshotResp map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &snapshotResp,
+			Method:   "POST",
+			Route:    "/balances-snapshots",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+
+		var response map[string]interface{}
+		ts := time.Now().UTC().Add(time.Minute).Format(time.RFC3339)
+		resp, err = SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/%s/at?timestamp=%s", newBalance.BalanceID, ts),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, false, response["from_source"])
+	})
+
+	t.Run("Nonexistent balance", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    "/balances/bln_nonexistent/at?from_source=true",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestGetBalanceByIndicator(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	indicator := "@test_" + gofakeit.LetterN(8)
+	currency := gofakeit.CurrencyShort()
+	newBalance := createTestBalanceWithLedger(t, b, currency, &balanceFixtureOpts{indicator: indicator})
+
+	t.Run("Existing indicator", func(t *testing.T) {
+		var response model.Balance
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/indicator/%s/currency/%s", indicator, currency),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, newBalance.BalanceID, response.BalanceID)
+	})
+
+	t.Run("Unknown indicator", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    "/balances/indicator/@does_not_exist/currency/USD",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestTakeBalanceSnapshots(t *testing.T) {
+	router, _, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	t.Run("Default batch size", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "POST",
+			Route:    "/balances-snapshots",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("Invalid batch size", func(t *testing.T) {
+		for _, route := range []string{"/balances-snapshots?batch_size=0", "/balances-snapshots?batch_size=abc"} {
+			var response map[string]interface{}
+			resp, err := SetUpTestRequest(TestRequest{
+				Response: &response,
+				Method:   "POST",
+				Route:    route,
+				Router:   router,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
+		}
+	})
+}
+
+func TestUpdateBalanceIdentity(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newBalance := createTestBalanceWithLedger(t, b, gofakeit.CurrencyShort(), nil)
+	identity := createTestIdentity(t, b)
+
+	t.Run("Valid update", func(t *testing.T) {
+		body := fmt.Sprintf(`{"identity_id": "%s"}`, identity.IdentityID)
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "PUT",
+			Route:    fmt.Sprintf("/balances/%s/identity", newBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+
+		balanceFromDB, err := b.GetBalanceByID(context.Background(), newBalance.BalanceID, nil, false)
+		if err != nil {
+			t.Fatalf("Failed to retrieve balance: %v", err)
+		}
+		assert.Equal(t, identity.IdentityID, balanceFromDB.IdentityID)
+	})
+
+	t.Run("Missing identity_id", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(`{}`)),
+			Response: &response,
+			Method:   "PUT",
+			Route:    fmt.Sprintf("/balances/%s/identity", newBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		// gin's required binding rejects the empty body before the handler's manual check
+		assert.Contains(t, response["error"], "IdentityId")
+	})
+
+	t.Run("Invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest("PUT", fmt.Sprintf("/balances/%s/identity", newBalance.BalanceID), bytes.NewReader([]byte("{bad")))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Nonexistent identity", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(`{"identity_id": "idt_nonexistent"}`)),
+			Response: &response,
+			Method:   "PUT",
+			Route:    fmt.Sprintf("/balances/%s/identity", newBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Nonexistent balance", func(t *testing.T) {
+		body := fmt.Sprintf(`{"identity_id": "%s"}`, identity.IdentityID)
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "PUT",
+			Route:    "/balances/bln_nonexistent/identity",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestGetBalanceLineage(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	t.Run("Lineage tracking disabled", func(t *testing.T) {
+		plainBalance := createTestBalanceWithLedger(t, b, gofakeit.CurrencyShort(), nil)
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/%s/lineage", plainBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Lineage tracking enabled", func(t *testing.T) {
+		lineageBalance := createTestBalanceWithLedger(t, b, gofakeit.CurrencyShort(), &balanceFixtureOpts{trackFundLineage: true})
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/%s/lineage", lineageBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, lineageBalance.BalanceID, response["balance_id"])
+	})
+
+	t.Run("Nonexistent balance", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    "/balances/bln_nonexistent/lineage",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestGetBalanceMonitorsByBalanceID(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newBalance := createTestBalanceWithLedger(t, b, gofakeit.CurrencyShort(), nil)
+
+	t.Run("No monitors", func(t *testing.T) {
+		var response []model.BalanceMonitor
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balance-monitors/balances/%s", newBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, 0, len(response))
+	})
+
+	t.Run("With monitors", func(t *testing.T) {
+		newMonitor, err := b.CreateMonitor(context.Background(), model.BalanceMonitor{
+			BalanceID: newBalance.BalanceID,
+			Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 1000},
+		})
+		if err != nil {
+			t.Fatalf("Failed to create monitor: %v", err)
+		}
+
+		var response []model.BalanceMonitor
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balance-monitors/balances/%s", newBalance.BalanceID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		if assert.Equal(t, 1, len(response)) {
+			assert.Equal(t, newMonitor.MonitorID, response[0].MonitorID)
+			assert.Equal(t, newBalance.BalanceID, response[0].BalanceID)
+		}
+	})
+}
+
+func TestDeleteBalanceMonitor(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	newBalance := createTestBalanceWithLedger(t, b, gofakeit.CurrencyShort(), nil)
+	newMonitor, err := b.CreateMonitor(context.Background(), model.BalanceMonitor{
+		BalanceID: newBalance.BalanceID,
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 1000},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create monitor: %v", err)
+	}
+
+	t.Run("Delete existing monitor", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "DELETE",
+			Route:    fmt.Sprintf("/balance-monitors/%s", newMonitor.MonitorID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+
+		_, err = b.GetMonitorByID(context.Background(), newMonitor.MonitorID)
+		assert.Error(t, err, "monitor should no longer exist")
+	})
+
+	t.Run("Delete nonexistent monitor", func(t *testing.T) {
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "DELETE",
+			Route:    "/balance-monitors/mon_nonexistent",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
 }
