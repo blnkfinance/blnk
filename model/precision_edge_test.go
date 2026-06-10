@@ -18,7 +18,6 @@ package model
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -184,10 +183,10 @@ func TestApplyPrecision_EdgeCases(t *testing.T) {
 		txn := &Transaction{Amount: 1.005, Precision: 100}
 		got := ApplyPrecision(txn)
 		if got == nil || got.Sign() <= 0 || got.Cmp(big.NewInt(100)) < 0 || got.Cmp(big.NewInt(101)) > 0 {
-			t.Skip(fmt.Sprintf("SUSPECTED BUG: ApplyPrecision(amount=1.005, precision=100) produced %v; "+
+			t.Skipf("SUSPECTED BUG: ApplyPrecision(amount=1.005, precision=100) produced %v; "+
 				"convertDecimalToPrecise (model/model.go:368) calls big.Int.SetString with a non-integer decimal "+
 				"string ('100.5'), which fails and silently yields a corrupt/zero precise amount instead of "+
-				"rounding or returning an error", got))
+				"rounding or returning an error", got)
 		}
 	})
 
@@ -567,9 +566,9 @@ func TestApplyRate_RoundingBoundary(t *testing.T) {
 		// destroys one minor unit on the FX leg.
 		got := ApplyRate(big.NewInt(10000), 1.0001)
 		if got.String() != "10001" {
-			t.Skip(fmt.Sprintf("SUSPECTED BUG: ApplyRate(10000, 1.0001) = %s, want 10001; "+
+			t.Skipf("SUSPECTED BUG: ApplyRate(10000, 1.0001) = %s, want 10001; "+
 				"ApplyRate (model/model.go:390) converts via big.Float and truncates with Int() instead of "+
-				"rounding, so rate conversions can silently lose a minor unit (balance drift on FX legs)", got))
+				"rounding, so rate conversions can silently lose a minor unit (balance drift on FX legs)", got)
 		}
 	})
 }
