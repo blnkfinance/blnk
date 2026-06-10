@@ -17,6 +17,7 @@ limitations under the License.
 package apierror
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -61,24 +62,34 @@ func NewAPIError(code ErrorCode, message string, details interface{}) APIError {
 	}
 }
 
+// ErrorResponse is the standard envelope for structured error payloads.
+type ErrorResponse struct {
+	Error APIError `json:"error"`
+}
+
+// NewErrorResponse builds an ErrorResponse with the code normalized to its
+// canonical form. Unlike NewAPIError it does not log; callers own logging.
+func NewErrorResponse(code ErrorCode, message string, details interface{}) ErrorResponse {
+	return ErrorResponse{
+		Error: APIError{
+			Code:    Normalize(code),
+			Message: message,
+			Details: details,
+		},
+	}
+}
+
 // MapErrorToHTTPStatus maps APIError codes to appropriate HTTP status codes.
-// It returns the corresponding HTTP status code for the given APIError.
+// It unwraps the error chain to find an APIError (value or pointer) and
+// resolves the status from the code catalog, normalizing legacy codes.
 func MapErrorToHTTPStatus(err error) int {
-	if apiErr, ok := err.(APIError); ok {
-		switch apiErr.Code {
-		case ErrNotFound:
-			return http.StatusNotFound // HTTP 404 Not Found for missing resources.
-		case ErrConflict:
-			return http.StatusConflict // HTTP 409 Conflict for conflicting requests.
-		case ErrInvalidInput:
-			return http.StatusBadRequest // HTTP 400 Bad Request for invalid inputs.
-		case ErrInternalServer:
-			return http.StatusInternalServerError // HTTP 500 Internal Server Error for server issues.
-		case ErrRateLimited:
-			return http.StatusTooManyRequests // HTTP 429 Too Many Requests for rate limiting.
-		default:
-			return http.StatusInternalServerError
-		}
+	var apiErr APIError
+	if errors.As(err, &apiErr) {
+		return StatusForCode(Normalize(apiErr.Code))
+	}
+	var apiErrPtr *APIError
+	if errors.As(err, &apiErrPtr) && apiErrPtr != nil {
+		return StatusForCode(Normalize(apiErrPtr.Code))
 	}
 	return http.StatusInternalServerError // Default to 500 Internal Server Error if no specific mapping is found.
 }

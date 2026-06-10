@@ -86,13 +86,6 @@ func processHTTP(data NewWebhook, client *http.Client) error {
 
 	secret := conf.Server.SecretKey
 
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-
-	signatureData := timestamp + "." + string(payloadBytes)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(signatureData))
-	signature := hex.EncodeToString(mac.Sum(nil))
-
 	req, err := http.NewRequest(
 		"POST",
 		conf.Notification.Webhook.Url,
@@ -103,8 +96,18 @@ func processHTTP(data NewWebhook, client *http.Client) error {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Blnk-Signature", signature)
-	req.Header.Set("X-Blnk-Timestamp", timestamp)
+
+	if secret != "" {
+		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+		signatureData := timestamp + "." + string(payloadBytes)
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write([]byte(signatureData))
+		signature := hex.EncodeToString(mac.Sum(nil))
+		req.Header.Set("X-Blnk-Signature", signature)
+		req.Header.Set("X-Blnk-Timestamp", timestamp)
+	} else {
+		logrus.Warn("webhook sent unsigned: server.secret_key is not configured")
+	}
 
 	for key, value := range conf.Notification.Webhook.Headers {
 		req.Header.Set(key, value)

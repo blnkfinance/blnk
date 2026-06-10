@@ -39,7 +39,7 @@ func TestBackupDB(t *testing.T) {
 		req := httptest.NewRequest("GET", "/backup", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusInternalServerError, resp.Code)
 		assert.Contains(t, resp.Body.String(), "error creating backup")
 	})
 
@@ -67,7 +67,7 @@ func TestBackupDBS3(t *testing.T) {
 		req := httptest.NewRequest("GET", "/backup-s3", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusInternalServerError, resp.Code)
 		assert.Contains(t, resp.Body.String(), "error creating backup")
 	})
 }

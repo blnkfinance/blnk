@@ -773,6 +773,18 @@ func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction,
 	ctx, span := otel.Tracer("blnk.reconciliation").Start(ctx, "ProcessManyToOne")
 	defer span.End()
 
+	processedAny := false
+	// Every input transaction must end up matched or unmatched; if the loop
+	// exits before any group batch was processed, report them all unmatched
+	// instead of silently dropping them from the reconciliation results.
+	defer func() {
+		if !processedAny {
+			for _, txn := range internalTxns {
+				unMatchChan <- txn.TransactionID
+			}
+		}
+	}()
+
 	// Loop to process transactions in batches.
 	for {
 		groupedExternalTxns, err := s.groupExternalTransactions(ctx, uploadID, groupingCriteria, batchSize, offset)
@@ -784,6 +796,7 @@ func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction,
 			span.AddEvent("No more grouped transactions to process")
 			break
 		}
+		processedAny = true
 		groupMap := s.buildGroupMap(groupedExternalTxns)
 		err = s.processGroupedTransactions(internalTxns, groupedExternalTxns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
 		if err != nil {
@@ -899,6 +912,17 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 	ctx, span := otel.Tracer("blnk.reconciliation").Start(ctx, "ProcessOneToMany")
 	defer span.End()
 
+	processedAny := false
+	// Mirror manyToOne: inputs must never silently vanish when no group
+	// batch was processed.
+	defer func() {
+		if !processedAny {
+			for _, txn := range singleTxn {
+				unMatchChan <- txn.TransactionID
+			}
+		}
+	}()
+
 	for {
 		txns, err := s.groupInternalTransactions(ctx, groupingCriteria, batchSize, offset)
 		if err != nil {
@@ -909,6 +933,7 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 			span.AddEvent("No more grouped transactions to process")
 			break
 		}
+		processedAny = true
 		groupMap := s.buildGroupMap(txns)
 		err = s.processGroupedTransactions(singleTxn, txns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
 		if err != nil {
@@ -1279,8 +1304,10 @@ func (s *Blnk) validateDrift(criteria model.MatchingCriteria) error {
 	if criteria.Operator == "equals" {
 		switch criteria.Field {
 		case "amount":
-			if criteria.AllowableDrift < 0 || criteria.AllowableDrift > 100 {
-				return errors.New("drift for amount must be between 0 and 100 (percentage)")
+			// Amount drift is a fraction of the amount: 0.01 allows 1%
+			// deviation, 1 allows 100%.
+			if criteria.AllowableDrift < 0 || criteria.AllowableDrift > 1 {
+				return errors.New("drift for amount must be between 0 and 1 (fraction, e.g. 0.01 = 1%)")
 			}
 		case "date":
 			if criteria.AllowableDrift < 0 {
@@ -1384,7 +1411,7 @@ func (s *Blnk) matchesCurrency(externalValue, internalValue string, criteria mod
 func (s *Blnk) matchesGroupAmount(externalAmount, groupAmount float64, criteria model.MatchingCriteria) bool {
 	switch criteria.Operator {
 	case "equals":
-		allowableDrift := groupAmount * criteria.AllowableDrift
+		allowableDrift := math.Abs(groupAmount) * criteria.AllowableDrift
 		return math.Abs(externalAmount-groupAmount) <= allowableDrift
 	case "greater_than":
 		return externalAmount > groupAmount
@@ -1404,10 +1431,10 @@ func (s *Blnk) matchesGroupDate(externalDate, groupEarliestDate time.Time, crite
 	switch criteria.Operator {
 	case "equals":
 		difference := externalDate.Sub(groupEarliestDate)
-		return math.Abs(float64(difference/time.Second)) <= criteria.AllowableDrift
-	case "after":
+		return math.Abs(difference.Seconds()) <= criteria.AllowableDrift
+	case "after", "greater_than":
 		return externalDate.After(groupEarliestDate)
-	case "before":
+	case "before", "less_than":
 		return externalDate.Before(groupEarliestDate)
 	}
 	return false
@@ -1434,9 +1461,9 @@ func (s *Blnk) calculateMatchingBounds(externalTxn *model.Transaction, matchingR
 	for _, rule := range matchingRules {
 		for _, criteria := range rule.Criteria {
 			if criteria.Field == "amount" && criteria.Operator == "equals" {
-				drift := criteria.AllowableDrift // percentage
+				drift := criteria.AllowableDrift // fraction: 0.01 = 1%
 				amt := externalTxn.Amount
-				delta := amt * (drift / 100.0)
+				delta := math.Abs(amt) * drift
 				low := amt - delta
 				high := amt + delta
 

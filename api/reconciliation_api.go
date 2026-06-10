@@ -17,8 +17,8 @@ package api
 
 import (
 	"net/http"
-	"strings"
 
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -39,7 +39,7 @@ func (a Api) UploadExternalData(c *gin.Context) {
 	source := c.PostForm("source")
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File upload failed"})
+		respondCode(c, apierror.ErrReconUploadFailed, "File upload failed", nil)
 		return
 	}
 	defer file.Close()
@@ -49,7 +49,7 @@ func (a Api) UploadExternalData(c *gin.Context) {
 	uploadID, total, err := a.blnk.UploadExternalData(c.Request.Context(), source, file, fileName)
 	if err != nil {
 		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process upload"})
+		respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
 		return
 	}
 
@@ -76,18 +76,18 @@ func (a Api) StartReconciliation(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 	if len(req.MatchingRuleIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "matching_rule_ids is required"})
+		respondCode(c, apierror.ErrReconMatchingRulesRequired, "matching_rule_ids is required", nil)
 		return
 	}
 
 	reconciliationID, err := a.blnk.StartReconciliation(c.Request.Context(), req.UploadID, req.Strategy, req.GroupingCriteria, req.MatchingRuleIDs, req.DryRun)
 	if err != nil {
 		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start reconciliation"})
+		respondError(c, err, withDefault(apierror.ErrReconStartFailed), withFallbackMessage("Failed to start reconciliation"))
 		return
 	}
 
@@ -115,15 +115,15 @@ func (a Api) InstantReconciliation(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 	if len(req.ExternalTransactions) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "external_transactions is required"})
+		respondCode(c, apierror.ErrReconExternalTxnsRequired, "external_transactions is required", nil)
 		return
 	}
 	if len(req.MatchingRuleIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "matching_rule_ids is required"})
+		respondCode(c, apierror.ErrReconMatchingRulesRequired, "matching_rule_ids is required", nil)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (a Api) InstantReconciliation(c *gin.Context) {
 	)
 	if err != nil {
 		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start instant reconciliation"})
+		respondError(c, err, withDefault(apierror.ErrReconStartFailed), withFallbackMessage("Failed to start instant reconciliation"))
 		return
 	}
 
@@ -157,21 +157,19 @@ func (a Api) InstantReconciliation(c *gin.Context) {
 func (a Api) GetReconciliation(c *gin.Context) {
 	reconciliationID := c.Param("id")
 	if reconciliationID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Reconciliation ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "Reconciliation ID is required", nil)
 		return
 	}
 
 	reconciliation, err := a.blnk.GetReconciliation(c.Request.Context(), reconciliationID)
 	if err != nil {
 		logrus.Error(err)
-
-		// Check if it's a not found error and return appropriate status code
-		if strings.Contains(err.Error(), "not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Reconciliation not found"})
+		if code, ok := classifyMessage(err.Error()); ok && apierror.StatusForCode(code) == http.StatusNotFound {
+			// Historical fixed message preserved for the legacy field.
+			respondCode(c, apierror.ErrReconNotFound, "Reconciliation not found", nil)
 			return
 		}
-
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve reconciliation"})
+		respondCode(c, apierror.ErrGenInternal, "Failed to retrieve reconciliation", nil)
 		return
 	}
 
@@ -191,14 +189,14 @@ func (a Api) GetReconciliation(c *gin.Context) {
 func (a Api) CreateMatchingRule(c *gin.Context) {
 	var rule model.MatchingRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	createdRule, err := a.blnk.CreateMatchingRule(c.Request.Context(), rule)
 	if err != nil {
 		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create matching rule"})
+		respondError(c, err, withDefault(apierror.ErrGenInternal), withFallbackMessage("Failed to create matching rule"))
 		return
 	}
 
@@ -218,13 +216,13 @@ func (a Api) CreateMatchingRule(c *gin.Context) {
 func (a Api) UpdateMatchingRule(c *gin.Context) {
 	ruleID := c.Param("id")
 	if ruleID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Matching Rule ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "Matching Rule ID is required", nil)
 		return
 	}
 
 	var rule model.MatchingRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
@@ -232,7 +230,7 @@ func (a Api) UpdateMatchingRule(c *gin.Context) {
 	updatedRule, err := a.blnk.UpdateMatchingRule(c.Request.Context(), rule)
 	if err != nil {
 		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update matching rule"})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrReconRuleNotFound), withDefault(apierror.ErrGenInternal), withFallbackMessage("Failed to update matching rule"))
 		return
 	}
 
@@ -252,14 +250,14 @@ func (a Api) UpdateMatchingRule(c *gin.Context) {
 func (a Api) DeleteMatchingRule(c *gin.Context) {
 	ruleID := c.Param("id")
 	if ruleID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Matching Rule ID is required"})
+		respondCode(c, apierror.ErrGenMissingParameter, "Matching Rule ID is required", nil)
 		return
 	}
 
 	err := a.blnk.DeleteMatchingRule(c.Request.Context(), ruleID)
 	if err != nil {
 		logrus.Error(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete matching rule"})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrReconRuleNotFound), withDefault(apierror.ErrGenInternal), withFallbackMessage("Failed to delete matching rule"))
 		return
 	}
 

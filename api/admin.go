@@ -31,17 +31,17 @@ import (
 // - c: The Gin context containing the request and response.
 //
 // Responses:
-// - 400 Bad Request: If there's an error in creating the backup or initializing the BackupManager.
+// - 500 Internal Server Error: If there's an error in creating the backup or initializing the BackupManager.
 // - 200 OK: If the backup is successfully created and stored on disk.
 func (a Api) BackupDB(c *gin.Context) {
 	backupManager, err := backups.NewBackupManager()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err)})
+		respondNestedAPIError(c, apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err), apierror.ErrAdminBackupFailed)
 		return
 	}
 	_, err = backupManager.BackupToDisk(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err)})
+		respondNestedAPIError(c, apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err), apierror.ErrAdminBackupFailed)
 		return
 	}
 	c.JSON(http.StatusOK, "backup successful")
@@ -55,17 +55,17 @@ func (a Api) BackupDB(c *gin.Context) {
 // - c: The Gin context containing the request and response.
 //
 // Responses:
-// - 400 Bad Request: If there's an error in creating the backup or initializing the BackupManager.
+// - 500 Internal Server Error: If there's an error in creating the backup or initializing the BackupManager.
 // - 200 OK: If the backup is successfully created and stored in S3.
 func (a Api) BackupDBS3(c *gin.Context) {
 	backupManager, err := backups.NewBackupManager()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err)})
+		respondNestedAPIError(c, apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err), apierror.ErrAdminBackupFailed)
 		return
 	}
 	err = backupManager.BackupToS3(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err)})
+		respondNestedAPIError(c, apierror.NewAPIError(apierror.ErrInternalServer, "error creating backup", err), apierror.ErrAdminBackupFailed)
 		return
 	}
 	c.JSON(http.StatusOK, "backup successful")

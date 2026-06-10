@@ -26,6 +26,7 @@ import (
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/api/middleware"
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -229,20 +230,20 @@ func logrusRecovery() gin.HandlerFunc {
 func (a Api) Search(c *gin.Context) {
 	collection, passed := c.Params.Get("collection")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "collection is required. pass id in the route /:collection"})
+		respondCode(c, apierror.ErrGenMissingParameter, "collection is required. pass id in the route /:collection", nil)
 		return
 	}
 
 	var query api.SearchCollectionParams
 	err := c.BindJSON(&query)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	resp, err := a.blnk.Search(collection, &query)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withDefault(apierror.ErrSrchQueryInvalid))
 		return
 	}
 
@@ -262,13 +263,13 @@ func (a Api) Search(c *gin.Context) {
 func (a Api) MultiSearch(c *gin.Context) {
 	var searchRequests api.MultiSearchSearchesParameter
 	if err := c.BindJSON(&searchRequests); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	resp, err := a.blnk.MultiSearch(&searchRequests)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withDefault(apierror.ErrSrchQueryInvalid))
 		return
 	}
 

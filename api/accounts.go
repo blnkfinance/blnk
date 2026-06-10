@@ -20,6 +20,7 @@ import (
 	"strconv"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
+	"github.com/blnkfinance/blnk/internal/apierror"
 
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/gin-gonic/gin"
@@ -39,19 +40,19 @@ import (
 func (a Api) CreateAccount(c *gin.Context) {
 	var newAccount model2.CreateAccount
 	if err := c.ShouldBindJSON(&newAccount); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	err := newAccount.ValidateCreateAccount()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil, withLegacyKey("errors"))
 		return
 	}
 
 	resp, err := a.blnk.CreateAccount(newAccount.ToAccount())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenConflict, apierror.ErrAccDuplicate))
 		return
 	}
 	c.JSON(http.StatusCreated, resp)
@@ -75,7 +76,7 @@ func (a Api) GetAccount(c *gin.Context) {
 
 	account, err := a.blnk.GetAccount(id, includes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrAccNotFound))
 		return
 	}
 	c.JSON(http.StatusOK, account)
@@ -114,14 +115,15 @@ func (a Api) GetAllAccounts(c *gin.Context) {
 	if HasFilters(c) {
 		filters, parseErrors := ParseFiltersFromContext(c, nil)
 		if len(parseErrors) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			respondCode(c, apierror.ErrGenValidation, "invalid filter parameters", parseErrors,
+				withLegacyKey("errors"), withLegacyValue(parseErrors))
 			return
 		}
 
 		// Use the new filter method
 		resp, err := a.blnk.GetAllAccountsWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 
@@ -132,7 +134,7 @@ func (a Api) GetAllAccounts(c *gin.Context) {
 	// Fall back to the legacy method when no filters are present
 	accounts, err := a.blnk.GetAllAccounts()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, accounts)
@@ -161,13 +163,13 @@ func (a Api) GetAllAccounts(c *gin.Context) {
 func (a Api) FilterAccounts(c *gin.Context) {
 	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "accounts")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil)
 		return
 	}
 
 	resp, count, err := a.blnk.GetAllAccountsWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

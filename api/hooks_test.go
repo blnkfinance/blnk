@@ -162,6 +162,6 @@ func TestDeleteHook(t *testing.T) {
 		req := httptest.NewRequest("DELETE", "/hooks/hk_nonexistent", nil)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }

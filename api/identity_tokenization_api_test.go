@@ -72,7 +72,7 @@ func TestTokenizeIdentityField(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusConflict, resp.Code)
 		assert.Contains(t, response["error"], "already tokenized")
 	})
 
@@ -102,7 +102,7 @@ func TestTokenizeIdentityField(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -124,7 +124,7 @@ func TestTokenizationDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	assert.Equal(t, http.StatusForbidden, resp.Code)
 }
 
 func TestDetokenizeIdentityField(t *testing.T) {
@@ -185,7 +185,7 @@ func TestDetokenizeIdentityField(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 
@@ -388,6 +388,6 @@ func TestGetTokenizedFields(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }

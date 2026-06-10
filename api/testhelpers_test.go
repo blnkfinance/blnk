@@ -18,7 +18,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -27,6 +29,7 @@ import (
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/gin-gonic/gin"
@@ -205,4 +208,23 @@ func resetReindexManager() {
 	globalReindexManager.mu.Lock()
 	globalReindexManager.service = nil
 	globalReindexManager.mu.Unlock()
+}
+
+// assertErrorCode asserts the standard dual error payload: the response has
+// the given status, error_detail carries the expected catalog code, and the
+// legacy flat field is still present.
+func assertErrorCode(t *testing.T, w *httptest.ResponseRecorder, status int, code apierror.ErrorCode) {
+	t.Helper()
+
+	require.Equal(t, status, w.Code)
+
+	var body struct {
+		Error       interface{}       `json:"error"`
+		Errors      interface{}       `json:"errors"`
+		ErrorDetail apierror.APIError `json:"error_detail"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, code, body.ErrorDetail.Code)
+	require.NotEmpty(t, body.ErrorDetail.Message)
+	require.True(t, body.Error != nil || body.Errors != nil, "legacy error field must still be present")
 }

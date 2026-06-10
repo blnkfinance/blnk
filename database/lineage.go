@@ -277,19 +277,25 @@ func (d Datasource) InsertLineageOutbox(ctx context.Context, outbox *model.Linea
 // ClaimPendingOutboxEntries claims a batch of pending outbox entries for processing.
 // It uses SELECT FOR UPDATE SKIP LOCKED to allow concurrent processors.
 func (d Datasource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) {
+	// UPDATE ... RETURNING does not preserve the inner ORDER BY, so the
+	// claimed rows are re-ordered through a CTE to guarantee FIFO delivery
+	// within the batch.
 	query := `
-		UPDATE blnk.lineage_outbox
-		SET status = $1, locked_until = NOW() + $2::interval
-		WHERE id IN (
-			SELECT id FROM blnk.lineage_outbox
-			WHERE status IN ('pending', 'processing')
-			  AND (locked_until IS NULL OR locked_until < NOW())
-			  AND attempts < max_attempts
-			ORDER BY created_at ASC
-			LIMIT $3
-			FOR UPDATE SKIP LOCKED
+		WITH claimed AS (
+			UPDATE blnk.lineage_outbox
+			SET status = $1, locked_until = NOW() + $2::interval
+			WHERE id IN (
+				SELECT id FROM blnk.lineage_outbox
+				WHERE status IN ('pending', 'processing')
+				  AND (locked_until IS NULL OR locked_until < NOW())
+				  AND attempts < max_attempts
+				ORDER BY created_at ASC
+				LIMIT $3
+				FOR UPDATE SKIP LOCKED
+			)
+			RETURNING id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until, inflight
 		)
-		RETURNING id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until, inflight
+		SELECT * FROM claimed ORDER BY created_at ASC
 	`
 
 	rows, err := d.Conn.QueryContext(ctx, query, model.OutboxStatusProcessing, lockDuration.String(), batchSize)

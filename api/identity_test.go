@@ -127,7 +127,7 @@ func TestGetIdentity(t *testing.T) {
 		}
 
 		resp, _ := SetUpTestRequest(testRequest)
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
 

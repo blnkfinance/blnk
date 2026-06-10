@@ -29,6 +29,7 @@ import (
 	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 
 	"github.com/gin-gonic/gin"
@@ -88,54 +89,17 @@ func handleRecordTransactionValidationError(c *gin.Context, err error) {
 	var validationErrors validation.Errors
 	if errors.As(err, &validationErrors) {
 		if precisionErr, ok := validationErrors["Precision"]; ok && errors.Is(precisionErr, model2.ErrPrecisionMustBeInteger) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": precisionErr.Error()})
+			respondCode(c, apierror.ErrTxnPrecisionNotInteger, precisionErr.Error(), nil)
 			return
 		}
 	}
 
 	if errors.Is(err, model2.ErrPrecisionMustBeInteger) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrTxnPrecisionNotInteger, err.Error(), nil)
 		return
 	}
 
-	c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
-}
-
-// RecordTransaction handles the recording of a new transaction.
-// It binds the incoming JSON request to a RecordTransaction object, validates it,
-// and then records the transaction. If any errors occur during validation or recording,
-// it responds with an appropriate error message.
-//
-// Parameters:
-// - c: The Gin context containing the request and response.
-//
-// Responses:
-// - 400 Bad Request: If there's an error in binding JSON or validating the transaction.
-// - 201 Created: If the transaction is successfully recorded.
-func (a Api) RecordTransaction(c *gin.Context) {
-	var newTransaction model2.RecordTransaction
-	// Bind the incoming JSON request to the newTransaction model
-	if err := c.ShouldBindJSON(&newTransaction); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": err.Error()})
-		return
-	}
-
-	// Validate the transaction data
-	err := newTransaction.ValidateRecordTransaction()
-	if err != nil {
-		handleRecordTransactionValidationError(c, err)
-		return
-	}
-
-	// Record the transaction using the Blnk service
-	resp, err := a.blnk.RecordTransaction(c.Request.Context(), newTransaction.ToTransaction())
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Return a response with the recorded transaction, properly transformed
-	c.JSON(http.StatusCreated, transformTransaction(resp))
+	respondCode(c, apierror.ErrTxnValidation, err.Error(), nil, withLegacyKey("errors"))
 }
 
 // QueueTransaction handles queuing a new transaction for later processing.
@@ -154,7 +118,7 @@ func (a Api) QueueTransaction(c *gin.Context) {
 	// Bind the incoming JSON request to the newTransaction model
 	if err := c.ShouldBindJSON(&newTransaction); err != nil {
 		logrus.WithError(err).Error("failed to bind transaction JSON")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		respondCode(c, apierror.ErrGenMalformedRequest, "Invalid input", nil)
 		return
 	}
 
@@ -169,7 +133,7 @@ func (a Api) QueueTransaction(c *gin.Context) {
 	resp, err := a.blnk.QueueTransaction(c.Request.Context(), newTransaction.ToTransaction())
 	if err != nil {
 		logrus.WithError(err).Error("failed to queue transaction")
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrTxnValidation))
 		return
 	}
 
@@ -204,7 +168,7 @@ type refundTransactionRequest struct {
 func (a Api) RefundTransaction(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
@@ -216,17 +180,17 @@ func (a Api) RefundTransaction(c *gin.Context) {
 	// of Content-Length / chunked transfer encoding.
 	var req refundTransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorkerWithOptions(req.SkipQueue))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
 		return
 	}
 	if len(transaction) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no transaction to refund"})
+		respondCode(c, apierror.ErrTxnNotFound, "no transaction to refund", nil)
 		return
 	}
 	resp := transformTransaction(transaction[0])
@@ -247,13 +211,13 @@ func (a Api) GetTransaction(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	resp, err := a.blnk.GetTransaction(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound))
 		return
 	}
 
@@ -274,13 +238,13 @@ func (a Api) GetTransactionByRef(c *gin.Context) {
 	reference, passed := c.Params.Get("reference")
 
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reference is required. pass reference in the route /ref/:reference"})
+		respondCode(c, apierror.ErrGenMissingParameter, "reference is required. pass reference in the route /ref/:reference", nil)
 		return
 	}
 
 	resp, err := a.blnk.GetTransactionByRef(c.Request.Context(), reference)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound))
 		return
 	}
 
@@ -322,14 +286,15 @@ func (a Api) GetAllTransactions(c *gin.Context) {
 	if HasFilters(c) {
 		filters, parseErrors := ParseFiltersFromContext(c, nil)
 		if len(parseErrors) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": parseErrors})
+			respondCode(c, apierror.ErrGenValidation, "invalid filter parameters", parseErrors,
+				withLegacyKey("errors"), withLegacyValue(parseErrors))
 			return
 		}
 
 		// Use the new filter method
 		transactions, err := a.blnk.GetAllTransactionsWithFilter(c.Request.Context(), filters, limitInt, offsetInt)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 
@@ -346,7 +311,7 @@ func (a Api) GetAllTransactions(c *gin.Context) {
 	// Fall back to legacy method when no filters are present
 	transactions, err := a.blnk.GetAllTransactions(limitInt, offsetInt)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -384,13 +349,13 @@ func (a Api) GetAllTransactions(c *gin.Context) {
 func (a Api) FilterTransactions(c *gin.Context) {
 	filters, opts, limit, offset, err := ParseFiltersFromBody(c, "transactions")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenValidation, err.Error(), nil)
 		return
 	}
 
 	transactions, count, err := a.blnk.GetAllTransactionsWithFilterAndOptions(c.Request.Context(), filters, opts, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -422,23 +387,23 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	id, passed := c.Params.Get("txID")
 	var req model2.InflightUpdate
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 	err := c.BindJSON(&req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 
 	cnf, err := config.Fetch()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	ds, err := database.GetDBConnection(cnf)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -452,27 +417,27 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	if status == "commit" {
 		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
 			return
 		}
 		if len(transaction) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no transaction to commit"})
+			respondCode(c, apierror.ErrTxnNotInflight, "no transaction to commit", nil)
 			return
 		}
 		resp = transformTransaction(transaction[0])
 	} else if status == "void" {
 		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
 			return
 		}
 		if len(transaction) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no transaction to void"})
+			respondCode(c, apierror.ErrTxnNotInflight, "no transaction to void", nil)
 			return
 		}
 		resp = transformTransaction(transaction[0])
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": errors.New("status not supported. use either commit or void")})
+		respondCode(c, apierror.ErrTxnInvalidStatusAction, "status not supported. use either commit or void", nil)
 		return
 	}
 
@@ -485,18 +450,20 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 func (a Api) CreateBulkTransactions(c *gin.Context) {
 	var req model2.BulkTransactionRequest
 	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, "Invalid request body: "+err.Error(), nil)
 		return
 	}
 
 	for i, transaction := range req.Transactions {
 		if transaction == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": "transactions[" + strconv.Itoa(i) + "] is required"})
+			respondCode(c, apierror.ErrTxnValidation, "transactions["+strconv.Itoa(i)+"] is required",
+				gin.H{"index": i}, withLegacyKey("errors"))
 			return
 		}
 
 		if err := transaction.ValidateRecordTransaction(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": "transactions[" + strconv.Itoa(i) + "]: " + err.Error()})
+			respondCode(c, apierror.ErrTxnValidation, "transactions["+strconv.Itoa(i)+"]: "+err.Error(),
+				gin.H{"index": i}, withLegacyKey("errors"))
 			return
 		}
 	}
@@ -507,11 +474,18 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), bulkReq)
 	// Handle the response based on the result and error from the service layer
 	if err != nil {
-		// If there was an error during synchronous processing
+		// If there was an error during synchronous processing.
+		// classifyMessage picks the most specific catalog code from the
+		// detailed result error; batch_id stays a top-level sibling field.
 		logrus.WithError(err).WithField("batch_id", result.BatchID).Error("bulk transaction API error")
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":    result.Error, // Use the detailed error from the result
-			"batch_id": result.BatchID,
+		code, ok := classifyMessage(result.Error)
+		if !ok {
+			code = apierror.ErrGenBadRequest
+		}
+		c.JSON(apierror.StatusForCode(code), gin.H{
+			"error":        result.Error, // Use the detailed error from the result
+			"batch_id":     result.BatchID,
+			"error_detail": apierror.NewErrorResponse(code, result.Error, gin.H{"batch_id": result.BatchID}).Error,
 		})
 		return
 	}
@@ -537,13 +511,13 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 func (a Api) GetTransactionLineage(c *gin.Context) {
 	id, passed := c.Params.Get("id")
 	if !passed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required. pass id in the route /:id"})
+		respondCode(c, apierror.ErrGenMissingParameter, "id is required. pass id in the route /:id", nil)
 		return
 	}
 
 	lineage, err := a.blnk.GetTransactionLineage(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound))
 		return
 	}
 
@@ -559,7 +533,7 @@ func (a Api) RecoverQueuedTransactions(c *gin.Context) {
 	if thresholdStr := c.Query("threshold"); thresholdStr != "" {
 		parsed, err := time.ParseDuration(thresholdStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid threshold duration: " + err.Error()})
+			respondCode(c, apierror.ErrGenValidation, "invalid threshold duration: "+err.Error(), nil)
 			return
 		}
 		threshold = parsed
@@ -567,7 +541,7 @@ func (a Api) RecoverQueuedTransactions(c *gin.Context) {
 
 	recovered, err := a.blnk.RecoverQueuedTransactions(c.Request.Context(), threshold)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -613,17 +587,15 @@ func toAPIResults(outcomes []blnk.BulkInflightOutcome) (model2.BulkInflightRespo
 func (a Api) BulkVoidInflight(c *gin.Context) {
 	var req model2.BulkInflightVoidRequest
 	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 	if len(req.TransactionIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "transaction_ids cannot be empty"})
+		respondCode(c, apierror.ErrTxnBulkEmpty, "transaction_ids cannot be empty", nil)
 		return
 	}
 	if len(req.TransactionIDs) > model2.MaxBulkInflightItems {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "too many transaction_ids; max is " + strconv.Itoa(model2.MaxBulkInflightItems),
-		})
+		respondCode(c, apierror.ErrTxnBulkLimitExceeded, "too many transaction_ids; max is "+strconv.Itoa(model2.MaxBulkInflightItems), nil)
 		return
 	}
 
@@ -634,7 +606,7 @@ func (a Api) BulkVoidInflight(c *gin.Context) {
 
 	outcomes, err := a.blnk.BulkInflightUpdate(c.Request.Context(), blnk.BulkInflightVoid, items, bulkInflightMaxWorkers)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withDefault(apierror.ErrGenBadRequest))
 		return
 	}
 	resp, _ := toAPIResults(outcomes)
@@ -652,28 +624,26 @@ func (a Api) BulkVoidInflight(c *gin.Context) {
 func (a Api) BulkCommitInflight(c *gin.Context) {
 	var req model2.BulkInflightCommitRequest
 	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
 		return
 	}
 	if len(req.Transactions) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "transactions cannot be empty"})
+		respondCode(c, apierror.ErrTxnBulkEmpty, "transactions cannot be empty", nil)
 		return
 	}
 	if len(req.Transactions) > model2.MaxBulkInflightItems {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "too many transactions; max is " + strconv.Itoa(model2.MaxBulkInflightItems),
-		})
+		respondCode(c, apierror.ErrTxnBulkLimitExceeded, "too many transactions; max is "+strconv.Itoa(model2.MaxBulkInflightItems), nil)
 		return
 	}
 
 	cnf, err := config.Fetch()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	ds, err := database.GetDBConnection(cnf)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -692,7 +662,7 @@ func (a Api) BulkCommitInflight(c *gin.Context) {
 
 	outcomes, err := a.blnk.BulkInflightUpdate(c.Request.Context(), blnk.BulkInflightCommit, items, bulkInflightMaxWorkers)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err, withDefault(apierror.ErrGenBadRequest))
 		return
 	}
 	resp, _ := toAPIResults(outcomes)

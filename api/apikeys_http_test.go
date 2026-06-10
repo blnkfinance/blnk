@@ -126,7 +126,8 @@ func TestListAPIKeysHTTP(t *testing.T) {
 	t.Run("Master without owner is rejected", func(t *testing.T) {
 		router, _ := setupAuthedRouter(t, true, nil)
 		resp := doJSONRequest(router, "GET", "/api-keys", nil)
-		assert.Equal(t, http.StatusUnauthorized, resp.Code)
+		// Owner-required is payload validation, not authentication: 400.
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
 	t.Run("Non-master lists own keys", func(t *testing.T) {
