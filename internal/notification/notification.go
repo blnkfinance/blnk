@@ -37,37 +37,44 @@ import (
 // The function retrieves configuration for the Slack webhook URL, formats the error,
 // and sends it as a JSON payload to the Slack webhook.
 func SlackNotification(err error) {
-	// Format the Slack message payload using the error message and the current time
-	data := json.RawMessage(fmt.Sprintf(`{
-		"blocks": [
+	// Build the Slack message payload with typed structs and json.Marshal so
+	// error text containing quotes, backslashes, or newlines is safely
+	// encoded instead of corrupting (or injecting into) the JSON template.
+	type slackText struct {
+		Type  string `json:"type"`
+		Text  string `json:"text"`
+		Emoji bool   `json:"emoji,omitempty"`
+	}
+	type slackBlock struct {
+		Type   string      `json:"type"`
+		Text   *slackText  `json:"text,omitempty"`
+		Fields []slackText `json:"fields,omitempty"`
+	}
+	payloadStruct := struct {
+		Blocks []slackBlock `json:"blocks"`
+	}{
+		Blocks: []slackBlock{
 			{
-				"type": "header",
-				"text": {
-					"type": "plain_text",
-					"text": "Error From Blnk 🐞",
-					"emoji": true
-				}
+				Type: "header",
+				Text: &slackText{Type: "plain_text", Text: "Error From Blnk 🐞", Emoji: true},
 			},
 			{
-				"type": "section",
-				"fields": [
-					{
-						"type": "mrkdwn",
-						"text": "*Error:*\n%v"
-					}
-				]
+				Type:   "section",
+				Fields: []slackText{{Type: "mrkdwn", Text: fmt.Sprintf("*Error:*\n%v", err.Error())}},
 			},
 			{
-				"type": "section",
-				"fields": [
-					{
-						"type": "mrkdwn",
-						"text": "*Time:*\n%v"
-					}
-				]
-			}
-		]
-	}`, err.Error(), time.Now().Format(time.RFC822)))
+				Type:   "section",
+				Fields: []slackText{{Type: "mrkdwn", Text: fmt.Sprintf("*Time:*\n%v", time.Now().Format(time.RFC822))}},
+			},
+		},
+	}
+
+	encoded, err := json.Marshal(payloadStruct)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	data := json.RawMessage(encoded)
 
 	// Fetch the configuration, including the Slack webhook URL
 	conf, err := config.Fetch()

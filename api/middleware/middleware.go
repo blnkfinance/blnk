@@ -46,7 +46,11 @@ func RateLimitMiddleware(conf *config.Configuration) gin.HandlerFunc {
 
 	rps := *conf.RateLimit.RequestsPerSecond
 	burst := *conf.RateLimit.Burst
-	ttl := time.Duration(*conf.RateLimit.CleanupIntervalSec) * time.Second
+	cleanupSec := config.DEFAULT_CLEANUP_SEC
+	if conf.RateLimit.CleanupIntervalSec != nil {
+		cleanupSec = *conf.RateLimit.CleanupIntervalSec
+	}
+	ttl := time.Duration(cleanupSec) * time.Second
 
 	// Create a new Tollbooth limiter with the specified rate and expiration time.
 	lmt := tollbooth.NewLimiter(rps, &limiter.ExpirableOptions{

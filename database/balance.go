@@ -737,7 +737,9 @@ func (d Datasource) GetAllBalances(limit, offset int) ([]model.Balance, error) {
 func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*model.Balance, error) {
 	// Execute SQL query to select balances for source and destination using a stored procedure
 	rows, err := d.Conn.QueryContext(context.Background(), `
-		SELECT blnk.get_balances_by_id($1,$2)
+		SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data
+		FROM blnk.balances
+		WHERE balance_id IN ($1, $2)
 	`, sourceId, destinationId)
 	if err != nil {
 		// Return an error if the query execution fails
@@ -757,14 +759,15 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 	// Iterate through the result set and scan each row into a Balance object
 	for rows.Next() {
 		balance := model.Balance{}
+		var balanceValue, creditBalanceValue, debitBalanceValue string
 		var metaDataJSON []byte
 
-		// Scan the values from the current row into the balance object and temporary metadata variable
+		// Scan the values from the current row into the balance object and temporary variables
 		err = rows.Scan(
 			&balance.BalanceID,
-			&balance.Balance,
-			&balance.CreditBalance,
-			&balance.DebitBalance,
+			&balanceValue,
+			&creditBalanceValue,
+			&debitBalanceValue,
 			&balance.Currency,
 			&balance.CurrencyMultiplier,
 			&balance.LedgerID,
@@ -776,15 +779,34 @@ func (d Datasource) GetSourceDestination(sourceId, destinationId string) ([]*mod
 			return nil, err
 		}
 
-		// Parse the metadata JSON into the MetaData map field
-		err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+		// Parse string values to big.Int
+		balance.Balance, err = parseBigInt(balanceValue)
 		if err != nil {
-			// Return an error if JSON parsing fails
-			return nil, err
+			return nil, fmt.Errorf("failed to parse balance: %w", err)
+		}
+		balance.CreditBalance, err = parseBigInt(creditBalanceValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse credit balance: %w", err)
+		}
+		balance.DebitBalance, err = parseBigInt(debitBalanceValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse debit balance: %w", err)
+		}
+
+		// Parse the metadata JSON into the MetaData map field (may be NULL)
+		if len(metaDataJSON) > 0 {
+			err = json.Unmarshal(metaDataJSON, &balance.MetaData)
+			if err != nil {
+				// Return an error if JSON parsing fails
+				return nil, err
+			}
 		}
 
 		// Append the balance to the slice of balances
 		balances = append(balances, &balance)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	// Return the slice of balances containing the source and destination balances
