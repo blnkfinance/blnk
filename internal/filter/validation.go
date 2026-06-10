@@ -27,6 +27,30 @@ func Validate(filters *QueryFilterSet, table string) error {
 			return fmt.Errorf("invalid operator '%s' for field '%s': must be one of eq, ne, gt, gte, lt, lte, in, between, like, ilike, isnull, isnotnull", f.Operator, f.Field)
 		}
 
+		// Enforce operator arity here so malformed filters are rejected with
+		// an error instead of being silently dropped by the SQL builders,
+		// which would run the query unfiltered.
+		switch f.Operator {
+		case OpIn:
+			if len(f.Values) == 0 {
+				return fmt.Errorf("operator 'in' for field '%s' requires at least one value in 'values'", f.Field)
+			}
+		case OpBetween:
+			if len(f.Values) != 2 {
+				return fmt.Errorf("operator 'between' for field '%s' requires exactly two values in 'values', got %d", f.Field, len(f.Values))
+			}
+		}
+
+		// balance_id on transactions is a virtual field matched against
+		// source/destination; only a subset of operators is implemented.
+		if table == "transactions" && f.Field == "balance_id" {
+			switch f.Operator {
+			case OpEqual, OpNotEqual, OpIn, OpIsNull, OpIsNotNull:
+			default:
+				return fmt.Errorf("operator '%s' is not supported for field 'balance_id' on transactions: must be one of eq, ne, in, isnull, isnotnull", f.Operator)
+			}
+		}
+
 		if strings.HasPrefix(f.Field, "meta_data.") && validFields["meta_data"] {
 			jsonKey := strings.TrimPrefix(f.Field, "meta_data.")
 			if !jsonKeyRegex.MatchString(jsonKey) {

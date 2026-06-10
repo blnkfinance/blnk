@@ -286,7 +286,7 @@ func (a Api) GetBalanceMonitorsByBalanceID(c *gin.Context) {
 		return
 	}
 
-	monitors, err := a.blnk.GetMonitorByID(c.Request.Context(), balanceID)
+	monitors, err := a.blnk.GetBalanceMonitors(c.Request.Context(), balanceID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/blnkfinance/blnk"
 	"github.com/gin-gonic/gin"
 )
 
@@ -40,7 +41,7 @@ func (a Api) UpdateMetadata(c *gin.Context) {
 
 	updatedMetadata, err := a.blnk.UpdateMetadata(c.Request.Context(), entityID, req.Metadata)
 	if err != nil {
-		if errors.Is(err, errors.New("entity not found")) {
+		if errors.Is(err, blnk.ErrEntityNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "entity not found"})
 			return
 		}

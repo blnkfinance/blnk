@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/blnkfinance/blnk/internal/request"
@@ -206,4 +208,84 @@ func TestGetAllIdentities(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.True(t, len(response) >= 1)
+}
+
+func TestFilterIdentities(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	// UUID as first name guarantees a unique filter match
+	uniqueFirstName := gofakeit.UUID()
+	newIdentity, err := b.CreateIdentity(model.Identity{
+		FirstName:    uniqueFirstName,
+		LastName:     gofakeit.LastName(),
+		EmailAddress: gofakeit.Email(),
+		Category:     "individual",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create identity: %v", err)
+	}
+
+	t.Run("Filter by first_name eq", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "first_name", "operator": "eq", "value": "%s"}]}`, uniqueFirstName)
+		var response []model.Identity
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/identities/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		if assert.Equal(t, 1, len(response)) {
+			assert.Equal(t, newIdentity.IdentityID, response[0].IdentityID)
+		}
+	})
+
+	t.Run("Include count", func(t *testing.T) {
+		body := fmt.Sprintf(`{"filters": [{"field": "first_name", "operator": "eq", "value": "%s"}], "include_count": true}`, uniqueFirstName)
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/identities/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Contains(t, response, "data")
+		assert.Equal(t, float64(1), response["total_count"])
+	})
+
+	t.Run("Malformed JSON body", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/identities/filter", bytes.NewReader([]byte("{bad")))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Invalid filter operator", func(t *testing.T) {
+		body := `{"filters": [{"field": "first_name", "operator": "badop", "value": "x"}]}`
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/identities/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
 }

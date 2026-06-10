@@ -1351,7 +1351,7 @@ func (s *Blnk) partialMatch(str1, str2 string, allowableDrift float64) bool {
 	}
 
 	// Calculate the Levenshtein distance between the strings.
-	distance := levenshtein.DistanceForStrings([]rune(str1), []rune(str2), levenshtein.DefaultOptions)
+	distance := levenshtein.DistanceForStrings([]rune(str1), []rune(str2), levenshtein.DefaultOptionsWithSub)
 
 	// Calculate the maximum allowable distance based on the length of the longer string.
 	maxLength := float64(max(len(str1), len(str2)))

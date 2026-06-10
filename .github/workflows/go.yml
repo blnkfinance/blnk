@@ -55,6 +55,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      typesense:
+        image: typesense/typesense:29.0
+        env:
+          TYPESENSE_API_KEY: blnk-api-key
+          TYPESENSE_DATA_DIR: /tmp
+        ports:
+          - 8108:8108
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8108 && printf \"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n\" >&3 && grep -q \"200 OK\" <&3'"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -74,3 +87,5 @@ jobs:
 
       - name: Test
         run: go test -v ./...
+        env:
+          BLNK_TYPESENSE_DNS: http://localhost:8108

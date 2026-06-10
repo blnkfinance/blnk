@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -117,7 +118,9 @@ func processHTTP(data NewWebhook, client *http.Client) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logrus.Warnf("Webhook failed with status %d", resp.StatusCode)
-		return nil
+		// Returning the error lets asynq retry the delivery; swallowing it
+		// would permanently drop the webhook on receiver-side failures.
+		return fmt.Errorf("webhook delivery failed with status %d", resp.StatusCode)
 	}
 
 	return nil

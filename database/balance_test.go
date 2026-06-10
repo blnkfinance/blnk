@@ -1034,9 +1034,7 @@ func TestGetSourceDestination_QueryError(t *testing.T) {
 
 	ds := Datasource{Conn: db}
 
-	query := `SELECT blnk.get_balances_by_id($1,$2)`
-
-	mock.ExpectQuery(regexp.QuoteMeta(query)).
+	mock.ExpectQuery("SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data").
 		WithArgs("bln_source", "bln_dest").
 		WillReturnError(fmt.Errorf("stored procedure error"))
 
@@ -1056,9 +1054,7 @@ func TestGetSourceDestination_NoResults(t *testing.T) {
 
 	ds := Datasource{Conn: db}
 
-	query := `SELECT blnk.get_balances_by_id($1,$2)`
-
-	mock.ExpectQuery(regexp.QuoteMeta(query)).
+	mock.ExpectQuery("SELECT balance_id, balance, credit_balance, debit_balance, currency, currency_multiplier, ledger_id, created_at, meta_data").
 		WithArgs("bln_source", "bln_dest").
 		WillReturnRows(sqlmock.NewRows([]string{"balance_id", "balance", "credit_balance", "debit_balance", "currency", "currency_multiplier", "ledger_id", "created_at", "meta_data"}))
 

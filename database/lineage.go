@@ -277,14 +277,12 @@ func (d Datasource) InsertLineageOutbox(ctx context.Context, outbox *model.Linea
 // ClaimPendingOutboxEntries claims a batch of pending outbox entries for processing.
 // It uses SELECT FOR UPDATE SKIP LOCKED to allow concurrent processors.
 func (d Datasource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int, lockDuration time.Duration) ([]model.LineageOutbox, error) {
-	lockedUntil := time.Now().Add(lockDuration)
-
 	query := `
 		UPDATE blnk.lineage_outbox
-		SET status = $1, locked_until = $2
+		SET status = $1, locked_until = NOW() + $2::interval
 		WHERE id IN (
 			SELECT id FROM blnk.lineage_outbox
-			WHERE status = 'pending'
+			WHERE status IN ('pending', 'processing')
 			  AND (locked_until IS NULL OR locked_until < NOW())
 			  AND attempts < max_attempts
 			ORDER BY created_at ASC
@@ -294,7 +292,7 @@ func (d Datasource) ClaimPendingOutboxEntries(ctx context.Context, batchSize int
 		RETURNING id, transaction_id, source_balance_id, destination_balance_id, provider, lineage_type, payload, status, attempts, max_attempts, last_error, created_at, processed_at, locked_until, inflight
 	`
 
-	rows, err := d.Conn.QueryContext(ctx, query, model.OutboxStatusProcessing, lockedUntil, batchSize)
+	rows, err := d.Conn.QueryContext(ctx, query, model.OutboxStatusProcessing, lockDuration.String(), batchSize)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to claim pending outbox entries", err)
 	}

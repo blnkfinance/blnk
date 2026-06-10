@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // ToJsonReq converts a Go object to a JSON-encoded HTTP request payload.
@@ -57,7 +58,8 @@ func ToJsonReq(payload interface{}) (*bytes.Buffer, error) {
 func Call(req *http.Request, response interface{}) (*http.Response, error) {
 	// Set request content type to JSON
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{}
+
+	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Send the HTTP request and capture the response
 	resp, err := client.Do(req)

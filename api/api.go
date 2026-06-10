@@ -71,6 +71,7 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/balance-monitors", a.GetAllBalanceMonitors)
 	router.GET("/balance-monitors/balances/:balance_id", a.GetBalanceMonitorsByBalanceID)
 	router.PUT("/balance-monitors/:id", a.UpdateBalanceMonitor)
+	router.DELETE("/balance-monitors/:id", a.DeleteBalanceMonitor)
 
 	// Transaction routes
 	router.POST("/transactions", a.QueueTransaction)
@@ -93,6 +94,7 @@ func (a Api) Router() *gin.Engine {
 	router.GET("/identities/:id", a.GetIdentity)
 	router.PUT("/identities/:id", a.UpdateIdentity)
 	router.GET("/identities", a.GetAllIdentities)
+	router.DELETE("/identities/:id", a.DeleteIdentity)
 	router.POST("/identities/filter", a.FilterIdentities)
 	router.GET("/identities/:id/tokenized-fields", a.GetTokenizedFields)
 	router.POST("/identities/:id/tokenize/:field", a.TokenizeIdentityField)

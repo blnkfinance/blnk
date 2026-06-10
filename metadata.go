@@ -9,6 +9,10 @@ import (
 	"github.com/blnkfinance/blnk/internal/notification"
 )
 
+// ErrEntityNotFound is returned by UpdateMetadata when the target entity
+// does not exist. API handlers match it with errors.Is to return 404.
+var ErrEntityNotFound = errors.New("entity not found")
+
 // getEntityTypeFromID determines the entity type from the ID prefix.
 // It analyzes the prefix of the provided ID and returns the corresponding entity type.
 //
@@ -58,7 +62,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 	case "ledgers":
 		ledger, err := l.GetLedgerByID(entityID)
 		if err != nil {
-			return nil, errors.New("entity not found")
+			return nil, ErrEntityNotFound
 		}
 		currentMetadata := ledger.MetaData
 		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
@@ -89,7 +93,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, err
 		}
 		if !exists {
-			return nil, errors.New("entity not found")
+			return nil, ErrEntityNotFound
 		}
 
 		// Apply metadata updates directly without trying to get current metadata
@@ -117,7 +121,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 	case "balances":
 		balance, err := l.GetBalanceByID(ctx, entityID, nil, false)
 		if err != nil {
-			return nil, errors.New("entity not found")
+			return nil, ErrEntityNotFound
 		}
 		currentMetadata := balance.MetaData
 		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
@@ -144,7 +148,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 	case "identities":
 		identity, err := l.GetIdentity(entityID)
 		if err != nil {
-			return nil, errors.New("entity not found")
+			return nil, ErrEntityNotFound
 		}
 		currentMetadata := identity.MetaData
 		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
