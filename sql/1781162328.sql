@@ -38,14 +38,14 @@ VALUES ('global', repeat('0', 64), repeat('0', 64))
 ON CONFLICT (chain_key) DO NOTHING;
 
 -- Verifier walks the chain in order; also forbids two rows sharing a position.
+-- This partial index is empty on existing installs (every row starts with a
+-- NULL chain_seq), so it builds instantly regardless of table size.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_chain_seq
     ON blnk.transactions (chain_seq) WHERE chain_seq IS NOT NULL;
 
--- The chainer's scan for unchained rows. In steady state this index holds only
--- the last few seconds of rows, so the poll query never degrades as the table
--- grows.
-CREATE INDEX IF NOT EXISTS idx_transactions_unchained
-    ON blnk.transactions (id) WHERE chain_seq IS NULL;
+-- Note: the chainer's scan index (idx_transactions_unchained) covers all rows
+-- initially, so it is built CONCURRENTLY in the next migration to avoid locking
+-- the transactions table on large installs.
 
 -- +migrate StatementBegin
 -- Replace the immutability trigger function with a NULL-safe version. The
@@ -83,7 +83,6 @@ $$;
 
 -- +migrate Down
 
-DROP INDEX IF EXISTS blnk.idx_transactions_unchained;
 DROP INDEX IF EXISTS blnk.idx_transactions_chain_seq;
 DROP TABLE IF EXISTS blnk.chain_state;
 ALTER TABLE blnk.transactions DROP COLUMN IF EXISTS chain_hash;
