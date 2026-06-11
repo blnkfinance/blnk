@@ -115,9 +115,10 @@ func TestProcessInflightCommitAndExpiry(t *testing.T) {
 		// Committing creates a child COMMIT entry; the parent leaves INFLIGHT.
 		assert.NotEqual(t, "VOID", committed.Status)
 
-		// Committing again must fail: it is already committed.
+		// Committing again is idempotent: the already-committed leg is terminal,
+		// so the worker acks (nil) instead of double-committing.
 		err = b.processInflightCommit(ctx, task)
-		require.Error(t, err, "double commit must surface an error")
+		require.NoError(t, err, "a replayed commit must be acked, not errored")
 	})
 
 	t.Run("expiry voids", func(t *testing.T) {

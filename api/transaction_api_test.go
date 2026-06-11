@@ -595,6 +595,7 @@ func TestInflightTransaction_Commit_API(t *testing.T) {
 	commitPayload := model2.InflightUpdate{
 		Status:        "commit",
 		PreciseAmount: inflightTxResponse.PreciseAmount,
+		SkipQueue:     true,
 	}
 	commitPayloadBytes, _ := request.ToJsonReq(&commitPayload)
 	var commitTxResponse model.Transaction
@@ -691,7 +692,8 @@ func TestInflightTransaction_Void_API(t *testing.T) {
 
 	// 3. Void Transaction
 	voidPayload := model2.InflightUpdate{
-		Status: "void",
+		Status:    "void",
+		SkipQueue: true,
 		// Amount is not strictly needed for void, but API might expect it or use precise_amount from original txn
 	}
 	voidPayloadBytes, _ := request.ToJsonReq(&voidPayload)
@@ -801,8 +803,9 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 	// 3. Partially Commit Transaction using Amount (float64)
 	partialAmountFloat := 100.25 // Changed to include decimals
 	commitPartialPayload := model2.InflightUpdate{
-		Status: "commit",
-		Amount: partialAmountFloat, // Using Amount (float64) instead of PreciseAmount
+		Status:    "commit",
+		Amount:    partialAmountFloat, // Using Amount (float64) instead of PreciseAmount
+		SkipQueue: true,
 	}
 	commitPartialPayloadBytes, _ := request.ToJsonReq(&commitPartialPayload)
 	var commitPartialTxResponse model.Transaction
@@ -843,7 +846,8 @@ func TestInflightTransaction_Commit_WithAmount_API(t *testing.T) {
 
 	// 5. Commit Remaining Transaction (by not specifying amount or precise_amount in payload)
 	commitRemainingPayload := model2.InflightUpdate{
-		Status: "commit",
+		Status:    "commit",
+		SkipQueue: true,
 		// Amount: 0.0, // Can be explicit 0.0 or absent due to omitempty
 		// PreciseAmount is nil by default
 	}
@@ -1036,7 +1040,7 @@ func TestBulkVoidInflight_Integration(t *testing.T) {
 	}
 
 	// 2. Bulk-void them
-	voidReq := model2.BulkInflightVoidRequest{TransactionIDs: ids}
+	voidReq := model2.BulkInflightVoidRequest{TransactionIDs: ids, SkipQueue: true}
 	voidBytes, _ := request.ToJsonReq(&voidReq)
 	var voidResp model2.BulkInflightResponse
 	rec, err := SetUpTestRequest(TestRequest{
@@ -1113,6 +1117,7 @@ func TestBulkCommitInflight_Integration(t *testing.T) {
 	// 2. Bulk-commit them, plus a deliberately-unknown id to verify partial
 	//    failure handling.
 	commitReq := model2.BulkInflightCommitRequest{
+		SkipQueue: true,
 		Transactions: []model2.BulkInflightCommitItem{
 			{TransactionID: id1},
 			{TransactionID: id2},

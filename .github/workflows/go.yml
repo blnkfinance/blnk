@@ -89,3 +89,66 @@ jobs:
         run: go test -v -p 1 ./...
         env:
           BLNK_TYPESENSE_DNS: http://localhost:8108
+
+  race:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: blnk
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      typesense:
+        image: typesense/typesense:29.0
+        env:
+          TYPESENSE_API_KEY: blnk-api-key
+          TYPESENSE_DATA_DIR: /tmp
+        ports:
+          - 8108:8108
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8108 && printf \"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n\" >&3 && grep -q \"200 OK\" <&3'"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.0
+
+      - name: Tidy
+        run: go mod tidy
+
+      - name: Migrate Database
+        run: go run ./cmd migrate up
+        env:
+          BLNK_DATA_SOURCE_DNS: postgres://postgres@localhost:5432/blnk?sslmode=disable
+          BLNK_REDIS_DNS: localhost:6379
+
+      - name: Test (race detector)
+        run: go test -race -p 1 ./...
+        env:
+          BLNK_TYPESENSE_DNS: http://localhost:8108

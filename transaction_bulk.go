@@ -187,6 +187,11 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 			)
 		}
 
+		// processBulkTransactions mutates each transaction (status, metadata,
+		// parent); clone them so the background goroutine never races the caller
+		// still holding the request's transactions.
+		asyncTxns := cloneTransactionsForAsync(req.Transactions)
+
 		// Start processing in background
 		go func() {
 			defer asyncBulkSemaphore.Release(1)
@@ -196,10 +201,10 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 			defer cancel()
 
 			logrus.Infof("Starting async bulk transaction batch %s with %d transactions (atomic: %v, inflight: %v)",
-				batchID, len(req.Transactions), req.Atomic, req.Inflight)
+				batchID, len(asyncTxns), req.Atomic, req.Inflight)
 
 			// Process transactions in batch
-			err := l.processBulkTransactions(bgCtx, req.Transactions, batchID, req.Inflight, req.SkipQueue)
+			err := l.processBulkTransactions(bgCtx, asyncTxns, batchID, req.Inflight, req.SkipQueue)
 
 			if err != nil {
 				// Handle failure (rollback if atomic, send webhook)

@@ -181,6 +181,16 @@ func cloneTransactionForAsync(t *model.Transaction) *model.Transaction {
 	return &clone
 }
 
+// cloneTransactionsForAsync clones each transaction so a background worker can
+// mutate them without touching the slice the caller still holds.
+func cloneTransactionsForAsync(txns []*model.Transaction) []*model.Transaction {
+	clones := make([]*model.Transaction, len(txns))
+	for i, t := range txns {
+		clones[i] = cloneTransactionForAsync(t)
+	}
+	return clones
+}
+
 // handleSplitTransactions attempts to split a transaction into multiple transactions if needed.
 // It starts a tracing span, attempts to split the transaction, and validates the result.
 //

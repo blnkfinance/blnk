@@ -176,6 +176,15 @@ func (l *Blnk) releaseSingleLock(ctx context.Context, locker *redlock.Locker) {
 // - *model.Transaction: A pointer to the committed Transaction model.
 // - error: An error if the transaction could not be committed.
 func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID string, amount *big.Int) (*model.Transaction, error) {
+	return l.CommitInflightTransactionWithRef(ctx, transactionID, amount, "")
+}
+
+// CommitInflightTransactionWithRef commits an inflight transaction using a
+// caller-supplied reference for the committed child. A non-empty reference makes
+// asynq retries idempotent: a retry that re-commits the same amount collides on
+// the unique reference index. An empty reference preserves the legacy behavior
+// of generating a random reference.
+func (l *Blnk) CommitInflightTransactionWithRef(ctx context.Context, transactionID string, amount *big.Int, reference string) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "CommitInflightTransaction")
 	defer span.End()
 
@@ -203,7 +212,7 @@ func (l *Blnk) CommitInflightTransaction(ctx context.Context, transactionID stri
 	span.AddEvent("Inflight transaction committed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 	metrics.InflightCommitTotal.Add(ctx, 1)
 
-	committedTxn, err := l.finalizeCommitment(ctx, transaction, false)
+	committedTxn, err := l.finalizeCommitment(ctx, transaction, false, reference)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +251,7 @@ func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transacti
 
 	span.AddEvent("Inflight transaction committed", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 
-	committedTxn, err := l.finalizeCommitment(ctx, transaction, true)
+	committedTxn, err := l.finalizeCommitment(ctx, transaction, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +388,7 @@ func (l *Blnk) convertPreciseToFloat(preciseAmount *big.Int, precision float64) 
 // Returns:
 // - *model.Transaction: A pointer to the finalized Transaction model.
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transaction, withQueue bool) (*model.Transaction, error) {
+func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transaction, withQueue bool, reference string) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "FinalizeCommitment")
 	defer span.End()
 
@@ -390,7 +399,11 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 		transaction.EffectiveDate = &transaction.CreatedAt
 	}
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
-	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	if reference != "" {
+		transaction.Reference = reference
+	} else {
+		transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	}
 	transaction.Hash = transaction.HashTxn()
 
 	if withQueue {
@@ -425,6 +438,13 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 // - *model.Transaction: A pointer to the voided Transaction model.
 // - error: An error if the transaction could not be voided.
 func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string) (*model.Transaction, error) {
+	return l.VoidInflightTransactionWithRef(ctx, transactionID, "")
+}
+
+// VoidInflightTransactionWithRef voids an inflight transaction using a
+// caller-supplied reference for the voided child, making asynq retries
+// idempotent. An empty reference preserves the legacy random-reference behavior.
+func (l *Blnk) VoidInflightTransactionWithRef(ctx context.Context, transactionID string, reference string) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "VoidInflightTransaction")
 	defer span.End()
 
@@ -458,7 +478,7 @@ func (l *Blnk) VoidInflightTransaction(ctx context.Context, transactionID string
 	span.AddEvent("Inflight transaction voided", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
 	metrics.InflightVoidTotal.Add(ctx, 1)
 
-	voidedTxn, err := l.finalizeVoidTransaction(ctx, transaction, amountLeft)
+	voidedTxn, err := l.finalizeVoidTransaction(ctx, transaction, amountLeft, reference)
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +587,7 @@ func (l *Blnk) calculateRemainingAmount(ctx context.Context, transaction *model.
 // Returns:
 // - *model.Transaction: A pointer to the voided Transaction model.
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.Transaction, amountLeft *big.Int) (*model.Transaction, error) {
+func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.Transaction, amountLeft *big.Int, reference string) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "FinalizeVoidTransaction")
 	defer span.End()
 
@@ -579,7 +599,11 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	}
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
-	transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	if reference != "" {
+		transaction.Reference = reference
+	} else {
+		transaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	}
 	transaction.Hash = transaction.HashTxn()
 	model.ApplyPrecision(transaction)
 
@@ -590,6 +614,182 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	}
 
 	span.AddEvent("Void transaction finalized", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
+	return transaction, nil
+}
+
+// inflightActionReference derives the deterministic reference for a committed or
+// voided leg from the action ID carried in the queued task. The same actionID
+// on an asynq retry reproduces the same reference, so a re-applied leg collides
+// on the unique reference index. An empty actionID yields "" (random reference).
+func inflightActionReference(legTransactionID, action, actionID string) string {
+	if actionID == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s_%s_%s", legTransactionID, action, actionID)
+}
+
+// isTerminalInflightError reports whether an inflight commit/void error is
+// terminal — the action cannot succeed on retry and the queued task should be
+// acked rather than retried.
+func (l *Blnk) isTerminalInflightError(err error) bool {
+	if IsDuplicateReferenceError(err) {
+		return true
+	}
+	switch classifyInflightError(err) {
+	case "ALREADY_COMMITTED", "ALREADY_VOIDED", "NOT_INFLIGHT", "INVALID_AMOUNT":
+		return true
+	default:
+		return false
+	}
+}
+
+// collectInflightLegs snapshots every inflight leg under a parent transaction
+// (transaction_id == parent OR parent_transaction == parent). Committing a leg
+// creates a child row but leaves the leg's own row INFLIGHT, so snapshotting up
+// front avoids re-processing the same legs across pages.
+func (l *Blnk) collectInflightLegs(ctx context.Context, parentTransactionID string) ([]*model.Transaction, error) {
+	batchSize := l.Config().Transaction.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	var legs []*model.Transaction
+	for offset := int64(0); ; offset += int64(batchSize) {
+		batch, err := l.GetInflightTransactionsByParentID(ctx, parentTransactionID, batchSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		legs = append(legs, batch...)
+		if len(batch) < batchSize {
+			return legs, nil
+		}
+	}
+}
+
+// applyInflightActionToLeg commits or voids a single inflight leg using the
+// deterministic reference (derived from actionID) that makes asynq retries
+// idempotent.
+func (l *Blnk) applyInflightActionToLeg(ctx context.Context, leg *model.Transaction, action string, amount *big.Int, actionID string) error {
+	ref := inflightActionReference(leg.TransactionID, action, actionID)
+	if action == InflightActionVoid {
+		_, err := l.VoidInflightTransactionWithRef(ctx, leg.TransactionID, ref)
+		return err
+	}
+	_, err := l.CommitInflightTransactionWithRef(ctx, leg.TransactionID, amount, ref)
+	return err
+}
+
+// RunInflightActionByParent commits or voids every inflight leg under a parent
+// transaction — the same expansion the synchronous endpoint performs — and is
+// the queued worker's entrypoint.
+//
+// retryable is true when at least one leg failed with a transient error (lock
+// contention, fetch failure, not-yet-visible), so the asynq task should retry;
+// already-finalized legs are terminal, skipped, and never block the ack.
+func (l *Blnk) RunInflightActionByParent(ctx context.Context, parentTransactionID, action string, amount *big.Int, actionID string) (retryable bool, err error) {
+	ctx, span := tracer.Start(ctx, "RunInflightActionByParent")
+	defer span.End()
+
+	legs, err := l.collectInflightLegs(ctx, parentTransactionID)
+	if err != nil {
+		span.RecordError(err)
+		return true, err // a fetch failure is transient
+	}
+	if len(legs) == 0 {
+		// Nothing inflight under this parent: already finalized or never existed.
+		span.AddEvent("No inflight legs to process")
+		return false, nil
+	}
+
+	var applied, skipped int
+	var lastTransientErr error
+	for _, leg := range legs {
+		switch err := l.applyInflightActionToLeg(ctx, leg, action, amount, actionID); {
+		case err == nil:
+			applied++
+		case l.isTerminalInflightError(err):
+			// Expected on a retry once a leg is already finalized; benign.
+			skipped++
+			logrus.WithFields(logrus.Fields{
+				"transaction_id": leg.TransactionID,
+				"reason":         classifyInflightError(err),
+			}).Debug("inflight leg already finalized; skipping (idempotent)")
+		default:
+			span.RecordError(err)
+			lastTransientErr = err
+		}
+	}
+
+	if lastTransientErr != nil {
+		return true, lastTransientErr
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"parent_transaction_id": parentTransactionID,
+		"action":                action,
+		"applied":               applied,
+		"skipped":               skipped,
+	}).Info("inflight action processed")
+	return false, nil
+}
+
+// preValidateInflightAction performs the read-only checks an inflight commit/void
+// would perform, without mutating or persisting anything. It lets the API reject
+// an obviously-invalid request (not inflight, already finalized, amount too high)
+// synchronously before enqueuing, while the worker remains the authority.
+func (l *Blnk) preValidateInflightAction(ctx context.Context, transactionID, action string, amount *big.Int) (*model.Transaction, error) {
+	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	amountLeft, err := l.calculateRemainingAmount(ctx, transaction)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := l.checkTransactionCommitStatus(amountLeft); err != nil {
+		return nil, err
+	}
+
+	if action == InflightActionCommit && amount != nil {
+		if err := l.validateRequestedAmount(transaction, amount, amountLeft); err != nil {
+			return nil, err
+		}
+	}
+
+	return transaction, nil
+}
+
+// QueueInflightAction pre-validates a commit/void and enqueues it for the worker.
+// It returns the still-inflight parent transaction (for the API response) and
+// ErrInflightActionQueued if an action for the same transaction is already queued.
+func (l *Blnk) QueueInflightAction(ctx context.Context, transactionID string, amount *big.Int, action string) (*model.Transaction, error) {
+	ctx, span := tracer.Start(ctx, "QueueInflightAction")
+	defer span.End()
+
+	transaction, err := l.preValidateInflightAction(ctx, transactionID, action, amount)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	preciseAmount := "0"
+	if amount != nil {
+		preciseAmount = amount.String()
+	}
+
+	payload := InflightActionPayload{
+		TransactionID: transactionID,
+		Action:        action,
+		PreciseAmount: preciseAmount,
+		ActionID:      model.GenerateUUIDWithSuffix("act"),
+	}
+	if err := l.queue.EnqueueInflightAction(ctx, payload); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	return transaction, nil
 }
 
@@ -627,6 +827,13 @@ type BulkInflightOutcome struct {
 // Codes are intentionally action-agnostic where possible. ALREADY_VOIDED and
 // ALREADY_COMMITTED are reported as observed — a void on an already-committed
 // txn surfaces ALREADY_COMMITTED, and vice versa.
+// ClassifyInflightError maps an inflight commit/void error to a stable code
+// (see classifyInflightError) so callers outside this package — e.g. the queued
+// bulk API path — can report per-item codes without regex-matching messages.
+func ClassifyInflightError(err error) string {
+	return classifyInflightError(err)
+}
+
 func classifyInflightError(err error) string {
 	if err == nil {
 		return ""
