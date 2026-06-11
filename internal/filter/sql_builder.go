@@ -282,10 +282,6 @@ func safeColumnForTableAndField(table, logicalName string) string {
 			return "created_at"
 		case "effective_date":
 			return "effective_date"
-		case "source_identity":
-			return "source_identity"
-		case "destination_identity":
-			return "destination_identity"
 		case "indicator":
 			return "indicator"
 		case "description":

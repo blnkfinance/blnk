@@ -65,6 +65,7 @@ type transactionProcessor struct {
 	datasource        database.IDataSource
 	progressSaveCount int
 	blnk              *Blnk
+	mu                sync.Mutex // guards matches, unmatched, and progress (process runs concurrently)
 }
 
 // reconciler defines the function type for reconciling a batch of transactions.
@@ -455,8 +456,10 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 	batchMatches, batchUnmatched := tp.reconciler(ctx, []*model.Transaction{txn})
 
 	// Increment the counters for matched and unmatched transactions.
+	tp.mu.Lock()
 	tp.matches += len(batchMatches)
 	tp.unmatched += len(batchUnmatched)
+	tp.mu.Unlock()
 
 	// If the reconciliation is not a dry run, record the matches and unmatched transactions.
 	if !tp.reconciliation.IsDryRun {
@@ -479,12 +482,16 @@ func (tp *transactionProcessor) process(ctx context.Context, txn *model.Transact
 	}
 
 	// Update the progress with the last processed transaction ID and increment the processed count.
+	tp.mu.Lock()
 	tp.progress.LastProcessedExternalTxnID = txn.TransactionID
 	tp.progress.ProcessedCount++
+	shouldSave := tp.progress.ProcessedCount%tp.progressSaveCount == 0
+	progressSnapshot := tp.progress
+	tp.mu.Unlock()
 
 	// Periodically save the reconciliation progress.
-	if tp.progress.ProcessedCount%tp.progressSaveCount == 0 {
-		if err := tp.datasource.SaveReconciliationProgress(ctx, tp.reconciliation.ReconciliationID, tp.progress); err != nil {
+	if shouldSave {
+		if err := tp.datasource.SaveReconciliationProgress(ctx, tp.reconciliation.ReconciliationID, progressSnapshot); err != nil {
 			logrus.Errorf("Error saving reconciliation progress: %v", err)
 		}
 	}
@@ -521,6 +528,8 @@ func (tp *transactionProcessor) updateMatchedTransactionsMetadata(ctx context.Co
 // - int: The count of matched transactions.
 // - int: The count of unmatched transactions.
 func (tp *transactionProcessor) getResults() (int, int) {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
 	return tp.matches, tp.unmatched
 }
 
@@ -798,11 +807,15 @@ func (s *Blnk) manyToOne(ctx context.Context, internalTxns []*model.Transaction,
 		}
 		processedAny = true
 		groupMap := s.buildGroupMap(groupedExternalTxns)
-		err = s.processGroupedTransactions(internalTxns, groupedExternalTxns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
+		var groupMapMu sync.Mutex
+		err = s.processGroupedTransactions(internalTxns, groupedExternalTxns, groupMap, &groupMapMu, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
 		if err != nil {
 			logrus.Errorf("Error processing grouped transactions: %v", err)
 		}
-		if len(groupMap) == 0 {
+		groupMapMu.Lock()
+		groupMapEmpty := len(groupMap) == 0
+		groupMapMu.Unlock()
+		if groupMapEmpty {
 			break
 		}
 		offset += int64(batchSize)
@@ -837,7 +850,7 @@ func (s *Blnk) groupExternalTransactions(ctx context.Context, uploadID string, g
 // - unMatchChan: Channel for collecting unmatched transaction IDs.
 // Returns:
 // - error: If any error occurs during processing.
-func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, matchChan chan model.Match, unMatchChan chan string) error {
+func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, groupMapMu *sync.Mutex, matchingRules []model.MatchingRule, isExternalGrouped bool, wg *sync.WaitGroup, matchChan chan model.Match, unMatchChan chan string) error {
 	conf, err := config.Fetch()
 	if err != nil {
 		logrus.Errorf("Error fetching configuration: %v", err)
@@ -855,7 +868,7 @@ func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, group
 			sem <- struct{}{}        // Acquire token
 			defer func() { <-sem }() // Release token
 
-			matched := s.matchSingleTransaction(txn, groupedTxns, groupMap, matchingRules, isExternalGrouped, matchChan)
+			matched := s.matchSingleTransaction(txn, groupedTxns, groupMap, groupMapMu, matchingRules, isExternalGrouped, matchChan)
 			if !matched {
 				unMatchChan <- txn.TransactionID
 			}
@@ -876,29 +889,46 @@ func (s *Blnk) processGroupedTransactions(singleTxns []*model.Transaction, group
 // - matchChan: Channel for sending matches.
 // Returns:
 // - bool: True if a match is found, false otherwise.
-func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, matchingRules []model.MatchingRule, isExternalGrouped bool, matchChan chan model.Match) bool {
-	for groupKey := range groupMap {
-		if s.matchesGroup(singleTxn, groupedTxns[groupKey], matchingRules) {
-			for _, groupedTxn := range groupedTxns[groupKey] {
-				var externalID, internalID string
-				if isExternalGrouped {
-					externalID = groupedTxn.TransactionID
-					internalID = singleTxn.TransactionID
-				} else {
-					externalID = singleTxn.TransactionID
-					internalID = groupedTxn.TransactionID
-				}
-				// Send the match result to the channel.
-				matchChan <- model.Match{
-					ExternalTransactionID: externalID,
-					InternalTransactionID: internalID,
-					Amount:                groupedTxn.Amount,
-					Date:                  groupedTxn.CreatedAt,
-				}
-			}
-			delete(groupMap, groupKey) // Mark the group as processed.
-			return true
+func (s *Blnk) matchSingleTransaction(singleTxn *model.Transaction, groupedTxns map[string][]*model.Transaction, groupMap map[string]bool, groupMapMu *sync.Mutex, matchingRules []model.MatchingRule, isExternalGrouped bool, matchChan chan model.Match) bool {
+	// Snapshot the candidate group keys under the lock so concurrent workers
+	// don't iterate the map while another deletes from it.
+	groupMapMu.Lock()
+	keys := make([]string, 0, len(groupMap))
+	for k := range groupMap {
+		keys = append(keys, k)
+	}
+	groupMapMu.Unlock()
+
+	for _, groupKey := range keys {
+		if !s.matchesGroup(singleTxn, groupedTxns[groupKey], matchingRules) {
+			continue
 		}
+		// Claim the group atomically: only the worker that deletes it owns the match.
+		groupMapMu.Lock()
+		if !groupMap[groupKey] {
+			groupMapMu.Unlock()
+			continue // already claimed by another worker
+		}
+		delete(groupMap, groupKey)
+		groupMapMu.Unlock()
+
+		for _, groupedTxn := range groupedTxns[groupKey] {
+			var externalID, internalID string
+			if isExternalGrouped {
+				externalID = groupedTxn.TransactionID
+				internalID = singleTxn.TransactionID
+			} else {
+				externalID = singleTxn.TransactionID
+				internalID = groupedTxn.TransactionID
+			}
+			matchChan <- model.Match{
+				ExternalTransactionID: externalID,
+				InternalTransactionID: internalID,
+				Amount:                groupedTxn.Amount,
+				Date:                  groupedTxn.CreatedAt,
+			}
+		}
+		return true
 	}
 	return false
 }
@@ -935,11 +965,15 @@ func (s *Blnk) oneToMany(ctx context.Context, singleTxn []*model.Transaction, ma
 		}
 		processedAny = true
 		groupMap := s.buildGroupMap(txns)
-		err = s.processGroupedTransactions(singleTxn, txns, groupMap, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
+		var groupMapMu sync.Mutex
+		err = s.processGroupedTransactions(singleTxn, txns, groupMap, &groupMapMu, matchingRules, isExternalGrouped, wg, matchChan, unMatchChan)
 		if err != nil {
 			logrus.Errorf("Error in one-to-many reconciliation: %v", err)
 		}
-		if len(groupMap) == 0 {
+		groupMapMu.Lock()
+		groupMapEmpty := len(groupMap) == 0
+		groupMapMu.Unlock()
+		if groupMapEmpty {
 			break
 		}
 		offset += int64(batchSize)

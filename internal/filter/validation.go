@@ -82,8 +82,6 @@ func GetValidFieldsForTable(table string) map[string]bool {
 			"status":               true,
 			"created_at":           true,
 			"effective_date":       true,
-			"source_identity":      true,
-			"destination_identity": true,
 			"indicator":            true,
 			"description":          true,
 			"precision":            true,

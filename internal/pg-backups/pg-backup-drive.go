@@ -21,12 +21,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -59,12 +59,16 @@ func NewBackupManager() (*BackupManager, error) {
 		return nil, errors.Wrap(err, "failed to fetch config")
 	}
 
+	// Use plaintext HTTP only when the endpoint explicitly asks for it (e.g. a
+	// local MinIO in development); default to TLS for real S3 and https endpoints.
+	disableSSL := strings.HasPrefix(strings.ToLower(cfg.S3Endpoint), "http://")
+
 	// Prepare AWS S3 configuration with access credentials and endpoint.
 	s3Config := &aws.Config{
 		Credentials:      credentials.NewStaticCredentials(cfg.AwsAccessKeyId, cfg.AwsSecretAccessKey, ""),
 		Endpoint:         aws.String(cfg.S3Endpoint),
 		Region:           aws.String(cfg.S3Region),
-		DisableSSL:       aws.Bool(true), // Disable SSL to use HTTP
+		DisableSSL:       aws.Bool(disableSSL),
 		S3ForcePathStyle: aws.Bool(true), // Force path style for certain S3-compatible services
 	}
 
@@ -182,17 +186,12 @@ func (bm *BackupManager) BackupToS3(ctx context.Context) error {
 
 	_, filename := filepath.Split(filePath) // Get the filename from the full path
 
-	// Read the file contents into memory.
-	fileBytes, err := io.ReadAll(file)
-	if err != nil {
-		return errors.Wrap(err, "failed to read file for S3 upload")
-	}
-
-	// Upload the file to S3.
+	// Stream the file straight to S3 rather than buffering the whole backup in
+	// memory; *os.File satisfies the io.ReadSeeker the SDK needs.
 	_, err = bm.S3Client.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(bm.Config.S3BucketName),
 		Key:    aws.String(filename),
-		Body:   bytes.NewReader(fileBytes),
+		Body:   file,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to upload to S3")

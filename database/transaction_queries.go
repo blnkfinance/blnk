@@ -257,54 +257,6 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 	return txn, nil
 }
 
-// UpdateTransactionStatus updates the status of a transaction in the database.
-// It traces the operation using OpenTelemetry and returns an error if the update fails or if the transaction is not found.
-// Parameters:
-// - ctx: Context for managing the request and tracing.
-// - id: The ID of the transaction to update.
-// - status: The new status to set for the transaction.
-// Returns:
-// - An error if the update fails or if the transaction is not found.
-func (d Datasource) UpdateTransactionStatus(ctx context.Context, id string, status string) error {
-	// Start a new tracing span for the update operation
-	ctx, span := otel.Tracer("transaction.database").Start(ctx, "UpdateTransactionStatus")
-	defer span.End()
-
-	// Execute the update query
-	result, err := d.Conn.ExecContext(ctx, `
-		UPDATE blnk.transactions
-		SET status = $2
-		WHERE transaction_id = $1
-	`, id, status)
-	if err != nil {
-		span.RecordError(err)
-		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update transaction status", err)
-	}
-
-	// Check how many rows were affected by the update
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		span.RecordError(err)
-		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
-	}
-
-	// If no rows were affected, return a not found error
-	if rowsAffected == 0 {
-		span.AddEvent("Transaction not found for status update", trace.WithAttributes(
-			attribute.String("transaction.id", id),
-			attribute.String("transaction.status", status),
-		))
-		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Transaction with ID '%s' not found", id), nil)
-	}
-
-	// Log the successful status update in the tracing span
-	span.AddEvent("Transaction status updated", trace.WithAttributes(
-		attribute.String("transaction.id", id),
-		attribute.String("transaction.status", status),
-	))
-	return nil
-}
-
 // GetAllTransactions retrieves all transactions from the database, ordered by creation date in descending order.
 // It traces the operation using OpenTelemetry and returns an error if the retrieval or processing fails.
 // Parameters:

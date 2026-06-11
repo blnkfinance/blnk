@@ -95,11 +95,6 @@ func (m *MockDataSource) GetExistingTransactionReferences(ctx context.Context, r
 	return args.Get(0).(map[string]struct{}), args.Error(1)
 }
 
-func (m *MockDataSource) UpdateTransactionStatus(ctx context.Context, id string, status string) error {
-	args := m.Called(ctx, id, status)
-	return args.Error(0)
-}
-
 func (m *MockDataSource) GetAllTransactions(ctx context.Context, limit, offset int) ([]model.Transaction, error) {
 	args := m.Called(limit, offset)
 	return args.Get(0).([]model.Transaction), args.Error(1)

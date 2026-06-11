@@ -324,20 +324,32 @@ func (l *Blnk) applyTransactionToBalances(ctx context.Context, balances []*model
 
 	span.AddEvent("Calculating new balances")
 
-	// Handle committed inflight transactions
+	// Handle committed inflight transactions.
 	if transaction.Status == StatusCommit {
-		balances[0].CommitInflightDebit(transaction)
-		balances[1].CommitInflightCredit(transaction)
+		if err := balances[0].CommitInflightDebit(transaction); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("commit inflight debit failed: %w", err)
+		}
+		if err := balances[1].CommitInflightCredit(transaction); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("commit inflight credit failed: %w", err)
+		}
 		span.AddEvent("Committed inflight balances")
 		return nil
 	}
 
 	transactionAmount := transaction.PreciseAmount
 
-	// Handle voided transactions
+	// Handle voided transactions.
 	if transaction.Status == StatusVoid {
-		balances[0].RollbackInflightDebit(transactionAmount)
-		balances[1].RollbackInflightCredit(transactionAmount)
+		if err := balances[0].RollbackInflightDebit(transactionAmount); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("void inflight debit failed: %w", err)
+		}
+		if err := balances[1].RollbackInflightCredit(transactionAmount); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("void inflight credit failed: %w", err)
+		}
 		span.AddEvent("Rolled back inflight balances")
 		return nil
 	}

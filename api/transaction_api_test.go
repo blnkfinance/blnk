@@ -426,6 +426,49 @@ func TestRecordTransactionPrecisionValidation(t *testing.T) {
 	})
 }
 
+// TestInflightCommitRejectsNonPositivePreciseAmount asserts the inflight
+// commit/void handler rejects an explicit non-positive precise_amount before any
+// processing, so a zero/negative partial commit can never be applied.
+func TestInflightCommitRejectsNonPositivePreciseAmount(t *testing.T) {
+	cases := []struct {
+		name          string
+		status        string
+		preciseAmount *big.Int
+	}{
+		{"commit negative precise_amount", "commit", big.NewInt(-100)},
+		{"commit zero precise_amount", "commit", big.NewInt(0)},
+		{"void negative precise_amount", "void", big.NewInt(-100)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router, _, err := setupRouter()
+			if err != nil {
+				t.Fatalf("Failed to setup router: %v", err)
+			}
+
+			payload := model2.InflightUpdate{
+				Status:        tc.status,
+				PreciseAmount: tc.preciseAmount,
+			}
+			payloadBytes, _ := request.ToJsonReq(&payload)
+			response := map[string]interface{}{}
+			resp, reqErr := SetUpTestRequest(TestRequest{
+				Payload:  payloadBytes,
+				Response: &response,
+				Method:   "PUT",
+				Route:    "/transactions/inflight/" + model.GenerateUUIDWithSuffix("txn"),
+				Auth:     "",
+				Router:   router,
+			})
+			require.NoError(t, reqErr)
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
+			bodyBytes, _ := json.Marshal(response)
+			assert.Contains(t, string(bodyBytes), "precise_amount must be positive")
+		})
+	}
+}
+
 func TestRecordTransactionWithExitingRef(t *testing.T) {
 	router, b, _ := setupRouter()
 	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})

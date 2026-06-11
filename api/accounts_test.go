@@ -13,6 +13,7 @@ import (
 	"github.com/blnkfinance/blnk/model"
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateAccount(t *testing.T) {
@@ -125,6 +126,69 @@ func TestGetAccount(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, newAccount.AccountID, response.AccountID)
+}
+
+func TestGetAccountWithIncludes(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	ctx := context.Background()
+	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+	require.NoError(t, err)
+	newBalance, err := b.CreateBalance(ctx, model.Balance{LedgerID: newLedger.LedgerID, Currency: "USD"})
+	require.NoError(t, err)
+
+	orgName := "Acme " + gofakeit.UUID()
+	identity, err := b.CreateIdentity(model.Identity{
+		IdentityType:     "organization",
+		OrganizationName: orgName,
+		Category:         "business",
+		EmailAddress:     gofakeit.Email(),
+	})
+	require.NoError(t, err)
+
+	newAccount, err := b.CreateAccount(model.Account{
+		BankName:   "Test Bank",
+		Number:     gofakeit.AchAccount(),
+		LedgerID:   newLedger.LedgerID,
+		BalanceID:  newBalance.BalanceID,
+		IdentityID: identity.IdentityID,
+	})
+	require.NoError(t, err)
+
+	t.Run("include=balance scans balance amounts and account timestamp", func(t *testing.T) {
+		var response model.Account
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/accounts/%s?include=balance", newAccount.AccountID),
+			Router:   router,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		require.NotNil(t, response.Balance, "balance must be populated")
+		assert.Equal(t, newBalance.BalanceID, response.Balance.BalanceID)
+		require.NotNil(t, response.Balance.Balance, "balance amount must scan into big.Int")
+		assert.Equal(t, "0", response.Balance.Balance.String())
+		assert.False(t, response.CreatedAt.IsZero(), "account created_at must be scanned (regression: was written to balance)")
+	})
+
+	t.Run("include=identity returns the joined identity", func(t *testing.T) {
+		var response model.Account
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/accounts/%s?include=identity", newAccount.AccountID),
+			Router:   router,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		require.NotNil(t, response.Identity)
+		assert.Equal(t, identity.IdentityID, response.Identity.IdentityID)
+		assert.Equal(t, orgName, response.Identity.OrganizationName)
+	})
 }
 
 func TestGetAllAccounts(t *testing.T) {

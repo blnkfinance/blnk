@@ -3766,7 +3766,7 @@ func TestRejectTransaction(t *testing.T) {
 	_, err = blnk.RefundTransaction(ctx, rejectedTxn.TransactionID, true)
 	require.Error(t, err, "Refunding a rejected transaction should fail")
 	// Check for the specific error substring, ignoring the transaction ID
-	require.Contains(t, err.Error(), "is not in a state that can be refunded (status: REJECTED)",
+	require.Contains(t, err.Error(), "cannot be refunded in status REJECTED",
 		"Error message should indicate transaction cannot be refunded due to its state")
 }
 
@@ -4324,7 +4324,7 @@ func TestRefundWorkerFullFlow(t *testing.T) {
 
 	require.Error(t, result2.Error, "Refunding a rejected transaction via worker should fail")
 	// Check for the specific error substring, ignoring the transaction ID
-	require.Contains(t, result2.Error.Error(), "is not in a state that can be refunded (status: REJECTED)",
+	require.Contains(t, result2.Error.Error(), "cannot be refunded in status REJECTED",
 		"Error should indicate transaction cannot be refunded")
 }
 
@@ -6084,48 +6084,6 @@ func TestGetTransactionByRef_Mock(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Equal(t, model.Transaction{}, result)
-		mockDS.AssertExpectations(t)
-	})
-}
-
-func TestUpdateTransactionStatus_Mock(t *testing.T) {
-	cnf := &config.Configuration{
-		Redis: config.RedisConfig{Dns: "localhost:6379"},
-		Queue: config.QueueConfig{
-			WebhookQueue:     "webhook_queue",
-			TransactionQueue: "transaction_queue",
-			NumberOfQueues:   1,
-		},
-	}
-	config.ConfigStore.Store(cnf)
-
-	t.Run("Success", func(t *testing.T) {
-		mockDS := new(mocks.MockDataSource)
-
-		txnID := "txn_to_update"
-		newStatus := "VOID"
-
-		mockDS.On("UpdateTransactionStatus", mock.Anything, txnID, newStatus).Return(nil)
-
-		blnk := &Blnk{datasource: mockDS, config: cnf}
-		err := blnk.UpdateTransactionStatus(context.Background(), txnID, newStatus)
-
-		assert.NoError(t, err)
-		mockDS.AssertExpectations(t)
-	})
-
-	t.Run("Error", func(t *testing.T) {
-		mockDS := new(mocks.MockDataSource)
-
-		txnID := "txn_nonexistent"
-		newStatus := "VOID"
-
-		mockDS.On("UpdateTransactionStatus", mock.Anything, txnID, newStatus).Return(fmt.Errorf("not found"))
-
-		blnk := &Blnk{datasource: mockDS, config: cnf}
-		err := blnk.UpdateTransactionStatus(context.Background(), txnID, newStatus)
-
-		assert.Error(t, err)
 		mockDS.AssertExpectations(t)
 	})
 }

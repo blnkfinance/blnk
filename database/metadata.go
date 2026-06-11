@@ -46,10 +46,13 @@ func (d *Datasource) UpdateTransactionMetadata(ctx context.Context, id string, m
 		return err
 	}
 
-	// Use jsonb_set or similar postgres function to merge the metadata rather than replacing it
+	// Merge into the existing metadata rather than replacing it. The left operand
+	// is coerced to an object first: jsonb concatenation of a non-object (a JSON
+	// null from a transaction stored without metadata, or a scalar) with an object
+	// yields an array, which corrupts the column.
 	_, err = d.Conn.ExecContext(ctx, `
-		UPDATE blnk.transactions 
-		SET meta_data = meta_data || $1::jsonb
+		UPDATE blnk.transactions
+		SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END) || $1::jsonb
 		WHERE transaction_id = $2 OR parent_transaction = $2
 	`, metadataJSON, id)
 	return err

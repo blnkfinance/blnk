@@ -44,8 +44,9 @@ func TestUpdateTransactionMetadata(t *testing.T) {
 
 	metadataJSON, _ := json.Marshal(metadata)
 
-	// Verify the SQL uses jsonb merge operator and updates both direct and parent matches
-	mock.ExpectExec(`UPDATE blnk\.transactions SET meta_data = meta_data \|\| \$1::jsonb WHERE transaction_id = \$2 OR parent_transaction = \$2`).
+	// Verify the SQL coerces the existing metadata to an object before the jsonb
+	// merge and updates both direct and parent matches.
+	mock.ExpectExec(`UPDATE blnk\.transactions\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\) \|\| \$1::jsonb\s+WHERE transaction_id = \$2 OR parent_transaction = \$2`).
 		WithArgs(metadataJSON, "txn_123").
 		WillReturnResult(sqlmock.NewResult(1, 2)) // 2 rows affected (1 direct + 1 parent match)
 

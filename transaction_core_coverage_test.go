@@ -19,6 +19,7 @@ package blnk
 import (
 	"context"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,6 +187,84 @@ func TestRefundTransaction_RejectedTransactionFails(t *testing.T) {
 
 	_, err = b.RefundTransaction(context.Background(), rej.TransactionID, true)
 	require.Error(t, err, "refunding a REJECTED transaction must fail")
+}
+
+// TestRefundTransaction_DeterministicReference pins the refund reference to a
+// stable "<original>_refund" value so the DB unique-reference constraint can act
+// as the idempotency backstop against double refunds.
+func TestRefundTransaction_DeterministicReference(t *testing.T) {
+	b, ds := newCoreTestBlnk(t)
+	src, dst := newBalancePair(t, ds)
+	txn := recordAppliedTxn(t, b, src.BalanceID, dst.BalanceID, 75)
+
+	refund, err := b.RefundTransaction(context.Background(), txn.TransactionID, true)
+	require.NoError(t, err)
+	assert.Equal(t, txn.TransactionID+"_refund", refund.Reference,
+		"refund reference must be deterministic for idempotency")
+}
+
+// TestRefundTransaction_ConcurrentSingleWinner fires several concurrent refunds
+// of the same applied transaction. The redlock + already-refunded check must let
+// exactly one succeed; the rest must fail without double-crediting the source.
+func TestRefundTransaction_ConcurrentSingleWinner(t *testing.T) {
+	b, ds := newCoreTestBlnk(t)
+	src, dst := newBalancePair(t, ds)
+	txn := recordAppliedTxn(t, b, src.BalanceID, dst.BalanceID, 120)
+
+	const racers = 5
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var successes int
+	wg.Add(racers)
+	for i := 0; i < racers; i++ {
+		go func() {
+			defer wg.Done()
+			if _, err := b.RefundTransaction(context.Background(), txn.TransactionID, true); err == nil {
+				mu.Lock()
+				successes++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, 1, successes, "exactly one concurrent refund may succeed")
+
+	srcAfter, err := ds.GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	assert.Equal(t, "0", srcAfter.Balance.String(),
+		"a single refund must restore the source exactly; concurrent refunds must not double-credit")
+}
+
+// TestRefundTransaction_RejectsNonRefundableStatus asserts the status gate blocks
+// refunds of transactions that never settled (QUEUED/INFLIGHT/SCHEDULED).
+func TestRefundTransaction_RejectsNonRefundableStatus(t *testing.T) {
+	for _, status := range []string{StatusQueued, StatusInflight, StatusScheduled} {
+		t.Run(status, func(t *testing.T) {
+			b, ds := newCoreTestBlnk(t)
+			src, dst := newBalancePair(t, ds)
+
+			draft := &model.Transaction{
+				TransactionID: model.GenerateUUIDWithSuffix("txn"),
+				Reference:     "ref_" + gofakeit.UUID(),
+				Source:        src.BalanceID,
+				Destination:   dst.BalanceID,
+				Amount:        25,
+				Precision:     100,
+				Currency:      "USD",
+				Status:        status,
+				CreatedAt:     time.Now(),
+			}
+			model.ApplyPrecision(draft)
+			model.ApplyPrecision(draft)
+			persisted, err := ds.RecordTransaction(context.Background(), draft)
+			require.NoError(t, err)
+
+			_, err = b.RefundTransaction(context.Background(), persisted.TransactionID, true)
+			require.Error(t, err, "refunding a %s transaction must fail", status)
+			assert.Contains(t, err.Error(), "cannot be refunded")
+		})
+	}
 }
 
 // --- inflight void / commit balance integrity ---------------------------------

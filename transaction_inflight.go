@@ -315,7 +315,11 @@ func (l *Blnk) checkTransactionCommitStatus(amountLeft *big.Int) error {
 // Returns:
 // - error: An error if the requested amount exceeds allowed limits.
 func (l *Blnk) validateRequestedAmount(transaction *model.Transaction, amount *big.Int, amountLeft *big.Int) error {
-	if amount.Cmp(big.NewInt(0)) == 0 {
+	if amount.Sign() < 0 {
+		return fmt.Errorf("commit amount cannot be negative")
+	}
+	// Zero is the sentinel for "commit the full remaining amount".
+	if amount.Sign() == 0 {
 		return nil
 	}
 

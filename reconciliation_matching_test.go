@@ -18,6 +18,8 @@ package blnk
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -578,7 +580,7 @@ func TestRecon_MatchSingleTransaction_ConsumesGroupAndOrientsIDs(t *testing.T) {
 	t.Run("internal grouped (one_to_many orientation)", func(t *testing.T) {
 		groupMap := map[string]bool{"g1": true}
 		matchChan := make(chan model.Match, 2)
-		matched := b.matchSingleTransaction(single, grouped, groupMap, rules, false, matchChan)
+		matched := b.matchSingleTransaction(single, grouped, groupMap, &sync.Mutex{}, rules, false, matchChan)
 		require.True(t, matched)
 		close(matchChan)
 
@@ -599,7 +601,7 @@ func TestRecon_MatchSingleTransaction_ConsumesGroupAndOrientsIDs(t *testing.T) {
 	t.Run("external grouped (many_to_one orientation)", func(t *testing.T) {
 		groupMap := map[string]bool{"g1": true}
 		matchChan := make(chan model.Match, 2)
-		matched := b.matchSingleTransaction(single, grouped, groupMap, rules, true, matchChan)
+		matched := b.matchSingleTransaction(single, grouped, groupMap, &sync.Mutex{}, rules, true, matchChan)
 		require.True(t, matched)
 		close(matchChan)
 
@@ -613,10 +615,75 @@ func TestRecon_MatchSingleTransaction_ConsumesGroupAndOrientsIDs(t *testing.T) {
 		groupMap := map[string]bool{"g1": true}
 		matchChan := make(chan model.Match, 2)
 		other := &model.Transaction{TransactionID: "single_2", Amount: 42, CreatedAt: reconBaseTime, Currency: "USD"}
-		matched := b.matchSingleTransaction(other, grouped, groupMap, rules, false, matchChan)
+		matched := b.matchSingleTransaction(other, grouped, groupMap, &sync.Mutex{}, rules, false, matchChan)
 		assert.False(t, matched)
 		assert.Equal(t, map[string]bool{"g1": true}, groupMap)
 	})
+}
+
+// TestRecon_MatchSingleTransaction_ConcurrentClaimIsRaceFree drives many single
+// transactions at a shared groupMap from multiple goroutines at once. Each group
+// must be claimed at most once (no double-match) and the shared map must not be
+// read+written concurrently. Run under -race to assert the claim-and-delete is
+// serialized by the supplied mutex.
+func TestRecon_MatchSingleTransaction_ConcurrentClaimIsRaceFree(t *testing.T) {
+	b := &Blnk{}
+
+	const groups = 25
+	const racersPerGroup = 4
+
+	grouped := make(map[string][]*model.Transaction, groups)
+	groupMap := make(map[string]bool, groups)
+	for g := 0; g < groups; g++ {
+		key := fmt.Sprintf("g%d", g)
+		grouped[key] = []*model.Transaction{
+			{TransactionID: key + "_m", Amount: 300, CreatedAt: reconBaseTime, Currency: "USD"},
+		}
+		groupMap[key] = true
+	}
+
+	rules := []model.MatchingRule{{RuleID: "r", Criteria: []model.MatchingCriteria{
+		{Field: "amount", Operator: "equals", AllowableDrift: 0},
+	}}}
+
+	// One match record per single-member group claim.
+	matchChan := make(chan model.Match, groups*racersPerGroup)
+	var mu sync.Mutex
+	var groupMapMu sync.Mutex
+
+	var claimed int64
+	var wg sync.WaitGroup
+	for g := 0; g < groups; g++ {
+		for r := 0; r < racersPerGroup; r++ {
+			wg.Add(1)
+			go func(g, r int) {
+				defer wg.Done()
+				single := &model.Transaction{
+					TransactionID: fmt.Sprintf("single_%d_%d", g, r),
+					Amount:        300,
+					CreatedAt:     reconBaseTime,
+					Currency:      "USD",
+				}
+				if b.matchSingleTransaction(single, grouped, groupMap, &groupMapMu, rules, false, matchChan) {
+					mu.Lock()
+					claimed++
+					mu.Unlock()
+				}
+			}(g, r)
+		}
+	}
+	wg.Wait()
+	close(matchChan)
+
+	// Each of the `groups` groups can be claimed by exactly one racer.
+	assert.Equal(t, int64(groups), claimed, "every group must be claimed exactly once across concurrent racers")
+	assert.Empty(t, groupMap, "all groups must be consumed")
+
+	var records int
+	for range matchChan {
+		records++
+	}
+	assert.Equal(t, groups, records, "exactly one match record per single-member group")
 }
 
 func TestRecon_OneToManyReportsUnmatchedWhenNoGroupsExist(t *testing.T) {

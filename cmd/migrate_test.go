@@ -115,7 +115,7 @@ func TestMigrateUpCommand_RunsViaCobra(t *testing.T) {
 	// Execute the actual cobra command (bypassing root preRun, which needs a
 	// blnk.json file) and verify it migrated the scratch database.
 	upCmd := migrateUpCommands()
-	upCmd.Run(upCmd, nil)
+	require.NoError(t, upCmd.RunE(upCmd, nil))
 
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
@@ -126,4 +126,16 @@ func TestMigrateUpCommand_RunsViaCobra(t *testing.T) {
 		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'blnk' AND table_name = 'gorp_migrations')`,
 	).Scan(&exists))
 	assert.True(t, exists, "the cobra up command must record applied migrations")
+}
+
+func TestMigrateUpCommand_ReturnsErrorOnFailure(t *testing.T) {
+	// A migration failure must surface as an error so the CLI exits non-zero
+	// (compose/k8s chain `migrate up && blnk start`).
+	config.MockConfig(&config.Configuration{
+		DataSource: config.DataSourceConfig{Dns: "postgres://invalid:invalid@127.0.0.1:1/nope?sslmode=disable&connect_timeout=2"},
+		Redis:      config.RedisConfig{Dns: "localhost:6379"},
+	})
+
+	upCmd := migrateUpCommands()
+	require.Error(t, upCmd.RunE(upCmd, nil), "migrate up must return an error when migrations fail")
 }

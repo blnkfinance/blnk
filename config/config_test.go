@@ -18,9 +18,61 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 )
+
+func TestValidateAndAddDefaults_InsecureWarning(t *testing.T) {
+	baseConfig := func() Configuration {
+		return Configuration{
+			ProjectName: "Test Project",
+			DataSource:  DataSourceConfig{Dns: "some-dns"},
+			Redis:       RedisConfig{Dns: "localhost:6379"},
+		}
+	}
+
+	t.Run("warns when secure is disabled", func(t *testing.T) {
+		hook := logtest.NewGlobal()
+		defer hook.Reset()
+
+		cnf := baseConfig()
+		cnf.Server.Secure = false
+		if err := cnf.validateAndAddDefaults(); err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		var warned bool
+		for _, entry := range hook.AllEntries() {
+			if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "authentication is DISABLED") {
+				warned = true
+			}
+		}
+		if !warned {
+			t.Errorf("Expected a SECURITY warning when server.secure is false")
+		}
+	})
+
+	t.Run("no warning when secure is enabled", func(t *testing.T) {
+		hook := logtest.NewGlobal()
+		defer hook.Reset()
+
+		cnf := baseConfig()
+		cnf.Server.Secure = true
+		if err := cnf.validateAndAddDefaults(); err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		for _, entry := range hook.AllEntries() {
+			if strings.Contains(entry.Message, "authentication is DISABLED") {
+				t.Errorf("Did not expect a SECURITY warning when server.secure is true")
+			}
+		}
+	})
+}
 
 func TestValidateAndAddDefaults(t *testing.T) {
 	// Test case with empty ProjectName and DataSource DNS

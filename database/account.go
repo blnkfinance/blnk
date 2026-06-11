@@ -188,26 +188,30 @@ func scanAccountRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Account,
 	identity := &model.Identity{}
 	ledger := &model.Ledger{}
 
-	metaDataJSON := []byte{}
+	accountMetaJSON := []byte{}
 	var scanArgs []interface{}
 
 	// Default fields for the account
 	scanArgs = append(scanArgs, &account.AccountID, &account.Name, &account.Number, &account.BankName,
 		&account.Currency,
-		&account.LedgerID, &account.IdentityID, &account.BalanceID, &balance.CreatedAt, &metaDataJSON)
+		&account.LedgerID, &account.IdentityID, &account.BalanceID, &account.CreatedAt, &accountMetaJSON)
 
-	// Add fields for balance if included
+	// Balance NUMERIC columns are scanned as strings and parsed into big.Int,
+	// since database/sql cannot scan directly into *big.Int.
+	var balanceStr, creditBalanceStr, debitBalanceStr string
+	balanceMetaJSON := []byte{}
 	if contains(include, "balance") {
-		scanArgs = append(scanArgs, &balance.BalanceID, &balance.Balance, &balance.CreditBalance,
-			&balance.DebitBalance, &balance.Currency, &balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &metaDataJSON)
+		scanArgs = append(scanArgs, &balance.BalanceID, &balanceStr, &creditBalanceStr,
+			&debitBalanceStr, &balance.Currency, &balance.LedgerID, &balance.IdentityID, &balance.CreatedAt, &balanceMetaJSON)
 	}
 
 	// Add fields for identity if included
+	identityMetaJSON := []byte{}
 	if contains(include, "identity") {
 		scanArgs = append(scanArgs, &identity.IdentityID, &identity.FirstName, &identity.OrganizationName, &identity.Category, &identity.LastName,
 			&identity.OtherNames, &identity.Gender, &identity.DOB, &identity.EmailAddress,
 			&identity.PhoneNumber, &identity.Nationality, &identity.Street, &identity.Country,
-			&identity.State, &identity.PostCode, &identity.City, &identity.IdentityType, &identity.CreatedAt, &metaDataJSON)
+			&identity.State, &identity.PostCode, &identity.City, &identity.IdentityType, &identity.CreatedAt, &identityMetaJSON)
 	}
 
 	// Add fields for ledger if included
@@ -224,10 +228,39 @@ func scanAccountRow(row *sql.Row, tx *sql.Tx, include []string) (*model.Account,
 	}
 
 	// Unmarshal the account metadata from JSON
-	err = json.Unmarshal(metaDataJSON, &account.MetaData)
+	err = json.Unmarshal(accountMetaJSON, &account.MetaData)
 	if err != nil {
 		_ = tx.Rollback()
 		return nil, err
+	}
+
+	if contains(include, "balance") {
+		balance.Balance, err = parseBigInt(balanceStr)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("failed to parse balance: %w", err)
+		}
+		balance.CreditBalance, err = parseBigInt(creditBalanceStr)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("failed to parse credit_balance: %w", err)
+		}
+		balance.DebitBalance, err = parseBigInt(debitBalanceStr)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("failed to parse debit_balance: %w", err)
+		}
+		if err = json.Unmarshal(balanceMetaJSON, &balance.MetaData); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+	}
+
+	if contains(include, "identity") {
+		if err = json.Unmarshal(identityMetaJSON, &identity.MetaData); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 	}
 
 	// Assign related entities if included

@@ -410,6 +410,10 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	amount := model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: req.Amount, TransactionID: id}, ds.Conn)
 
 	if req.PreciseAmount != nil {
+		if req.PreciseAmount.Sign() <= 0 {
+			respondCode(c, apierror.ErrTxnInvalidAmount, "precise_amount must be positive", nil)
+			return
+		}
 		amount = req.PreciseAmount
 	}
 
@@ -484,6 +488,13 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), bulkReq)
 	// Handle the response based on the result and error from the service layer
 	if err != nil {
+		// Some failures (e.g. async-bulk semaphore saturation) return a nil
+		// result alongside a typed API error; surface that error's own status
+		// code instead of dereferencing the nil result.
+		if result == nil {
+			respondError(c, err, withDefault(apierror.ErrGenBadRequest))
+			return
+		}
 		// If there was an error during synchronous processing.
 		// classifyMessage picks the most specific catalog code from the
 		// detailed result error; batch_id stays a top-level sibling field.

@@ -126,28 +126,3 @@ func (l *Blnk) GetTransactionByRef(ctx context.Context, reference string) (model
 	span.AddEvent("Transaction retrieved by reference", trace.WithAttributes(attribute.String("transaction.reference", reference)))
 	return transaction, nil
 }
-
-// UpdateTransactionStatus updates the status of a transaction by its ID in the datasource.
-// It starts a tracing span, updates the transaction status, and records relevant events and errors.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - id string: The ID of the transaction to be updated.
-// - status string: The new status to be set for the transaction.
-//
-// Returns:
-// - error: An error if the transaction status could not be updated.
-func (l *Blnk) UpdateTransactionStatus(ctx context.Context, id string, status string) error {
-	ctx, span := tracer.Start(ctx, "UpdateTransactionStatus")
-	defer span.End()
-
-	// Update the transaction status in the datasource
-	err := l.datasource.UpdateTransactionStatus(ctx, id, status)
-	if err != nil {
-		span.RecordError(err)
-		return err
-	}
-
-	span.AddEvent("Transaction status updated", trace.WithAttributes(attribute.String("transaction.id", id), attribute.String("transaction.status", status)))
-	return nil
-}
