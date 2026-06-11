@@ -169,6 +169,7 @@ type TransactionConfig struct {
 	EnableCoalescing           bool          `json:"enable_coalescing" envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
 	EnableQueuedChecks         bool          `json:"enable_queued_checks" envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
 	DisableBatchReferenceCheck bool          `json:"disable_batch_reference_check" envconfig:"BLNK_TRANSACTION_DISABLE_BATCH_REFERENCE_CHECK"`
+	HashChain                  HashChainConfig `json:"hash_chain"`
 }
 
 type ReconciliationConfig struct {
@@ -221,6 +222,16 @@ type Configuration struct {
 	Transaction             TransactionConfig             `json:"transaction"`
 	Reconciliation          ReconciliationConfig          `json:"reconciliation"`
 	Queue                   QueueConfig                   `json:"queue"`
+}
+
+// HashChainConfig controls the background hash-chainer that seals transaction
+// history into a tamper-evident chain. It lives under transaction config and is
+// disabled by default.
+type HashChainConfig struct {
+	Enabled       bool          `json:"enabled" envconfig:"BLNK_TRANSACTION_HASHCHAIN_ENABLED"`
+	PollInterval  time.Duration `json:"poll_interval" envconfig:"BLNK_TRANSACTION_HASHCHAIN_POLL_INTERVAL"`
+	BatchSize     int           `json:"batch_size" envconfig:"BLNK_TRANSACTION_HASHCHAIN_BATCH_SIZE"`
+	TrailingDelay time.Duration `json:"trailing_delay" envconfig:"BLNK_TRANSACTION_HASHCHAIN_TRAILING_DELAY"`
 }
 
 func (cnf *Configuration) RemoteMonitoringDSN() string {
@@ -340,6 +351,7 @@ func (cnf *Configuration) setDefaultValues() {
 	cnf.setTransactionDefaults()
 	cnf.setReconciliationDefaults()
 	cnf.setQueueDefaults()
+	cnf.setHashChainDefaults()
 
 	if cnf.EnableTelemetry {
 		logrus.Info("telemetry enabled")
@@ -351,6 +363,19 @@ func (cnf *Configuration) setDefaultValues() {
 		logrus.Info("observability enabled")
 	} else {
 		logrus.Info("observability disabled")
+	}
+}
+
+func (cnf *Configuration) setHashChainDefaults() {
+	// Enabled stays false unless explicitly turned on.
+	if cnf.Transaction.HashChain.PollInterval <= 0 {
+		cnf.Transaction.HashChain.PollInterval = 5 * time.Second
+	}
+	if cnf.Transaction.HashChain.BatchSize <= 0 {
+		cnf.Transaction.HashChain.BatchSize = 1000
+	}
+	if cnf.Transaction.HashChain.TrailingDelay <= 0 {
+		cnf.Transaction.HashChain.TrailingDelay = 30 * time.Second
 	}
 }
 

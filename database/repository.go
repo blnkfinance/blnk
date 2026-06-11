@@ -37,6 +37,7 @@ type IDataSource interface {
 	reconciliation // Interface for reconciliation-related operations
 	apikey         // Interface for API key operations
 	lineage        // Interface for fund lineage operations
+	chain          // Interface for hash-chain operations
 }
 
 // transaction defines methods for handling transactions.
@@ -192,4 +193,12 @@ type lineage interface {
 	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error                                                     // Marks an outbox entry as failed
 	GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error)                        // Gets outbox entry by transaction ID
 	HasPendingCreditOutbox(ctx context.Context, balanceID string) (bool, error)                                              // Checks if there are pending credit outbox entries for a balance
+}
+
+// chain defines the hash-chain (tamper-evidence) operations.
+type chain interface {
+	ChainPendingTransactions(ctx context.Context, cutoff time.Time, batchSize int) (int, error)           // Seals the next batch of unchained transactions
+	GetChainState(ctx context.Context) (*model.ChainState, error)                                         // Returns the global chain bookmark
+	GetChainedTransactionsAfter(ctx context.Context, afterSeq int64, limit int) ([]model.ChainedTransaction, error) // Pages chained transactions in chain order
+	CountUnchainedTransactions(ctx context.Context, cutoff time.Time) (int64, error)                      // Counts the chainer backlog
 }
