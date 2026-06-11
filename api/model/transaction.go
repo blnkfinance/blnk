@@ -77,6 +77,9 @@ type InflightUpdate struct {
 	Status        string   `json:"status"`
 	Amount        float64  `json:"amount"`
 	PreciseAmount *big.Int `json:"precise_amount,omitempty"`
+	// SkipQueue processes the commit/void synchronously instead of routing it
+	// through the inflight-commit queue (the default).
+	SkipQueue bool `json:"skip_queue"`
 }
 
 // MaxBulkInflightItems caps the number of transactions accepted in a single
@@ -101,6 +104,9 @@ const MaxInstantReconciliationItems = 10000
 // of the batch.
 type BulkInflightVoidRequest struct {
 	TransactionIDs []string `json:"transaction_ids"`
+	// SkipQueue processes every item synchronously instead of routing them
+	// through the inflight-commit queue (the default).
+	SkipQueue bool `json:"skip_queue"`
 }
 
 // BulkInflightCommitItem describes one transaction in a bulk commit request.
@@ -118,6 +124,9 @@ type BulkInflightCommitItem struct {
 // its own amount for partial commits.
 type BulkInflightCommitRequest struct {
 	Transactions []BulkInflightCommitItem `json:"transactions"`
+	// SkipQueue processes every item synchronously instead of routing them
+	// through the inflight-commit queue (the default).
+	SkipQueue bool `json:"skip_queue"`
 }
 
 // BulkInflightResult is the per-item outcome reported in BulkInflightResponse.

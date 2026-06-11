@@ -19,6 +19,7 @@ package blnk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"time"
@@ -45,6 +46,58 @@ type Queue struct {
 // TransactionTypePayload represents the payload for a transaction type.
 type TransactionTypePayload struct {
 	Data model.Transaction
+}
+
+// Inflight action names carried in an InflightActionPayload.
+const (
+	InflightActionCommit = "commit"
+	InflightActionVoid   = "void"
+)
+
+// ErrInflightActionQueued is returned by EnqueueInflightAction when a commit or
+// void for the same transaction is already queued (asynq TaskID conflict). The
+// API maps it to HTTP 409.
+var ErrInflightActionQueued = errors.New("a commit or void is already queued for this transaction")
+
+// InflightActionPayload is the task payload for a queued inflight commit/void.
+// ActionID is generated once at enqueue time and seeds the per-leg commit/void
+// references so asynq retries are idempotent.
+type InflightActionPayload struct {
+	TransactionID string `json:"transaction_id"`
+	Action        string `json:"action"`         // "commit" | "void"
+	PreciseAmount string `json:"precise_amount"` // big.Int string; "0" = full remaining
+	ActionID      string `json:"action_id"`
+}
+
+// EnqueueInflightAction enqueues a commit or void to the inflight-commit queue.
+// The asynq TaskID dedups concurrent actions for the same transaction: a second
+// enqueue while one is pending/active returns ErrInflightActionQueued. The
+// "inflight-action:" prefix is intentionally distinct from the scheduled
+// auto-commit TaskID (the bare transaction ID) so a pre-scheduled
+// inflight_commit_date task does not block a manual commit/void.
+func (q *Queue) EnqueueInflightAction(ctx context.Context, p InflightActionPayload) error {
+	payload, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+
+	taskOptions := []asynq.Option{
+		asynq.TaskID("inflight-action:" + p.TransactionID),
+		asynq.Queue(q.config.Queue.InflightCommitQueue),
+		asynq.MaxRetry(q.config.Queue.MaxRetryAttempts),
+	}
+
+	task := asynq.NewTask(q.config.Queue.InflightCommitQueue, payload, taskOptions...)
+	if _, err := q.Client.EnqueueContext(ctx, task); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return ErrInflightActionQueued
+		}
+		logrus.WithError(err).WithField("transaction_id", p.TransactionID).Error("failed to enqueue inflight action")
+		return err
+	}
+
+	logrus.WithFields(logrus.Fields{"transaction_id": p.TransactionID, "action": p.Action}).Debug("successfully enqueued inflight action")
+	return nil
 }
 
 // NewQueue initializes a new Queue instance with the provided configuration.
@@ -305,7 +358,15 @@ func (q *Queue) GetTransactionFromQueue(transactionID string) (*model.Transactio
 // Returns:
 // - error: An error if the task could not be enqueued.
 func (q *Queue) queueInflightCommit(transactionID string, commitAt time.Time) error {
-	IPayload, err := json.Marshal(transactionID)
+	// Use the same struct payload and worker path as manual actions so the
+	// scheduled auto-commit also covers all inflight legs and is idempotent on
+	// retry. The TaskID stays the bare transaction ID (unchanged).
+	IPayload, err := json.Marshal(InflightActionPayload{
+		TransactionID: transactionID,
+		Action:        InflightActionCommit,
+		PreciseAmount: "0",
+		ActionID:      model.GenerateUUIDWithSuffix("act"),
+	})
 	if err != nil {
 		return err
 	}

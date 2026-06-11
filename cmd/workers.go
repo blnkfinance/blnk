@@ -252,18 +252,39 @@ func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error 
 }
 
 func (b *blnkInstance) processInflightCommit(ctx context.Context, t *asynq.Task) error {
-	var txnID string
-	if err := json.Unmarshal(t.Payload(), &txnID); err != nil {
-		logrus.Error(err)
-		return err
+	var p blnk.InflightActionPayload
+	if err := json.Unmarshal(t.Payload(), &p); err != nil || p.TransactionID == "" {
+		// Legacy payload: a bare JSON string transaction ID from a scheduled
+		// auto-commit enqueued before this change. Treat it as a full commit.
+		var txnID string
+		if serr := json.Unmarshal(t.Payload(), &txnID); serr != nil || txnID == "" {
+			logrus.WithError(serr).Error("failed to unmarshal inflight action payload")
+			return serr
+		}
+		p = blnk.InflightActionPayload{TransactionID: txnID, Action: blnk.InflightActionCommit}
 	}
 
-	_, err := b.blnk.CommitInflightTransaction(ctx, txnID, big.NewInt(0))
+	action := p.Action
+	if action == "" {
+		action = blnk.InflightActionCommit
+	}
+
+	amount := big.NewInt(0)
+	if p.PreciseAmount != "" {
+		if parsed, ok := new(big.Int).SetString(p.PreciseAmount, 10); ok {
+			amount = parsed
+		}
+	}
+
+	retryable, err := b.blnk.RunInflightActionByParent(ctx, p.TransactionID, action, amount, p.ActionID)
+	if err != nil && retryable {
+		return err // transient failure; asynq will retry
+	}
 	if err != nil {
-		return err
+		// Non-retryable failure: ack so the task doesn't poison-loop. The
+		// service layer already logged the per-leg detail.
+		logrus.WithError(err).WithField("transaction_id", p.TransactionID).Error("inflight action failed permanently; acking task")
 	}
-
-	logrus.Printf(" [*] Inflight Transaction Committed %s", txnID)
 	return nil
 }
 

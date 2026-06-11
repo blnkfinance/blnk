@@ -16,6 +16,7 @@ limitations under the License.
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"math/big"
@@ -418,7 +419,29 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	}
 
 	status := req.Status
-	if status == "commit" {
+	if status != blnk.InflightActionCommit && status != blnk.InflightActionVoid {
+		respondCode(c, apierror.ErrTxnInvalidStatusAction, "status not supported. use either commit or void", nil)
+		return
+	}
+
+	// Default: route the action through the inflight-commit queue. The response
+	// is the still-inflight parent plus a queued marker; the worker applies it.
+	if !req.SkipQueue {
+		parent, err := a.blnk.QueueInflightAction(c.Request.Context(), id, amount, status)
+		if err != nil {
+			if errors.Is(err, blnk.ErrInflightActionQueued) {
+				respondCode(c, apierror.ErrGenConflict, "a commit or void is already queued for this transaction", nil)
+				return
+			}
+			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
+			return
+		}
+		c.JSON(http.StatusOK, queuedInflightResponse{Transaction: transformTransaction(parent), Queued: true})
+		return
+	}
+
+	// skip_queue: process synchronously (legacy behavior).
+	if status == blnk.InflightActionCommit {
 		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
 		if err != nil {
 			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
@@ -429,7 +452,7 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 			return
 		}
 		resp = transformTransaction(transaction[0])
-	} else if status == "void" {
+	} else {
 		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
 		if err != nil {
 			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
@@ -440,12 +463,18 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 			return
 		}
 		resp = transformTransaction(transaction[0])
-	} else {
-		respondCode(c, apierror.ErrTxnInvalidStatusAction, "status not supported. use either commit or void", nil)
-		return
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// queuedInflightResponse is the body returned when a commit/void is queued. The
+// embedded transaction promotes all its fields to the top level (unchanged for
+// existing clients); `queued` marks that the action was accepted but not yet
+// applied (the transaction is still INFLIGHT).
+type queuedInflightResponse struct {
+	*model.Transaction
+	Queued bool `json:"queued"`
 }
 
 // CreateBulkTransactions handles the creation of multiple transactions in a batch.
@@ -625,6 +654,11 @@ func (a Api) BulkVoidInflight(c *gin.Context) {
 		items[i] = blnk.BulkInflightItem{TransactionID: id}
 	}
 
+	if !req.SkipQueue {
+		c.JSON(http.StatusOK, a.queueBulkInflight(c.Request.Context(), blnk.InflightActionVoid, items))
+		return
+	}
+
 	outcomes, err := a.blnk.BulkInflightUpdate(c.Request.Context(), blnk.BulkInflightVoid, items, bulkInflightMaxWorkers)
 	if err != nil {
 		respondError(c, err, withDefault(apierror.ErrGenBadRequest))
@@ -632,6 +666,29 @@ func (a Api) BulkVoidInflight(c *gin.Context) {
 	}
 	resp, _ := toAPIResults(outcomes)
 	c.JSON(http.StatusOK, resp)
+}
+
+// queueBulkInflight enqueues a commit/void per item and builds the per-item
+// response: QUEUED on success, ALREADY_QUEUED when one is already in flight
+// (both count as accepted), and a classified failure code if pre-validation
+// rejects the item synchronously.
+func (a Api) queueBulkInflight(ctx context.Context, action string, items []blnk.BulkInflightItem) model2.BulkInflightResponse {
+	resp := model2.BulkInflightResponse{Results: make([]model2.BulkInflightResult, 0, len(items))}
+	for _, it := range items {
+		_, err := a.blnk.QueueInflightAction(ctx, it.TransactionID, it.Amount, action)
+		switch {
+		case err == nil:
+			resp.Results = append(resp.Results, model2.BulkInflightResult{TransactionID: it.TransactionID, Status: "queued", Code: "QUEUED"})
+			resp.Succeeded++
+		case errors.Is(err, blnk.ErrInflightActionQueued):
+			resp.Results = append(resp.Results, model2.BulkInflightResult{TransactionID: it.TransactionID, Status: "queued", Code: "ALREADY_QUEUED", Message: err.Error()})
+			resp.Succeeded++
+		default:
+			resp.Results = append(resp.Results, model2.BulkInflightResult{TransactionID: it.TransactionID, Status: "failed", Code: blnk.ClassifyInflightError(err), Message: err.Error()})
+			resp.Failed++
+		}
+	}
+	return resp
 }
 
 // BulkCommitInflight commits many independently-created inflight
@@ -679,6 +736,11 @@ func (a Api) BulkCommitInflight(c *gin.Context) {
 			amount = model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: it.Amount, TransactionID: it.TransactionID}, ds.Conn)
 		}
 		items[i] = blnk.BulkInflightItem{TransactionID: it.TransactionID, Amount: amount}
+	}
+
+	if !req.SkipQueue {
+		c.JSON(http.StatusOK, a.queueBulkInflight(c.Request.Context(), blnk.InflightActionCommit, items))
+		return
 	}
 
 	outcomes, err := a.blnk.BulkInflightUpdate(c.Request.Context(), blnk.BulkInflightCommit, items, bulkInflightMaxWorkers)
