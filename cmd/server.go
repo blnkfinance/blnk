@@ -403,6 +403,14 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			lineageProcessor.Start(ctx)
 			defer lineageProcessor.Stop()
 
+			// Start the hash-chain processor when enabled. It seals transactions
+			// into a tamper-evident chain off the hot path.
+			if cfg.Transaction.HashChain.Enabled {
+				chainProcessor := blnk.NewChainProcessor(b.blnk)
+				chainProcessor.Start(ctx)
+				defer chainProcessor.Stop()
+			}
+
 			// Start server
 			if err := startServer(router, cfg.Server.Port); err != nil {
 				logrus.Fatal(err)

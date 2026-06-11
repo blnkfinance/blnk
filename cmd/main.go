@@ -127,9 +127,10 @@ func NewCLI() *Blnk {
 	rootCmd.PersistentPreRunE = preRun(b)
 
 	// Add various subcommands to the root command.
-	rootCmd.AddCommand(serverCommands(b))  // Command for starting the server
-	rootCmd.AddCommand(workerCommands(b))  // Command for worker processes
-	rootCmd.AddCommand(migrateCommands(b)) // Command for database/schema migrations
+	rootCmd.AddCommand(serverCommands(b))      // Command for starting the server
+	rootCmd.AddCommand(workerCommands(b))      // Command for worker processes
+	rootCmd.AddCommand(migrateCommands(b))     // Command for database/schema migrations
+	rootCmd.AddCommand(verifyChainCommands(b)) // Command for verifying the transaction hash chain
 
 	return &Blnk{cmd: rootCmd}
 }

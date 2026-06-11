@@ -675,3 +675,29 @@ func (m *MockDataSource) HasPendingCreditOutbox(ctx context.Context, balanceID s
 	args := m.Called(ctx, balanceID)
 	return args.Bool(0), args.Error(1)
 }
+
+func (m *MockDataSource) ChainPendingTransactions(ctx context.Context, cutoff time.Time, batchSize int) (int, error) {
+	args := m.Called(ctx, cutoff, batchSize)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockDataSource) GetChainState(ctx context.Context) (*model.ChainState, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.ChainState), args.Error(1)
+}
+
+func (m *MockDataSource) GetChainedTransactionsAfter(ctx context.Context, afterSeq int64, limit int) ([]model.ChainedTransaction, error) {
+	args := m.Called(ctx, afterSeq, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.ChainedTransaction), args.Error(1)
+}
+
+func (m *MockDataSource) CountUnchainedTransactions(ctx context.Context, cutoff time.Time) (int64, error) {
+	args := m.Called(ctx, cutoff)
+	return args.Get(0).(int64), args.Error(1)
+}
