@@ -580,7 +580,7 @@ func startMonitoringServer(conf *config.Configuration) *http.Server {
 		_, _ = fmt.Fprintf(w, `{"status": "UP", "service": "worker"}`)
 	})
 
-	monitoringMux.Handle("/monitoring/", asynqmonHandler)
+	monitoringMux.Handle("/monitoring/", middleware.MetricsAuthHandler(conf.Server.Secure, conf.Server.MetricsBearerToken, asynqmonHandler))
 	if h := trace.MetricsHandler(); h != nil {
 		monitoringMux.Handle("/metrics", middleware.MetricsAuthHandler(conf.Server.Secure, conf.Server.MetricsBearerToken, h))
 	}

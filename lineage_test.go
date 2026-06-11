@@ -1318,6 +1318,101 @@ func TestProcessLineageFromOutbox(t *testing.T) {
 		err := blnkInstance.ProcessLineageFromOutbox(ctx, entry)
 		assert.NoError(t, err)
 	})
+
+	t.Run("Propagates processing errors so the outbox worker can retry", func(t *testing.T) {
+		// A transient provider-validation DB error must surface from
+		// ProcessLineageFromOutbox so the worker can mark the entry
+		// failed/pending and retry it, rather than completing it and dropping
+		// the lineage record.
+		mockDS := new(mocks.MockDataSource)
+
+		txn := &model.Transaction{
+			TransactionID: "txn_err",
+			Source:        "bln_source",
+			Destination:   "bln_dest",
+			PreciseAmount: big.NewInt(10000),
+			Currency:      "USD",
+			MetaData:      map[string]interface{}{LineageProviderKey: "stripe"},
+		}
+
+		sourceBalance := &model.Balance{BalanceID: "bln_source", TrackFundLineage: true}
+		destBalance := &model.Balance{BalanceID: "bln_dest", TrackFundLineage: false}
+
+		entry := model.LineageOutbox{
+			ID:                   1,
+			TransactionID:        "txn_err",
+			SourceBalanceID:      "bln_source",
+			DestinationBalanceID: "bln_dest",
+			LineageType:          "debit",
+		}
+
+		mockDS.On("GetTransaction", mock.Anything, "txn_err").Return(txn, nil)
+		mockDS.On("GetBalanceByIDLite", "bln_source").Return(sourceBalance, nil)
+		mockDS.On("GetBalanceByIDLite", "bln_dest").Return(destBalance, nil)
+		mockDS.On("GetLineageMappingByProvider", mock.Anything, "bln_source", "stripe").
+			Return((*model.LineageMapping)(nil), assert.AnError)
+
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		err := blnkInstance.ProcessLineageFromOutbox(ctx, entry)
+		assert.Error(t, err, "a transient validation error must propagate, not be swallowed")
+	})
+}
+
+// TestRemainingDebitAmount covers C2: reprocessing a lineage debit must be
+// idempotent and total-conserving. The remaining-to-allocate amount is the
+// original debit minus any per-provider releases already persisted, so a retry
+// after a partial crash allocates only the unreleased remainder and a full retry
+// allocates nothing.
+func TestRemainingDebitAmount(t *testing.T) {
+	ctx := context.Background()
+	mappings := []model.LineageMapping{
+		{Provider: "p1", ShadowBalanceID: "shadow_p1"},
+		{Provider: "p2", ShadowBalanceID: "shadow_p2"},
+	}
+	txn := &model.Transaction{Reference: "ref1", PreciseAmount: big.NewInt(10000)}
+
+	refP1 := releaseReference(txn.Reference, "p1")
+	refP2 := releaseReference(txn.Reference, "p2")
+
+	t.Run("no prior releases returns full amount", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("TransactionExistsByRef", mock.Anything, refP1).Return(false, nil)
+		mockDS.On("TransactionExistsByRef", mock.Anything, refP2).Return(false, nil)
+
+		b := &Blnk{datasource: mockDS}
+		remaining, err := b.remainingDebitAmount(ctx, txn, mappings)
+		assert.NoError(t, err)
+		assert.Equal(t, "10000", remaining.String())
+	})
+
+	t.Run("fully released returns zero so retry allocates nothing", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("TransactionExistsByRef", mock.Anything, refP1).Return(true, nil)
+		mockDS.On("TransactionExistsByRef", mock.Anything, refP2).Return(true, nil)
+		mockDS.On("GetTransactionByRef", mock.Anything, refP1).
+			Return(model.Transaction{PreciseAmount: big.NewInt(6000)}, nil)
+		mockDS.On("GetTransactionByRef", mock.Anything, refP2).
+			Return(model.Transaction{PreciseAmount: big.NewInt(4000)}, nil)
+
+		b := &Blnk{datasource: mockDS}
+		remaining, err := b.remainingDebitAmount(ctx, txn, mappings)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, remaining.Sign(), "a fully-released debit must have nothing left to allocate")
+	})
+
+	t.Run("partial release returns only the unreleased remainder", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		mockDS.On("TransactionExistsByRef", mock.Anything, refP1).Return(true, nil)
+		mockDS.On("TransactionExistsByRef", mock.Anything, refP2).Return(false, nil)
+		mockDS.On("GetTransactionByRef", mock.Anything, refP1).
+			Return(model.Transaction{PreciseAmount: big.NewInt(4000)}, nil)
+
+		b := &Blnk{datasource: mockDS}
+		remaining, err := b.remainingDebitAmount(ctx, txn, mappings)
+		assert.NoError(t, err)
+		assert.Equal(t, "6000", remaining.String(), "retry must allocate only the unreleased remainder")
+	})
 }
 
 func TestLineageOutboxProcessor(t *testing.T) {

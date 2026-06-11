@@ -85,18 +85,62 @@ func (l *Blnk) processLineageDebit(ctx context.Context, txn *model.Transaction, 
 		return fmt.Errorf("failed to get lineage sources: %w", err)
 	}
 
-	allocations := l.calculateAllocation(sources, txn.PreciseAmount, sourceBalance.AllocationStrategy)
+	remaining, err := l.remainingDebitAmount(ctx, txn, mappings)
+	if err != nil {
+		return err
+	}
+	if remaining.Sign() <= 0 {
+		span.AddEvent("Lineage debit already fully processed; nothing to allocate")
+		return nil
+	}
+
+	allocations := l.calculateAllocation(sources, remaining, sourceBalance.AllocationStrategy)
 
 	sourceAggBalance, err := l.getSourceAggregateBalance(ctx, sourceBalance)
 	if err != nil {
 		return err
 	}
 
-	l.processAllocations(ctx, txn, allocations, mappings, sourceBalance, destinationBalance, sourceAggBalance, destLineageBalances)
+	if err := l.processAllocations(ctx, txn, allocations, mappings, sourceBalance, destinationBalance, sourceAggBalance, destLineageBalances); err != nil {
+		return err
+	}
 	l.updateFundAllocationMetadata(ctx, txn, allocations, mappings)
 
 	span.AddEvent("Lineage debit processed", trace.WithAttributes(attribute.Int("allocations", len(allocations))))
 	return nil
+}
+
+// releaseReference and receiveReference build a provider's shadow transaction
+// references, keyed on the parent reference and provider so they are stable
+// across retries.
+func releaseReference(parentRef, provider string) string {
+	return fmt.Sprintf("%s_release_%s", parentRef, provider)
+}
+
+func receiveReference(parentRef, provider string) string {
+	return fmt.Sprintf("%s_receive_%s", parentRef, provider)
+}
+
+// remainingDebitAmount returns the original debit amount minus any releases
+// already persisted for this transaction's providers.
+func (l *Blnk) remainingDebitAmount(ctx context.Context, txn *model.Transaction, mappings []model.LineageMapping) (*big.Int, error) {
+	released := big.NewInt(0)
+	for _, m := range mappings {
+		ref := releaseReference(txn.Reference, m.Provider)
+		exists, err := l.datasource.TransactionExistsByRef(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check release idempotency: %w", err)
+		}
+		if !exists {
+			continue
+		}
+		prior, err := l.datasource.GetTransactionByRef(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load prior release %s: %w", ref, err)
+		}
+		released.Add(released, prior.PreciseAmount)
+	}
+	return new(big.Int).Sub(txn.PreciseAmount, released), nil
 }
 
 // prepareDestinationLineageBalances pre-creates destination shadow and aggregate balances for all providers.
@@ -193,8 +237,8 @@ func (l *Blnk) getSourceAggregateBalance(ctx context.Context, sourceBalance *mod
 // - destinationBalance *model.Balance: The destination balance.
 // - sourceAggBalance *model.Balance: The source aggregate balance.
 // - destLineageBalances map[string]*destinationLineageInfo: Pre-created destination lineage balances (may be nil).
-func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, allocations []Allocation, mappings []model.LineageMapping, sourceBalance, destinationBalance, sourceAggBalance *model.Balance, destLineageBalances map[string]*destinationLineageInfo) {
-	for i, alloc := range allocations {
+func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, allocations []Allocation, mappings []model.LineageMapping, sourceBalance, destinationBalance, sourceAggBalance *model.Balance, destLineageBalances map[string]*destinationLineageInfo) error {
+	for _, alloc := range allocations {
 		if alloc.Amount.Cmp(big.NewInt(0)) == 0 {
 			continue
 		}
@@ -204,16 +248,23 @@ func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, a
 			continue
 		}
 
-		if err := l.queueReleaseTransaction(ctx, txn, alloc, mapping, sourceBalance, sourceAggBalance, i); err != nil {
-			logrus.Errorf("failed to queue release transaction: %v", err)
+		exists, err := l.datasource.TransactionExistsByRef(ctx, releaseReference(txn.Reference, mapping.Provider))
+		if err != nil {
+			return fmt.Errorf("failed to check release idempotency: %w", err)
+		}
+		if exists {
 			continue
 		}
 
-		if err := l.processDestinationLineage(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destLineageBalances, i); err != nil {
-			logrus.Errorf("failed to process destination lineage: %v", err)
-			// Continue processing other allocations even if one fails
+		if err := l.queueReleaseTransaction(ctx, txn, alloc, mapping, sourceBalance, sourceAggBalance); err != nil {
+			return fmt.Errorf("failed to queue release transaction: %w", err)
+		}
+
+		if err := l.processDestinationLineage(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destLineageBalances); err != nil {
+			return fmt.Errorf("failed to process destination lineage: %w", err)
 		}
 	}
+	return nil
 }
 
 // queueReleaseTransaction queues a transaction to release funds from the aggregate balance back to a shadow balance.
@@ -229,14 +280,14 @@ func (l *Blnk) processAllocations(ctx context.Context, txn *model.Transaction, a
 //
 // Returns:
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, sourceAggBalance *model.Balance, index int) error {
+func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, sourceAggBalance *model.Balance) error {
 	releaseTxn := &model.Transaction{
 		Source:        sourceAggBalance.BalanceID,
 		Destination:   alloc.BalanceID,
 		PreciseAmount: new(big.Int).Set(alloc.Amount),
 		Currency:      sourceBalance.Currency,
 		Precision:     txn.Precision,
-		Reference:     fmt.Sprintf("%s_release_%s_%d", txn.Reference, mapping.Provider, index),
+		Reference:     releaseReference(txn.Reference, mapping.Provider),
 		Description:   fmt.Sprintf("Release %s funds", mapping.Provider),
 		MetaData: map[string]interface{}{
 			"_shadow_for":   txn.TransactionID,
@@ -268,7 +319,7 @@ func (l *Blnk) queueReleaseTransaction(ctx context.Context, txn *model.Transacti
 //
 // Returns:
 // - error: An error if destination lineage processing fails.
-func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance *model.Balance, destLineageBalances map[string]*destinationLineageInfo, index int) error {
+func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance *model.Balance, destLineageBalances map[string]*destinationLineageInfo) error {
 	if destinationBalance == nil || !destinationBalance.TrackFundLineage || destinationBalance.IdentityID == "" {
 		return nil
 	}
@@ -286,7 +337,7 @@ func (l *Blnk) processDestinationLineage(ctx context.Context, txn *model.Transac
 	destShadowBalance := destInfo.shadowBalance
 	destAggBalance := destInfo.aggregateBalance
 
-	if err := l.queueReceiveTransaction(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance, index); err != nil {
+	if err := l.queueReceiveTransaction(ctx, txn, alloc, mapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance); err != nil {
 		return fmt.Errorf("failed to queue receive transaction: %w", err)
 	}
 
@@ -354,14 +405,14 @@ func (l *Blnk) getOrCreateDestinationLineageBalances(ctx context.Context, provid
 //
 // Returns:
 // - error: An error if the transaction could not be queued.
-func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance *model.Balance, index int) error {
+func (l *Blnk) queueReceiveTransaction(ctx context.Context, txn *model.Transaction, alloc Allocation, mapping *model.LineageMapping, sourceBalance, destinationBalance, destShadowBalance, destAggBalance *model.Balance) error {
 	receiveTxn := &model.Transaction{
 		Source:        destShadowBalance.BalanceID,
 		Destination:   destAggBalance.BalanceID,
 		PreciseAmount: new(big.Int).Set(alloc.Amount),
 		Currency:      destinationBalance.Currency,
 		Precision:     txn.Precision,
-		Reference:     fmt.Sprintf("%s_receive_%s_%d", txn.Reference, mapping.Provider, index),
+		Reference:     receiveReference(txn.Reference, mapping.Provider),
 		Description:   fmt.Sprintf("Receive %s funds", mapping.Provider),
 		MetaData: map[string]interface{}{
 			"_shadow_for":   txn.TransactionID,

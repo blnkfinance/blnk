@@ -74,10 +74,12 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan stuck queued transaction", err)
 		}
 
-		err = json.Unmarshal(metaDataJSON, &txn.MetaData)
-		if err != nil {
-			span.RecordError(err)
-			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		// A single row with malformed metadata (e.g. a legacy array-shaped
+		// meta_data) must not abort the whole recovery sweep; skip it and keep
+		// recovering the rest.
+		if err = json.Unmarshal(metaDataJSON, &txn.MetaData); err != nil {
+			logrus.Warnf("skipping stuck transaction %s: unparseable metadata: %v", txn.TransactionID, err)
+			continue
 		}
 
 		txn.PreciseAmount, err = parseBigInt(preciseAmountStr)

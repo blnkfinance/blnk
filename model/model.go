@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -16,11 +17,32 @@ import (
 )
 
 // precisionCache stores transaction precisions fetched from the database.
-var precisionCache map[string]float64
+// It is read-through over the database (the source of truth) and is bounded
+// and concurrency-safe via precisionCacheMu.
+var (
+	precisionCacheMu sync.RWMutex
+	precisionCache   = make(map[string]float64)
+)
 
-// init initializes the precisionCache.
-func init() {
-	precisionCache = make(map[string]float64)
+const precisionCacheMaxEntries = 100_000
+
+// getCachedPrecision returns a cached precision for transactionID, if present.
+func getCachedPrecision(transactionID string) (float64, bool) {
+	precisionCacheMu.RLock()
+	defer precisionCacheMu.RUnlock()
+	precision, found := precisionCache[transactionID]
+	return precision, found
+}
+
+// setCachedPrecision stores a precision, resetting the cache if it reaches the
+// size bound (entries are immutable, so a reset only forces re-fetches).
+func setCachedPrecision(transactionID string, precision float64) {
+	precisionCacheMu.Lock()
+	defer precisionCacheMu.Unlock()
+	if len(precisionCache) >= precisionCacheMaxEntries {
+		precisionCache = make(map[string]float64)
+	}
+	precisionCache[transactionID] = precision
 }
 
 // GenerateUUIDWithSuffix generates a UUID with a given module name as a suffix.
@@ -182,53 +204,78 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 	return fmt.Errorf("insufficient funds in source balance")
 }
 
-// CommitInflightDebit commits a debit from the inflight balance and adds it to the debit balance.
-// This is part of the finalization process for inflight transactions.
-func (balance *Balance) CommitInflightDebit(transaction *Transaction) {
-	balance.InitializeBalanceFields()
-	preciseAmount := ApplyPrecision(transaction) // Apply precision to the transaction amount.
-	transactionAmount := preciseAmount           // Convert to *big.Int.
-
-	if balance.InflightDebitBalance.Cmp(transactionAmount) >= 0 {
-		// Deduct from inflight and add to regular debit balance.
-		balance.InflightDebitBalance.Sub(balance.InflightDebitBalance, transactionAmount)
-		balance.DebitBalance.Add(balance.DebitBalance, transactionAmount)
-		balance.computeBalance(true)  // Recompute inflight balance.
-		balance.computeBalance(false) // Recompute regular balance.
+// checkSufficientInflightDebit returns an error when the inflight debit balance
+// cannot cover amount.
+func (balance *Balance) checkSufficientInflightDebit(amount *big.Int) error {
+	if balance.InflightDebitBalance.Cmp(amount) < 0 {
+		return fmt.Errorf("insufficient inflight debit balance: have %s, need %s",
+			balance.InflightDebitBalance.String(), amount.String())
 	}
+	return nil
+}
+
+// checkSufficientInflightCredit mirrors checkSufficientInflightDebit for the credit side.
+func (balance *Balance) checkSufficientInflightCredit(amount *big.Int) error {
+	if balance.InflightCreditBalance.Cmp(amount) < 0 {
+		return fmt.Errorf("insufficient inflight credit balance: have %s, need %s",
+			balance.InflightCreditBalance.String(), amount.String())
+	}
+	return nil
+}
+
+// CommitInflightDebit commits a debit from the inflight balance and adds it to the
+// debit balance, returning an error if the inflight hold cannot cover the amount.
+func (balance *Balance) CommitInflightDebit(transaction *Transaction) error {
+	balance.InitializeBalanceFields()
+	transactionAmount := ApplyPrecision(transaction)
+
+	if err := balance.checkSufficientInflightDebit(transactionAmount); err != nil {
+		return err
+	}
+	// Deduct from inflight and add to regular debit balance.
+	balance.InflightDebitBalance.Sub(balance.InflightDebitBalance, transactionAmount)
+	balance.DebitBalance.Add(balance.DebitBalance, transactionAmount)
+	balance.computeBalance(true)  // Recompute inflight balance.
+	balance.computeBalance(false) // Recompute regular balance.
+	return nil
 }
 
 // CommitInflightCredit commits a credit from the inflight balance and adds it to the credit balance.
-func (balance *Balance) CommitInflightCredit(transaction *Transaction) {
+func (balance *Balance) CommitInflightCredit(transaction *Transaction) error {
 	balance.InitializeBalanceFields()
-	preciseAmount := ApplyPrecision(transaction)
-	transactionAmount := preciseAmount
+	transactionAmount := ApplyPrecision(transaction)
 
-	if balance.InflightCreditBalance.Cmp(transactionAmount) >= 0 {
-		// Deduct from inflight and add to regular credit balance.
-		balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, transactionAmount)
-		balance.CreditBalance.Add(balance.CreditBalance, transactionAmount)
-		balance.computeBalance(true)  // Recompute inflight balance.
-		balance.computeBalance(false) // Recompute regular balance.
+	if err := balance.checkSufficientInflightCredit(transactionAmount); err != nil {
+		return err
 	}
+	// Deduct from inflight and add to regular credit balance.
+	balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, transactionAmount)
+	balance.CreditBalance.Add(balance.CreditBalance, transactionAmount)
+	balance.computeBalance(true)  // Recompute inflight balance.
+	balance.computeBalance(false) // Recompute regular balance.
+	return nil
 }
 
 // RollbackInflightCredit rolls back (decreases) the inflight credit balance by the specified amount.
-func (balance *Balance) RollbackInflightCredit(amount *big.Int) {
+func (balance *Balance) RollbackInflightCredit(amount *big.Int) error {
 	balance.InitializeBalanceFields()
-	if balance.InflightCreditBalance.Cmp(amount) >= 0 {
-		balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, amount)
-		balance.computeBalance(true) // Update inflight balance.
+	if err := balance.checkSufficientInflightCredit(amount); err != nil {
+		return err
 	}
+	balance.InflightCreditBalance.Sub(balance.InflightCreditBalance, amount)
+	balance.computeBalance(true) // Update inflight balance.
+	return nil
 }
 
 // RollbackInflightDebit rolls back (decreases) the inflight debit balance by the specified amount.
-func (balance *Balance) RollbackInflightDebit(amount *big.Int) {
+func (balance *Balance) RollbackInflightDebit(amount *big.Int) error {
 	balance.InitializeBalanceFields()
-	if balance.InflightDebitBalance.Cmp(amount) >= 0 {
-		balance.InflightDebitBalance.Sub(balance.InflightDebitBalance, amount)
-		balance.computeBalance(true) // Update inflight balance.
+	if err := balance.checkSufficientInflightDebit(amount); err != nil {
+		return err
 	}
+	balance.InflightDebitBalance.Sub(balance.InflightDebitBalance, amount)
+	balance.computeBalance(true) // Update inflight balance.
+	return nil
 }
 
 // ApplyPrecision handles both operations involving precision:
@@ -265,7 +312,7 @@ func applyPrecisionLogic(transaction *Transaction) *big.Int {
 // It returns the precision, a boolean indicating if found, and an error.
 func fetchTransactionPrecisionFromDB(db *sql.DB, transactionID string) (float64, bool, error) {
 	// Check cache first
-	if precision, found := precisionCache[transactionID]; found {
+	if precision, found := getCachedPrecision(transactionID); found {
 		logrus.WithFields(logrus.Fields{
 			"transaction_id": transactionID,
 			"precision":      precision,
@@ -298,7 +345,7 @@ func fetchTransactionPrecisionFromDB(db *sql.DB, transactionID string) (float64,
 	}
 
 	// Store in cache
-	precisionCache[transactionID] = precision
+	setCachedPrecision(transactionID, precision)
 	logrus.WithFields(logrus.Fields{
 		"transaction_id": transactionID,
 		"precision":      precision,
@@ -391,9 +438,15 @@ func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 	return result
 }
 
-// validate checks if the transaction is valid (e.g., ensuring positive amount).
+// validate checks if the transaction has a positive amount.
 func (transaction *Transaction) validate() error {
-	if transaction.Amount <= 0 && transaction.PreciseAmount == nil {
+	if transaction.PreciseAmount != nil {
+		if transaction.PreciseAmount.Sign() <= 0 {
+			return errors.New("transaction precise amount must be positive")
+		}
+		return nil
+	}
+	if transaction.Amount <= 0 {
 		return errors.New("transaction amount must be positive")
 	}
 	return nil

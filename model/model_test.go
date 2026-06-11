@@ -371,7 +371,7 @@ func TestBalance_CommitInflightDebit(t *testing.T) {
 		Precision: 1,
 	}
 
-	balance.CommitInflightDebit(txn)
+	assert.NoError(t, balance.CommitInflightDebit(txn))
 
 	// Expected: InflightDebitBalance should decrease by 300
 	assert.Equal(t, big.NewInt(200), balance.InflightDebitBalance)
@@ -392,7 +392,7 @@ func TestBalance_CommitInflightCredit(t *testing.T) {
 		Amount:    300,
 		Precision: 1,
 	}
-	balance.CommitInflightCredit(txn)
+	assert.NoError(t, balance.CommitInflightCredit(txn))
 	assert.Equal(t, big.NewInt(100), balance.InflightCreditBalance)
 	assert.Equal(t, big.NewInt(400), balance.CreditBalance)
 }
@@ -402,7 +402,7 @@ func TestBalance_RollbackInflightCredit(t *testing.T) {
 		InflightCreditBalance: big.NewInt(400),
 	}
 	amount := big.NewInt(200)
-	balance.RollbackInflightCredit(amount)
+	assert.NoError(t, balance.RollbackInflightCredit(amount))
 	assert.Equal(t, big.NewInt(200), balance.InflightCreditBalance)
 }
 
@@ -411,7 +411,7 @@ func TestBalance_RollbackInflightDebit(t *testing.T) {
 		InflightDebitBalance: big.NewInt(500),
 	}
 	amount := big.NewInt(300)
-	balance.RollbackInflightDebit(amount)
+	assert.NoError(t, balance.RollbackInflightDebit(amount))
 	assert.Equal(t, big.NewInt(200), balance.InflightDebitBalance)
 }
 

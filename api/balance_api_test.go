@@ -32,6 +32,7 @@ import (
 	"github.com/blnkfinance/blnk/model"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateBalance(t *testing.T) {
@@ -151,6 +152,58 @@ func TestGetBalance(t *testing.T) {
 	assert.Equal(t, big.NewInt(0), newBalance.InflightCreditBalance)
 	assert.Equal(t, big.NewInt(0), newBalance.InflightDebitBalance)
 	assert.Equal(t, int64(0), newBalance.Version)
+}
+
+func TestGetBalanceWithIncludes(t *testing.T) {
+	router, b, _ := setupRouter()
+	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+	require.NoError(t, err)
+
+	orgName := "Acme " + gofakeit.UUID()
+	identity, err := b.CreateIdentity(model.Identity{
+		IdentityType:     "organization",
+		OrganizationName: orgName,
+		Category:         "business",
+		EmailAddress:     gofakeit.Email(),
+	})
+	require.NoError(t, err)
+
+	newBalance, err := b.CreateBalance(context.Background(), model.Balance{
+		LedgerID:   newLedger.LedgerID,
+		Currency:   "USD",
+		IdentityID: identity.IdentityID,
+	})
+	require.NoError(t, err)
+
+	t.Run("include=identity returns the joined identity", func(t *testing.T) {
+		var response model.Balance
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/%s?include=identity", newBalance.BalanceID),
+			Router:   router,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, newBalance.BalanceID, response.BalanceID)
+		require.NotNil(t, response.Identity, "identity must be populated")
+		assert.Equal(t, identity.IdentityID, response.Identity.IdentityID)
+		assert.Equal(t, orgName, response.Identity.OrganizationName, "organization_name must round-trip (regression: i_name typo)")
+	})
+
+	t.Run("include=ledger returns the joined ledger", func(t *testing.T) {
+		var response model.Balance
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balances/%s?include=ledger", newBalance.BalanceID),
+			Router:   router,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.Code)
+		require.NotNil(t, response.Ledger)
+		assert.Equal(t, newLedger.LedgerID, response.Ledger.LedgerID)
+	})
 }
 
 func TestGetBalances(t *testing.T) {

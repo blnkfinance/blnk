@@ -134,6 +134,11 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 }
 
 func processTransactionAsync(ctx context.Context, l *Blnk, transaction *model.Transaction, originalRef string, originalTxnID string, transactions []*model.Transaction) {
+	// The background worker mutates the transaction (metadata, timestamps,
+	// precise amount) while the caller still holds the pointer returned from
+	// QueueTransaction. Snapshot it so the worker never races a caller that
+	// inspects the returned transaction.
+	asyncTxn := cloneTransactionForAsync(transaction)
 	go func() {
 		if err := asyncTxnSemaphore.Acquire(ctx, 1); err != nil {
 			logrus.WithError(err).Error("failed to acquire async txn semaphore")
@@ -144,17 +149,36 @@ func processTransactionAsync(ctx context.Context, l *Blnk, transaction *model.Tr
 		ctx, span := tracer.Start(ctx, "ProcessTransactionAsync")
 		defer span.End()
 
-		queueTransactions, err := l.processTxns(ctx, transaction, transactions, originalTxnID, originalRef)
+		queueTransactions, err := l.processTxns(ctx, asyncTxn, transactions, originalTxnID, originalRef)
 		if err != nil {
 			span.RecordError(err)
 		}
 
-		if !transaction.SkipQueue {
-			if err := enqueueTransactions(ctx, l.queue, transaction, queueTransactions); err != nil {
+		if !asyncTxn.SkipQueue {
+			if err := enqueueTransactions(ctx, l.queue, asyncTxn, queueTransactions); err != nil {
 				span.RecordError(err)
 			}
 		}
 	}()
+}
+
+// cloneTransactionForAsync returns a copy of the transaction safe to hand to the
+// async worker: the MetaData map and EffectiveDate pointer are duplicated so the
+// worker's mutations never touch the object the caller still holds.
+func cloneTransactionForAsync(t *model.Transaction) *model.Transaction {
+	clone := *t
+	if t.MetaData != nil {
+		md := make(map[string]interface{}, len(t.MetaData))
+		for k, v := range t.MetaData {
+			md[k] = v
+		}
+		clone.MetaData = md
+	}
+	if t.EffectiveDate != nil {
+		ed := *t.EffectiveDate
+		clone.EffectiveDate = &ed
+	}
+	return &clone
 }
 
 // handleSplitTransactions attempts to split a transaction into multiple transactions if needed.

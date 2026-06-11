@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 
+	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/model"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -120,9 +121,14 @@ func (l *Blnk) validateTransactionForRefund(ctx context.Context, originalTxn *mo
 	ctx, span := tracer.Start(ctx, "validateTransactionForRefund")
 	defer span.End()
 
-	// Validate the transaction status
-	if originalTxn.Status == StatusRejected {
-		err := fmt.Errorf("transaction %s is not in a state that can be refunded (status: %s)", originalTxn.TransactionID, originalTxn.Status)
+	// Only settled (APPLIED) or voided originals are refundable. Refunding a
+	// QUEUED/INFLIGHT/SCHEDULED original would reverse funds that were never
+	// settled.
+	switch originalTxn.Status {
+	case StatusApplied, StatusVoid:
+		// refundable
+	default:
+		err := fmt.Errorf("transaction %s cannot be refunded in status %s (only APPLIED or VOID)", originalTxn.TransactionID, originalTxn.Status)
 		span.RecordError(err)
 		return err
 	}
@@ -147,7 +153,7 @@ func (l *Blnk) validateTransactionForRefund(ctx context.Context, originalTxn *mo
 func prepareRefundTransaction(originalTxn *model.Transaction, skipQueue bool) *model.Transaction {
 	newTransaction := *originalTxn // Create a copy
 	newTransaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
-	newTransaction.Reference = model.GenerateUUIDWithSuffix("ref")
+	newTransaction.Reference = fmt.Sprintf("%s_refund", originalTxn.TransactionID)
 	newTransaction.ParentTransaction = originalTxn.TransactionID
 	newTransaction.Source = originalTxn.Destination // Swap source and destination
 	newTransaction.Destination = originalTxn.Source
@@ -180,6 +186,16 @@ func prepareRefundTransaction(originalTxn *model.Transaction, skipQueue bool) *m
 func (l *Blnk) RefundTransaction(ctx context.Context, transactionID string, skipQueue bool) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "RefundTransaction")
 	defer span.End()
+
+	// Serialize refunds of the same transaction so the already-refunded check
+	// can't be raced into a double refund.
+	lockKey := fmt.Sprintf("refund:%s", transactionID)
+	locker := redlock.NewLocker(l.redis, lockKey, model.GenerateUUIDWithSuffix("loc"))
+	if err := locker.Lock(ctx, l.Config().Transaction.LockDuration); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to acquire lock for refund: %w", err)
+	}
+	defer l.releaseSingleLock(ctx, locker)
 
 	// 1. Retrieve the original transaction (from DB or Queue)
 	originalTxn, err := l.getOriginalTransactionForRefund(ctx, transactionID)

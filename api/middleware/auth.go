@@ -18,6 +18,7 @@ package middleware
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"strings"
@@ -225,7 +226,8 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 
 		// First check if it's the master key
-		if err == nil && conf != nil && conf.Server.SecretKey == key {
+		if err == nil && conf != nil && conf.Server.SecretKey != "" &&
+			subtle.ConstantTimeCompare([]byte(conf.Server.SecretKey), []byte(key)) == 1 {
 			// Master key has all permissions
 			c.Set("isMasterKey", true)
 			c.Next()

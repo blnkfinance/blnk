@@ -27,20 +27,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func (l *Blnk) processLineage(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) {
+// processLineage tracks fund lineage for a transaction. A benign provider
+// mismatch is not an error; database/processing failures are returned so the
+// outbox worker retries the entry.
+func (l *Blnk) processLineage(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) error {
 	ctx, span := tracer.Start(ctx, "ProcessLineage")
 	defer span.End()
 
 	provider := l.getLineageProvider(txn)
 
-	// Validate provider against source balance
-	// If source tracks lineage but doesn't have the provider, ignore it
 	validatedProvider, err := l.validateLineageProvider(ctx, provider, sourceBalance)
 	if err != nil {
 		span.RecordError(err)
-		logrus.Errorf("lineage provider validation failed: %v", err)
 		notification.NotifyError(err)
-		validatedProvider = ""
+		return fmt.Errorf("lineage provider validation failed: %w", err)
 	}
 
 	if provider != "" && validatedProvider == "" && sourceBalance != nil {
@@ -50,12 +50,12 @@ func (l *Blnk) processLineage(ctx context.Context, txn *model.Transaction, sourc
 		))
 	}
 
-	// Credit processing requires a validated provider to know the source of funds
+	// Credit must run before debit: debit allocates from the shadow balances credit creates.
 	if validatedProvider != "" && destinationBalance != nil && destinationBalance.TrackFundLineage {
 		if err := l.processLineageCredit(ctx, txn, destinationBalance, validatedProvider); err != nil {
 			span.RecordError(err)
-			logrus.Errorf("lineage credit processing failed: %v", err)
 			notification.NotifyError(err)
+			return fmt.Errorf("lineage credit processing failed: %w", err)
 		}
 	}
 
@@ -63,12 +63,13 @@ func (l *Blnk) processLineage(ctx context.Context, txn *model.Transaction, sourc
 	if sourceBalance != nil && sourceBalance.TrackFundLineage {
 		if err := l.processLineageDebit(ctx, txn, sourceBalance, destinationBalance); err != nil {
 			span.RecordError(err)
-			logrus.Errorf("lineage debit processing failed: %v", err)
 			notification.NotifyError(err)
+			return fmt.Errorf("lineage debit processing failed: %w", err)
 		}
 	}
 
 	span.AddEvent("Lineage processing completed")
+	return nil
 }
 
 // getLineageProvider extracts the fund provider from the transaction metadata.

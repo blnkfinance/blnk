@@ -68,7 +68,7 @@ func TestCommitInflight_ExactFullAmountSettles(t *testing.T) {
 	t.Run("debit", func(t *testing.T) {
 		b := &Balance{InflightDebitBalance: big.NewInt(10000)}
 		b.InitializeBalanceFields()
-		b.CommitInflightDebit(txn)
+		require.NoError(t, b.CommitInflightDebit(txn))
 		assert.Equal(t, "0", b.InflightDebitBalance.String(), "committing exactly the inflight amount must drain it")
 		assert.Equal(t, "10000", b.DebitBalance.String(), "the full amount must land in the committed debit balance")
 	})
@@ -76,16 +76,16 @@ func TestCommitInflight_ExactFullAmountSettles(t *testing.T) {
 	t.Run("credit", func(t *testing.T) {
 		b := &Balance{InflightCreditBalance: big.NewInt(10000)}
 		b.InitializeBalanceFields()
-		b.CommitInflightCredit(txn)
+		require.NoError(t, b.CommitInflightCredit(txn))
 		assert.Equal(t, "0", b.InflightCreditBalance.String())
 		assert.Equal(t, "10000", b.CreditBalance.String())
 	})
 
-	t.Run("over-commit is a no-op", func(t *testing.T) {
+	t.Run("over-commit errors and moves nothing", func(t *testing.T) {
 		over := &Transaction{Amount: 100.01, Precision: 100}
 		b := &Balance{InflightDebitBalance: big.NewInt(10000)}
 		b.InitializeBalanceFields()
-		b.CommitInflightDebit(over)
+		require.Error(t, b.CommitInflightDebit(over), "committing more than inflight must fail")
 		assert.Equal(t, "10000", b.InflightDebitBalance.String(), "committing more than inflight must not move anything")
 		assert.Equal(t, "0", b.DebitBalance.String())
 	})
@@ -95,21 +95,21 @@ func TestRollbackInflight_ExactFullAmount(t *testing.T) {
 	t.Run("credit", func(t *testing.T) {
 		b := &Balance{InflightCreditBalance: big.NewInt(500)}
 		b.InitializeBalanceFields()
-		b.RollbackInflightCredit(big.NewInt(500))
+		require.NoError(t, b.RollbackInflightCredit(big.NewInt(500)))
 		assert.Equal(t, "0", b.InflightCreditBalance.String(), "rolling back exactly the inflight amount must drain it")
 	})
 
 	t.Run("debit", func(t *testing.T) {
 		b := &Balance{InflightDebitBalance: big.NewInt(500)}
 		b.InitializeBalanceFields()
-		b.RollbackInflightDebit(big.NewInt(500))
+		require.NoError(t, b.RollbackInflightDebit(big.NewInt(500)))
 		assert.Equal(t, "0", b.InflightDebitBalance.String())
 	})
 
-	t.Run("over-rollback is a no-op", func(t *testing.T) {
+	t.Run("over-rollback errors and moves nothing", func(t *testing.T) {
 		b := &Balance{InflightCreditBalance: big.NewInt(500)}
 		b.InitializeBalanceFields()
-		b.RollbackInflightCredit(big.NewInt(501))
+		require.Error(t, b.RollbackInflightCredit(big.NewInt(501)))
 		assert.Equal(t, "500", b.InflightCreditBalance.String())
 	})
 }

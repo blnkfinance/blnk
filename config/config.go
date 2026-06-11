@@ -281,6 +281,10 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	cnf.trimWhitespace()
 	cnf.setupRateLimiting()
 
+	if !cnf.Server.Secure {
+		logrus.Warn("SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.")
+	}
+
 	// Validate tokenization secret length (AES-256 requires 32 bytes)
 	if len(cnf.TokenizationSecret) > 0 && len(cnf.TokenizationSecret) != 32 {
 		logrus.Warn("tokenization secret should be 32 bytes for AES-256 encryption")

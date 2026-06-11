@@ -80,14 +80,16 @@ func runMigrations(direction migrate.MigrationDirection) (int, error) {
 // migrateUpCommands creates the command for applying migrations.
 func migrateUpCommands() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "up",
-		Run: func(cmd *cobra.Command, args []string) {
+		Use:           "up",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			n, err := runMigrations(migrate.Up)
 			if err != nil {
-				logrus.Errorf("Error migrating up: %v", err)
-				return
+				return fmt.Errorf("error migrating up: %w", err)
 			}
 			logrus.Infof("Applied %d migrations!\n", n)
+			return nil
 		},
 	}
 
@@ -97,14 +99,16 @@ func migrateUpCommands() *cobra.Command {
 // migrateDownCommands creates the command for rolling back migrations.
 func migrateDownCommands() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "down",
-		Run: func(cmd *cobra.Command, args []string) {
+		Use:           "down",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			n, err := runMigrations(migrate.Down)
 			if err != nil {
-				logrus.Errorf("Error migrating down: %v", err)
-				return
+				return fmt.Errorf("error migrating down: %w", err)
 			}
 			logrus.Infof("Rolled back %d migrations!\n", n)
+			return nil
 		},
 	}
 

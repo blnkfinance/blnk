@@ -69,7 +69,7 @@ func prepareQueries(queryBuilder strings.Builder, include []string) string {
 	// Conditionally include identity fields
 	if contains(include, "identity") {
 		selectFields = append(selectFields,
-			"i.identity_id", "i.first_name", "i_name", "i.category", "i.last_name", "i.other_names",
+			"i.identity_id", "i.first_name", "i.organization_name", "i.category", "i.last_name", "i.other_names",
 			"i.gender", "i.dob", "i.email_address", "i.phone_number",
 			"i.nationality", "i.street", "i.country", "i.state",
 			"i.post_code", "i.city", "i.created_at")

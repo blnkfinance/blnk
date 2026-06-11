@@ -410,6 +410,10 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	amount := model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: req.Amount, TransactionID: id}, ds.Conn)
 
 	if req.PreciseAmount != nil {
+		if req.PreciseAmount.Sign() <= 0 {
+			respondCode(c, apierror.ErrTxnInvalidAmount, "precise_amount must be positive", nil)
+			return
+		}
 		amount = req.PreciseAmount
 	}
 

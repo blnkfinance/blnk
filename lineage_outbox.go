@@ -172,8 +172,9 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 		}
 	}
 
-	// Process lineage using the existing logic
-	l.processLineage(ctx, txn, sourceBalance, destinationBalance)
+	if err := l.processLineage(ctx, txn, sourceBalance, destinationBalance); err != nil {
+		return err
+	}
 
 	span.AddEvent("Lineage processing completed from outbox")
 	return nil

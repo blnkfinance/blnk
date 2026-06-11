@@ -447,7 +447,7 @@ func TestPrepareQueuedBatchTransaction_Coverage(t *testing.T) {
 			map[string]*model.Balance{txn.Source: src, txn.Destination: dst}, nil,
 			map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "zero-amount")
+		assert.Contains(t, err.Error(), "must be positive")
 	})
 
 	t.Run("insufficient funds without overdraft fails the batch item", func(t *testing.T) {

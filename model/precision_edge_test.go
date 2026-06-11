@@ -573,17 +573,16 @@ func TestUpdateBalances_Conservation(t *testing.T) {
 		assert.Equal(t, "0", total.String(), "money must be conserved")
 	})
 
-	t.Run("zero amount with nil precise amount rejected", func(t *testing.T) {
+	t.Run("zero amount rejected at model validation", func(t *testing.T) {
 		source := &Balance{}
 		dest := &Balance{}
 		txn := &Transaction{Amount: 0, Precision: 100, AllowOverdraft: true}
-		// ApplyPrecision inside UpdateBalances will set PreciseAmount to 0;
-		// validate only rejects when PreciseAmount is nil, so this documents
-		// that zero-amount transactions pass model-level validation and must
-		// be filtered by the execution layer (buildTransactionExecutionWork).
+		// ApplyPrecision inside UpdateBalances sets PreciseAmount to 0; validate
+		// rejects non-positive amounts before any balance is touched, so a
+		// zero-amount transaction never moves money.
 		err := UpdateBalances(txn, source, dest)
-		assert.NoError(t, err)
-		assert.Equal(t, "0", source.Balance.String())
+		assert.Error(t, err)
+		assert.Nil(t, source.Balance, "balance never initialized on early rejection")
 	})
 
 	t.Run("inflight transaction only moves inflight balances", func(t *testing.T) {

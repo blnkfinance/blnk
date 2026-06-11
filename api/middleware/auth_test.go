@@ -519,6 +519,38 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			apiKey:       comprehensiveKey.Key,
 			expectedCode: http.StatusOK,
 		},
+		{
+			name:   "Near-miss master key is rejected",
+			path:   "/ledgers",
+			method: "GET",
+			apiKey: "master-keX", // differs from SecretKey by one char
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure:    true,
+						SecretKey: "master-key",
+					},
+				}
+			},
+			expectedCode:  http.StatusUnauthorized,
+			expectedError: "Invalid API key",
+		},
+		{
+			name:   "Empty configured secret key does not grant master access",
+			path:   "/ledgers",
+			method: "GET",
+			apiKey: "anything", // no SecretKey configured -> must not be treated as master
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure:    true,
+						SecretKey: "",
+					},
+				}
+			},
+			expectedCode:  http.StatusUnauthorized,
+			expectedError: "Invalid API key",
+		},
 	}
 
 	for _, tt := range tests {
