@@ -35,6 +35,9 @@ const (
 	DEFAULT_TYPESENSE_KEY      = "blnk-api-key"
 	DEFAULT_MONITORING_PORT    = "5004"
 	DEFAULT_MAX_UPLOAD_SIZE_MB = 256 // caps reconciliation file uploads
+	// DEFAULT_MAX_REQUEST_BODY_SIZE_MB caps non-upload request bodies so a large
+	// POST can't exhaust memory before a handler (or the auth middleware) reads it.
+	DEFAULT_MAX_REQUEST_BODY_SIZE_MB = 5
 )
 
 // Default values for different configurations
@@ -101,7 +104,8 @@ type ServerConfig struct {
 	Email              string `json:"ssl_email" envconfig:"BLNK_SERVER_SSL_EMAIL"`
 	Port               string `json:"port" envconfig:"BLNK_SERVER_PORT"`
 	MetricsBearerToken string `json:"metrics_bearer_token" envconfig:"BLNK_METRICS_BEARER_TOKEN"`
-	MaxUploadSizeMB    int64  `json:"max_upload_size_mb" envconfig:"BLNK_SERVER_MAX_UPLOAD_SIZE_MB"`
+	MaxUploadSizeMB      int64 `json:"max_upload_size_mb" envconfig:"BLNK_SERVER_MAX_UPLOAD_SIZE_MB"`
+	MaxRequestBodySizeMB int64 `json:"max_request_body_size_mb" envconfig:"BLNK_SERVER_MAX_REQUEST_BODY_SIZE_MB"`
 }
 
 type DataSourceConfig struct {
@@ -320,6 +324,10 @@ func (cnf *Configuration) setDefaultValues() {
 
 	if cnf.Server.MaxUploadSizeMB <= 0 {
 		cnf.Server.MaxUploadSizeMB = DEFAULT_MAX_UPLOAD_SIZE_MB
+	}
+
+	if cnf.Server.MaxRequestBodySizeMB <= 0 {
+		cnf.Server.MaxRequestBodySizeMB = DEFAULT_MAX_REQUEST_BODY_SIZE_MB
 	}
 
 	if cnf.TypeSenseKey == "" {

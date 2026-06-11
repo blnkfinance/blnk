@@ -204,3 +204,22 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequestSizeLimit caps the size of non-upload request bodies so a large POST
+// cannot exhaust memory before a handler (or the auth middleware that reads the
+// body to inject the API key) consumes it. Multipart uploads are skipped: the
+// upload handlers apply their own, larger MaxUploadSizeMB limit.
+func RequestSizeLimit(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body == nil || maxBytes <= 0 {
+			c.Next()
+			return
+		}
+		if strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
+			c.Next()
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Next()
+	}
+}

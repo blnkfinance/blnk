@@ -34,6 +34,10 @@ const (
 	hookKeyPrefix     = "hooks:"
 	preHookKeyPrefix  = "hooks:pre"
 	postHookKeyPrefix = "hooks:post"
+
+	// maxHookRetryCount caps a hook's retry count so a misconfigured hook can't
+	// schedule an unbounded number of retries (asynq.MaxRetry(hook.RetryCount)).
+	maxHookRetryCount = 10
 )
 
 type redisHookManager struct {
@@ -372,6 +376,9 @@ func validateHook(hook *Hook) error {
 	}
 	if hook.RetryCount < 0 {
 		hook.RetryCount = 3 // Default retry count
+	}
+	if hook.RetryCount > maxHookRetryCount {
+		hook.RetryCount = maxHookRetryCount
 	}
 	return nil
 }
