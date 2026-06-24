@@ -90,5 +90,13 @@ DROP INDEX IF EXISTS blnk.idx_lineage_outbox_pending;
 DROP INDEX IF EXISTS blnk.idx_lineage_outbox_transaction;
 DROP INDEX IF EXISTS blnk.idx_lineage_outbox_failed;
 
--- Remove unique constraint
-ALTER TABLE blnk.lineage_outbox DROP CONSTRAINT IF EXISTS lineage_outbox_transaction_id_key;
+-- Remove the unique index on transaction_id. The Up migration creates this as a
+-- unique INDEX (lineage_outbox_transaction_id_uidx), not a table constraint, so it
+-- must be dropped with DROP INDEX — the previous ALTER TABLE ... DROP CONSTRAINT
+-- (with the wrong name "_key") was a silent no-op.
+DROP INDEX IF EXISTS blnk.lineage_outbox_transaction_id_uidx;
+
+-- Drop the lineage_outbox table created by the Up migration. Without this the Down
+-- migration leaves the table (and its remaining indexes) behind, so the rollback is
+-- not a true inverse. Dropping the table also removes any indexes still on it.
+DROP TABLE IF EXISTS blnk.lineage_outbox;
