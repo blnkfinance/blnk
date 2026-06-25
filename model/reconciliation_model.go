@@ -18,11 +18,11 @@ package model
 import "time"
 
 type Match struct {
-	ExternalTransactionID string
-	InternalTransactionID string
-	ReconciliationID      string
-	Amount                float64
-	Date                  time.Time
+	ExternalTransactionID string    `json:"external_transaction_id"`
+	InternalTransactionID string    `json:"internal_transaction_id"`
+	ReconciliationID      string    `json:"-"`
+	Amount                float64   `json:"amount"`
+	Date                  time.Time `json:"date"`
 }
 
 type ExternalTransaction struct {

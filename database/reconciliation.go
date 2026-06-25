@@ -308,8 +308,7 @@ func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconcilia
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT m.external_transaction_id, m.internal_transaction_id, m.amount, m.date
 		FROM blnk.matches m
-		JOIN blnk.external_transactions et ON m.external_transaction_id = et.id
-		WHERE et.reconciliation_id = $1
+		WHERE m.reconciliation_id = $1
 	`, reconciliationID)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matches", err)
