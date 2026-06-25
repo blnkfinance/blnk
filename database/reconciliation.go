@@ -819,7 +819,7 @@ func (d Datasource) GetUnmatchedByReconciliationID(ctx context.Context, reconcil
 	}
 	defer func() { _ = rows.Close() }()
 
-	var ids []string
+	ids := []string{}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
