@@ -322,3 +322,80 @@ func TestInitConfig(t *testing.T) {
 		t.Errorf("Expected DataSource.Dns to be 'init-config-dns', got '%s'", loadedConfig.DataSource.Dns)
 	}
 }
+
+// TestUploadURLTimeoutDefault verifies that an unset/zero upload URL timeout is
+// defaulted to DEFAULT_UPLOAD_URL_TIMEOUT_SEC (30s).
+func TestUploadURLTimeoutDefault(t *testing.T) {
+	cnf := Configuration{
+		ProjectName: "Test Project",
+		DataSource:  DataSourceConfig{Dns: "some-dns"},
+		Redis:       RedisConfig{Dns: "localhost:6379"},
+	}
+	cnf.Server.UploadURLTimeoutSec = 0
+	if err := cnf.validateAndAddDefaults(); err != nil {
+		t.Fatalf("validateAndAddDefaults failed: %v", err)
+	}
+	if cnf.Server.UploadURLTimeoutSec != DEFAULT_UPLOAD_URL_TIMEOUT_SEC {
+		t.Errorf("expected default timeout %d, got %d", DEFAULT_UPLOAD_URL_TIMEOUT_SEC, cnf.Server.UploadURLTimeoutSec)
+	}
+
+	// An explicitly-configured value must be preserved.
+	cnf2 := Configuration{
+		ProjectName: "Test Project",
+		DataSource:  DataSourceConfig{Dns: "some-dns"},
+		Redis:       RedisConfig{Dns: "localhost:6379"},
+	}
+	cnf2.Server.UploadURLTimeoutSec = 7
+	if err := cnf2.validateAndAddDefaults(); err != nil {
+		t.Fatalf("validateAndAddDefaults failed: %v", err)
+	}
+	if cnf2.Server.UploadURLTimeoutSec != 7 {
+		t.Errorf("expected explicit timeout 7 to be preserved, got %d", cnf2.Server.UploadURLTimeoutSec)
+	}
+}
+
+// TestUploadWhitelistHostsParsing verifies parsing of the comma-separated
+// whitelist: trimming, scheme-tolerance, case-folding, de-duplication, and
+// deny-by-default (empty -> nil).
+func TestUploadWhitelistHostsParsing(t *testing.T) {
+	cases := []struct {
+		name   string
+		raw    string
+		expect []string
+	}{
+		{
+			name:   "mixed entries with schemes, empties, and dup",
+			raw:    "example.com, https://x.com/path, ,Foo.COM, example.com",
+			expect: []string{"example.com", "x.com", "foo.com"},
+		},
+		{
+			name:   "bare hostnames only",
+			raw:    "a.example.com, b.example.com",
+			expect: []string{"a.example.com", "b.example.com"},
+		},
+		{
+			name:   "empty whitelist is deny-by-default",
+			raw:    "",
+			expect: nil,
+		},
+		{
+			name:   "only whitespace and commas",
+			raw:    " , , ",
+			expect: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cnf := Configuration{Server: ServerConfig{UploadDomainWhitelist: tc.raw}}
+			got := cnf.UploadDomainWhitelistHosts()
+			if len(got) != len(tc.expect) {
+				t.Fatalf("expected %v, got %v", tc.expect, got)
+			}
+			for i := range got {
+				if got[i] != tc.expect[i] {
+					t.Errorf("entry %d: expected %q, got %q", i, tc.expect[i], got[i])
+				}
+			}
+		})
+	}
+}
