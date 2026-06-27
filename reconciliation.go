@@ -264,6 +264,49 @@ func (s *Blnk) GetReconciliation(ctx context.Context, reconciliationID string) (
 	return reconciliation, nil
 }
 
+// GetReconciliationResults retrieves the full reconciliation results for a given reconciliation ID.
+// It combines the base reconciliation record with detailed matched and unmatched transaction data.
+// The method performs three queries:
+//  1. Retrieves the base reconciliation record (status, timestamps, etc.).
+//  2. Fetches all matched transactions ([]Match) from the matches table.
+//  3. Fetches all unmatched external transaction IDs from the unmatched table.
+//
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - reconciliationID: The ID of the reconciliation to retrieve results for.
+// Returns:
+// - A pointer to a ReconciliationResults struct containing the reconciliation summary, matched transactions, and unmatched transaction IDs.
+// - An error if any of the underlying queries fail.
+func (s *Blnk) GetReconciliationResults(ctx context.Context, reconciliationID string) (*model.ReconciliationResults, error) {
+	rec, err := s.datasource.GetReconciliation(ctx, reconciliationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve reconciliation: %w", err)
+	}
+
+	matches, err := s.datasource.GetMatchesByReconciliationID(ctx, reconciliationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve matches: %w", err)
+	}
+	matchSlice := make([]model.Match, len(matches))
+	for i, m := range matches {
+		matchSlice[i] = *m
+	}
+
+	unmatched, err := s.datasource.GetUnmatchedByReconciliationID(ctx, reconciliationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve unmatched transactions: %w", err)
+	}
+
+	return &model.ReconciliationResults{
+		ReconciliationID:      rec.ReconciliationID,
+		Status:                rec.Status,
+		StartedAt:             rec.StartedAt,
+		CompletedAt:           rec.CompletedAt,
+		MatchedTransactions:   matchSlice,
+		UnmatchedTransactions: unmatched,
+	}, nil
+}
+
 // matchesRules checks whether an external transaction matches a group transaction based on specified matching rules.
 // It iterates through the rules and criteria, evaluating whether the transactions meet the conditions for a match.
 // Parameters:

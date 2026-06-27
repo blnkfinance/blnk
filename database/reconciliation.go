@@ -43,7 +43,7 @@ func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconci
 
 	_, err := d.Conn.ExecContext(ctx,
 		`INSERT INTO blnk.reconciliations(
-			reconciliation_id, upload_id, status, matched_transactions, 
+			reconciliation_id, upload_id, status, matched_transactions,
 			unmatched_transactions, started_at, completed_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		rec.ReconciliationID, rec.UploadID, rec.Status, rec.MatchedTransactions,
@@ -68,7 +68,7 @@ func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Re
 
 	rec := &model.Reconciliation{}
 	err := d.Conn.QueryRowContext(ctx, `
-		SELECT id, reconciliation_id, upload_id, status, matched_transactions, 
+		SELECT id, reconciliation_id, upload_id, status, matched_transactions,
 			unmatched_transactions, started_at, completed_at
 		FROM blnk.reconciliations
 		WHERE reconciliation_id = $1
@@ -135,7 +135,7 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 	defer span.End()
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT id, reconciliation_id, upload_id, status, matched_transactions, 
+		SELECT id, reconciliation_id, upload_id, status, matched_transactions,
 			unmatched_transactions, started_at, completed_at
 		FROM blnk.reconciliations
 		WHERE upload_id = $1
@@ -308,8 +308,7 @@ func (d Datasource) GetMatchesByReconciliationID(ctx context.Context, reconcilia
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT m.external_transaction_id, m.internal_transaction_id, m.amount, m.date
 		FROM blnk.matches m
-		JOIN blnk.external_transactions et ON m.external_transaction_id = et.id
-		WHERE et.reconciliation_id = $1
+		WHERE m.reconciliation_id = $1
 	`, reconciliationID)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve matches", err)
@@ -797,6 +796,43 @@ func (d Datasource) FetchAndGroupExternalTransactions(ctx context.Context, uploa
 		attribute.Int("group.count", len(groupedTransactions)),
 	))
 	return groupedTransactions, nil
+}
+
+// GetUnmatchedByReconciliationID retrieves all unmatched external transaction IDs associated with a given reconciliation.
+// It queries the blnk.unmatched table to find all external transaction IDs that were not matched during the reconciliation process.
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - reconciliationID: The ID of the reconciliation to retrieve unmatched transactions for.
+// Returns:
+// - A slice of external transaction IDs (as strings) representing the unmatched transactions, or an error wrapped in an APIError if the operation fails.
+func (d Datasource) GetUnmatchedByReconciliationID(ctx context.Context, reconciliationID string) ([]string, error) {
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Fetching unmatched transactions by reconciliation ID")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT external_transaction_id
+		FROM blnk.unmatched
+		WHERE reconciliation_id = $1
+	`, reconciliationID)
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve unmatched transactions", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan unmatched transaction", err)
+		}
+		ids = append(ids, id)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Error occurred while iterating over unmatched transactions", err)
+	}
+
+	return ids, nil
 }
 
 func groupedExternalTransactionsQuery(groupCriteria string) (string, bool) {

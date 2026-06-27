@@ -701,3 +701,8 @@ func (m *MockDataSource) CountUnchainedTransactions(ctx context.Context, cutoff 
 	args := m.Called(ctx, cutoff)
 	return args.Get(0).(int64), args.Error(1)
 }
+
+func (m *MockDataSource) GetUnmatchedByReconciliationID(ctx context.Context, reconciliationID string) ([]string, error) {
+	args := m.Called(ctx, reconciliationID)
+	return args.Get(0).([]string), args.Error(1)
+}

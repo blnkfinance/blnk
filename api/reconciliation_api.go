@@ -181,7 +181,7 @@ func (a Api) GetReconciliation(c *gin.Context) {
 		return
 	}
 
-	reconciliation, err := a.blnk.GetReconciliation(c.Request.Context(), reconciliationID)
+	reconciliation, err := a.blnk.GetReconciliationResults(c.Request.Context(), reconciliationID)
 	if err != nil {
 		logrus.Error(err)
 		if code, ok := classifyMessage(err.Error()); ok && apierror.StatusForCode(code) == http.StatusNotFound {

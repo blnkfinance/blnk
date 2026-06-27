@@ -168,6 +168,7 @@ type reconciliation interface {
 	RecordMatches(ctx context.Context, reconciliationID string, matches []model.Match) error                                                                            // Records matches for a reconciliation
 	RecordUnmatched(ctx context.Context, reconciliationID string, results []string) error                                                                               // Records unmatched results for a reconciliation
 	FetchAndGroupExternalTransactions(ctx context.Context, uploadID string, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error) // Fetches and groups external transactions based on criteria
+	GetUnmatchedByReconciliationID(ctx context.Context, reconciliationID string) ([]string, error)                                                                      // Retrieves unmatched transaction IDs by reconciliation ID
 }
 
 type apikey interface {
@@ -197,8 +198,8 @@ type lineage interface {
 
 // chain defines the hash-chain (tamper-evidence) operations.
 type chain interface {
-	ChainPendingTransactions(ctx context.Context, cutoff time.Time, batchSize int) (int, error)           // Seals the next batch of unchained transactions
-	GetChainState(ctx context.Context) (*model.ChainState, error)                                         // Returns the global chain bookmark
+	ChainPendingTransactions(ctx context.Context, cutoff time.Time, batchSize int) (int, error)                     // Seals the next batch of unchained transactions
+	GetChainState(ctx context.Context) (*model.ChainState, error)                                                   // Returns the global chain bookmark
 	GetChainedTransactionsAfter(ctx context.Context, afterSeq int64, limit int) ([]model.ChainedTransaction, error) // Pages chained transactions in chain order
-	CountUnchainedTransactions(ctx context.Context, cutoff time.Time) (int64, error)                      // Counts the chainer backlog
+	CountUnchainedTransactions(ctx context.Context, cutoff time.Time) (int64, error)                                // Counts the chainer backlog
 }
