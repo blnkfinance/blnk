@@ -16,9 +16,15 @@ limitations under the License.
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/config"
@@ -48,27 +54,179 @@ func (a Api) UploadExternalData(c *gin.Context) {
 
 	source := c.PostForm("source")
 	file, header, err := c.Request.FormFile("file")
-	if err != nil {
-		// http.MaxBytesReader surfaces oversized bodies here; report 413.
-		if strings.Contains(err.Error(), "request body too large") {
-			respondCode(c, apierror.ErrGenPayloadTooLarge, "upload exceeds the maximum allowed size", nil)
+	if err == nil {
+		// Multipart file upload path (existing behaviour). `file` wins when
+		// both `file` and `url` are present, preserving backward compatibility.
+		defer file.Close()
+		fileName := header.Filename
+
+		uploadID, total, err := a.blnk.UploadExternalData(c.Request.Context(), source, file, fileName)
+		if err != nil {
+			logrus.Error(err)
+			respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
 			return
 		}
+
+		c.JSON(http.StatusOK, gin.H{"upload_id": uploadID, "record_count": total, "source": source})
+		return
+	}
+
+	// http.MaxBytesReader surfaces oversized multipart bodies as a FormFile error.
+	if strings.Contains(err.Error(), "request body too large") {
+		respondCode(c, apierror.ErrGenPayloadTooLarge, "upload exceeds the maximum allowed size", nil)
+		return
+	}
+
+	// No `file` part. Fall back to the URL download path if a `url` was supplied
+	// via a form field or a JSON body. If neither is present, return the legacy
+	// 400 "File upload failed" so existing clients see unchanged behaviour.
+	rawURL, jsonSource := resolveUploadURL(c)
+	if jsonSource != "" && source == "" {
+		source = jsonSource
+	}
+	if rawURL == "" {
 		respondCode(c, apierror.ErrReconUploadFailed, "File upload failed", nil)
 		return
 	}
-	defer file.Close()
 
-	fileName := header.Filename
-
-	uploadID, total, err := a.blnk.UploadExternalData(c.Request.Context(), source, file, fileName)
-	if err != nil {
-		logrus.Error(err)
-		respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
-		return
+	uploadID, total, ok := a.downloadAndUpload(c, source, rawURL)
+	if !ok {
+		return // downloadAndUpload already wrote the error response.
 	}
 
 	c.JSON(http.StatusOK, gin.H{"upload_id": uploadID, "record_count": total, "source": source})
+}
+
+// resolveUploadURL extracts the `url` for a URL-based upload. For JSON bodies
+// ({"url": "...", "source": "..."}) it returns both fields; for multipart form
+// data it reads the `url` form field (the source is read separately by the
+// caller via PostForm).
+func resolveUploadURL(c *gin.Context) (rawURL, source string) {
+	ctype := c.GetHeader("Content-Type")
+	if strings.HasPrefix(strings.ToLower(ctype), "application/json") {
+		var body struct {
+			URL    string `json:"url"`
+			Source string `json:"source"`
+		}
+		if err := json.NewDecoder(c.Request.Body).Decode(&body); err == nil {
+			return body.URL, body.Source
+		}
+		return "", ""
+	}
+	return c.PostForm("url"), ""
+}
+
+// downloadAndUpload fetches the remote body at rawURL and pipes it through the
+// unchanged UploadExternalData service. It enforces SSRF protection
+// (http(s)-only, deny-by-default host whitelist, redirect re-validation), a
+// configurable GET timeout, and the existing MaxUploadSizeMB body cap via
+// io.LimitReader. On failure it writes the error response and returns ok=false.
+func (a Api) downloadAndUpload(c *gin.Context, source, rawURL string) (uploadID string, total int, ok bool) {
+	cfg, _ := config.Fetch()
+
+	u, err := url.Parse(rawURL)
+	if err != nil || u == nil {
+		respondCode(c, apierror.ErrReconUploadURLInvalid, "invalid upload URL", nil)
+		return "", 0, false
+	}
+
+	// Scheme guard: http/https only (rejects ftp://, file://, gopher://, ...).
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		respondCode(c, apierror.ErrReconUploadURLInvalid, "upload URL must use http or https", nil)
+		return "", 0, false
+	}
+
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "" {
+		respondCode(c, apierror.ErrReconUploadURLInvalid, "invalid upload URL", nil)
+		return "", 0, false
+	}
+
+	// Whitelist guard: exact-host match, deny-by-default when empty.
+	allowed := cfg.UploadWhitelistHosts()
+	if !hostAllowed(host, allowed) {
+		respondCode(c, apierror.ErrReconUploadHostNotAllowed, "upload host not allowed", nil)
+		return "", 0, false
+	}
+
+	// Filename from the URL path; the service layer relies on the extension for
+	// type detection. Fall back to "download" when the path has no basename.
+	name := path.Base(u.Path)
+	if name == "." || name == "/" || name == "" {
+		name = "download"
+	}
+
+	timeout := time.Duration(config.DEFAULT_UPLOAD_URL_TIMEOUT_SEC) * time.Second
+	if cfg != nil && cfg.Server.UploadURLTimeoutSec > 0 {
+		timeout = time.Duration(cfg.Server.UploadURLTimeoutSec) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		logrus.WithError(err).Error("failed to build upload download request")
+		respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
+		return "", 0, false
+	}
+	req.Header.Set("User-Agent", "blnk-reconciliation/1.0")
+
+	// Custom client that re-validates every redirect's host against the
+	// whitelist so a whitelisted host can't 302 to an internal IP/loopback.
+	client := &http.Client{
+		CheckRedirect: func(next *http.Request, _ []*http.Request) error {
+			if next == nil {
+				return http.ErrUseLastResponse
+			}
+			nextHost := strings.ToLower(strings.TrimSpace(next.URL.Hostname()))
+			if nextHost == "" || !hostAllowed(nextHost, allowed) {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logrus.WithError(err).Error("failed to fetch upload URL")
+		respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
+		return "", 0, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logrus.WithField("status", resp.StatusCode).Error("upload URL returned non-2xx")
+		respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
+		return "", 0, false
+	}
+
+	// Cap the downloaded body at MaxUploadSizeMB. An oversize response is
+	// truncated, which surfaces downstream as a parse/processing failure (500).
+	limit := int64(config.DEFAULT_MAX_UPLOAD_SIZE_MB) * 1024 * 1024
+	if cfg != nil && cfg.Server.MaxUploadSizeMB > 0 {
+		limit = cfg.Server.MaxUploadSizeMB * 1024 * 1024
+	}
+	limited := io.LimitReader(resp.Body, limit+1)
+
+	id, total, err := a.blnk.UploadExternalData(ctx, source, limited, name)
+	if err != nil {
+		logrus.WithError(err).Error("failed to process URL upload")
+		respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
+		return "", 0, false
+	}
+
+	return id, total, true
+}
+
+// hostAllowed reports whether host is present in the (lowercased) whitelist.
+func hostAllowed(host string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == host {
+			return true
+		}
+	}
+	return false
 }
 
 // StartReconciliation initiates a new reconciliation process based on the provided parameters.

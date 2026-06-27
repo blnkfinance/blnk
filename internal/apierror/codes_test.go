@@ -87,6 +87,8 @@ func TestStatusForCode(t *testing.T) {
 		{ErrReconRuleNotFound, http.StatusNotFound},
 		{ErrReconUploadFailed, http.StatusBadRequest},
 		{ErrReconUploadProcessingFailed, http.StatusInternalServerError},
+		{ErrReconUploadURLInvalid, http.StatusBadRequest},
+		{ErrReconUploadHostNotAllowed, http.StatusBadRequest},
 		{ErrReconRuleInvalid, http.StatusBadRequest},
 		{ErrReconMatchingRulesRequired, http.StatusBadRequest},
 		{ErrReconExternalTxnsRequired, http.StatusBadRequest},

@@ -19,6 +19,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -38,6 +39,10 @@ const (
 	// DEFAULT_MAX_REQUEST_BODY_SIZE_MB caps non-upload request bodies so a large
 	// POST can't exhaust memory before a handler (or the auth middleware) reads it.
 	DEFAULT_MAX_REQUEST_BODY_SIZE_MB = 5
+	// DEFAULT_UPLOAD_URL_TIMEOUT_SEC caps how long a URL-based reconciliation
+	// upload may spend fetching the remote body, preventing a slow or stalled
+	// upstream from hanging the handler.
+	DEFAULT_UPLOAD_URL_TIMEOUT_SEC = 30
 )
 
 // Default values for different configurations
@@ -106,6 +111,15 @@ type ServerConfig struct {
 	MetricsBearerToken string `json:"metrics_bearer_token" envconfig:"BLNK_METRICS_BEARER_TOKEN"`
 	MaxUploadSizeMB      int64 `json:"max_upload_size_mb" envconfig:"BLNK_SERVER_MAX_UPLOAD_SIZE_MB"`
 	MaxRequestBodySizeMB int64 `json:"max_request_body_size_mb" envconfig:"BLNK_SERVER_MAX_REQUEST_BODY_SIZE_MB"`
+
+	// UploadWhitelist is a comma-separated list of exact hostnames permitted as
+	// targets for URL-based reconciliation uploads (BLNK_UPLOAD_WHITELIST).
+	// Empty/unset means deny-by-default: every URL upload is rejected. Listing a
+	// bare IP literal or "localhost" is unsafe and defeats the SSRF guard.
+	UploadWhitelist string `json:"upload_whitelist" envconfig:"BLNK_UPLOAD_WHITELIST"`
+	// UploadURLTimeoutSec caps the HTTP GET issued for a URL-based upload
+	// (BLNK_UPLOAD_URL_TIMEOUT_SEC). Defaults to DEFAULT_UPLOAD_URL_TIMEOUT_SEC.
+	UploadURLTimeoutSec int `json:"upload_url_timeout_sec" envconfig:"BLNK_UPLOAD_URL_TIMEOUT_SEC"`
 }
 
 type DataSourceConfig struct {
@@ -341,6 +355,10 @@ func (cnf *Configuration) setDefaultValues() {
 		cnf.Server.MaxRequestBodySizeMB = DEFAULT_MAX_REQUEST_BODY_SIZE_MB
 	}
 
+	if cnf.Server.UploadURLTimeoutSec <= 0 {
+		cnf.Server.UploadURLTimeoutSec = DEFAULT_UPLOAD_URL_TIMEOUT_SEC
+	}
+
 	if cnf.TypeSenseKey == "" {
 		cnf.TypeSenseKey = DEFAULT_TYPESENSE_KEY
 	}
@@ -498,6 +516,47 @@ func (cnf *Configuration) trimWhitespace() {
 	cnf.Server.Port = strings.TrimSpace(cnf.Server.Port)
 	cnf.DataSource.Dns = strings.TrimSpace(cnf.DataSource.Dns)
 	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
+}
+
+// UploadWhitelistHosts returns the parsed, trimmed, de-duplicated, lowercase
+// list of exact hostnames permitted as targets for URL-based reconciliation
+// uploads. Entries may be supplied as bare hostnames ("example.com") or full
+// URLs ("https://example.com/path"); the hostname is extracted either way.
+// An empty/unset whitelist yields an empty slice, which the upload handler
+// treats as deny-by-default.
+func (cnf *Configuration) UploadWhitelistHosts() []string {
+	raw := strings.TrimSpace(cnf.Server.UploadWhitelist)
+	if raw == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	hosts := make([]string, 0, 4)
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		// Tolerate entries supplied as full URLs by extracting the hostname.
+		var host string
+		if strings.Contains(entry, "://") {
+			if u, err := url.Parse(entry); err == nil {
+				host = u.Hostname()
+			}
+		} else {
+			host = entry
+		}
+		host = strings.ToLower(strings.TrimSpace(host))
+		if host == "" {
+			continue
+		}
+		if _, ok := seen[host]; ok {
+			continue
+		}
+		seen[host] = struct{}{}
+		hosts = append(hosts, host)
+	}
+	return hosts
 }
 
 func (cnf *Configuration) setupRateLimiting() {

@@ -103,6 +103,8 @@ const (
 	ErrReconRuleNotFound           ErrorCode = "RECON_RULE_NOT_FOUND"
 	ErrReconUploadFailed           ErrorCode = "RECON_UPLOAD_FAILED"
 	ErrReconUploadProcessingFailed ErrorCode = "RECON_UPLOAD_PROCESSING_FAILED"
+	ErrReconUploadURLInvalid       ErrorCode = "RECON_UPLOAD_URL_INVALID"
+	ErrReconUploadHostNotAllowed   ErrorCode = "RECON_UPLOAD_HOST_NOT_ALLOWED"
 	ErrReconRuleInvalid            ErrorCode = "RECON_RULE_INVALID"
 	ErrReconMatchingRulesRequired  ErrorCode = "RECON_MATCHING_RULES_REQUIRED"
 	ErrReconExternalTxnsRequired   ErrorCode = "RECON_EXTERNAL_TXNS_REQUIRED"
@@ -199,6 +201,8 @@ var statusByCode = map[ErrorCode]int{
 	ErrReconRuleNotFound:           http.StatusNotFound,
 	ErrReconUploadFailed:           http.StatusBadRequest,
 	ErrReconUploadProcessingFailed: http.StatusInternalServerError,
+	ErrReconUploadURLInvalid:       http.StatusBadRequest,
+	ErrReconUploadHostNotAllowed:   http.StatusBadRequest,
 	ErrReconRuleInvalid:            http.StatusBadRequest,
 	ErrReconMatchingRulesRequired:  http.StatusBadRequest,
 	ErrReconExternalTxnsRequired:   http.StatusBadRequest,
