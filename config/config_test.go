@@ -328,7 +328,7 @@ func TestInitConfig(t *testing.T) {
 func TestUploadURLTimeoutDefault(t *testing.T) {
 	cnf := Configuration{
 		ProjectName: "Test Project",
-		DataSource: DataSourceConfig{Dns: "some-dns"},
+		DataSource:  DataSourceConfig{Dns: "some-dns"},
 		Redis:       RedisConfig{Dns: "localhost:6379"},
 	}
 	cnf.Server.UploadURLTimeoutSec = 0
@@ -342,7 +342,7 @@ func TestUploadURLTimeoutDefault(t *testing.T) {
 	// An explicitly-configured value must be preserved.
 	cnf2 := Configuration{
 		ProjectName: "Test Project",
-		DataSource: DataSourceConfig{Dns: "some-dns"},
+		DataSource:  DataSourceConfig{Dns: "some-dns"},
 		Redis:       RedisConfig{Dns: "localhost:6379"},
 	}
 	cnf2.Server.UploadURLTimeoutSec = 7
@@ -386,8 +386,8 @@ func TestUploadWhitelistHostsParsing(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cnf := Configuration{Server: ServerConfig{UploadWhitelist: tc.raw}}
-			got := cnf.UploadWhitelistHosts()
+			cnf := Configuration{Server: ServerConfig{UploadDomainWhitelist: tc.raw}}
+			got := cnf.UploadDomainWhitelistHosts()
 			if len(got) != len(tc.expect) {
 				t.Fatalf("expected %v, got %v", tc.expect, got)
 			}

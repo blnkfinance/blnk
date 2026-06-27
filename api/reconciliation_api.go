@@ -144,7 +144,7 @@ func (a Api) downloadAndUpload(c *gin.Context, source, rawURL string) (uploadID 
 	}
 
 	// Whitelist guard: exact-host match, deny-by-default when empty.
-	allowed := cfg.UploadWhitelistHosts()
+	allowed := cfg.UploadDomainWhitelistHosts()
 	if !hostAllowed(host, allowed) {
 		respondCode(c, apierror.ErrReconUploadHostNotAllowed, "upload host not allowed", nil)
 		return "", 0, false
@@ -257,10 +257,22 @@ func (a Api) StartReconciliation(c *gin.Context) {
 		return
 	}
 
-	reconciliationID, err := a.blnk.StartReconciliation(c.Request.Context(), req.UploadID, req.Strategy, req.GroupingCriteria, req.MatchingRuleIDs, req.DryRun)
+	reconciliationID, err := a.blnk.StartReconciliation(
+		c.Request.Context(),
+		req.UploadID,
+		req.Strategy,
+		req.GroupingCriteria,
+		req.MatchingRuleIDs,
+		req.DryRun,
+	)
 	if err != nil {
 		logrus.Error(err)
-		respondError(c, err, withDefault(apierror.ErrReconStartFailed), withFallbackMessage("Failed to start reconciliation"))
+		respondError(
+			c,
+			err,
+			withDefault(apierror.ErrReconStartFailed),
+			withFallbackMessage("Failed to start reconciliation"),
+		)
 		return
 	}
 
@@ -315,7 +327,12 @@ func (a Api) InstantReconciliation(c *gin.Context) {
 	)
 	if err != nil {
 		logrus.Error(err)
-		respondError(c, err, withDefault(apierror.ErrReconStartFailed), withFallbackMessage("Failed to start instant reconciliation"))
+		respondError(
+			c,
+			err,
+			withDefault(apierror.ErrReconStartFailed),
+			withFallbackMessage("Failed to start instant reconciliation"),
+		)
 		return
 	}
 
@@ -374,7 +391,12 @@ func (a Api) CreateMatchingRule(c *gin.Context) {
 	createdRule, err := a.blnk.CreateMatchingRule(c.Request.Context(), rule)
 	if err != nil {
 		logrus.Error(err)
-		respondError(c, err, withDefault(apierror.ErrGenInternal), withFallbackMessage("Failed to create matching rule"))
+		respondError(
+			c,
+			err,
+			withDefault(apierror.ErrGenInternal),
+			withFallbackMessage("Failed to create matching rule"),
+		)
 		return
 	}
 
@@ -408,7 +430,13 @@ func (a Api) UpdateMatchingRule(c *gin.Context) {
 	updatedRule, err := a.blnk.UpdateMatchingRule(c.Request.Context(), rule)
 	if err != nil {
 		logrus.Error(err)
-		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrReconRuleNotFound), withDefault(apierror.ErrGenInternal), withFallbackMessage("Failed to update matching rule"))
+		respondError(
+			c,
+			err,
+			withUpgrade(apierror.ErrGenNotFound, apierror.ErrReconRuleNotFound),
+			withDefault(apierror.ErrGenInternal),
+			withFallbackMessage("Failed to update matching rule"),
+		)
 		return
 	}
 
@@ -435,7 +463,13 @@ func (a Api) DeleteMatchingRule(c *gin.Context) {
 	err := a.blnk.DeleteMatchingRule(c.Request.Context(), ruleID)
 	if err != nil {
 		logrus.Error(err)
-		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrReconRuleNotFound), withDefault(apierror.ErrGenInternal), withFallbackMessage("Failed to delete matching rule"))
+		respondError(
+			c,
+			err,
+			withUpgrade(apierror.ErrGenNotFound, apierror.ErrReconRuleNotFound),
+			withDefault(apierror.ErrGenInternal),
+			withFallbackMessage("Failed to delete matching rule"),
+		)
 		return
 	}
 

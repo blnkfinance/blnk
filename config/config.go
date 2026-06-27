@@ -101,40 +101,40 @@ var (
 var ConfigStore atomic.Value
 
 type ServerConfig struct {
-	SSL                bool   `json:"ssl" envconfig:"BLNK_SERVER_SSL"`
-	CertStoragePath    string `json:"cert_storage_path" envconfig:"BLNK_CERT_STORAGE_PATH"`
-	Secure             bool   `json:"secure" envconfig:"BLNK_SERVER_SECURE"`
-	SecretKey          string `json:"secret_key" envconfig:"BLNK_SERVER_SECRET_KEY"`
-	Domain             string `json:"domain" envconfig:"BLNK_SERVER_SSL_DOMAIN"`
-	Email              string `json:"ssl_email" envconfig:"BLNK_SERVER_SSL_EMAIL"`
-	Port               string `json:"port" envconfig:"BLNK_SERVER_PORT"`
-	MetricsBearerToken string `json:"metrics_bearer_token" envconfig:"BLNK_METRICS_BEARER_TOKEN"`
-	MaxUploadSizeMB      int64 `json:"max_upload_size_mb" envconfig:"BLNK_SERVER_MAX_UPLOAD_SIZE_MB"`
-	MaxRequestBodySizeMB int64 `json:"max_request_body_size_mb" envconfig:"BLNK_SERVER_MAX_REQUEST_BODY_SIZE_MB"`
+	SSL                  bool   `json:"ssl"                      envconfig:"BLNK_SERVER_SSL"`
+	CertStoragePath      string `json:"cert_storage_path"        envconfig:"BLNK_CERT_STORAGE_PATH"`
+	Secure               bool   `json:"secure"                   envconfig:"BLNK_SERVER_SECURE"`
+	SecretKey            string `json:"secret_key"               envconfig:"BLNK_SERVER_SECRET_KEY"`
+	Domain               string `json:"domain"                   envconfig:"BLNK_SERVER_SSL_DOMAIN"`
+	Email                string `json:"ssl_email"                envconfig:"BLNK_SERVER_SSL_EMAIL"`
+	Port                 string `json:"port"                     envconfig:"BLNK_SERVER_PORT"`
+	MetricsBearerToken   string `json:"metrics_bearer_token"     envconfig:"BLNK_METRICS_BEARER_TOKEN"`
+	MaxUploadSizeMB      int64  `json:"max_upload_size_mb"       envconfig:"BLNK_SERVER_MAX_UPLOAD_SIZE_MB"`
+	MaxRequestBodySizeMB int64  `json:"max_request_body_size_mb" envconfig:"BLNK_SERVER_MAX_REQUEST_BODY_SIZE_MB"`
 
 	// UploadWhitelist is a comma-separated list of exact hostnames permitted as
-	// targets for URL-based reconciliation uploads (BLNK_UPLOAD_WHITELIST).
+	// targets for URL-based reconciliation uploads (BLNK_UPLOAD_DOMAIN_WHITELIST).
 	// Empty/unset means deny-by-default: every URL upload is rejected. Listing a
 	// bare IP literal or "localhost" is unsafe and defeats the SSRF guard.
-	UploadWhitelist string `json:"upload_whitelist" envconfig:"BLNK_UPLOAD_WHITELIST"`
+	UploadDomainWhitelist string `json:"upload_whitelist"       envconfig:"BLNK_UPLOAD_DOMAIN_WHITELIST"`
 	// UploadURLTimeoutSec caps the HTTP GET issued for a URL-based upload
 	// (BLNK_UPLOAD_URL_TIMEOUT_SEC). Defaults to DEFAULT_UPLOAD_URL_TIMEOUT_SEC.
 	UploadURLTimeoutSec int `json:"upload_url_timeout_sec" envconfig:"BLNK_UPLOAD_URL_TIMEOUT_SEC"`
 }
 
 type DataSourceConfig struct {
-	Dns             string        `json:"dns" envconfig:"BLNK_DATA_SOURCE_DNS"`
-	MaxOpenConns    int           `json:"max_open_conns" envconfig:"BLNK_DATABASE_MAX_OPEN_CONNS"`
-	MaxIdleConns    int           `json:"max_idle_conns" envconfig:"BLNK_DATABASE_MAX_IDLE_CONNS"`
-	ConnMaxLifetime time.Duration `json:"conn_max_lifetime" envconfig:"BLNK_DATABASE_CONN_MAX_LIFETIME"`
+	Dns             string        `json:"dns"                envconfig:"BLNK_DATA_SOURCE_DNS"`
+	MaxOpenConns    int           `json:"max_open_conns"     envconfig:"BLNK_DATABASE_MAX_OPEN_CONNS"`
+	MaxIdleConns    int           `json:"max_idle_conns"     envconfig:"BLNK_DATABASE_MAX_IDLE_CONNS"`
+	ConnMaxLifetime time.Duration `json:"conn_max_lifetime"  envconfig:"BLNK_DATABASE_CONN_MAX_LIFETIME"`
 	ConnMaxIdleTime time.Duration `json:"conn_max_idle_time" envconfig:"BLNK_DATABASE_CONN_MAX_IDLE_TIME"`
 }
 
 type RedisConfig struct {
-	Dns           string `json:"dns" envconfig:"BLNK_REDIS_DNS"`
+	Dns           string `json:"dns"             envconfig:"BLNK_REDIS_DNS"`
 	SkipTLSVerify bool   `json:"skip_tls_verify" envconfig:"BLNK_REDIS_SKIP_TLS_VERIFY"`
-	PoolSize      int    `json:"pool_size" envconfig:"BLNK_REDIS_POOL_SIZE"`
-	MinIdleConns  int    `json:"min_idle_conns" envconfig:"BLNK_REDIS_MIN_IDLE_CONNS"`
+	PoolSize      int    `json:"pool_size"       envconfig:"BLNK_REDIS_POOL_SIZE"`
+	MinIdleConns  int    `json:"min_idle_conns"  envconfig:"BLNK_REDIS_MIN_IDLE_CONNS"`
 }
 
 type TypeSenseConfig struct {
@@ -154,8 +154,8 @@ type AccountNumberGenerationConfig struct {
 }
 
 type RateLimitConfig struct {
-	RequestsPerSecond  *float64 `json:"requests_per_second" envconfig:"BLNK_RATE_LIMIT_RPS"`
-	Burst              *int     `json:"burst" envconfig:"BLNK_RATE_LIMIT_BURST"`
+	RequestsPerSecond  *float64 `json:"requests_per_second"  envconfig:"BLNK_RATE_LIMIT_RPS"`
+	Burst              *int     `json:"burst"                envconfig:"BLNK_RATE_LIMIT_BURST"`
 	CleanupIntervalSec *int     `json:"cleanup_interval_sec" envconfig:"BLNK_RATE_LIMIT_CLEANUP_INTERVAL_SEC"`
 }
 
@@ -164,7 +164,7 @@ type SlackWebhook struct {
 }
 
 type WebhookConfig struct {
-	Url     string            `json:"url" envconfig:"BLNK_WEBHOOK_URL"`
+	Url     string            `json:"url"     envconfig:"BLNK_WEBHOOK_URL"`
 	Headers map[string]string `json:"headers" envconfig:"BLNK_WEBHOOK_HEADERS"`
 }
 
@@ -174,65 +174,65 @@ type Notification struct {
 }
 
 type TransactionConfig struct {
-	BatchSize                  int           `json:"batch_size" envconfig:"BLNK_TRANSACTION_BATCH_SIZE"`
-	MaxQueueSize               int           `json:"max_queue_size" envconfig:"BLNK_TRANSACTION_MAX_QUEUE_SIZE"`
-	MaxWorkers                 int           `json:"max_workers" envconfig:"BLNK_TRANSACTION_MAX_WORKERS"`
-	LockDuration               time.Duration `json:"lock_duration" envconfig:"BLNK_TRANSACTION_LOCK_DURATION"`
-	LockWaitTimeout            time.Duration `json:"lock_wait_timeout" envconfig:"BLNK_TRANSACTION_LOCK_WAIT_TIMEOUT"`
-	IndexQueuePrefix           string        `json:"index_queue_prefix" envconfig:"BLNK_TRANSACTION_INDEX_QUEUE_PREFIX"`
-	EnableCoalescing           bool          `json:"enable_coalescing" envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
-	EnableQueuedChecks         bool          `json:"enable_queued_checks" envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
-	DisableBatchReferenceCheck bool          `json:"disable_batch_reference_check" envconfig:"BLNK_TRANSACTION_DISABLE_BATCH_REFERENCE_CHECK"`
+	BatchSize                  int             `json:"batch_size"                    envconfig:"BLNK_TRANSACTION_BATCH_SIZE"`
+	MaxQueueSize               int             `json:"max_queue_size"                envconfig:"BLNK_TRANSACTION_MAX_QUEUE_SIZE"`
+	MaxWorkers                 int             `json:"max_workers"                   envconfig:"BLNK_TRANSACTION_MAX_WORKERS"`
+	LockDuration               time.Duration   `json:"lock_duration"                 envconfig:"BLNK_TRANSACTION_LOCK_DURATION"`
+	LockWaitTimeout            time.Duration   `json:"lock_wait_timeout"             envconfig:"BLNK_TRANSACTION_LOCK_WAIT_TIMEOUT"`
+	IndexQueuePrefix           string          `json:"index_queue_prefix"            envconfig:"BLNK_TRANSACTION_INDEX_QUEUE_PREFIX"`
+	EnableCoalescing           bool            `json:"enable_coalescing"             envconfig:"BLNK_TRANSACTION_ENABLE_COALESCING"`
+	EnableQueuedChecks         bool            `json:"enable_queued_checks"          envconfig:"BLNK_TRANSACTION_ENABLE_QUEUED_CHECKS"`
+	DisableBatchReferenceCheck bool            `json:"disable_batch_reference_check" envconfig:"BLNK_TRANSACTION_DISABLE_BATCH_REFERENCE_CHECK"`
 	HashChain                  HashChainConfig `json:"hash_chain"`
 }
 
 type ReconciliationConfig struct {
-	DefaultStrategy  string        `json:"default_strategy" envconfig:"BLNK_RECONCILIATION_DEFAULT_STRATEGY"`
+	DefaultStrategy  string        `json:"default_strategy"  envconfig:"BLNK_RECONCILIATION_DEFAULT_STRATEGY"`
 	ProgressInterval int           `json:"progress_interval" envconfig:"BLNK_RECONCILIATION_PROGRESS_INTERVAL"`
-	MaxRetries       int           `json:"max_retries" envconfig:"BLNK_RECONCILIATION_MAX_RETRIES"`
-	RetryDelay       time.Duration `json:"retry_delay" envconfig:"BLNK_RECONCILIATION_RETRY_DELAY"`
+	MaxRetries       int           `json:"max_retries"       envconfig:"BLNK_RECONCILIATION_MAX_RETRIES"`
+	RetryDelay       time.Duration `json:"retry_delay"       envconfig:"BLNK_RECONCILIATION_RETRY_DELAY"`
 }
 
 type QueueConfig struct {
-	TransactionQueue                string        `json:"transaction_queue" envconfig:"BLNK_QUEUE_TRANSACTION"`
-	WebhookQueue                    string        `json:"webhook_queue" envconfig:"BLNK_QUEUE_WEBHOOK"`
-	IndexQueue                      string        `json:"index_queue" envconfig:"BLNK_QUEUE_INDEX"`
-	InflightExpiryQueue             string        `json:"inflight_expiry_queue" envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
-	InflightCommitQueue             string        `json:"inflight_commit_queue" envconfig:"BLNK_QUEUE_INFLIGHT_COMMIT"`
-	NumberOfQueues                  int           `json:"number_of_queues" envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
-	EnableHotLane                   bool          `json:"enable_hot_lane" envconfig:"BLNK_QUEUE_ENABLE_HOT_LANE"`
-	HotQueueName                    string        `json:"hot_queue_name" envconfig:"BLNK_QUEUE_HOT_QUEUE_NAME"`
-	HotQueueConcurrency             int           `json:"hot_queue_concurrency" envconfig:"BLNK_QUEUE_HOT_QUEUE_CONCURRENCY"`
-	HotPairTTL                      time.Duration `json:"hot_pair_ttl" envconfig:"BLNK_QUEUE_HOT_PAIR_TTL"`
+	TransactionQueue                string        `json:"transaction_queue"                  envconfig:"BLNK_QUEUE_TRANSACTION"`
+	WebhookQueue                    string        `json:"webhook_queue"                      envconfig:"BLNK_QUEUE_WEBHOOK"`
+	IndexQueue                      string        `json:"index_queue"                        envconfig:"BLNK_QUEUE_INDEX"`
+	InflightExpiryQueue             string        `json:"inflight_expiry_queue"              envconfig:"BLNK_QUEUE_INFLIGHT_EXPIRY"`
+	InflightCommitQueue             string        `json:"inflight_commit_queue"              envconfig:"BLNK_QUEUE_INFLIGHT_COMMIT"`
+	NumberOfQueues                  int           `json:"number_of_queues"                   envconfig:"BLNK_QUEUE_NUMBER_OF_QUEUES"`
+	EnableHotLane                   bool          `json:"enable_hot_lane"                    envconfig:"BLNK_QUEUE_ENABLE_HOT_LANE"`
+	HotQueueName                    string        `json:"hot_queue_name"                     envconfig:"BLNK_QUEUE_HOT_QUEUE_NAME"`
+	HotQueueConcurrency             int           `json:"hot_queue_concurrency"              envconfig:"BLNK_QUEUE_HOT_QUEUE_CONCURRENCY"`
+	HotPairTTL                      time.Duration `json:"hot_pair_ttl"                       envconfig:"BLNK_QUEUE_HOT_PAIR_TTL"`
 	HotPairLockContentionThreshold  int           `json:"hot_pair_lock_contention_threshold" envconfig:"BLNK_QUEUE_HOT_PAIR_LOCK_CONTENTION_THRESHOLD"`
 	RejectLockContentionImmediately bool          `json:"reject_lock_contention_immediately" envconfig:"BLNK_QUEUE_REJECT_LOCK_CONTENTION_IMMEDIATELY"`
-	InsufficientFundRetries         bool          `json:"insufficient_fund_retries" envconfig:"BLNK_QUEUE_INSUFFICIENT_FUND_RETRIES"`
-	MaxRetryAttempts                int           `json:"max_retry_attempts" envconfig:"BLNK_QUEUE_MAX_RETRY_ATTEMPTS"`
-	MonitoringPort                  string        `json:"monitoring_port" envconfig:"BLNK_QUEUE_MONITORING_PORT"`
-	WebhookConcurrency              int           `json:"webhook_concurrency" envconfig:"BLNK_QUEUE_WEBHOOK_CONCURRENCY"`
-	TransactionWorkerConcurrency    int           `json:"transaction_worker_concurrency" envconfig:"BLNK_QUEUE_TRANSACTION_WORKER_CONCURRENCY"`
+	InsufficientFundRetries         bool          `json:"insufficient_fund_retries"          envconfig:"BLNK_QUEUE_INSUFFICIENT_FUND_RETRIES"`
+	MaxRetryAttempts                int           `json:"max_retry_attempts"                 envconfig:"BLNK_QUEUE_MAX_RETRY_ATTEMPTS"`
+	MonitoringPort                  string        `json:"monitoring_port"                    envconfig:"BLNK_QUEUE_MONITORING_PORT"`
+	WebhookConcurrency              int           `json:"webhook_concurrency"                envconfig:"BLNK_QUEUE_WEBHOOK_CONCURRENCY"`
+	TransactionWorkerConcurrency    int           `json:"transaction_worker_concurrency"     envconfig:"BLNK_QUEUE_TRANSACTION_WORKER_CONCURRENCY"`
 }
 
 type Configuration struct {
-	ProjectName             string                        `json:"project_name" envconfig:"BLNK_PROJECT_NAME"`
-	BackupDir               string                        `json:"backup_dir" envconfig:"BLNK_BACKUP_DIR"`
-	AwsAccessKeyId          string                        `json:"aws_access_key_id" envconfig:"BLNK_AWS_ACCESS_KEY_ID"`
-	S3Endpoint              string                        `json:"s3_endpoint" envconfig:"BLNK_S3_ENDPOINT"`
-	AwsSecretAccessKey      string                        `json:"aws_secret_access_key" envconfig:"BLNK_AWS_SECRET_ACCESS_KEY"`
-	S3BucketName            string                        `json:"s3_bucket_name" envconfig:"BLNK_S3_BUCKET_NAME"`
-	S3Region                string                        `json:"s3_region" envconfig:"BLNK_S3_REGION"`
+	ProjectName             string                        `json:"project_name"              envconfig:"BLNK_PROJECT_NAME"`
+	BackupDir               string                        `json:"backup_dir"                envconfig:"BLNK_BACKUP_DIR"`
+	AwsAccessKeyId          string                        `json:"aws_access_key_id"         envconfig:"BLNK_AWS_ACCESS_KEY_ID"`
+	S3Endpoint              string                        `json:"s3_endpoint"               envconfig:"BLNK_S3_ENDPOINT"`
+	AwsSecretAccessKey      string                        `json:"aws_secret_access_key"     envconfig:"BLNK_AWS_SECRET_ACCESS_KEY"`
+	S3BucketName            string                        `json:"s3_bucket_name"            envconfig:"BLNK_S3_BUCKET_NAME"`
+	S3Region                string                        `json:"s3_region"                 envconfig:"BLNK_S3_REGION"`
 	Server                  ServerConfig                  `json:"server"`
 	DataSource              DataSourceConfig              `json:"data_source"`
 	Redis                   RedisConfig                   `json:"redis"`
 	TypeSense               TypeSenseConfig               `json:"typesense"`
-	TypeSenseKey            string                        `json:"type_sense_key" envconfig:"BLNK_TYPESENSE_KEY"`
-	TokenizationSecret      string                        `json:"tokenization_secret" envconfig:"BLNK_TOKENIZATION_SECRET"`
+	TypeSenseKey            string                        `json:"type_sense_key"            envconfig:"BLNK_TYPESENSE_KEY"`
+	TokenizationSecret      string                        `json:"tokenization_secret"       envconfig:"BLNK_TOKENIZATION_SECRET"`
 	AccountNumberGeneration AccountNumberGenerationConfig `json:"account_number_generation"`
 	Notification            Notification                  `json:"notification"`
 	RateLimit               RateLimitConfig               `json:"rate_limit"`
-	EnableTelemetry         bool                          `json:"enable_telemetry" envconfig:"BLNK_ENABLE_TELEMETRY"`
-	EnableObservability     bool                          `json:"enable_observability" envconfig:"BLNK_ENABLE_OBSERVABILITY"`
-	MonitoringDSN           string                        `json:"monitoring_dsn" envconfig:"BLNK_MONITORING_DSN"`
+	EnableTelemetry         bool                          `json:"enable_telemetry"          envconfig:"BLNK_ENABLE_TELEMETRY"`
+	EnableObservability     bool                          `json:"enable_observability"      envconfig:"BLNK_ENABLE_OBSERVABILITY"`
+	MonitoringDSN           string                        `json:"monitoring_dsn"            envconfig:"BLNK_MONITORING_DSN"`
 	Transaction             TransactionConfig             `json:"transaction"`
 	Reconciliation          ReconciliationConfig          `json:"reconciliation"`
 	Queue                   QueueConfig                   `json:"queue"`
@@ -242,9 +242,9 @@ type Configuration struct {
 // history into a tamper-evident chain. It lives under transaction config and is
 // disabled by default.
 type HashChainConfig struct {
-	Enabled       bool          `json:"enabled" envconfig:"BLNK_TRANSACTION_HASHCHAIN_ENABLED"`
-	PollInterval  time.Duration `json:"poll_interval" envconfig:"BLNK_TRANSACTION_HASHCHAIN_POLL_INTERVAL"`
-	BatchSize     int           `json:"batch_size" envconfig:"BLNK_TRANSACTION_HASHCHAIN_BATCH_SIZE"`
+	Enabled       bool          `json:"enabled"        envconfig:"BLNK_TRANSACTION_HASHCHAIN_ENABLED"`
+	PollInterval  time.Duration `json:"poll_interval"  envconfig:"BLNK_TRANSACTION_HASHCHAIN_POLL_INTERVAL"`
+	BatchSize     int           `json:"batch_size"     envconfig:"BLNK_TRANSACTION_HASHCHAIN_BATCH_SIZE"`
 	TrailingDelay time.Duration `json:"trailing_delay" envconfig:"BLNK_TRANSACTION_HASHCHAIN_TRAILING_DELAY"`
 }
 
@@ -311,7 +311,9 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	cnf.setupRateLimiting()
 
 	if !cnf.Server.Secure {
-		logrus.Warn("SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.")
+		logrus.Warn(
+			"SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.",
+		)
 	}
 
 	// Validate tokenization secret length (AES-256 requires 32 bytes)
@@ -518,14 +520,14 @@ func (cnf *Configuration) trimWhitespace() {
 	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
 }
 
-// UploadWhitelistHosts returns the parsed, trimmed, de-duplicated, lowercase
+// UploadDomainWhitelistHosts returns the parsed, trimmed, de-duplicated, lowercase
 // list of exact hostnames permitted as targets for URL-based reconciliation
 // uploads. Entries may be supplied as bare hostnames ("example.com") or full
 // URLs ("https://example.com/path"); the hostname is extracted either way.
 // An empty/unset whitelist yields an empty slice, which the upload handler
 // treats as deny-by-default.
-func (cnf *Configuration) UploadWhitelistHosts() []string {
-	raw := strings.TrimSpace(cnf.Server.UploadWhitelist)
+func (cnf *Configuration) UploadDomainWhitelistHosts() []string {
+	raw := strings.TrimSpace(cnf.Server.UploadDomainWhitelist)
 	if raw == "" {
 		return nil
 	}
@@ -587,7 +589,8 @@ func (cnf *Configuration) setupRateLimiting() {
 	if cnf.RateLimit.CleanupIntervalSec == nil {
 		defaultCleanup := DEFAULT_CLEANUP_SEC
 		cnf.RateLimit.CleanupIntervalSec = &defaultCleanup
-		logrus.WithField("cleanup_interval_sec", defaultCleanup).Warn("rate limit cleanup interval not specified, setting default")
+		logrus.WithField("cleanup_interval_sec", defaultCleanup).
+			Warn("rate limit cleanup interval not specified, setting default")
 	}
 }
 
