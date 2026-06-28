@@ -344,7 +344,7 @@ func TestGetReconciliationsByUploadID_Success(t *testing.T) {
 	ctx := context.TODO()
 	completedAt := time.Now()
 
-	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at, export_type, export_s3_key_matched, export_s3_key_unmatched FROM blnk.reconciliations WHERE upload_id").
+	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at, COALESCE\\(export_type").
 		WithArgs("upl123").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "reconciliation_id", "upload_id", "status", "matched_transactions", "unmatched_transactions", "started_at", "completed_at",
@@ -368,7 +368,7 @@ func TestGetReconciliationsByUploadID_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
 
-	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at, export_type, export_s3_key_matched, export_s3_key_unmatched FROM blnk.reconciliations WHERE upload_id").
+	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at, COALESCE\\(export_type").
 		WithArgs("upl123").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "reconciliation_id", "upload_id", "status", "matched_transactions", "unmatched_transactions", "started_at", "completed_at",
