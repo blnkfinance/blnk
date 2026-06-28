@@ -352,6 +352,9 @@ func (s *Blnk) GetReconciliationResults(ctx context.Context, reconciliationID st
 // - error: a non-nil error if results cannot be fetched, serialization fails,
 //   either upload fails, or the DB update of the keys fails.
 func (s *Blnk) exportReconciliationToS3(ctx context.Context, reconciliation model.Reconciliation) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
 	results, err := s.GetReconciliationResults(ctx, reconciliation.ReconciliationID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch reconciliation results: %w", err)

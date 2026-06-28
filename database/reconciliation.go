@@ -69,8 +69,10 @@ func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Re
 	rec := &model.Reconciliation{}
 	err := d.Conn.QueryRowContext(ctx, `
 		SELECT id, reconciliation_id, upload_id, status, matched_transactions,
-			unmatched_transactions, started_at, completed_at, export_type,
-			export_s3_key_matched, export_s3_key_unmatched
+			unmatched_transactions, started_at, completed_at,
+			COALESCE(export_type, ''),
+			COALESCE(export_s3_key_matched, ''),
+			COALESCE(export_s3_key_unmatched, '')
 		FROM blnk.reconciliations
 		WHERE reconciliation_id = $1
 	`, id).Scan(
@@ -175,8 +177,10 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT id, reconciliation_id, upload_id, status, matched_transactions,
-			unmatched_transactions, started_at, completed_at, export_type,
-			export_s3_key_matched, export_s3_key_unmatched
+			unmatched_transactions, started_at, completed_at,
+			COALESCE(export_type, ''),
+			COALESCE(export_s3_key_matched, ''),
+			COALESCE(export_s3_key_unmatched, '')
 		FROM blnk.reconciliations
 		WHERE upload_id = $1
 		ORDER BY started_at DESC

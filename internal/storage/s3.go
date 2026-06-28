@@ -63,10 +63,12 @@ func NewS3Client(cfg *config.Configuration) (*S3, error) {
 
 	s3Config := &aws.Config{
 		Credentials:      credentials.NewStaticCredentials(cfg.AwsAccessKeyId, cfg.AwsSecretAccessKey, ""),
-		Endpoint:         aws.String(cfg.S3Endpoint),
 		Region:           aws.String(cfg.S3Region),
 		DisableSSL:       aws.Bool(disableSSL),
 		S3ForcePathStyle: aws.Bool(true),
+	}
+	if cfg.S3Endpoint != "" {
+		s3Config.Endpoint = aws.String(cfg.S3Endpoint)
 	}
 
 	sess, err := session.NewSession(s3Config)
