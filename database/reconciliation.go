@@ -44,10 +44,10 @@ func (d Datasource) RecordReconciliation(ctx context.Context, rec *model.Reconci
 	_, err := d.Conn.ExecContext(ctx,
 		`INSERT INTO blnk.reconciliations(
 			reconciliation_id, upload_id, status, matched_transactions,
-			unmatched_transactions, started_at, completed_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			unmatched_transactions, started_at, completed_at, export_type
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		rec.ReconciliationID, rec.UploadID, rec.Status, rec.MatchedTransactions,
-		rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt,
+		rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt, rec.ExportType,
 	)
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record reconciliation", err)
@@ -69,13 +69,15 @@ func (d Datasource) GetReconciliation(ctx context.Context, id string) (*model.Re
 	rec := &model.Reconciliation{}
 	err := d.Conn.QueryRowContext(ctx, `
 		SELECT id, reconciliation_id, upload_id, status, matched_transactions,
-			unmatched_transactions, started_at, completed_at
+			unmatched_transactions, started_at, completed_at, export_type,
+			export_s3_key_matched, export_s3_key_unmatched
 		FROM blnk.reconciliations
 		WHERE reconciliation_id = $1
 	`, id).Scan(
 		&rec.ID, &rec.ReconciliationID, &rec.UploadID, &rec.Status,
 		&rec.MatchedTransactions, &rec.UnmatchedTransactions,
-		&rec.StartedAt, &rec.CompletedAt,
+		&rec.StartedAt, &rec.CompletedAt, &rec.ExportType,
+		&rec.ExportS3KeyMatched, &rec.ExportS3KeyUnmatched,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -124,6 +126,43 @@ func (d Datasource) UpdateReconciliationStatus(ctx context.Context, id string, s
 	return nil
 }
 
+// UpdateReconciliationExportKey persists the S3 object keys for the matched and unmatched
+// export files of a reconciliation. Both keys are stored together; the export endpoint
+// treats either key being empty as "not yet exported".
+//
+// Parameters:
+// - ctx: Context for managing request and tracing.
+// - reconID: The reconciliation ID to update.
+// - matchedKey: The S3 object key for the matched-transactions export.
+// - unmatchedKey: The S3 object key for the unmatched-transactions export.
+//
+// Returns:
+// - An error if the update fails or the reconciliation is not found.
+func (d Datasource) UpdateReconciliationExportKey(ctx context.Context, reconID, matchedKey, unmatchedKey string) error {
+	ctx, span := otel.Tracer("reconciliation.database").Start(ctx, "Updating reconciliation export keys")
+	defer span.End()
+
+	result, err := d.Conn.ExecContext(ctx, `
+		UPDATE blnk.reconciliations
+		SET export_s3_key_matched = $2, export_s3_key_unmatched = $3
+		WHERE reconciliation_id = $1
+	`, reconID, matchedKey, unmatchedKey)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update reconciliation export keys", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Reconciliation with ID '%s' not found", reconID), nil)
+	}
+
+	return nil
+}
+
 // GetReconciliationsByUploadID retrieves all reconciliations associated with a specific upload ID, ordered by the start date in descending order.
 // Parameters:
 // - ctx: Context for managing request and tracing.
@@ -136,7 +175,8 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT id, reconciliation_id, upload_id, status, matched_transactions,
-			unmatched_transactions, started_at, completed_at
+			unmatched_transactions, started_at, completed_at, export_type,
+			export_s3_key_matched, export_s3_key_unmatched
 		FROM blnk.reconciliations
 		WHERE upload_id = $1
 		ORDER BY started_at DESC
@@ -153,7 +193,8 @@ func (d Datasource) GetReconciliationsByUploadID(ctx context.Context, uploadID s
 		err = rows.Scan(
 			&rec.ID, &rec.ReconciliationID, &rec.UploadID, &rec.Status,
 			&rec.MatchedTransactions, &rec.UnmatchedTransactions,
-			&rec.StartedAt, &rec.CompletedAt,
+			&rec.StartedAt, &rec.CompletedAt, &rec.ExportType,
+			&rec.ExportS3KeyMatched, &rec.ExportS3KeyUnmatched,
 		)
 		if err != nil {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan reconciliation data", err)

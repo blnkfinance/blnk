@@ -31,10 +31,12 @@ import (
 	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/search"
+	"github.com/blnkfinance/blnk/internal/storage"
 	"github.com/blnkfinance/blnk/internal/tokenization"
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
 )
 
 // Blnk represents the main struct for the Blnk application.
@@ -51,6 +53,7 @@ type Blnk struct {
 	config      *config.Configuration
 	cache       cache.Cache
 	hotPairs    *hotpairs.Manager
+	exporter    reconciliationExporter
 }
 
 const (
@@ -135,6 +138,20 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 		HotPairTTL:              configuration.Queue.HotPairTTL,
 		LockContentionThreshold: configuration.Queue.HotPairLockContentionThreshold,
 	})
+
+	// S3 exporter for reconciliation exports. Built lazily and best-effort: a
+	// misconfigured S3 must not prevent startup — the export endpoint will
+	// surface 500 RECON_EXPORT_S3_FAILED on demand instead.
+	var exporter reconciliationExporter
+	if storage.IsConfigured(configuration) {
+		s3Client, s3Err := storage.NewS3Client(configuration)
+		if s3Err != nil {
+			logrus.WithError(s3Err).Warn("failed to initialize S3 client; reconciliation export will be unavailable")
+		} else {
+			exporter = s3Client
+		}
+	}
+
 	newQueue := NewQueue(configuration, asynqClient)
 	newSearch := search.NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
 	hookManager := hooks.NewHookManager(redisClient, asynqClient)
@@ -156,6 +173,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 		config:      configuration,
 		cache:       newCache,
 		hotPairs:    hotPairManager,
+		exporter:    exporter,
 	}
 
 	notification.RegisterWebhookSender(func(event string, payload interface{}) error {

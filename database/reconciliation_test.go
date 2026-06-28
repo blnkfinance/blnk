@@ -77,7 +77,7 @@ func TestRecordReconciliation_Success(t *testing.T) {
 
 	mock.ExpectExec("INSERT INTO blnk.reconciliations").
 		WithArgs(rec.ReconciliationID, rec.UploadID, rec.Status, rec.MatchedTransactions,
-			rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt).
+			rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt, rec.ExportType).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = ds.RecordReconciliation(ctx, rec)
@@ -106,7 +106,7 @@ func TestRecordReconciliation_Fail(t *testing.T) {
 
 	mock.ExpectExec("INSERT INTO blnk.reconciliations").
 		WithArgs(rec.ReconciliationID, rec.UploadID, rec.Status, rec.MatchedTransactions,
-			rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt).
+			rec.UnmatchedTransactions, rec.StartedAt, rec.CompletedAt, rec.ExportType).
 		WillReturnError(fmt.Errorf("failed to insert"))
 
 	err = ds.RecordReconciliation(ctx, rec)
@@ -137,8 +137,10 @@ func TestGetReconciliation_Success(t *testing.T) {
 		WithArgs("rec123").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "reconciliation_id", "upload_id", "status", "matched_transactions", "unmatched_transactions", "started_at", "completed_at",
+			"export_type", "export_s3_key_matched", "export_s3_key_unmatched",
 		}).AddRow(expectedRec.ID, expectedRec.ReconciliationID, expectedRec.UploadID, expectedRec.Status, expectedRec.MatchedTransactions,
-			expectedRec.UnmatchedTransactions, expectedRec.StartedAt, expectedRec.CompletedAt))
+			expectedRec.UnmatchedTransactions, expectedRec.StartedAt, expectedRec.CompletedAt,
+			expectedRec.ExportType, expectedRec.ExportS3KeyMatched, expectedRec.ExportS3KeyUnmatched))
 
 	rec, err := ds.GetReconciliation(ctx, "rec123")
 	assert.NoError(t, err)
@@ -208,6 +210,59 @@ func TestUpdateReconciliationStatus_Fail(t *testing.T) {
 		WillReturnError(fmt.Errorf("failed to update"))
 
 	err = ds.UpdateReconciliationStatus(ctx, "rec123", "completed", 10, 5)
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrInternalServer, err.(apierror.APIError).Code)
+}
+
+func TestUpdateReconciliationExportKey_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.TODO()
+
+	matchedKey := "reconciliations/2026-06-27/abc123-matched.json"
+	unmatchedKey := "reconciliations/2026-06-27/abc123-unmatched.json"
+
+	mock.ExpectExec("UPDATE blnk.reconciliations").
+		WithArgs("rec123", matchedKey, unmatchedKey).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = ds.UpdateReconciliationExportKey(ctx, "rec123", matchedKey, unmatchedKey)
+	assert.NoError(t, err)
+}
+
+func TestUpdateReconciliationExportKey_NotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.TODO()
+
+	mock.ExpectExec("UPDATE blnk.reconciliations").
+		WithArgs("rec_missing", "k1", "k2").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	err = ds.UpdateReconciliationExportKey(ctx, "rec_missing", "k1", "k2")
+	assert.Error(t, err)
+	assert.Equal(t, apierror.ErrNotFound, err.(apierror.APIError).Code)
+}
+
+func TestUpdateReconciliationExportKey_Fail(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.TODO()
+
+	mock.ExpectExec("UPDATE blnk.reconciliations").
+		WithArgs("rec123", "k1", "k2").
+		WillReturnError(fmt.Errorf("failed to update"))
+
+	err = ds.UpdateReconciliationExportKey(ctx, "rec123", "k1", "k2")
 	assert.Error(t, err)
 	assert.Equal(t, apierror.ErrInternalServer, err.(apierror.APIError).Code)
 }
@@ -289,13 +344,14 @@ func TestGetReconciliationsByUploadID_Success(t *testing.T) {
 	ctx := context.TODO()
 	completedAt := time.Now()
 
-	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at FROM blnk.reconciliations WHERE upload_id").
+	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at, export_type, export_s3_key_matched, export_s3_key_unmatched FROM blnk.reconciliations WHERE upload_id").
 		WithArgs("upl123").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "reconciliation_id", "upload_id", "status", "matched_transactions", "unmatched_transactions", "started_at", "completed_at",
+			"export_type", "export_s3_key_matched", "export_s3_key_unmatched",
 		}).
-			AddRow(1, "rec1", "upl123", "completed", 10, 5, time.Now(), &completedAt).
-			AddRow(2, "rec2", "upl123", "pending", 0, 0, time.Now(), nil))
+			AddRow(1, "rec1", "upl123", "completed", 10, 5, time.Now(), &completedAt, "", "", "").
+			AddRow(2, "rec2", "upl123", "pending", 0, 0, time.Now(), nil, "", "", ""))
 
 	recs, err := ds.GetReconciliationsByUploadID(ctx, "upl123")
 	assert.NoError(t, err)
@@ -312,10 +368,11 @@ func TestGetReconciliationsByUploadID_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.TODO()
 
-	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at FROM blnk.reconciliations WHERE upload_id").
+	mock.ExpectQuery("SELECT id, reconciliation_id, upload_id, status, matched_transactions, unmatched_transactions, started_at, completed_at, export_type, export_s3_key_matched, export_s3_key_unmatched FROM blnk.reconciliations WHERE upload_id").
 		WithArgs("upl123").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "reconciliation_id", "upload_id", "status", "matched_transactions", "unmatched_transactions", "started_at", "completed_at",
+			"export_type", "export_s3_key_matched", "export_s3_key_unmatched",
 		}))
 
 	recs, err := ds.GetReconciliationsByUploadID(ctx, "upl123")

@@ -17,6 +17,10 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,8 +29,46 @@ import (
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database/mocks"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 )
+
+// fakeExporter is a test double for reconciliationExporter that records every
+// Upload and PresignGet call so assertions can verify the key format, payload,
+// and expiry without a real S3 endpoint.
+type fakeExporter struct {
+	uploads      []fakeUpload
+	presignCalls []fakePresign
+	uploadErr    error
+	presignURL   string
+	presignErr   error
+}
+
+type fakeUpload struct {
+	bucket      string
+	key         string
+	data        []byte
+	contentType string
+}
+
+type fakePresign struct {
+	bucket string
+	key    string
+	expiry time.Duration
+}
+
+func (f *fakeExporter) Upload(_ context.Context, bucket, key string, data []byte, contentType string) error {
+	f.uploads = append(f.uploads, fakeUpload{bucket: bucket, key: key, data: data, contentType: contentType})
+	return f.uploadErr
+}
+
+func (f *fakeExporter) PresignGet(bucket, key string, expiry time.Duration) (string, error) {
+	f.presignCalls = append(f.presignCalls, fakePresign{bucket: bucket, key: key, expiry: expiry})
+	if f.presignErr != nil {
+		return "", f.presignErr
+	}
+	return f.presignURL, nil
+}
 
 // TestOneToManyReconciliation tests the one-to-many reconciliation strategy
 func TestOneToManyReconciliation(t *testing.T) {
@@ -429,4 +471,222 @@ func TestReconciliationEdgeCases(t *testing.T) {
 
 		mockDS.AssertExpectations(t)
 	})
+}
+
+func TestExportReconciliationToS3_JSON(t *testing.T) {
+	config.ConfigStore.Store(&config.Configuration{S3BucketName: "test-bucket"})
+	mockDS := new(mocks.MockDataSource)
+	exp := &fakeExporter{}
+	b := &Blnk{datasource: mockDS, exporter: exp}
+
+	rec := model.Reconciliation{ReconciliationID: "rec_json", ExportType: "json"}
+	matchTime := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
+
+	mockDS.On("GetReconciliation", mock.Anything, "rec_json").
+		Return(&model.Reconciliation{ReconciliationID: "rec_json"}, nil).Once()
+	mockDS.On("GetMatchesByReconciliationID", mock.Anything, "rec_json").
+		Return([]*model.Match{
+			{ExternalTransactionID: "ext1", InternalTransactionID: "int1", Amount: 100.5, Date: matchTime},
+		}, nil).Once()
+	mockDS.On("GetUnmatchedByReconciliationID", mock.Anything, "rec_json").
+		Return([]string{"ext2"}, nil).Once()
+	mockDS.On("UpdateReconciliationExportKey", mock.Anything, "rec_json",
+		mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Return(nil).Once()
+
+	err := b.exportReconciliationToS3(context.Background(), rec)
+	assert.NoError(t, err)
+	assert.Len(t, exp.uploads, 2, "expected one upload for matched, one for unmatched")
+
+	// Both keys share the same random id and date folder; they differ only in
+	// the suffix and extension. Compute the expected date folder at runtime so
+	// the test is not tied to a specific calendar day.
+	dateFolder := "reconciliations/" + time.Now().Format("2006-01-02") + "/"
+	matchedKey := exp.uploads[0].key
+	unmatchedKey := exp.uploads[1].key
+	assert.True(t, strings.HasPrefix(matchedKey, dateFolder), "matched key has date folder: %s", matchedKey)
+	assert.True(t, strings.HasSuffix(matchedKey, "-matched.json"), "matched key has suffix: %s", matchedKey)
+	assert.True(t, strings.HasSuffix(unmatchedKey, "-unmatched.json"), "unmatched key has suffix: %s", unmatchedKey)
+
+	// Strip the suffixes and verify the base id is identical (same upload batch).
+	matchedBase := strings.TrimSuffix(strings.TrimPrefix(matchedKey, dateFolder), "-matched.json")
+	unmatchedBase := strings.TrimSuffix(strings.TrimPrefix(unmatchedKey, dateFolder), "-unmatched.json")
+	assert.Equal(t, matchedBase, unmatchedBase, "matched and unmatched keys share the same base id")
+
+	assert.Equal(t, "application/json", exp.uploads[0].contentType)
+	assert.Equal(t, "application/json", exp.uploads[1].contentType)
+
+	var gotMatches []model.Match
+	assert.NoError(t, json.Unmarshal(exp.uploads[0].data, &gotMatches))
+	assert.Len(t, gotMatches, 1)
+	assert.Equal(t, "ext1", gotMatches[0].ExternalTransactionID)
+	assert.Equal(t, 100.5, gotMatches[0].Amount)
+
+	var gotUnmatched []string
+	assert.NoError(t, json.Unmarshal(exp.uploads[1].data, &gotUnmatched))
+	assert.Equal(t, []string{"ext2"}, gotUnmatched)
+
+	mockDS.AssertExpectations(t)
+}
+
+func TestExportReconciliationToS3_CSV(t *testing.T) {
+	config.ConfigStore.Store(&config.Configuration{S3BucketName: "test-bucket"})
+	mockDS := new(mocks.MockDataSource)
+	exp := &fakeExporter{}
+	b := &Blnk{datasource: mockDS, exporter: exp}
+
+	rec := model.Reconciliation{ReconciliationID: "rec_csv", ExportType: "csv"}
+	matchTime := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
+
+	mockDS.On("GetReconciliation", mock.Anything, "rec_csv").
+		Return(&model.Reconciliation{ReconciliationID: "rec_csv"}, nil).Once()
+	mockDS.On("GetMatchesByReconciliationID", mock.Anything, "rec_csv").
+		Return([]*model.Match{
+			{ExternalTransactionID: "ext1", InternalTransactionID: "int1", Amount: 200.75, Date: matchTime},
+		}, nil).Once()
+	mockDS.On("GetUnmatchedByReconciliationID", mock.Anything, "rec_csv").
+		Return([]string{"ext2"}, nil).Once()
+	mockDS.On("UpdateReconciliationExportKey", mock.Anything, "rec_csv",
+		mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Return(nil).Once()
+
+	err := b.exportReconciliationToS3(context.Background(), rec)
+	assert.NoError(t, err)
+	assert.Len(t, exp.uploads, 2)
+
+	assert.True(t, strings.HasSuffix(exp.uploads[0].key, "-matched.csv"))
+	assert.True(t, strings.HasSuffix(exp.uploads[1].key, "-unmatched.csv"))
+	assert.Equal(t, "text/csv", exp.uploads[0].contentType)
+	assert.Equal(t, "text/csv", exp.uploads[1].contentType)
+
+	matchedCSV := string(exp.uploads[0].data)
+	assert.Contains(t, matchedCSV, "external_transaction_id,internal_transaction_id,amount,date")
+	assert.Contains(t, matchedCSV, "ext1,int1,200.75,")
+	assert.Contains(t, matchedCSV, matchTime.UTC().Format(time.RFC3339))
+
+	unmatchedCSV := string(exp.uploads[1].data)
+	assert.Contains(t, unmatchedCSV, "external_transaction_id")
+	assert.Contains(t, unmatchedCSV, "ext2")
+
+	mockDS.AssertExpectations(t)
+}
+
+func TestExportReconciliationToS3_UploadError(t *testing.T) {
+	config.ConfigStore.Store(&config.Configuration{S3BucketName: "test-bucket"})
+	mockDS := new(mocks.MockDataSource)
+	exp := &fakeExporter{uploadErr: fmt.Errorf("s3 unavailable")}
+	b := &Blnk{datasource: mockDS, exporter: exp}
+
+	rec := model.Reconciliation{ReconciliationID: "rec_err", ExportType: "json"}
+
+	mockDS.On("GetReconciliation", mock.Anything, "rec_err").
+		Return(&model.Reconciliation{ReconciliationID: "rec_err"}, nil).Once()
+	mockDS.On("GetMatchesByReconciliationID", mock.Anything, "rec_err").
+		Return([]*model.Match{}, nil).Once()
+	mockDS.On("GetUnmatchedByReconciliationID", mock.Anything, "rec_err").
+		Return([]string{}, nil).Once()
+
+	err := b.exportReconciliationToS3(context.Background(), rec)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to upload matched export")
+
+	// Keys must NOT be persisted when the upload fails.
+	mockDS.AssertNotCalled(t, "UpdateReconciliationExportKey", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestExportReconciliationToS3_UnsupportedType(t *testing.T) {
+	config.ConfigStore.Store(&config.Configuration{S3BucketName: "test-bucket"})
+	mockDS := new(mocks.MockDataSource)
+	exp := &fakeExporter{}
+	b := &Blnk{datasource: mockDS, exporter: exp}
+
+	rec := model.Reconciliation{ReconciliationID: "rec_bad", ExportType: "xml"}
+	mockDS.On("GetReconciliation", mock.Anything, "rec_bad").
+		Return(&model.Reconciliation{ReconciliationID: "rec_bad"}, nil).Once()
+	mockDS.On("GetMatchesByReconciliationID", mock.Anything, "rec_bad").
+		Return([]*model.Match{}, nil).Once()
+	mockDS.On("GetUnmatchedByReconciliationID", mock.Anything, "rec_bad").
+		Return([]string{}, nil).Once()
+
+	err := b.exportReconciliationToS3(context.Background(), rec)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported export type")
+	assert.Empty(t, exp.uploads, "no uploads should occur for an unsupported type")
+}
+
+func TestGetReconciliationExportURL_Ready(t *testing.T) {
+	config.ConfigStore.Store(&config.Configuration{S3BucketName: "test-bucket"})
+	mockDS := new(mocks.MockDataSource)
+	exp := &fakeExporter{presignURL: "https://fake/presigned?sig=abc"}
+	b := &Blnk{datasource: mockDS, exporter: exp}
+
+	mockDS.On("GetReconciliation", mock.Anything, "rec_ready").Return(&model.Reconciliation{
+		ReconciliationID:     "rec_ready",
+		ExportS3KeyMatched:   "reconciliations/2026-06-27/abc-matched.json",
+		ExportS3KeyUnmatched: "reconciliations/2026-06-27/abc-unmatched.json",
+	}, nil).Once()
+
+	urls, err := b.GetReconciliationExportURL(context.Background(), "rec_ready")
+	assert.NoError(t, err)
+	assert.Equal(t, "https://fake/presigned?sig=abc", urls["matched"])
+	assert.Equal(t, "https://fake/presigned?sig=abc", urls["unmatched"])
+	assert.Len(t, exp.presignCalls, 2)
+	assert.Equal(t, 24*time.Hour, exp.presignCalls[0].expiry, "presigned URL TTL must be 24h")
+	assert.Equal(t, 24*time.Hour, exp.presignCalls[1].expiry)
+	mockDS.AssertExpectations(t)
+}
+
+func TestGetReconciliationExportURL_NotReady(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	b := &Blnk{datasource: mockDS}
+
+	mockDS.On("GetReconciliation", mock.Anything, "rec_not_exported").Return(&model.Reconciliation{
+		ReconciliationID: "rec_not_exported",
+	}, nil).Once()
+
+	urls, err := b.GetReconciliationExportURL(context.Background(), "rec_not_exported")
+	assert.Nil(t, urls)
+	assert.Error(t, err)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok, "expected APIError")
+	assert.Equal(t, apierror.ErrReconExportNotReady, apiErr.Code)
+}
+
+func TestGetReconciliationExportURL_ReconNotFound(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	b := &Blnk{datasource: mockDS}
+
+	mockDS.On("GetReconciliation", mock.Anything, "rec_missing").Return(
+		(*model.Reconciliation)(nil),
+		apierror.NewAPIError(apierror.ErrNotFound, "Reconciliation with ID 'rec_missing' not found", nil),
+	).Once()
+
+	urls, err := b.GetReconciliationExportURL(context.Background(), "rec_missing")
+	assert.Nil(t, urls)
+	assert.Error(t, err)
+	// Blnk.GetReconciliation wraps the datasource error with fmt.Errorf("...%w", err),
+	// so the error reaches us as a wrapped error. Use errors.As to unwrap it.
+	var apiErr apierror.APIError
+	assert.True(t, errors.As(err, &apiErr), "expected wrapped APIError, got %T", err)
+	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+}
+
+func TestGetReconciliationExportURL_PresignError(t *testing.T) {
+	config.ConfigStore.Store(&config.Configuration{S3BucketName: "test-bucket"})
+	mockDS := new(mocks.MockDataSource)
+	exp := &fakeExporter{presignErr: fmt.Errorf("presign failed")}
+	b := &Blnk{datasource: mockDS, exporter: exp}
+
+	mockDS.On("GetReconciliation", mock.Anything, "rec_presign_err").Return(&model.Reconciliation{
+		ReconciliationID:     "rec_presign_err",
+		ExportS3KeyMatched:   "k-matched",
+		ExportS3KeyUnmatched: "k-unmatched",
+	}, nil).Once()
+
+	urls, err := b.GetReconciliationExportURL(context.Background(), "rec_presign_err")
+	assert.Nil(t, urls)
+	assert.Error(t, err)
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok, "expected APIError")
+	assert.Equal(t, apierror.ErrReconExportS3Failed, apiErr.Code)
 }

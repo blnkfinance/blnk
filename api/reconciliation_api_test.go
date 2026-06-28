@@ -561,3 +561,57 @@ func TestUploadExternalData_URLWhitelist(t *testing.T) {
 		assert.Contains(t, resp.Body.String(), "Failed to process upload")
 	})
 }
+
+// TestStartReconciliation_InvalidExportType verifies that the service-layer
+// validation rejects unsupported export_type values with a 400 before any
+// database or goroutine work happens.
+func TestStartReconciliation_InvalidExportType(t *testing.T) {
+	router, _, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	payload := map[string]interface{}{
+		"upload_id":         "upload_1",
+		"strategy":          "one_to_one",
+		"matching_rule_ids": []string{"rule_1"},
+		"export_type":       "xml",
+	}
+	body, _ := request.ToJsonReq(payload)
+	req := httptest.NewRequest("POST", "/reconciliation/start", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	assert.Contains(t, resp.Body.String(), "export_type must be 'json' or 'csv'")
+	assert.Contains(t, resp.Body.String(), "GEN_VALIDATION_ERROR")
+}
+
+// TestStartReconciliation_OmitsExportType verifies that omitting the field
+// entirely keeps the existing happy-path behaviour (no export, no validation
+// error). The reconciliation is recorded with ExportType="" and the async
+// goroutine is started.
+func TestStartReconciliation_OmitsExportType(t *testing.T) {
+	router, _, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	payload := map[string]interface{}{
+		"upload_id":         "upload_1",
+		"strategy":          "one_to_one",
+		"matching_rule_ids": []string{"rule_1"},
+	}
+	body, _ := request.ToJsonReq(payload)
+	req := httptest.NewRequest("POST", "/reconciliation/start", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// The reconciliation starts asynchronously. With a real database the
+	// request either returns 200 (reconciliation_id) or 400 if the upload_id
+	// doesn't exist. What we assert here is that the response is NOT a 400
+	// from the export_type validation — i.e. the omitted field is accepted.
+	assert.NotContains(t, resp.Body.String(), "export_type must be")
+}

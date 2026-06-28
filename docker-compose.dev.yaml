@@ -112,6 +112,23 @@ services:
       timeout: 5s
       retries: 3
 
+  localstack:
+    image: localstack/localstack:4.0.3
+    restart: unless-stopped
+    environment:
+      SERVICES: s3
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    volumes:
+      - localstack_data:/var/lib/localstack
+    ports:
+      - "4566:4566" # LocalStack Gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -128,3 +145,4 @@ services:
 volumes:
   pg_data:
   typesense_data:
+  localstack_data:

@@ -483,6 +483,11 @@ func (m *MockDataSource) UpdateReconciliationStatus(ctx context.Context, id stri
 	return args.Error(0)
 }
 
+func (m *MockDataSource) UpdateReconciliationExportKey(ctx context.Context, reconID, matchedKey, unmatchedKey string) error {
+	args := m.Called(ctx, reconID, matchedKey, unmatchedKey)
+	return args.Error(0)
+}
+
 func (m *MockDataSource) GetReconciliationsByUploadID(ctx context.Context, uploadID string) ([]*model.Reconciliation, error) {
 	args := m.Called(ctx, uploadID)
 	return args.Get(0).([]*model.Reconciliation), args.Error(1)

@@ -223,7 +223,7 @@ func TestRecon_StartReconciliation_RecordErrorAborts(t *testing.T) {
 	dbErr := errors.New("insert failed")
 	mockDS.On("RecordReconciliation", mock.Anything, mock.Anything).Return(dbErr).Once()
 
-	id, err := b.StartReconciliation(context.Background(), "upload_1", "one_to_one", "", nil, false)
+	id, err := b.StartReconciliation(context.Background(), "upload_1", "one_to_one", "", nil, false, "")
 	assert.Empty(t, id)
 	assert.ErrorIs(t, err, dbErr)
 	reconAssertNoCall(t, mockDS, "UpdateReconciliationStatus")
@@ -263,7 +263,7 @@ func TestRecon_StartReconciliation_DryRunCompletes(t *testing.T) {
 		Run(func(mock.Arguments) { close(done) }).
 		Return(nil).Once()
 
-	id, err := b.StartReconciliation(context.Background(), "upload_1", "one_to_one", "", []string{"rule_1"}, true)
+	id, err := b.StartReconciliation(context.Background(), "upload_1", "one_to_one", "", []string{"rule_1"}, true, "")
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(id, "recon_"), "reconciliation ID %q must have recon_ prefix", id)
 
@@ -293,7 +293,7 @@ func TestRecon_StartReconciliation_ProcessFailureMarksFailed(t *testing.T) {
 		Run(func(mock.Arguments) { close(done) }).
 		Return(nil).Once()
 
-	id, err := b.StartReconciliation(context.Background(), "upload_1", "one_to_one", "", nil, false)
+	id, err := b.StartReconciliation(context.Background(), "upload_1", "one_to_one", "", nil, false, "")
 	require.NoError(t, err, "StartReconciliation reports success; failures surface asynchronously")
 	assert.NotEmpty(t, id)
 
@@ -419,7 +419,7 @@ func TestRecon_ProcessReconciliation_DryRunMatchedAndUnmatched(t *testing.T) {
 
 	mockDS.On("UpdateReconciliationStatus", mock.Anything, "recon_test", StatusCompleted, 1, 1).Return(nil).Once()
 
-	err := b.processReconciliation(context.Background(), rec, "one_to_one", "", []string{"rule_1"})
+	err := b.processReconciliation(context.Background(), rec, "one_to_one", "", []string{"rule_1"}, "")
 	require.NoError(t, err)
 	reconAssertNoCall(t, mockDS, "RecordMatches")
 	reconAssertNoCall(t, mockDS, "RecordUnmatched")
@@ -434,7 +434,7 @@ func TestRecon_ProcessReconciliation_StatusUpdateError(t *testing.T) {
 	mockDS.On("UpdateReconciliationStatus", mock.Anything, "recon_x", StatusInProgress, 0, 0).
 		Return(errors.New("locked")).Once()
 
-	err := b.processReconciliation(context.Background(), model.Reconciliation{ReconciliationID: "recon_x"}, "one_to_one", "", nil)
+	err := b.processReconciliation(context.Background(), model.Reconciliation{ReconciliationID: "recon_x"}, "one_to_one", "", nil, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to update reconciliation status")
 }
@@ -447,7 +447,7 @@ func TestRecon_ProcessReconciliation_RuleFetchError(t *testing.T) {
 	mockDS.On("UpdateReconciliationStatus", mock.Anything, "recon_x", StatusInProgress, 0, 0).Return(nil).Once()
 	mockDS.On("GetMatchingRule", mock.Anything, "rule_missing").Return((*model.MatchingRule)(nil), errors.New("no such rule")).Once()
 
-	err := b.processReconciliation(context.Background(), model.Reconciliation{ReconciliationID: "recon_x"}, "one_to_one", "", []string{"rule_missing"})
+	err := b.processReconciliation(context.Background(), model.Reconciliation{ReconciliationID: "recon_x"}, "one_to_one", "", []string{"rule_missing"}, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get matching rules")
 }
@@ -463,7 +463,7 @@ func TestRecon_ProcessReconciliation_TransactionFetchError(t *testing.T) {
 		Return(([]*model.ExternalTransaction)(nil), errors.New("query timeout")).Once()
 
 	rec := model.Reconciliation{ReconciliationID: "recon_x", UploadID: "upload_1", IsDryRun: true}
-	err := b.processReconciliation(context.Background(), rec, "one_to_one", "", nil)
+	err := b.processReconciliation(context.Background(), rec, "one_to_one", "", nil, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to process transactions")
 	// On synchronous failure the status update to failed happens in the caller

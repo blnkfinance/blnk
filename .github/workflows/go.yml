@@ -68,6 +68,20 @@ jobs:
           --health-timeout 10s
           --health-retries 5
 
+      localstack:
+        image: localstack/localstack:4.0.3
+        env:
+          SERVICES: s3
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +103,11 @@ jobs:
         run: go test -v -p 1 ./...
         env:
           BLNK_TYPESENSE_DNS: http://localhost:8108
+          BLNK_S3_ENDPOINT: http://localhost:4566
+          BLNK_S3_BUCKET_NAME: test-bucket
+          BLNK_S3_REGION: us-east-1
+          BLNK_AWS_ACCESS_KEY_ID: test
+          BLNK_AWS_SECRET_ACCESS_KEY: test
 
   race:
     runs-on: ubuntu-latest
@@ -131,6 +150,20 @@ jobs:
           --health-timeout 10s
           --health-retries 5
 
+      localstack:
+        image: localstack/localstack:4.0.3
+        env:
+          SERVICES: s3
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -152,3 +185,8 @@ jobs:
         run: go test -race -p 1 ./...
         env:
           BLNK_TYPESENSE_DNS: http://localhost:8108
+          BLNK_S3_ENDPOINT: http://localhost:4566
+          BLNK_S3_BUCKET_NAME: test-bucket
+          BLNK_S3_REGION: us-east-1
+          BLNK_AWS_ACCESS_KEY_ID: test
+          BLNK_AWS_SECRET_ACCESS_KEY: test

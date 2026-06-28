@@ -17,21 +17,28 @@ limitations under the License.
 package blnk
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/big"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/files"
 	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/internal/storage"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/texttheater/golang-levenshtein/levenshtein"
 	"github.com/wacul/ptr"
@@ -71,6 +78,19 @@ type transactionProcessor struct {
 // reconciler defines the function type for reconciling a batch of transactions.
 // It accepts a context, and a slice of transactions, and returns the matched transactions and unmatched ones.
 type reconciler func(ctx context.Context, txns []*model.Transaction) ([]model.Match, []string)
+
+// reconciliationExporter is the seam between the reconciliation flow and the
+// S3 helper. It is unexported and satisfied by *storage.S3 in production;
+// tests inject a fake so the export logic can be exercised without a real S3
+// (or LocalStack) endpoint.
+type reconciliationExporter interface {
+	Upload(ctx context.Context, bucket, key string, data []byte, contentType string) error
+	PresignGet(bucket, key string, expiry time.Duration) (string, error)
+}
+
+// Compile-time check that *storage.S3 satisfies reconciliationExporter. If
+// either method signature drifts, the build fails here rather than at runtime.
+var _ reconciliationExporter = (*storage.S3)(nil)
 
 // contains checks whether a slice contains a specific string.
 // Parameters:
@@ -139,10 +159,19 @@ func (l *Blnk) postReconciliationActions(_ context.Context, reconciliation model
 // - groupCriteria: Criteria to group transactions (optional).
 // - matchingRuleIDs: The IDs of the rules used for matching transactions.
 // - isDryRun: If true, the reconciliation will not commit changes (useful for testing).
+// - exportType: Optional export format ("json" or "csv"); when set and S3 is configured,
+//   the completed reconciliation results are uploaded to S3 and the keys are persisted.
 // Returns:
 // - string: The ID of the reconciliation process.
-// - error: If the reconciliation fails to start.
-func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strategy string, groupCriteria string, matchingRuleIDs []string, isDryRun bool) (string, error) {
+// - error: If the reconciliation fails to start or exportType is invalid.
+func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strategy string, groupCriteria string, matchingRuleIDs []string, isDryRun bool, exportType string) (string, error) {
+	// Validate export_type. Only "", "json", and "csv" are accepted; any other
+	// value returns a validation error so the request fails fast before any DB
+	// or goroutine work happens.
+	if exportType != "" && exportType != "json" && exportType != "csv" {
+		return "", apierror.NewAPIError(apierror.ErrGenValidation, "export_type must be 'json' or 'csv'", nil)
+	}
+
 	// Generate a unique ID for the reconciliation.
 	reconciliationID := model.GenerateUUIDWithSuffix("recon")
 	// Initialize a new reconciliation object with the provided parameters.
@@ -152,6 +181,7 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 		Status:           StatusStarted,
 		StartedAt:        time.Now(),
 		IsDryRun:         isDryRun,
+		ExportType:       exportType,
 	}
 
 	// Record the reconciliation in the data source (e.g., database).
@@ -165,7 +195,7 @@ func (s *Blnk) StartReconciliation(ctx context.Context, uploadID string, strateg
 
 	// Start the reconciliation process asynchronously.
 	go func() {
-		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs)
+		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs, exportType)
 		if err != nil {
 			// If an error occurs during the reconciliation, log it and update the reconciliation status to "failed".
 			logrus.Errorf("Error in reconciliation process: %v", err)
@@ -234,7 +264,7 @@ func (s *Blnk) StartInstantReconciliation(ctx context.Context, externalTransacti
 
 	// Start the reconciliation process asynchronously
 	go func() {
-		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs)
+		err := s.processReconciliation(ctxWithTrace, reconciliation, strategy, groupCriteria, matchingRuleIDs, "")
 		if err != nil {
 			// If an error occurs during the reconciliation, log it and update the reconciliation status to "failed"
 			logrus.Errorf("Error in instant reconciliation process: %v", err)
@@ -307,6 +337,199 @@ func (s *Blnk) GetReconciliationResults(ctx context.Context, reconciliationID st
 	}, nil
 }
 
+// exportReconciliationToS3 serializes the reconciliation results and uploads
+// them to S3 as two objects (matched + unmatched) under
+// reconciliations/<YYYY-MM-DD>/<uuid>-<part>.<ext>. On success the S3 keys
+// are persisted to the reconciliation record. All errors are returned to the
+// caller, which logs and swallows them — the reconciliation itself remains
+// "completed" regardless.
+//
+// Parameters:
+// - ctx: The context controlling the operation.
+// - reconciliation: The reconciliation whose results should be exported.
+//
+// Returns:
+// - error: a non-nil error if results cannot be fetched, serialization fails,
+//   either upload fails, or the DB update of the keys fails.
+func (s *Blnk) exportReconciliationToS3(ctx context.Context, reconciliation model.Reconciliation) error {
+	results, err := s.GetReconciliationResults(ctx, reconciliation.ReconciliationID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch reconciliation results: %w", err)
+	}
+
+	matchedBytes, unmatchedBytes, err := serializeReconciliationResults(reconciliation.ExportType, results)
+	if err != nil {
+		return fmt.Errorf("failed to serialize reconciliation results: %w", err)
+	}
+
+	cfg, err := config.Fetch()
+	if err != nil {
+		return fmt.Errorf("failed to fetch config: %w", err)
+	}
+
+	date := time.Now()
+	id := uuid.NewString()
+	matchedKey := storage.BuildExportKey(date, id, "matched", reconciliation.ExportType)
+	unmatchedKey := storage.BuildExportKey(date, id, "unmatched", reconciliation.ExportType)
+	contentType := exportContentType(reconciliation.ExportType)
+	bucket := cfg.S3BucketName
+
+	if err := s.exporter.Upload(ctx, bucket, matchedKey, matchedBytes, contentType); err != nil {
+		return fmt.Errorf("failed to upload matched export: %w", err)
+	}
+	if err := s.exporter.Upload(ctx, bucket, unmatchedKey, unmatchedBytes, contentType); err != nil {
+		return fmt.Errorf("failed to upload unmatched export: %w", err)
+	}
+
+	if err := s.datasource.UpdateReconciliationExportKey(ctx, reconciliation.ReconciliationID, matchedKey, unmatchedKey); err != nil {
+		return fmt.Errorf("failed to persist export keys: %w", err)
+	}
+
+	return nil
+}
+
+// GetReconciliationExportURL returns presigned S3 download URLs (24h TTL) for
+// the matched and unmatched export objects of a reconciliation. Returns
+// ErrReconExportNotReady (422) when the reconciliation has no export keys
+// recorded (either it was never exported, S3 was not configured at export
+// time, or the export itself failed and was swallowed as best-effort).
+// Returns ErrReconExportS3Failed (500) when the S3 client cannot be built or
+// presigning fails.
+//
+// Parameters:
+// - ctx: The context controlling the request.
+// - reconID: The reconciliation ID whose export URLs should be generated.
+//
+// Returns:
+// - map[string]string: {"matched": "<url>", "unmatched": "<url>"} when successful.
+// - error: a non-nil error in the failure cases described above.
+func (s *Blnk) GetReconciliationExportURL(ctx context.Context, reconID string) (map[string]string, error) {
+	rec, err := s.GetReconciliation(ctx, reconID)
+	if err != nil {
+		return nil, err
+	}
+
+	if rec.ExportS3KeyMatched == "" || rec.ExportS3KeyUnmatched == "" {
+		return nil, apierror.NewAPIError(apierror.ErrReconExportNotReady, "reconciliation export not ready", nil)
+	}
+
+	cfg, err := config.Fetch()
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrReconExportS3Failed, "failed to fetch config", err)
+	}
+
+	exporter := s.exporter
+	if exporter == nil {
+		if !storage.IsConfigured(cfg) {
+			return nil, apierror.NewAPIError(apierror.ErrReconExportS3Failed, "S3 is not configured", nil)
+		}
+		s3Client, s3Err := storage.NewS3Client(cfg)
+		if s3Err != nil {
+			return nil, apierror.NewAPIError(apierror.ErrReconExportS3Failed, "failed to build S3 client", s3Err)
+		}
+		exporter = s3Client
+	}
+
+	expiry := 24 * time.Hour
+	matchedURL, err := exporter.PresignGet(cfg.S3BucketName, rec.ExportS3KeyMatched, expiry)
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrReconExportS3Failed, "failed to presign matched URL", err)
+	}
+	unmatchedURL, err := exporter.PresignGet(cfg.S3BucketName, rec.ExportS3KeyUnmatched, expiry)
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrReconExportS3Failed, "failed to presign unmatched URL", err)
+	}
+
+	return map[string]string{"matched": matchedURL, "unmatched": unmatchedURL}, nil
+}
+
+// serializeReconciliationResults returns the matched and unmatched bytes for
+// the requested export type. json produces compact JSON arrays; csv produces
+// a header row followed by one row per item.
+func serializeReconciliationResults(exportType string, results *model.ReconciliationResults) (matchedBytes, unmatchedBytes []byte, err error) {
+	switch exportType {
+	case "json":
+		matchedBytes, err = json.Marshal(results.MatchedTransactions)
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal matched: %w", err)
+		}
+		unmatchedBytes, err = json.Marshal(results.UnmatchedTransactions)
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal unmatched: %w", err)
+		}
+	case "csv":
+		matchedBytes, err = csvMatchedBytes(results.MatchedTransactions)
+		if err != nil {
+			return nil, nil, err
+		}
+		unmatchedBytes, err = csvUnmatchedBytes(results.UnmatchedTransactions)
+		if err != nil {
+			return nil, nil, err
+		}
+	default:
+		return nil, nil, fmt.Errorf("unsupported export type %q", exportType)
+	}
+	return matchedBytes, unmatchedBytes, nil
+}
+
+// csvMatchedBytes serializes matched transactions to CSV with header
+// external_transaction_id,internal_transaction_id,amount,date.
+func csvMatchedBytes(matches []model.Match) ([]byte, error) {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write([]string{"external_transaction_id", "internal_transaction_id", "amount", "date"}); err != nil {
+		return nil, fmt.Errorf("csv header: %w", err)
+	}
+	for _, m := range matches {
+		if err := w.Write([]string{
+			m.ExternalTransactionID,
+			m.InternalTransactionID,
+			strconv.FormatFloat(m.Amount, 'f', -1, 64),
+			m.Date.UTC().Format(time.RFC3339),
+		}); err != nil {
+			return nil, fmt.Errorf("csv row: %w", err)
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, fmt.Errorf("csv flush: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// csvUnmatchedBytes serializes unmatched external transaction IDs to CSV with
+// header external_transaction_id.
+func csvUnmatchedBytes(unmatched []string) ([]byte, error) {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write([]string{"external_transaction_id"}); err != nil {
+		return nil, fmt.Errorf("csv header: %w", err)
+	}
+	for _, id := range unmatched {
+		if err := w.Write([]string{id}); err != nil {
+			return nil, fmt.Errorf("csv row: %w", err)
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, fmt.Errorf("csv flush: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// exportContentType returns the HTTP Content-Type for the requested export
+// format.
+func exportContentType(exportType string) string {
+	switch exportType {
+	case "json":
+		return "application/json"
+	case "csv":
+		return "text/csv"
+	default:
+		return "application/octet-stream"
+	}
+}
+
 // matchesRules checks whether an external transaction matches a group transaction based on specified matching rules.
 // It iterates through the rules and criteria, evaluating whether the transactions meet the conditions for a match.
 // Parameters:
@@ -372,9 +595,12 @@ func (s *Blnk) loadReconciliationProgress(ctx context.Context, reconciliationID 
 // - strategy: The reconciliation strategy (e.g., one-to-one, one-to-many).
 // - groupCriteria: Criteria for grouping transactions (optional).
 // - matchingRuleIDs: A list of matching rule IDs to apply during the process.
+// - exportType: Optional export format ("json" or "csv"); when non-empty, non-dry-run,
+//   and S3 is configured, the completed results are uploaded after finalization.
 // Returns:
-// - error: If any step in the reconciliation process fails.
-func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupCriteria string, matchingRuleIDs []string) error {
+// - error: If any step in the reconciliation process fails. Export failures are
+//   intentionally not returned — see the comment below.
+func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.Reconciliation, strategy string, groupCriteria string, matchingRuleIDs []string, exportType string) error {
 	// Update the reconciliation status to "in progress".
 	if err := s.updateReconciliationStatus(ctx, reconciliation.ReconciliationID, StatusInProgress); err != nil {
 		return fmt.Errorf("failed to update reconciliation status: %w", err)
@@ -408,7 +634,24 @@ func (s *Blnk) processReconciliation(ctx context.Context, reconciliation model.R
 	matched, unmatched := processor.getResults()
 
 	// Finalize the reconciliation by updating the status and recording the results.
-	return s.finalizeReconciliation(ctx, reconciliation, matched, unmatched)
+	if err := s.finalizeReconciliation(ctx, reconciliation, matched, unmatched); err != nil {
+		return err
+	}
+
+	// S3 export is best-effort: a transient upload failure must not roll back a
+	// completed reconciliation. We only attempt it when the caller asked for an
+	// export (exportType != ""), the reconciliation is not a dry run (dry runs
+	// don't persist matches so the export would be misleadingly empty), and the
+	// S3 helper is available (NewBlnk leaves it nil when S3 isn't configured).
+	if exportType != "" && !reconciliation.IsDryRun && s.exporter != nil {
+		if exportErr := s.exportReconciliationToS3(ctx, reconciliation); exportErr != nil {
+			logrus.WithError(exportErr).
+				WithField("reconciliation_id", reconciliation.ReconciliationID).
+				Error("reconciliation export failed; keys left empty")
+		}
+	}
+
+	return nil
 }
 
 // updateReconciliationStatus updates the status of a reconciliation process in the database.

@@ -72,8 +72,19 @@ func setupRouter() (*gin.Engine, *blnk.Blnk, error) {
 			TransactionQueue: "transaction_queue_test_api_md_async",
 			NumberOfQueues:   1,
 		},
-		Redis:      config.RedisConfig{Dns: "localhost:6379"},
-		DataSource: config.DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
+		Redis:              config.RedisConfig{Dns: "localhost:6379"},
+		DataSource:         config.DataSourceConfig{Dns: "postgres://postgres:@localhost:5432/blnk?sslmode=disable"},
+		// LocalStack S3 defaults. Values match the GitHub Actions workflow
+		// service and docker-compose.dev.yaml so a Blnk instance built here has
+		// the reconciliation exporter initialized (via storage.IsConfigured in
+		// NewBlnk). The exporter itself only contacts S3 when an actual
+		// PutObject or PresignGet call is made, so tests that never trigger
+		// those paths are unaffected when LocalStack isn't running.
+		AwsSecretAccessKey: "test",
+		AwsAccessKeyId:     "test",
+		S3Endpoint:         "http://localhost:4566",
+		S3BucketName:       "test-bucket",
+		S3Region:           "us-east-1",
 	})
 	cnf, err := config.Fetch()
 	if err != nil {
@@ -304,7 +315,11 @@ func TestUpdateLedger(t *testing.T) {
 	})
 
 	t.Run("Invalid JSON", func(t *testing.T) {
-		req := httptest.NewRequest("PUT", fmt.Sprintf("/ledgers/%s", newLedger.LedgerID), bytes.NewReader([]byte("not json")))
+		req := httptest.NewRequest(
+			"PUT",
+			fmt.Sprintf("/ledgers/%s", newLedger.LedgerID),
+			bytes.NewReader([]byte("not json")),
+		)
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -374,7 +389,10 @@ func TestFilterLedgers(t *testing.T) {
 	})
 
 	t.Run("Include count", func(t *testing.T) {
-		body := fmt.Sprintf(`{"filters": [{"field": "name", "operator": "eq", "value": "%s"}], "include_count": true}`, newLedger.Name)
+		body := fmt.Sprintf(
+			`{"filters": [{"field": "name", "operator": "eq", "value": "%s"}], "include_count": true}`,
+			newLedger.Name,
+		)
 		var response map[string]interface{}
 		resp, err := SetUpTestRequest(TestRequest{
 			Payload:  bytes.NewReader([]byte(body)),

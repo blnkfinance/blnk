@@ -153,6 +153,7 @@ type reconciliation interface {
 	RecordReconciliation(ctx context.Context, rec *model.Reconciliation) error                                                                                          // Records a new reconciliation
 	GetReconciliation(ctx context.Context, id string) (*model.Reconciliation, error)                                                                                    // Retrieves a reconciliation by ID
 	UpdateReconciliationStatus(ctx context.Context, id string, status string, matchedCount, unmatchedCount int) error                                                   // Updates the status of a reconciliation
+	UpdateReconciliationExportKey(ctx context.Context, reconID, matchedKey, unmatchedKey string) error                                                                              // Persists the S3 object keys for the matched + unmatched export files
 	GetReconciliationsByUploadID(ctx context.Context, uploadID string) ([]*model.Reconciliation, error)                                                                 // Retrieves reconciliations by upload ID
 	RecordMatch(ctx context.Context, match *model.Match) error                                                                                                          // Records a match in reconciliation
 	GetMatchesByReconciliationID(ctx context.Context, reconciliationID string) ([]*model.Match, error)                                                                  // Retrieves matches by reconciliation ID

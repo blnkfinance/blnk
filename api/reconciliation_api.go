@@ -246,6 +246,7 @@ func (a Api) StartReconciliation(c *gin.Context) {
 		GroupingCriteria string   `json:"grouping_criteria"`
 		DryRun           bool     `json:"dry_run"`
 		MatchingRuleIDs  []string `json:"matching_rule_ids" binding:"required"`
+		ExportType       string   `json:"export_type"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -264,6 +265,7 @@ func (a Api) StartReconciliation(c *gin.Context) {
 		req.GroupingCriteria,
 		req.MatchingRuleIDs,
 		req.DryRun,
+		req.ExportType,
 	)
 	if err != nil {
 		logrus.Error(err)
@@ -474,4 +476,47 @@ func (a Api) DeleteMatchingRule(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Matching rule deleted successfully"})
+}
+
+// ExportReconciliation returns presigned S3 download URLs (24h TTL) for the
+// matched and unmatched export objects of a reconciliation. The export must
+// have already been triggered via POST /reconciliation/start with an
+// export_type, and S3 must have accepted the upload.
+//
+// Parameters:
+// - c: The Gin context containing the request and response.
+//
+// Responses:
+// - 400 Bad Request: If the reconciliation ID is missing.
+// - 404 Not Found: If the reconciliation does not exist.
+// - 422 Unprocessable Entity: If the reconciliation exists but has no
+//   export recorded (export_type was omitted, S3 was not configured, or the
+//   upload itself failed and was swallowed as best-effort).
+// - 500 Internal Server Error: On S3 presign failures.
+// - 200 OK: Returns {"presigned_urls": {"matched": "...", "unmatched": "..."},
+//   "expires_in": "24h"}.
+func (a Api) ExportReconciliation(c *gin.Context) {
+	reconciliationID := c.Param("id")
+	if reconciliationID == "" {
+		respondCode(c, apierror.ErrGenMissingParameter, "Reconciliation ID is required", nil)
+		return
+	}
+
+	urls, err := a.blnk.GetReconciliationExportURL(c.Request.Context(), reconciliationID)
+	if err != nil {
+		logrus.WithError(err).WithField("reconciliation_id", reconciliationID).Error("failed to generate export URL")
+		respondError(
+			c,
+			err,
+			// GEN_NOT_FOUND (from GetReconciliation) upgrades to the recon-specific code.
+			withUpgrade(apierror.ErrGenNotFound, apierror.ErrReconNotFound),
+			// RECON_EXPORT_NOT_READY flows through as a typed APIError → 422.
+			// Anything else (presign failures, missing S3 client) falls back to 500.
+			withDefault(apierror.ErrReconExportS3Failed),
+			withFallbackMessage("Failed to generate export URL"),
+		)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"presigned_urls": urls, "expires_in": "24h"})
 }

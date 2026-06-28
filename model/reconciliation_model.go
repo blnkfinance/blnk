@@ -45,6 +45,9 @@ type Reconciliation struct {
 	IsDryRun              bool       `json:"is_dry_run"`
 	StartedAt             time.Time  `json:"started_at"`
 	CompletedAt           *time.Time `json:"completed_at"`
+	ExportType            string     `json:"export_type"`
+	ExportS3KeyMatched    string     `json:"export_s3_key_matched"`
+	ExportS3KeyUnmatched  string     `json:"export_s3_key_unmatched"`
 }
 
 type ReconciliationProgress struct {

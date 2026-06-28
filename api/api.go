@@ -131,6 +131,7 @@ func (a Api) Router() *gin.Engine {
 	router.POST("/reconciliation/start", a.StartReconciliation)
 	router.POST("/reconciliation/start-instant", a.InstantReconciliation)
 	router.GET("/reconciliation/:id", a.GetReconciliation)
+	router.GET("/reconciliation/:id/export", a.ExportReconciliation)
 
 	// Metadata routes
 	router.POST("/:entity-id/metadata", a.UpdateMetadata)

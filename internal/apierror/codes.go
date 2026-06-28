@@ -109,6 +109,8 @@ const (
 	ErrReconMatchingRulesRequired  ErrorCode = "RECON_MATCHING_RULES_REQUIRED"
 	ErrReconExternalTxnsRequired   ErrorCode = "RECON_EXTERNAL_TXNS_REQUIRED"
 	ErrReconStartFailed            ErrorCode = "RECON_START_FAILED"
+	ErrReconExportNotReady         ErrorCode = "RECON_EXPORT_NOT_READY"
+	ErrReconExportS3Failed         ErrorCode = "RECON_EXPORT_S3_FAILED"
 
 	// META — entity metadata
 	ErrMetaEntityNotFound    ErrorCode = "META_ENTITY_NOT_FOUND"
@@ -207,6 +209,8 @@ var statusByCode = map[ErrorCode]int{
 	ErrReconMatchingRulesRequired:  http.StatusBadRequest,
 	ErrReconExternalTxnsRequired:   http.StatusBadRequest,
 	ErrReconStartFailed:            http.StatusInternalServerError,
+	ErrReconExportNotReady:         http.StatusUnprocessableEntity,
+	ErrReconExportS3Failed:         http.StatusInternalServerError,
 
 	ErrMetaEntityNotFound:    http.StatusNotFound,
 	ErrMetaUnsupportedEntity: http.StatusBadRequest,
