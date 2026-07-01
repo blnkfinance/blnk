@@ -927,7 +927,7 @@ func TestGetAllTransactions_Success(t *testing.T) {
 	metaDataJSON, _ := json.Marshal(metaData)
 
 	query := `
-		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -936,17 +936,23 @@ func TestGetAllTransactions_Success(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"transaction_id", "source", "reference", "amount", "currency",
-			"destination", "description", "status", "hash", "created_at", "meta_data",
+			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
+			"destination", "description", "status", "hash", "created_at", "meta_data", "parent_transaction",
 		}).
-			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), metaDataJSON).
-			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), metaDataJSON))
+			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "1000", 100.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), metaDataJSON, "txn_parent_1").
+			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "2000", 100.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), metaDataJSON, ""))
 
 	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
 	assert.Equal(t, "txn_1", transactions[0].TransactionID)
 	assert.Equal(t, "txn_2", transactions[1].TransactionID)
+	// Regression guard for the reindex field-loss bug (blnk#326): the query
+	// previously omitted these, so reindexed docs lost them in Typesense.
+	assert.Equal(t, "txn_parent_1", transactions[0].ParentTransaction)
+	assert.Equal(t, "1000", transactions[0].PreciseAmount.String())
+	assert.Equal(t, 100.0, transactions[0].Precision)
+	assert.Equal(t, "2000", transactions[1].PreciseAmount.String())
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -961,7 +967,7 @@ func TestGetAllTransactions_Empty(t *testing.T) {
 	ctx := context.Background()
 
 	query := `
-		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -970,8 +976,8 @@ func TestGetAllTransactions_Empty(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"transaction_id", "source", "reference", "amount", "currency",
-			"destination", "description", "status", "hash", "created_at", "meta_data",
+			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
+			"destination", "description", "status", "hash", "created_at", "meta_data", "parent_transaction",
 		}))
 
 	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
@@ -991,7 +997,7 @@ func TestGetAllTransactions_QueryError(t *testing.T) {
 	ctx := context.Background()
 
 	query := `
-		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2

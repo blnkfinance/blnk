@@ -270,7 +270,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 
 	// Execute the query to retrieve all transactions
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, source, reference, amount, currency, destination, description, status, hash, created_at, meta_data
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -292,6 +292,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 	for rows.Next() {
 		transaction := model.Transaction{}
 		var metaDataJSON []byte
+		var preciseAmountStr string
 
 		// Scan each row into the Transaction struct
 		err = rows.Scan(
@@ -299,6 +300,8 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 			&transaction.Source,
 			&transaction.Reference,
 			&transaction.Amount,
+			&preciseAmountStr,
+			&transaction.Precision,
 			&transaction.Currency,
 			&transaction.Destination,
 			&transaction.Description,
@@ -306,10 +309,19 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 			&transaction.Hash,
 			&transaction.CreatedAt,
 			&metaDataJSON,
+			&transaction.ParentTransaction,
 		)
 		if err != nil {
 			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
+		}
+
+		// Parse the precise amount (NUMERIC) into a big.Int, mirroring the other
+		// transaction row scans in this package.
+		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
+		if err != nil {
+			span.RecordError(err)
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to parse precise_amount", err)
 		}
 
 		// Unmarshal metadata into the transaction's MetaData field
