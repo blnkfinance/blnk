@@ -20,12 +20,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/brianvoe/gofakeit/v6"
-	"github.com/gin-gonic/gin"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/brianvoe/gofakeit/v6"
+	"github.com/gin-gonic/gin"
 
 	model2 "github.com/blnkfinance/blnk/api/model"
 	"github.com/blnkfinance/blnk/config"
@@ -99,7 +103,12 @@ func TestInstantReconciliation(t *testing.T) {
 	t.Run("Too many external transactions", func(t *testing.T) {
 		txns := make([]map[string]interface{}, model2.MaxInstantReconciliationItems+1)
 		for i := range txns {
-			txns[i] = map[string]interface{}{"id": fmt.Sprintf("ext_%d", i), "amount": 1, "reference": fmt.Sprintf("r%d", i), "currency": "USD"}
+			txns[i] = map[string]interface{}{
+				"id":        fmt.Sprintf("ext_%d", i),
+				"amount":    1,
+				"reference": fmt.Sprintf("r%d", i),
+				"currency":  "USD",
+			}
 		}
 		payload := map[string]interface{}{
 			"external_transactions": txns,
@@ -168,7 +177,11 @@ func TestUpdateMatchingRule(t *testing.T) {
 	})
 
 	t.Run("Invalid JSON", func(t *testing.T) {
-		req := httptest.NewRequest("PUT", "/reconciliation/matching-rules/mr_test", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest(
+			"PUT",
+			"/reconciliation/matching-rules/mr_test",
+			bytes.NewReader([]byte("invalid json")),
+		)
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
@@ -197,7 +210,12 @@ func TestDeleteMatchingRule(t *testing.T) {
 	})
 }
 
-func uploadMultipart(t *testing.T, router *gin.Engine, fieldName, fileName, source string, content []byte) *httptest.ResponseRecorder {
+func uploadMultipart(
+	t *testing.T,
+	router *gin.Engine,
+	fieldName, fileName, source string,
+	content []byte,
+) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var buf bytes.Buffer
@@ -251,7 +269,13 @@ func TestUploadExternalData(t *testing.T) {
 	})
 
 	t.Run("Valid JSON upload", func(t *testing.T) {
-		jsonContent := []byte(fmt.Sprintf(`[{"id": "ext_%s", "amount": 300, "currency": "USD", "reference": "ref_%s", "description": "json row", "date": "2024-01-03T10:00:00Z"}]`, gofakeit.UUID(), gofakeit.UUID()))
+		jsonContent := []byte(
+			fmt.Sprintf(
+				`[{"id": "ext_%s", "amount": 300, "currency": "USD", "reference": "ref_%s", "description": "json row", "date": "2024-01-03T10:00:00Z"}]`,
+				gofakeit.UUID(),
+				gofakeit.UUID(),
+			),
+		)
 		resp := uploadMultipart(t, router, "file", "data.json", "bank-test", jsonContent)
 		assert.Equal(t, http.StatusOK, resp.Code)
 
@@ -288,4 +312,252 @@ func TestUploadExternalData_RejectsOversizedBody(t *testing.T) {
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.Code)
 	assert.Contains(t, resp.Body.String(), "exceeds the maximum allowed size")
+}
+
+// newCSVContent builds a 2-row external-transaction CSV payload.
+func newCSVContent(t *testing.T, rows int) []byte {
+	t.Helper()
+	if rows < 1 {
+		rows = 1
+	}
+	var b strings.Builder
+	b.WriteString("ID,Amount,Currency,Reference,Description,Date\n")
+	for i := 0; i < rows; i++ {
+		fmt.Fprintf(&b, "ext_%s,100.50,USD,ref_%s,row %d,2024-01-0%dT10:00:00Z\n",
+			gofakeit.UUID(), gofakeit.UUID(), i+1, i+1)
+	}
+	return []byte(b.String())
+}
+
+// uploadServerHost returns the lowercase hostname of a test server's base URL,
+// suitable for use as an exact-host whitelist entry.
+func uploadServerHost(srv *httptest.Server) string {
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		panic(err)
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// startUploadTestServer spins up an httptest.Server serving:
+//
+//	/data.csv  -> a valid 2-row CSV
+//	/big.csv   -> a >1MB body (for oversize tests)
+//	/error     -> HTTP 500
+//	/slow      -> sleeps 5s before responding (for timeout tests)
+func startUploadTestServer(t *testing.T, bigBody []byte) *httptest.Server {
+	t.Helper()
+	csv := newCSVContent(t, 2)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/data.csv", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write(csv)
+	})
+	mux.HandleFunc("/big.csv", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write(bigBody)
+	})
+	mux.HandleFunc("/error", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(5 * time.Second)
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write(csv)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// uploadMultipartURL posts a multipart form carrying only a `url` field
+// (and optional source), mirroring uploadMultipart but with no file part.
+func uploadMultipartURL(t *testing.T, router *gin.Engine, urlVal, source string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if source != "" {
+		if err := writer.WriteField("source", source); err != nil {
+			t.Fatalf("Failed to write source field: %v", err)
+		}
+	}
+	if err := writer.WriteField("url", urlVal); err != nil {
+		t.Fatalf("Failed to write url field: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Failed to close multipart writer: %v", err)
+	}
+	req := httptest.NewRequest("POST", "/reconciliation/upload", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+// uploadMultipartFileAndURL posts a multipart form with BOTH a `file` part and
+// a `url` field, used to verify that `file` wins.
+func uploadMultipartFileAndURL(
+	t *testing.T,
+	router *gin.Engine,
+	fileName, source string,
+	content []byte,
+	urlVal string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if source != "" {
+		if err := writer.WriteField("source", source); err != nil {
+			t.Fatalf("Failed to write source field: %v", err)
+		}
+	}
+	if err := writer.WriteField("url", urlVal); err != nil {
+		t.Fatalf("Failed to write url field: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", fileName)
+	if err != nil {
+		t.Fatalf("Failed to create form file: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("Failed to write file content: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Failed to close multipart writer: %v", err)
+	}
+	req := httptest.NewRequest("POST", "/reconciliation/upload", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+// uploadJSONURL posts an application/json body {"url","source"}.
+func uploadJSONURL(t *testing.T, router *gin.Engine, urlVal, source string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"url": urlVal, "source": source})
+	req := httptest.NewRequest("POST", "/reconciliation/upload", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+func TestUploadExternalData_URLDownload(t *testing.T) {
+	// Router whose whitelist contains the test server's hostname.
+	router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+		// whitelist is set per-subtest via the dedicated function below; here we
+		// just ensure MaxUploadSizeMB is a sane default.
+	})
+
+	t.Run("url field points to valid CSV", func(t *testing.T) {
+		srv := startUploadTestServer(t, nil)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.UploadDomainWhitelist = uploadServerHost(srv)
+		})
+		resp := uploadMultipartURL(t, router, srv.URL+"/data.csv", "bank-test")
+		assert.Equal(t, http.StatusOK, resp.Code)
+
+		var response map[string]interface{}
+		if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		assert.Contains(t, response["upload_id"], "upload_")
+		assert.Equal(t, float64(2), response["record_count"])
+		assert.Equal(t, "bank-test", response["source"])
+	})
+
+	t.Run("url field with invalid scheme", func(t *testing.T) {
+		resp := uploadMultipartURL(t, router, "ftp://example.com/x.csv", "bank-test")
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Contains(t, resp.Body.String(), "RECON_UPLOAD_URL_INVALID")
+	})
+
+	t.Run("url field pointing to a server that returns an error", func(t *testing.T) {
+		srv := startUploadTestServer(t, nil)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.UploadDomainWhitelist = uploadServerHost(srv)
+		})
+		resp := uploadMultipartURL(t, router, srv.URL+"/error", "bank-test")
+		assert.Equal(t, http.StatusInternalServerError, resp.Code)
+		assert.Contains(t, resp.Body.String(), "Failed to process upload")
+	})
+
+	t.Run("both file and url present, file wins", func(t *testing.T) {
+		srv := startUploadTestServer(t, nil)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.UploadDomainWhitelist = uploadServerHost(srv)
+		})
+		fileContent := newCSVContent(t, 1) // 1 row — distinct from the URL's 2
+		resp := uploadMultipartFileAndURL(t, router, "data.csv", "bank-test", fileContent, srv.URL+"/data.csv")
+		assert.Equal(t, http.StatusOK, resp.Code)
+
+		var response map[string]interface{}
+		if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		assert.Equal(t, float64(1), response["record_count"], "file content (1 row) must win over url (2 rows)")
+	})
+
+	t.Run("JSON body url points to valid CSV", func(t *testing.T) {
+		srv := startUploadTestServer(t, nil)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.UploadDomainWhitelist = uploadServerHost(srv)
+		})
+		resp := uploadJSONURL(t, router, srv.URL+"/data.csv", "bank-json")
+		assert.Equal(t, http.StatusOK, resp.Code)
+
+		var response map[string]interface{}
+		if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		assert.Equal(t, float64(2), response["record_count"])
+		assert.Equal(t, "bank-json", response["source"])
+	})
+}
+
+func TestUploadExternalData_URLWhitelist(t *testing.T) {
+	t.Run("host not in whitelist", func(t *testing.T) {
+		srv := startUploadTestServer(t, nil)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.UploadDomainWhitelist = "allowed.example.com" // does not include srv host
+		})
+		resp := uploadMultipartURL(t, router, srv.URL+"/data.csv", "bank-test")
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Contains(t, resp.Body.String(), "RECON_UPLOAD_HOST_NOT_ALLOWED")
+	})
+
+	t.Run("empty whitelist denies all", func(t *testing.T) {
+		srv := startUploadTestServer(t, nil)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.UploadDomainWhitelist = ""
+		})
+		resp := uploadMultipartURL(t, router, srv.URL+"/data.csv", "bank-test")
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Contains(t, resp.Body.String(), "RECON_UPLOAD_HOST_NOT_ALLOWED")
+	})
+
+	t.Run("oversize download returns 500", func(t *testing.T) {
+		// 2 MB CSV body, but MaxUploadSizeMB=1: the LimitReader truncates, so
+		// processing fails downstream.
+		bigBody := bytes.Repeat([]byte("a"), 2*1024*1024)
+		srv := startUploadTestServer(t, bigBody)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.MaxUploadSizeMB = 1
+			c.Server.UploadDomainWhitelist = uploadServerHost(srv)
+		})
+		resp := uploadMultipartURL(t, router, srv.URL+"/big.csv", "bank-test")
+		assert.Equal(t, http.StatusInternalServerError, resp.Code)
+		assert.Contains(t, resp.Body.String(), "Failed to process upload")
+	})
+
+	t.Run("timeout enforced", func(t *testing.T) {
+		srv := startUploadTestServer(t, nil)
+		router, _, _ := setupRouterWithConfig(t, func(c *config.Configuration) {
+			c.Server.UploadURLTimeoutSec = 1
+			c.Server.UploadDomainWhitelist = uploadServerHost(srv)
+		})
+		resp := uploadMultipartURL(t, router, srv.URL+"/slow", "bank-test")
+		assert.Equal(t, http.StatusInternalServerError, resp.Code)
+		assert.Contains(t, resp.Body.String(), "Failed to process upload")
+	})
 }
