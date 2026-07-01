@@ -57,7 +57,7 @@ func (a Api) UploadExternalData(c *gin.Context) {
 	if err == nil {
 		// Multipart file upload path (existing behaviour). `file` wins when
 		// both `file` and `url` are present, preserving backward compatibility.
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		fileName := header.Filename
 
 		uploadID, total, err := a.blnk.UploadExternalData(c.Request.Context(), source, file, fileName)
@@ -193,7 +193,7 @@ func (a Api) downloadAndUpload(c *gin.Context, source, rawURL string) (uploadID 
 		respondCode(c, apierror.ErrReconUploadProcessingFailed, "Failed to process upload", nil)
 		return "", 0, false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logrus.WithField("status", resp.StatusCode).Error("upload URL returned non-2xx")
