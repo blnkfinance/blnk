@@ -9,3 +9,6 @@ dump.rdb
 heartbeat.db
 .claude
 CLAUDE.md
+__pycache__
+tests/loadtest/*.json
+tests/loadtest/*.ndjson
