@@ -51,7 +51,7 @@ var (
 		BatchSize:                  1000,
 		MaxQueueSize:               1000,
 		MaxWorkers:                 10,
-		LockDuration:               30 * time.Minute,
+		LockDuration:               5 * time.Minute,
 		LockWaitTimeout:            3 * time.Second,
 		IndexQueuePrefix:           "transactions",
 		EnableCoalescing:           true,
@@ -411,7 +411,7 @@ func (cnf *Configuration) setTransactionDefaults() {
 	}
 	if cnf.Transaction.LockDuration == 0 {
 		cnf.Transaction.LockDuration = defaultTransaction.LockDuration
-	} else {
+	} else if cnf.Transaction.LockDuration > 0 && cnf.Transaction.LockDuration < time.Second {
 		cnf.Transaction.LockDuration = cnf.Transaction.LockDuration * time.Second
 	}
 	if cnf.Transaction.LockWaitTimeout == 0 {
