@@ -77,3 +77,11 @@ func TestValidateRequestedAmountErrorFormatting(t *testing.T) {
 	assert.Equal(t, "cannot commit more than the original transaction amount. Original: USD100.00, Requested: USD110.00", err.Error())
 	assert.NotContains(t, err.Error(), "%!")
 }
+
+func TestShouldExpandInflightParent(t *testing.T) {
+	assert.True(t, shouldExpandInflightParent(errors.New("transaction not found")))
+	assert.True(t, shouldExpandInflightParent(errors.New("transaction is not in inflight status")))
+	assert.True(t, shouldExpandInflightParent(errors.New("NOT_FOUND: Transaction with ID 'txn_x' not found")))
+	assert.False(t, shouldExpandInflightParent(errors.New("failed to acquire lock for inflight commit")))
+	assert.False(t, shouldExpandInflightParent(nil))
+}
