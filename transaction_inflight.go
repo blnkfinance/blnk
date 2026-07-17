@@ -318,7 +318,7 @@ func (l *Blnk) checkTransactionCommitStatus(amountLeft *big.Int) error {
 //
 // Parameters:
 // - transaction *model.Transaction: The transaction being validated.
-// - amount float64: The requested amount to commit.
+// - amount *big.Int: The requested precise amount to commit.
 // - amountLeft *big.Int: The remaining amount that can be committed.
 //
 // Returns:
@@ -333,16 +333,17 @@ func (l *Blnk) validateRequestedAmount(transaction *model.Transaction, amount *b
 	}
 
 	requestedAmount := amount
+	requestedValue := l.convertPreciseToFloat(requestedAmount, transaction.Precision)
 
 	if requestedAmount.Cmp(transaction.PreciseAmount) > 0 {
 		return fmt.Errorf("cannot commit more than the original transaction amount. Original: %s%.2f, Requested: %s%.2f",
-			transaction.Currency, transaction.Amount, transaction.Currency, amount)
+			transaction.Currency, transaction.Amount, transaction.Currency, requestedValue)
 	}
 
 	if requestedAmount.Cmp(amountLeft) > 0 {
 		amountLeftValue := l.convertPreciseToFloat(amountLeft, transaction.Precision)
 		return fmt.Errorf("cannot commit more than the remaining amount. Available: %s%.2f, Requested: %s%.2f",
-			transaction.Currency, amountLeftValue, transaction.Currency, amount)
+			transaction.Currency, amountLeftValue, transaction.Currency, requestedValue)
 	}
 
 	return nil

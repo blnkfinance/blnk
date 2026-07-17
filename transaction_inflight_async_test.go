@@ -18,9 +18,12 @@ package blnk
 
 import (
 	"errors"
+	"math/big"
 	"testing"
 
+	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInflightActionReference(t *testing.T) {
@@ -53,6 +56,26 @@ func TestIsTerminalInflightError(t *testing.T) {
 	for _, err := range transient {
 		assert.Falsef(t, l.isTerminalInflightError(err), "expected transient: %v", err)
 	}
+}
+
+func TestValidateRequestedAmountErrorFormatting(t *testing.T) {
+	l := &Blnk{}
+	txn := &model.Transaction{
+		Currency:      "USD",
+		Amount:        100,
+		PreciseAmount: big.NewInt(10000),
+		Precision:     100,
+	}
+
+	err := l.validateRequestedAmount(txn, big.NewInt(7000), big.NewInt(6000))
+	require.Error(t, err)
+	assert.Equal(t, "cannot commit more than the remaining amount. Available: USD60.00, Requested: USD70.00", err.Error())
+	assert.NotContains(t, err.Error(), "%!")
+
+	err = l.validateRequestedAmount(txn, big.NewInt(11000), big.NewInt(10000))
+	require.Error(t, err)
+	assert.Equal(t, "cannot commit more than the original transaction amount. Original: USD100.00, Requested: USD110.00", err.Error())
+	assert.NotContains(t, err.Error(), "%!")
 }
 
 func TestShouldExpandInflightParent(t *testing.T) {
