@@ -737,12 +737,82 @@ func (l *Blnk) RunInflightActionByParent(ctx context.Context, parentTransactionI
 // would perform, without mutating or persisting anything. It lets the API reject
 // an obviously-invalid request (not inflight, already finalized, amount too high)
 // synchronously before enqueuing, while the worker remains the authority.
+//
+// When transactionID is a multi-source / multi-destination parent or a bulk
+// batch_id, there is often no INFLIGHT row for that id itself — only child legs.
+// Sync commit already expands via GetInflightTransactionsByParentID; this
+// pre-check does the same so queued commit does not 404 on a valid parent.
 func (l *Blnk) preValidateInflightAction(ctx context.Context, transactionID, action string, amount *big.Int) (*model.Transaction, error) {
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
-	if err != nil {
+	if err == nil {
+		return l.validateInflightActionAmount(ctx, transaction, action, amount)
+	}
+
+	if !shouldExpandInflightParent(err) {
 		return nil, err
 	}
 
+	legs, legErr := l.collectInflightLegs(ctx, transactionID)
+	if legErr != nil {
+		return nil, legErr
+	}
+	if len(legs) == 0 {
+		return nil, err
+	}
+
+	remaining, remErr := l.anyInflightLegRemaining(ctx, legs)
+	if remErr != nil {
+		return nil, remErr
+	}
+	if !remaining {
+		if action == InflightActionVoid {
+			return nil, errors.New("cannot void. Transaction already committed")
+		}
+		return nil, errors.New("cannot commit. Transaction already committed")
+	}
+
+	// Response stand-in: first leg's fields, but the id the client committed
+	// against (parent / batch id) so the queued payload matches the request.
+	representative := *legs[0]
+	representative.TransactionID = transactionID
+	return &representative, nil
+}
+
+// shouldExpandInflightParent reports whether a fetch/validate failure should
+// fall back to looking up inflight legs under transactionID as a parent.
+func shouldExpandInflightParent(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return true
+	}
+	switch classifyInflightError(err) {
+	case "NOT_FOUND", "NOT_INFLIGHT":
+		return true
+	default:
+		return false
+	}
+}
+
+// anyInflightLegRemaining reports whether at least one leg still has an
+// uncommitted amount left.
+func (l *Blnk) anyInflightLegRemaining(ctx context.Context, legs []*model.Transaction) (bool, error) {
+	for _, leg := range legs {
+		amountLeft, err := l.calculateRemainingAmount(ctx, leg)
+		if err != nil {
+			return false, err
+		}
+		if amountLeft.Sign() != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// validateInflightActionAmount runs the single-transaction amount checks used
+// when the commit/void target is itself an INFLIGHT row.
+func (l *Blnk) validateInflightActionAmount(ctx context.Context, transaction *model.Transaction, action string, amount *big.Int) (*model.Transaction, error) {
 	amountLeft, err := l.calculateRemainingAmount(ctx, transaction)
 	if err != nil {
 		return nil, err
