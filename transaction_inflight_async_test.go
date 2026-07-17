@@ -54,3 +54,11 @@ func TestIsTerminalInflightError(t *testing.T) {
 		assert.Falsef(t, l.isTerminalInflightError(err), "expected transient: %v", err)
 	}
 }
+
+func TestShouldExpandInflightParent(t *testing.T) {
+	assert.True(t, shouldExpandInflightParent(errors.New("transaction not found")))
+	assert.True(t, shouldExpandInflightParent(errors.New("transaction is not in inflight status")))
+	assert.True(t, shouldExpandInflightParent(errors.New("NOT_FOUND: Transaction with ID 'txn_x' not found")))
+	assert.False(t, shouldExpandInflightParent(errors.New("failed to acquire lock for inflight commit")))
+	assert.False(t, shouldExpandInflightParent(nil))
+}
