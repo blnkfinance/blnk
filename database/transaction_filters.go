@@ -71,7 +71,7 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 	}
 
 	// Determine select fields based on whether count is requested
-	selectFields := "transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data"
+	selectFields := "transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, COALESCE(parent_transaction, '') AS parent_transaction"
 	if opts != nil && opts.IncludeCount {
 		selectFields += ", COUNT(*) OVER() AS total_count"
 	}
@@ -139,6 +139,7 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 				&transaction.CreatedAt,
 				&transaction.EffectiveDate,
 				&metaDataJSON,
+				&transaction.ParentTransaction,
 				&count,
 			)
 			if totalCount == nil {
@@ -160,6 +161,7 @@ func (d Datasource) GetAllTransactionsWithFilterAndOptions(ctx context.Context, 
 				&transaction.CreatedAt,
 				&transaction.EffectiveDate,
 				&metaDataJSON,
+				&transaction.ParentTransaction,
 			)
 		}
 		if err != nil {
