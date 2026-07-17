@@ -1509,14 +1509,14 @@ func TestGetAllTransactionsWithFilterAndOptions_ReturnsPrecision(t *testing.T) {
 	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
 	assert.NoError(t, err)
 
-	mock.ExpectQuery(`(?s)SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data\s+FROM blnk\.transactions\s+ORDER BY created_at DESC\s+LIMIT \$1 OFFSET \$2`).
+	mock.ExpectQuery(`(?s)SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, COALESCE\(parent_transaction, ''\) AS parent_transaction\s+FROM blnk\.transactions\s+ORDER BY created_at DESC\s+LIMIT \$1 OFFSET \$2`).
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "source", "reference", "amount", "precise_amount", "precision",
-			"currency", "destination", "description", "status", "hash", "created_at", "effective_date", "meta_data",
+			"currency", "destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction",
 		}).AddRow(
 			"txn_1", "bln_src", "ref_1", 1000.0, "100000", 100,
-			"USD", "bln_dest", "Desc", "APPLIED", "hash_1", now, now, metaDataJSON,
+			"USD", "bln_dest", "Desc", "APPLIED", "hash_1", now, now, metaDataJSON, "txn_parent_1",
 		))
 
 	txns, count, err := ds.GetAllTransactionsWithFilterAndOptions(ctx, nil, nil, 10, 0)
@@ -1524,6 +1524,7 @@ func TestGetAllTransactionsWithFilterAndOptions_ReturnsPrecision(t *testing.T) {
 	assert.Nil(t, count)
 	assert.Len(t, txns, 1)
 	assert.Equal(t, float64(100), txns[0].Precision)
+	assert.Equal(t, "txn_parent_1", txns[0].ParentTransaction)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1542,14 +1543,14 @@ func TestGetAllTransactionsWithFilterAndOptions_IncludeCountReturnsPrecision(t *
 	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
 	assert.NoError(t, err)
 
-	mock.ExpectQuery(`(?s)SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, COUNT\(\*\) OVER\(\) AS total_count\s+FROM blnk\.transactions\s+ORDER BY created_at DESC\s+LIMIT \$1 OFFSET \$2`).
+	mock.ExpectQuery(`(?s)SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, COALESCE\(parent_transaction, ''\) AS parent_transaction, COUNT\(\*\) OVER\(\) AS total_count\s+FROM blnk\.transactions\s+ORDER BY created_at DESC\s+LIMIT \$1 OFFSET \$2`).
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "source", "reference", "amount", "precise_amount", "precision",
-			"currency", "destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "total_count",
+			"currency", "destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction", "total_count",
 		}).AddRow(
 			"txn_1", "bln_src", "ref_1", 1000.0, "100000", 100,
-			"USD", "bln_dest", "Desc", "APPLIED", "hash_1", now, now, metaDataJSON, int64(1),
+			"USD", "bln_dest", "Desc", "APPLIED", "hash_1", now, now, metaDataJSON, "txn_parent_1", int64(1),
 		))
 
 	txns, count, err := ds.GetAllTransactionsWithFilterAndOptions(ctx, nil, opts, 10, 0)
@@ -1558,6 +1559,47 @@ func TestGetAllTransactionsWithFilterAndOptions_IncludeCountReturnsPrecision(t *
 	assert.EqualValues(t, 1, *count)
 	assert.Len(t, txns, 1)
 	assert.Equal(t, float64(100), txns[0].Precision)
+	assert.Equal(t, "txn_parent_1", txns[0].ParentTransaction)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetAllTransactionsWithFilterAndOptions_ReturnsParentTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+	parentID := "txn_inflight_1"
+
+	now := time.Now().UTC()
+	metaDataJSON, err := json.Marshal(map[string]interface{}{})
+	assert.NoError(t, err)
+
+	filters := &filter.QueryFilterSet{
+		Filters: []filter.QueryFilter{
+			{Field: "parent_transaction", Operator: filter.OpEqual, Value: parentID},
+		},
+	}
+
+	mock.ExpectQuery(`(?s)SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, COALESCE\(parent_transaction, ''\) AS parent_transaction\s+FROM blnk\.transactions\s+WHERE parent_transaction = \$1\s+ORDER BY created_at DESC\s+LIMIT \$2 OFFSET \$3`).
+		WithArgs(parentID, 10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "precise_amount", "precision",
+			"currency", "destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction",
+		}).AddRow(
+			"txn_child_1", "bln_src", "ref_child", 100.0, "10000", 100,
+			"USD", "bln_dest", "committed", "APPLIED", "hash_child", now, now, metaDataJSON, parentID,
+		))
+
+	txns, count, err := ds.GetAllTransactionsWithFilterAndOptions(ctx, filters, nil, 10, 0)
+	assert.NoError(t, err)
+	assert.Nil(t, count)
+	assert.Len(t, txns, 1)
+	assert.Equal(t, parentID, txns[0].ParentTransaction)
+	assert.Equal(t, "txn_child_1", txns[0].TransactionID)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
