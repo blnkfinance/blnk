@@ -925,9 +925,13 @@ func TestGetAllTransactions_Success(t *testing.T) {
 
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
+	// Backdated business date — must survive the scan (this is the reindex
+	// field-loss the query fix restores). txn_2 leaves it NULL to cover the
+	// sql.NullTime-invalid path (EffectiveDate stays nil).
+	effectiveDate := time.Now().Add(-48 * time.Hour)
 
 	query := `
-		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -937,10 +941,10 @@ func TestGetAllTransactions_Success(t *testing.T) {
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
-			"destination", "description", "status", "hash", "created_at", "meta_data", "parent_transaction",
+			"destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction",
 		}).
-			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "1000", 100.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), metaDataJSON, "txn_parent_1").
-			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "2000", 100.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), metaDataJSON, ""))
+			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "1000", 100.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), effectiveDate, metaDataJSON, "txn_parent_1").
+			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "2000", 100.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), nil, metaDataJSON, ""))
 
 	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
 	assert.NoError(t, err)
@@ -953,6 +957,10 @@ func TestGetAllTransactions_Success(t *testing.T) {
 	assert.Equal(t, "1000", transactions[0].PreciseAmount.String())
 	assert.Equal(t, 100.0, transactions[0].Precision)
 	assert.Equal(t, "2000", transactions[1].PreciseAmount.String())
+	// effective_date must survive the scan (reindex field-loss guard): set for
+	// txn_1, NULL for txn_2.
+	assert.NotNil(t, transactions[0].EffectiveDate)
+	assert.Nil(t, transactions[1].EffectiveDate)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -967,7 +975,7 @@ func TestGetAllTransactions_Empty(t *testing.T) {
 	ctx := context.Background()
 
 	query := `
-		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -977,7 +985,7 @@ func TestGetAllTransactions_Empty(t *testing.T) {
 		WithArgs(10, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
-			"destination", "description", "status", "hash", "created_at", "meta_data", "parent_transaction",
+			"destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction",
 		}))
 
 	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
@@ -997,7 +1005,7 @@ func TestGetAllTransactions_QueryError(t *testing.T) {
 	ctx := context.Background()
 
 	query := `
-		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
