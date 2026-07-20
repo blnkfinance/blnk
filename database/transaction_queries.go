@@ -270,7 +270,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 
 	// Execute the query to retrieve all transactions
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, parent_transaction
 		FROM blnk.transactions
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -293,6 +293,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 		transaction := model.Transaction{}
 		var metaDataJSON []byte
 		var preciseAmountStr string
+		var effectiveDate sql.NullTime
 
 		// Scan each row into the Transaction struct
 		err = rows.Scan(
@@ -308,12 +309,19 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 			&transaction.Status,
 			&transaction.Hash,
 			&transaction.CreatedAt,
+			&effectiveDate,
 			&metaDataJSON,
 			&transaction.ParentTransaction,
 		)
 		if err != nil {
 			span.RecordError(err)
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
+		}
+
+		// Preserve the business/value date through reindex (nil for old records,
+		// where GetEffectiveDate falls back to created_at).
+		if effectiveDate.Valid {
+			transaction.EffectiveDate = &effectiveDate.Time
 		}
 
 		// Parse the precise amount (NUMERIC) into a big.Int, mirroring the other
