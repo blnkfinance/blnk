@@ -14,6 +14,15 @@
 version: "3.8"
 
 services:
+  init:
+    image: alpine:3.19
+    container_name: init
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    entrypoint: ["/bin/sh", "/workspace/blnk-init.sh"]
+    restart: "no"
+
   server:
     image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.15.0}
     container_name: server
@@ -29,6 +38,7 @@ services:
       - "80:80"
       - "443:443"
     depends_on:
+      - init
       - redis
       - postgres
       - jaeger
@@ -45,6 +55,7 @@ services:
     ports:
       - "5004:5004"
     depends_on:
+      - init
       - redis
       - postgres
       - jaeger
