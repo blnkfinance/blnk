@@ -83,6 +83,9 @@ var (
 		MonitoringPort:                  DEFAULT_MONITORING_PORT,
 		WebhookConcurrency:              20,
 		TransactionWorkerConcurrency:    4,
+		EnableBackpressure:              true,
+		BackpressureMemoryPercent:       85,
+		BackpressureCheckInterval:       500 * time.Millisecond,
 	}
 
 	defaultRedis = RedisConfig{
@@ -211,6 +214,10 @@ type QueueConfig struct {
 	MonitoringPort                  string        `json:"monitoring_port"                    envconfig:"BLNK_QUEUE_MONITORING_PORT"`
 	WebhookConcurrency              int           `json:"webhook_concurrency"                envconfig:"BLNK_QUEUE_WEBHOOK_CONCURRENCY"`
 	TransactionWorkerConcurrency    int           `json:"transaction_worker_concurrency"     envconfig:"BLNK_QUEUE_TRANSACTION_WORKER_CONCURRENCY"`
+	EnableBackpressure              bool          `json:"enable_backpressure"                envconfig:"BLNK_QUEUE_ENABLE_BACKPRESSURE"`
+	BackpressureMemoryPercent       float64       `json:"backpressure_memory_percent"        envconfig:"BLNK_QUEUE_BACKPRESSURE_MEMORY_PERCENT"`
+	BackpressureMaxPendingTasks     int           `json:"backpressure_max_pending_tasks"     envconfig:"BLNK_QUEUE_BACKPRESSURE_MAX_PENDING_TASKS"`
+	BackpressureCheckInterval       time.Duration `json:"backpressure_check_interval"        envconfig:"BLNK_QUEUE_BACKPRESSURE_CHECK_INTERVAL"`
 }
 
 type Configuration struct {
@@ -486,6 +493,12 @@ func (cnf *Configuration) setQueueDefaults() {
 	}
 	if cnf.Queue.TransactionWorkerConcurrency == 0 {
 		cnf.Queue.TransactionWorkerConcurrency = defaultQueue.TransactionWorkerConcurrency
+	}
+	if cnf.Queue.BackpressureMemoryPercent == 0 {
+		cnf.Queue.BackpressureMemoryPercent = defaultQueue.BackpressureMemoryPercent
+	}
+	if cnf.Queue.BackpressureCheckInterval == 0 {
+		cnf.Queue.BackpressureCheckInterval = defaultQueue.BackpressureCheckInterval
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"sync"
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
@@ -34,13 +35,18 @@ import (
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 )
 
 // Queue represents a queue for handling various tasks.
 type Queue struct {
-	Client    *asynq.Client
-	Inspector *asynq.Inspector
-	config    *config.Configuration
+	Client      *asynq.Client
+	Inspector   *asynq.Inspector
+	config      *config.Configuration
+	redis       redis.UniversalClient
+	bpMu        sync.Mutex
+	bpCheckedAt time.Time
+	bpReject    bool
 }
 
 // TransactionTypePayload represents the payload for a transaction type.
@@ -107,7 +113,7 @@ func (q *Queue) EnqueueInflightAction(ctx context.Context, p InflightActionPaylo
 //
 // Returns:
 // - *Queue: A pointer to the newly created Queue instance.
-func NewQueue(conf *config.Configuration, client *asynq.Client) *Queue {
+func NewQueue(conf *config.Configuration, client *asynq.Client, redisClient redis.UniversalClient) *Queue {
 	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to parse Redis URL")
@@ -119,6 +125,7 @@ func NewQueue(conf *config.Configuration, client *asynq.Client) *Queue {
 		Client:    client,
 		Inspector: inspector,
 		config:    conf,
+		redis:     redisClient,
 	}
 }
 
@@ -226,6 +233,10 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) error {
 	ctx, span := tracer.Start(ctx, "Adding Transaction To Redis Queue")
 	defer span.End()
+
+	if err := q.assertEnqueueAllowed(ctx); err != nil {
+		return err
+	}
 
 	payload, err := json.Marshal(transaction)
 	if err != nil {

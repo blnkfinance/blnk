@@ -120,6 +120,9 @@ const (
 	ErrHookInvalid         ErrorCode = "HOOK_INVALID"
 	ErrHookOperationFailed ErrorCode = "HOOK_OPERATION_FAILED"
 
+	// QUEUE — async processing
+	ErrQueueBackpressure ErrorCode = "QUEUE_BACKPRESSURE"
+
 	// SRCH — search & reindex
 	ErrSrchQueryInvalid      ErrorCode = "SRCH_QUERY_INVALID"
 	ErrSrchFailed            ErrorCode = "SRCH_FAILED"
@@ -215,6 +218,8 @@ var statusByCode = map[ErrorCode]int{
 	ErrHookNotFound:        http.StatusNotFound,
 	ErrHookInvalid:         http.StatusBadRequest,
 	ErrHookOperationFailed: http.StatusInternalServerError,
+
+	ErrQueueBackpressure: http.StatusServiceUnavailable,
 
 	ErrSrchQueryInvalid:      http.StatusBadRequest,
 	ErrSrchFailed:            http.StatusInternalServerError,

@@ -49,7 +49,7 @@ func newTestQueue(t *testing.T, conf *config.Configuration, cleanupQueues ...str
 	config.ConfigStore.Store(conf)
 
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: testRedisAddr})
-	q := NewQueue(conf, client)
+	q := NewQueue(conf, client, nil)
 	inspector := q.Inspector
 
 	t.Cleanup(func() {
