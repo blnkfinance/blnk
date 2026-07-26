@@ -49,7 +49,7 @@ func TestEnqueueImmediateTransactionSuccess(t *testing.T) {
 	client := asynq.NewClient(queueOptions)
 	inspector := asynq.NewInspector(queueOptions)
 
-	q := NewQueue(cnf, client)
+	q := NewQueue(cnf, client, nil)
 	q.Inspector = inspector
 
 	transaction := getTransactionMock(100, false)
@@ -82,7 +82,7 @@ func TestEnqueueScheduledTransaction(t *testing.T) {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 
-	q := NewQueue(conf, client)
+	q := NewQueue(conf, client, nil)
 	q.Inspector = inspector
 
 	transaction := getTransactionMock(100, false)
@@ -127,7 +127,7 @@ func TestQueueInflightCommitEnqueuesTask(t *testing.T) {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 
-	q := NewQueue(conf, client)
+	q := NewQueue(conf, client, nil)
 	q.Inspector = inspector
 
 	transaction := getTransactionMock(100, false)
@@ -157,7 +157,7 @@ func TestEnqueueWithAsynqClientEnqueueError(t *testing.T) {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 
-	q := NewQueue(conf, client)
+	q := NewQueue(conf, client, nil)
 	q.Inspector = inspector
 
 	transaction := getTransactionMock(100, false)

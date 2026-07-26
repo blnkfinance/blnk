@@ -31,6 +31,9 @@ var TransactionRejectedTotal metric.Int64Counter
 // Attributes: queue_name
 var QueueEnqueuedTotal metric.Int64Counter
 
+// QueueBackpressureRejectedTotal counts enqueue attempts rejected by backpressure.
+var QueueBackpressureRejectedTotal metric.Int64Counter
+
 // QueueProcessingDuration records the time spent processing a transaction in the worker.
 // Attributes: result (success, error, retry)
 var QueueProcessingDuration metric.Float64Histogram
@@ -104,6 +107,14 @@ func Init() error {
 
 	QueueEnqueuedTotal, err = meter.Int64Counter("blnk.queue.enqueued.total",
 		metric.WithDescription("Total number of transactions enqueued for processing"),
+		metric.WithUnit("{transaction}"),
+	)
+	if err != nil {
+		return err
+	}
+
+	QueueBackpressureRejectedTotal, err = meter.Int64Counter("blnk.queue.backpressure.rejected.total",
+		metric.WithDescription("Total enqueue attempts rejected by queue backpressure"),
 		metric.WithUnit("{transaction}"),
 	)
 	if err != nil {

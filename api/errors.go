@@ -172,6 +172,8 @@ func classifySentinel(err error) (apierror.ErrorCode, bool) {
 		return apierror.ErrTxnPrecisionNotInteger, true
 	case errors.Is(err, blnk.ErrEntityNotFound):
 		return apierror.ErrMetaEntityNotFound, true
+	case errors.Is(err, blnk.ErrQueueBackpressure):
+		return apierror.ErrQueueBackpressure, true
 	case errors.Is(err, sql.ErrNoRows):
 		return apierror.ErrGenNotFound, true
 	}
