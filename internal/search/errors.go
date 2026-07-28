@@ -27,7 +27,7 @@ const typesenseOutOfMemoryCode = "OUT_OF_MEMORY"
 // ErrMemoryBackpressure marks an indexing task that Typesense rejected at its
 // native memory limit. Workers use this sentinel to retry without consuming
 // their normal failure budget.
-var ErrMemoryBackpressure = errors.New("Typesense memory backpressure")
+var ErrMemoryBackpressure = errors.New("typesense memory backpressure")
 
 // IsMemoryBackpressure reports whether Typesense rejected a write because its
 // native memory-used-max-percentage limit was reached.
