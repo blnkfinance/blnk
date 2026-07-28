@@ -33,6 +33,9 @@ spec:
             - --listen-port
             - "8108"
           image: typesense/typesense:29.0
+          env:
+            - name: TYPESENSE_MEMORY_USED_MAX_PERCENTAGE
+              value: "85"
           livenessProbe:
             httpGet:
               path: /health

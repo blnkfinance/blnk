@@ -20,6 +20,18 @@ const RATE = Number(__ENV.RATE || 300);
 const SOURCE_BUCKETS = Number(__ENV.SOURCE_BUCKETS || 1);
 const DESTINATION_BUCKETS = Number(__ENV.DESTINATION_BUCKETS || 1);
 
+function envBool(name, defaultVal) {
+  var v = __ENV[name];
+  if (v === undefined || v === "") {
+    return defaultVal;
+  }
+  v = String(v).toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+const INFLIGHT = envBool("INFLIGHT", true);
+const SKIP_QUEUE = envBool("SKIP_QUEUE", false);
+
 function dth(scn) {
   var o = {};
   o["http_req_failed{scenario:" + scn + "}"] = ["rate<0.001"];
@@ -226,7 +238,8 @@ function postTxn(source, destination) {
     description: "load test",
     precision: 100,
     allow_overdraft: true,
-    inflight: true,
+    inflight: INFLIGHT,
+    skip_queue: SKIP_QUEUE,
     reference: uuidv4(),
     currency: "USD",
     source: source,

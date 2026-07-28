@@ -102,6 +102,7 @@ func TestReindexProgressLifecycle(t *testing.T) {
 		var progress map[string]interface{}
 		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &progress))
 		assert.Contains(t, progress, "status")
+		assert.Contains(t, progress, "paused")
 	})
 }
 

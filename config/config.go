@@ -66,6 +66,10 @@ var (
 		RetryDelay:       5 * time.Second,
 	}
 
+	defaultTypeSense = TypeSenseConfig{
+		BackpressureRetryInterval: 5 * time.Second,
+	}
+
 	defaultQueue = QueueConfig{
 		TransactionQueue:                "new:transaction",
 		WebhookQueue:                    "new:webhook",
@@ -141,7 +145,8 @@ type RedisConfig struct {
 }
 
 type TypeSenseConfig struct {
-	Dns string `json:"dns" envconfig:"BLNK_TYPESENSE_DNS"`
+	Dns                       string        `json:"dns"                             envconfig:"BLNK_TYPESENSE_DNS"`
+	BackpressureRetryInterval time.Duration `json:"backpressure_retry_interval"     envconfig:"BLNK_TYPESENSE_BACKPRESSURE_RETRY_INTERVAL"`
 }
 
 type AccountGenerationHttpService struct {
@@ -377,6 +382,7 @@ func (cnf *Configuration) setDefaultValues() {
 	cnf.setDatabaseDefaults()
 	cnf.setTransactionDefaults()
 	cnf.setReconciliationDefaults()
+	cnf.setTypeSenseDefaults()
 	cnf.setQueueDefaults()
 	cnf.setHashChainDefaults()
 
@@ -446,6 +452,12 @@ func (cnf *Configuration) setReconciliationDefaults() {
 	}
 	if cnf.Reconciliation.RetryDelay == 0 {
 		cnf.Reconciliation.RetryDelay = defaultReconciliation.RetryDelay
+	}
+}
+
+func (cnf *Configuration) setTypeSenseDefaults() {
+	if cnf.TypeSense.BackpressureRetryInterval <= 0 {
+		cnf.TypeSense.BackpressureRetryInterval = defaultTypeSense.BackpressureRetryInterval
 	}
 }
 

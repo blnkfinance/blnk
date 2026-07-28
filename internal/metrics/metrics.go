@@ -34,6 +34,11 @@ var QueueEnqueuedTotal metric.Int64Counter
 // QueueBackpressureRejectedTotal counts enqueue attempts rejected by backpressure.
 var QueueBackpressureRejectedTotal metric.Int64Counter
 
+// SearchBackpressureRetryTotal counts indexing operations deferred after
+// Typesense rejects a write at its native memory limit.
+// Attribute: source (worker, reindex)
+var SearchBackpressureRetryTotal metric.Int64Counter
+
 // QueueProcessingDuration records the time spent processing a transaction in the worker.
 // Attributes: result (success, error, retry)
 var QueueProcessingDuration metric.Float64Histogram
@@ -116,6 +121,14 @@ func Init() error {
 	QueueBackpressureRejectedTotal, err = meter.Int64Counter("blnk.queue.backpressure.rejected.total",
 		metric.WithDescription("Total enqueue attempts rejected by queue backpressure"),
 		metric.WithUnit("{transaction}"),
+	)
+	if err != nil {
+		return err
+	}
+
+	SearchBackpressureRetryTotal, err = meter.Int64Counter("blnk.search.backpressure.retry.total",
+		metric.WithDescription("Total indexing retries caused by Typesense native memory backpressure"),
+		metric.WithUnit("{retry}"),
 	)
 	if err != nil {
 		return err
