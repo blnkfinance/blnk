@@ -72,9 +72,14 @@ func TestNewReindexService_ClampsBatchSize(t *testing.T) {
 	for _, size := range []int{0, -5} {
 		svc := NewReindexService(nil, nil, ReindexConfig{BatchSize: size})
 		assert.Equal(t, 1000, svc.config.BatchSize, "batch size %d should clamp to default", size)
+		assert.Equal(t, 5*time.Second, svc.config.BackpressureRetryInterval)
 	}
-	svc := NewReindexService(nil, nil, ReindexConfig{BatchSize: 25})
+	svc := NewReindexService(nil, nil, ReindexConfig{
+		BatchSize:                 25,
+		BackpressureRetryInterval: 2 * time.Second,
+	})
 	assert.Equal(t, 25, svc.config.BatchSize)
+	assert.Equal(t, 2*time.Second, svc.config.BackpressureRetryInterval)
 	assert.Equal(t, "pending", svc.GetProgress().Status)
 }
 
@@ -88,6 +93,56 @@ func TestGetProgress_ReturnsCopy(t *testing.T) {
 	ptr := svc.GetProgressPtr()
 	ptr.Status = "mutated"
 	assert.Equal(t, "pending", svc.GetProgress().Status, "GetProgressPtr must also return a detached copy")
+}
+
+func TestRetryWithMemoryBackpressurePausesAndResumes(t *testing.T) {
+	svc := NewReindexService(nil, nil, ReindexConfig{BackpressureRetryInterval: time.Millisecond})
+	svc.updateProgress("indexing_ledgers", 0, 0)
+
+	attempts := 0
+	err := svc.retryWithMemoryBackpressure(context.Background(), func() error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("Rejecting write: running out of resource type: OUT_OF_MEMORY")
+		}
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, attempts)
+	progress := svc.GetProgress()
+	assert.False(t, progress.Paused)
+	assert.Empty(t, progress.PauseReason)
+	assert.Nil(t, progress.PausedAt)
+	assert.Empty(t, progress.Errors)
+}
+
+func TestRetryWithMemoryBackpressureRespectsContextCancellation(t *testing.T) {
+	svc := NewReindexService(nil, nil, ReindexConfig{BackpressureRetryInterval: time.Hour})
+	svc.updateProgress("indexing_transactions", 0, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() {
+		done <- svc.retryWithMemoryBackpressure(ctx, func() error {
+			return errors.New("resource type: OUT_OF_MEMORY")
+		})
+	}()
+
+	require.Eventually(t, func() bool {
+		return svc.GetProgress().Paused
+	}, time.Second, time.Millisecond)
+	progress := svc.GetProgress()
+	assert.Equal(t, "typesense_out_of_memory", progress.PauseReason)
+	assert.NotNil(t, progress.PausedAt)
+
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("backpressure retry did not stop after context cancellation")
+	}
 }
 
 func TestStartReindex_HappyPath(t *testing.T) {

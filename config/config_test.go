@@ -354,6 +354,28 @@ func TestUploadURLTimeoutDefault(t *testing.T) {
 	}
 }
 
+func TestTypeSenseBackpressureRetryIntervalDefault(t *testing.T) {
+	cnf := Configuration{
+		ProjectName: "Test Project",
+		DataSource:  DataSourceConfig{Dns: "some-dns"},
+		Redis:       RedisConfig{Dns: "localhost:6379"},
+	}
+	if err := cnf.validateAndAddDefaults(); err != nil {
+		t.Fatalf("validateAndAddDefaults failed: %v", err)
+	}
+	if cnf.TypeSense.BackpressureRetryInterval != 5*time.Second {
+		t.Fatalf("default Typesense backpressure retry interval = %v, want 5s", cnf.TypeSense.BackpressureRetryInterval)
+	}
+
+	cnf.TypeSense.BackpressureRetryInterval = 2 * time.Second
+	if err := cnf.validateAndAddDefaults(); err != nil {
+		t.Fatalf("validateAndAddDefaults failed: %v", err)
+	}
+	if cnf.TypeSense.BackpressureRetryInterval != 2*time.Second {
+		t.Fatalf("explicit Typesense backpressure retry interval = %v, want 2s", cnf.TypeSense.BackpressureRetryInterval)
+	}
+}
+
 // TestUploadWhitelistHostsParsing verifies parsing of the comma-separated
 // whitelist: trimming, scheme-tolerance, case-folding, de-duplication, and
 // deny-by-default (empty -> nil).

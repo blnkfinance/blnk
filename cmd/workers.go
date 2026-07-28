@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -178,6 +179,32 @@ func shouldRejectLockContentionImmediately(cfg *config.Configuration, err error)
 	return hotpairs.IsLockContentionError(err)
 }
 
+func searchBackpressureRetryDelay(retryInterval time.Duration) asynq.RetryDelayFunc {
+	if retryInterval <= 0 {
+		retryInterval = 5 * time.Second
+	}
+	return func(retryCount int, err error, task *asynq.Task) time.Duration {
+		if errors.Is(err, search.ErrMemoryBackpressure) {
+			return retryInterval
+		}
+		return asynq.DefaultRetryDelayFunc(retryCount, err, task)
+	}
+}
+
+func isWorkerFailure(err error) bool {
+	return err != nil && !errors.Is(err, search.ErrMemoryBackpressure)
+}
+
+func markWorkerSearchBackpressure(ctx context.Context, err error) error {
+	if !search.IsMemoryBackpressure(err) {
+		return err
+	}
+	metrics.SearchBackpressureRetryTotal.Add(ctx, 1,
+		otelmetric.WithAttributes(attribute.String("source", "worker")),
+	)
+	return search.MarkMemoryBackpressure(err)
+}
+
 // indexData indexes data into TypeSense for searchability.
 // It fetches the collection name and payload from the task, ensures the collections exist,
 // and sends the payload to the appropriate TypeSense collection for indexing.
@@ -201,14 +228,20 @@ func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
 	err := newSearch.EnsureCollectionsExist(ctx)
 	if err != nil {
-		logrus.Errorf("Failed to ensure collections exist: %v", err)
+		err = markWorkerSearchBackpressure(ctx, err)
+		if !errors.Is(err, search.ErrMemoryBackpressure) {
+			logrus.Errorf("Failed to ensure collections exist: %v", err)
+		}
 		return err
 	}
 
 	// Handle the notification and send the payload to the collection for indexing.
 	err = newSearch.HandleNotification(ctx, collection, payload)
 	if err != nil {
-		logrus.Error("Error indexing data", err)
+		err = markWorkerSearchBackpressure(ctx, err)
+		if !errors.Is(err, search.ErrMemoryBackpressure) {
+			logrus.Error("Error indexing data", err)
+		}
 		return err
 	}
 
@@ -236,14 +269,20 @@ func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error 
 	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
 	err := newSearch.EnsureCollectionsExist(ctx)
 	if err != nil {
-		logrus.Errorf("Failed to ensure collections exist: %v", err)
+		err = markWorkerSearchBackpressure(ctx, err)
+		if !errors.Is(err, search.ErrMemoryBackpressure) {
+			logrus.Errorf("Failed to ensure collections exist: %v", err)
+		}
 		return err
 	}
 
 	// Handle the batch notification - indexes dependencies first, then primary.
 	err = newSearch.HandleBatchNotification(ctx, &batch)
 	if err != nil {
-		logrus.Errorf("Error indexing batch %s: %v", batch.ID, err)
+		err = markWorkerSearchBackpressure(ctx, err)
+		if !errors.Is(err, search.ErrMemoryBackpressure) {
+			logrus.Errorf("Error indexing batch %s: %v", batch.ID, err)
+		}
 		return err
 	}
 
@@ -373,6 +412,8 @@ func initializeWebhookWorkerServer(conf *config.Configuration, queues map[string
 			Concurrency:     conf.Queue.WebhookConcurrency,
 			Queues:          queues,
 			ShutdownTimeout: 30 * time.Second,
+			RetryDelayFunc:  searchBackpressureRetryDelay(conf.TypeSense.BackpressureRetryInterval),
+			IsFailure:       isWorkerFailure,
 		},
 	), nil
 }

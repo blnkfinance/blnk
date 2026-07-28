@@ -3,12 +3,41 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/hibiken/asynq"
 )
+
+func TestSearchBackpressureRetryPolicy(t *testing.T) {
+	rawPressureErr := errors.New("Rejecting write: running out of resource type: OUT_OF_MEMORY")
+	pressureErr := markWorkerSearchBackpressure(context.Background(), rawPressureErr)
+	ordinaryErr := errors.New("connection refused")
+	task := asynq.NewTask("new:index", nil)
+	retryDelay := searchBackpressureRetryDelay(3 * time.Second)
+
+	if got := retryDelay(0, pressureErr, task); got != 3*time.Second {
+		t.Fatalf("pressure retry delay = %v, want 3s", got)
+	}
+	if got := retryDelay(0, ordinaryErr, task); got < 15*time.Second {
+		t.Fatalf("ordinary retry delay = %v, want default Asynq backoff", got)
+	}
+	if isWorkerFailure(pressureErr) {
+		t.Fatal("memory backpressure must not consume an Asynq retry attempt")
+	}
+	if !isWorkerFailure(rawPressureErr) {
+		t.Fatal("only index-handler-marked errors may bypass normal failure accounting")
+	}
+	if !isWorkerFailure(ordinaryErr) {
+		t.Fatal("ordinary errors must retain normal Asynq failure accounting")
+	}
+	if isWorkerFailure(nil) {
+		t.Fatal("nil must not be classified as a worker failure")
+	}
+}
 
 func TestHasReachedMaxRetryAttempt(t *testing.T) {
 	cfg := &config.Configuration{

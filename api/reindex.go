@@ -73,7 +73,8 @@ func (a Api) StartReindex(c *gin.Context) {
 	}
 
 	config := search.ReindexConfig{
-		BatchSize: req.BatchSize,
+		BatchSize:                 req.BatchSize,
+		BackpressureRetryInterval: a.blnk.Config().TypeSense.BackpressureRetryInterval,
 	}
 
 	reindexService := search.NewReindexService(

@@ -23,8 +23,13 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	otelmetric "go.opentelemetry.io/otel/metric"
 )
+
+const defaultBackpressureRetryInterval = 5 * time.Second
 
 // ReindexProgress tracks the progress of a reindex operation.
 type ReindexProgress struct {
@@ -35,11 +40,15 @@ type ReindexProgress struct {
 	Errors           []string   `json:"errors,omitempty"`
 	StartedAt        time.Time  `json:"started_at"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	Paused           bool       `json:"paused"`
+	PauseReason      string     `json:"pause_reason,omitempty"`
+	PausedAt         *time.Time `json:"paused_at,omitempty"`
 }
 
 // ReindexConfig holds configuration for reindexing.
 type ReindexConfig struct {
-	BatchSize int
+	BatchSize                 int
+	BackpressureRetryInterval time.Duration
 }
 
 // ReindexService handles reindexing operations.
@@ -56,6 +65,9 @@ func NewReindexService(client *TypesenseClient, datasource database.IDataSource,
 	if config.BatchSize <= 0 {
 		config.BatchSize = 1000
 	}
+	if config.BackpressureRetryInterval <= 0 {
+		config.BackpressureRetryInterval = defaultBackpressureRetryInterval
+	}
 	return &ReindexService{
 		client:     client,
 		datasource: datasource,
@@ -70,7 +82,21 @@ func NewReindexService(client *TypesenseClient, datasource database.IDataSource,
 func (r *ReindexService) GetProgress() ReindexProgress {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return *r.progress
+	return cloneReindexProgress(r.progress)
+}
+
+func cloneReindexProgress(progress *ReindexProgress) ReindexProgress {
+	cloned := *progress
+	cloned.Errors = append([]string(nil), progress.Errors...)
+	if progress.CompletedAt != nil {
+		completedAt := *progress.CompletedAt
+		cloned.CompletedAt = &completedAt
+	}
+	if progress.PausedAt != nil {
+		pausedAt := *progress.PausedAt
+		cloned.PausedAt = &pausedAt
+	}
+	return cloned
 }
 
 func (r *ReindexService) updateProgress(phase string, processed int64, total int64) {
@@ -130,12 +156,16 @@ func (r *ReindexService) StartReindex(ctx context.Context) (*ReindexProgress, er
 	r.progress.Status = "completed"
 	r.progress.Phase = "done"
 	r.progress.CompletedAt = &now
+	r.progress.Paused = false
+	r.progress.PauseReason = ""
+	r.progress.PausedAt = nil
 	r.mu.Unlock()
 
+	progress := r.GetProgress()
 	logrus.WithFields(logrus.Fields{
-		"total_records":     r.progress.TotalRecords,
-		"processed_records": r.progress.ProcessedRecords,
-		"duration":          time.Since(r.progress.StartedAt).String(),
+		"total_records":     progress.TotalRecords,
+		"processed_records": progress.ProcessedRecords,
+		"duration":          time.Since(progress.StartedAt).String(),
 	}).Info("Reindex operation completed")
 
 	return r.GetProgressPtr(), nil
@@ -145,7 +175,7 @@ func (r *ReindexService) StartReindex(ctx context.Context) (*ReindexProgress, er
 func (r *ReindexService) GetProgressPtr() *ReindexProgress {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	progress := *r.progress
+	progress := cloneReindexProgress(r.progress)
 	return &progress
 }
 
@@ -156,6 +186,9 @@ func (r *ReindexService) failWithError(err error, phase string) (*ReindexProgres
 	r.progress.Phase = phase
 	r.progress.CompletedAt = &now
 	r.progress.Errors = append(r.progress.Errors, err.Error())
+	r.progress.Paused = false
+	r.progress.PauseReason = ""
+	r.progress.PausedAt = nil
 	r.mu.Unlock()
 
 	logrus.WithError(err).WithField("phase", phase).Error("Reindex operation failed")
@@ -178,12 +211,76 @@ func (r *ReindexService) createCollections(ctx context.Context) error {
 	r.updateProgress("create_collections", 0, 0)
 	logrus.Info("Creating collections")
 
-	if err := r.client.EnsureCollectionsExist(ctx); err != nil {
+	if err := r.retryWithMemoryBackpressure(ctx, func() error {
+		return r.client.EnsureCollectionsExist(ctx)
+	}); err != nil {
 		return err
 	}
 
 	logrus.Info("All collections created successfully")
 	return nil
+}
+
+func (r *ReindexService) retryWithMemoryBackpressure(ctx context.Context, operation func() error) error {
+	for {
+		err := operation()
+		if !IsMemoryBackpressure(err) {
+			r.setMemoryBackpressurePaused(false)
+			return err
+		}
+
+		r.setMemoryBackpressurePaused(true)
+		metrics.SearchBackpressureRetryTotal.Add(ctx, 1,
+			otelmetric.WithAttributes(attribute.String("source", "reindex")),
+		)
+		if err := waitForRetry(ctx, r.config.BackpressureRetryInterval); err != nil {
+			return err
+		}
+	}
+}
+
+func waitForRetry(ctx context.Context, retryInterval time.Duration) error {
+	timer := time.NewTimer(retryInterval)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (r *ReindexService) setMemoryBackpressurePaused(paused bool) {
+	r.mu.Lock()
+	if r.progress.Paused == paused {
+		r.mu.Unlock()
+		return
+	}
+
+	phase := r.progress.Phase
+	r.progress.Paused = paused
+	if paused {
+		now := time.Now()
+		r.progress.PauseReason = "typesense_out_of_memory"
+		r.progress.PausedAt = &now
+	} else {
+		r.progress.PauseReason = ""
+		r.progress.PausedAt = nil
+	}
+	r.mu.Unlock()
+
+	if paused {
+		logrus.WithField("phase", phase).Warn("Reindex paused by Typesense memory backpressure")
+		return
+	}
+	logrus.WithField("phase", phase).Info("Reindex resumed after Typesense memory backpressure")
+}
+
+func (r *ReindexService) indexDocument(ctx context.Context, collection string, data map[string]interface{}) error {
+	return r.retryWithMemoryBackpressure(ctx, func() error {
+		return r.client.HandleNotification(ctx, collection, data)
+	})
 }
 
 func (r *ReindexService) indexLedgers(ctx context.Context) error {
@@ -212,7 +309,10 @@ func (r *ReindexService) indexLedgers(ctx context.Context) error {
 				continue
 			}
 
-			if err := r.client.HandleNotification(ctx, CollectionLedgers, data); err != nil {
+			if err := r.indexDocument(ctx, CollectionLedgers, data); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				r.addError("ledger " + ledger.LedgerID + ": " + err.Error())
 				continue
 			}
@@ -262,7 +362,10 @@ func (r *ReindexService) indexIdentities(ctx context.Context) error {
 				continue
 			}
 
-			if err := r.client.HandleNotification(ctx, CollectionIdentities, data); err != nil {
+			if err := r.indexDocument(ctx, CollectionIdentities, data); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				r.addError("identity " + identity.IdentityID + ": " + err.Error())
 				continue
 			}
@@ -315,7 +418,10 @@ func (r *ReindexService) indexBalances(ctx context.Context) error {
 				continue
 			}
 
-			if err := r.client.HandleNotification(ctx, CollectionBalances, data); err != nil {
+			if err := r.indexDocument(ctx, CollectionBalances, data); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				r.addError("balance " + balance.BalanceID + ": " + err.Error())
 				continue
 			}
@@ -368,7 +474,10 @@ func (r *ReindexService) indexTransactions(ctx context.Context) error {
 				continue
 			}
 
-			if err := r.client.HandleNotification(ctx, CollectionTransactions, data); err != nil {
+			if err := r.indexDocument(ctx, CollectionTransactions, data); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				r.addError("transaction " + transaction.TransactionID + ": " + err.Error())
 				continue
 			}

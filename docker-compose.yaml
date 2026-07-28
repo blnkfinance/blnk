@@ -35,8 +35,6 @@ services:
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "5001:5001"
-      - "80:80"
-      - "443:443"
     depends_on:
       - init
       - redis
@@ -91,6 +89,8 @@ services:
     container_name: typesense
     command:
       ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
+    environment:
+      TYPESENSE_MEMORY_USED_MAX_PERCENTAGE: "${TYPESENSE_MEMORY_USED_MAX_PERCENTAGE:-85}"
     ports:
       - "8108:8108"
     volumes:
