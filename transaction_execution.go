@@ -728,11 +728,14 @@ func (l *Blnk) buildTransactionExecutionWork(ctx context.Context, transaction *m
 		}, true
 	}
 
+	outbox := l.prepareTransactionOutbox(ctx, transaction, sourceBalance, destinationBalance)
+	clearTerminalInflightMetadata(transaction)
+
 	return queuedBatchPostCommitWork{
 		transaction:        transaction,
 		sourceBalance:      sourceBalance,
 		destinationBalance: destinationBalance,
-		outbox:             l.prepareTransactionOutbox(ctx, transaction, sourceBalance, destinationBalance),
+		outbox:             outbox,
 	}, false
 }
 

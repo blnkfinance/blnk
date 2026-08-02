@@ -17,6 +17,7 @@ limitations under the License.
 package blnk
 
 import (
+	"context"
 	"errors"
 	"math/big"
 	"testing"
@@ -84,4 +85,63 @@ func TestShouldExpandInflightParent(t *testing.T) {
 	assert.True(t, shouldExpandInflightParent(errors.New("NOT_FOUND: Transaction with ID 'txn_x' not found")))
 	assert.False(t, shouldExpandInflightParent(errors.New("failed to acquire lock for inflight commit")))
 	assert.False(t, shouldExpandInflightParent(nil))
+}
+
+func TestClearTerminalInflightMetadata(t *testing.T) {
+	terminal := &model.Transaction{
+		Status:   StatusApplied,
+		Inflight: true,
+		MetaData: map[string]interface{}{
+			"inflight": true,
+			"source":   "checkout",
+		},
+	}
+
+	clearTerminalInflightMetadata(terminal)
+
+	assert.False(t, terminal.Inflight)
+	assert.NotContains(t, terminal.MetaData, "inflight")
+	assert.Equal(t, "checkout", terminal.MetaData["source"])
+
+	pending := &model.Transaction{Status: StatusInflight, Inflight: true, MetaData: map[string]interface{}{"inflight": true}}
+	clearTerminalInflightMetadata(pending)
+
+	assert.True(t, pending.Inflight)
+	assert.Contains(t, pending.MetaData, "inflight")
+
+	clearTerminalInflightMetadata(nil)
+}
+
+func TestBuildTransactionExecutionWorkClearsTerminalInflightMetadata(t *testing.T) {
+	l := &Blnk{}
+	source := &model.Balance{BalanceID: "source"}
+	destination := &model.Balance{BalanceID: "destination"}
+
+	for _, status := range []string{StatusCommit, StatusVoid} {
+		t.Run(status, func(t *testing.T) {
+			expectedStatus := StatusVoid
+			if status == StatusCommit {
+				expectedStatus = StatusApplied
+			}
+
+			transaction := &model.Transaction{
+				Status:            status,
+				PreciseAmount:     big.NewInt(100),
+				ParentTransaction: "txn_parent",
+				MetaData: map[string]interface{}{
+					"inflight": true,
+					"source":   "checkout",
+				},
+			}
+
+			work, discarded := l.buildTransactionExecutionWork(context.Background(), transaction, source, destination)
+
+			require.False(t, discarded)
+			assert.Equal(t, expectedStatus, work.transaction.Status)
+			assert.Nil(t, work.outbox)
+			assert.False(t, work.transaction.Inflight)
+			assert.NotContains(t, work.transaction.MetaData, "inflight")
+			assert.Equal(t, "checkout", work.transaction.MetaData["source"])
+		})
+	}
 }

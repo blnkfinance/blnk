@@ -1129,6 +1129,11 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommit(t *testing.T) {
 	require.NoError(t, err, "Failed to partially commit transaction")
 	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
 	require.Equal(t, partialAmount, partialCommitTxn.Amount, "Partial commit amount should match specified amount")
+	require.False(t, partialCommitTxn.Inflight)
+	require.NotContains(t, partialCommitTxn.MetaData, "inflight")
+	persistedPartialCommit, err := ds.GetTransactionByRef(ctx, partialCommitTxn.Reference)
+	require.NoError(t, err)
+	require.NotContains(t, persistedPartialCommit.MetaData, "inflight")
 
 	// Verify balances were updated after partial commit
 	updatedSourceAfterPartialCommit, err := ds.GetBalanceByIDLite(source.BalanceID)
@@ -1359,6 +1364,11 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommitThenVoid(t *testin
 	voidTxn, err := blnk.VoidInflightTransaction(ctx, inflightEntry.TransactionID)
 	require.NoError(t, err, "Failed to void remaining transaction amount")
 	require.Equal(t, StatusVoid, voidTxn.Status, "Void transaction should have VOID status")
+	require.False(t, voidTxn.Inflight)
+	require.NotContains(t, voidTxn.MetaData, "inflight")
+	persistedVoid, err := ds.GetTransactionByRef(ctx, voidTxn.Reference)
+	require.NoError(t, err)
+	require.NotContains(t, persistedVoid.MetaData, "inflight")
 
 	// Verify balances after void
 	updatedSourceAfterVoid, err := ds.GetBalanceByIDLite(source.BalanceID)
