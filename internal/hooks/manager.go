@@ -221,10 +221,28 @@ func (m *redisHookManager) GetHook(ctx context.Context, hookID string) (*Hook, e
 // - []*Hook: A slice of retrieved hooks.
 // - error: An error if retrieval fails.
 func (m *redisHookManager) ListHooks(ctx context.Context, hookType HookType) ([]*Hook, error) {
-	typeKey := getTypeKey(hookType)
-	hookIDs, err := m.client.SMembers(ctx, typeKey).Result()
-	if err != nil {
-		return nil, err
+	var hookIDs []string
+	if hookType == "" {
+		seen := make(map[string]struct{})
+		for _, typeKey := range []string{preHookKeyPrefix, postHookKeyPrefix} {
+			ids, err := m.client.SMembers(ctx, typeKey).Result()
+			if err != nil {
+				return nil, err
+			}
+			for _, id := range ids {
+				if _, exists := seen[id]; exists {
+					continue
+				}
+				seen[id] = struct{}{}
+				hookIDs = append(hookIDs, id)
+			}
+		}
+	} else {
+		var err error
+		hookIDs, err = m.client.SMembers(ctx, getTypeKey(hookType)).Result()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	hooks := make([]*Hook, 0, len(hookIDs))
