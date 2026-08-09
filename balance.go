@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/filter"
 	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/blnkfinance/blnk/internal/notification"
@@ -231,11 +232,23 @@ func (l *Blnk) CreateBalance(ctx context.Context, balance model.Balance) (model.
 	ctx, span := balanceTracer.Start(ctx, "CreateBalance")
 	defer span.End()
 
+	requestedIndicator := balance.Indicator
+
 	balance, err := l.datasource.CreateBalance(balance)
 	if err != nil {
 		span.RecordError(err)
 		return model.Balance{}, err
 	}
+
+	// The datasource signals a duplicate (indicator, currency) pair by returning
+	// an empty balance with a nil error (see database/balance.go unique_indicator_currency
+	// handling). Without this check the API would respond 201 with an empty body.
+	if requestedIndicator != "" && balance.BalanceID == "" {
+		conflictErr := apierror.NewAPIError(apierror.ErrConflict, fmt.Sprintf("Balance already exists for indicator '%s' and this currency", requestedIndicator), nil)
+		span.RecordError(conflictErr)
+		return model.Balance{}, conflictErr
+	}
+
 	l.postBalanceActions(ctx, &balance)
 	metrics.BalanceCreatedTotal.Add(ctx, 1)
 	span.AddEvent("Balance created", trace.WithAttributes(attribute.String("balance.id", balance.BalanceID)))
