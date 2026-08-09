@@ -68,6 +68,43 @@ func (l *Blnk) PreviewTransaction(ctx context.Context, transaction *model.Transa
 	return preview, nil
 }
 
+// PreviewRefund projects the reversal of an existing transaction without
+// creating it.
+//
+// It runs the same lookup and eligibility checks a real refund runs, and builds
+// the reversal with the same helper, so a projection that reports the refund as
+// applicable is one the ledger would accept. Nothing is written: the refund is
+// never queued and the parent is not marked refunded.
+func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.TransactionPreview, error) {
+	ctx, span := tracer.Start(ctx, "PreviewRefund")
+	defer span.End()
+
+	originalTxn, err := l.getOriginalTransactionForRefund(ctx, transactionID)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if err := l.validateTransactionForRefund(ctx, originalTxn); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	// Same builder the real refund uses: source and destination swapped,
+	// overdraft allowed, status reset. skipQueue is irrelevant here because the
+	// projection never reaches the queue.
+	refund := prepareRefundTransaction(originalTxn, true)
+
+	preview, err := l.PreviewTransaction(ctx, refund)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	preview.AddNote(fmt.Sprintf("projected refund of transaction %s", originalTxn.TransactionID))
+	return preview, nil
+}
+
 // normalizePreviewStatus assigns the status the transaction would carry by the
 // time balances are applied.
 //
