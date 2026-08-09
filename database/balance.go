@@ -340,10 +340,11 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	var inflightBalanceValue, inflightCreditBalanceValue, inflightDebitBalanceValue string
 	var indicator sql.NullString
 	var allocationStrategy sql.NullString
+	var metaDataJSON []byte
 
 	// Execute the query
 	row := d.Conn.QueryRowContext(context.Background(), `
-       SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id
+       SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id, meta_data
        FROM blnk.balances
        WHERE balance_id = $1
     `, id)
@@ -365,6 +366,7 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 		&balance.TrackFundLineage,
 		&allocationStrategy,
 		&balance.IdentityID,
+		&metaDataJSON,
 	)
 
 	// Handle null indicator field
@@ -414,6 +416,13 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	balance.InflightDebitBalance, err = parseBigInt(inflightDebitBalanceValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse inflight_debit_balance: %w", err)
+	}
+
+	// Parse the metadata JSON into the MetaData map field (may be NULL)
+	if len(metaDataJSON) > 0 {
+		if err := json.Unmarshal(metaDataJSON, &balance.MetaData); err != nil {
+			return nil, fmt.Errorf("failed to parse meta_data: %w", err)
+		}
 	}
 
 	return &balance, nil
