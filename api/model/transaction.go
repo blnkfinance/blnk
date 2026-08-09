@@ -64,6 +64,15 @@ type BulkTransactionRequest struct {
 	Atomic       bool                 `json:"atomic"`
 	RunAsync     bool                 `json:"run_async"`
 	SkipQueue    bool                 `json:"skip_queue"`
+
+	// DryRun projects the batch and returns the result without applying any of
+	// it. The projection answers synchronously with 200, so run_async is
+	// ignored.
+	//
+	// Items are projected against each other's effects only when skip_queue is
+	// set, mirroring how the batch would really run; the response reports which
+	// mode was used.
+	DryRun bool `json:"dry_run"`
 }
 
 func (r *BulkTransactionRequest) ToBulkTransactionRequest() *model.BulkTransactionRequest {
@@ -90,6 +99,14 @@ type InflightUpdate struct {
 	// SkipQueue processes the commit/void synchronously instead of routing it
 	// through the inflight-commit queue (the default).
 	SkipQueue bool `json:"skip_queue"`
+
+	// DryRun projects the commit or void and returns the resulting balances
+	// without settling anything: no settlement transaction is recorded and the
+	// hold stays in place.
+	//
+	// A void always releases the full remaining hold, so any amount sent with
+	// one is ignored.
+	DryRun bool `json:"dry_run"`
 }
 
 // MaxBulkInflightItems caps the number of transactions accepted in a single

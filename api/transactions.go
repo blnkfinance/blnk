@@ -103,15 +103,30 @@ func (a Api) respondPreview(c *gin.Context, preview *model.TransactionPreview, e
 		return
 	}
 
-	if preview.Rejection != nil && preview.Rejection.Code == "" {
-		code, ok := classifyMessage(preview.Rejection.Message)
-		if !ok {
-			code = apierror.ErrTxnValidation
-		}
-		preview.Rejection.Code = string(code)
+	resolvePreviewRejectionCode(preview)
+	c.JSON(http.StatusOK, preview)
+}
+
+// resolvePreviewRejectionCode fills in the error code a real post would have
+// returned for a projected rejection, using the same classifier the other
+// endpoints resolve errors through.
+func resolvePreviewRejectionCode(preview *model.TransactionPreview) {
+	if preview == nil || preview.Rejection == nil || preview.Rejection.Code != "" {
+		return
 	}
 
-	c.JSON(http.StatusOK, preview)
+	code, ok := classifyMessage(preview.Rejection.Message)
+	if !ok {
+		code = apierror.ErrTxnValidation
+	}
+	preview.Rejection.Code = string(code)
+}
+
+// resolvePreviewRejectionCodes fills in rejection codes across a batch.
+func resolvePreviewRejectionCodes(previews []model.TransactionPreview) {
+	for i := range previews {
+		resolvePreviewRejectionCode(&previews[i])
+	}
 }
 
 func handleRecordTransactionValidationError(c *gin.Context, err error) {
@@ -444,6 +459,20 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		return
 	}
 
+	status := req.Status
+	if status != blnk.InflightActionCommit && status != blnk.InflightActionVoid {
+		respondCode(c, apierror.ErrTxnInvalidStatusAction, "status not supported. use either commit or void", nil)
+		return
+	}
+
+	// Projected before the precision lookup below, which caches into package
+	// state, and before any queueing.
+	if req.DryRun {
+		preview, err := a.blnk.PreviewInflightAction(c.Request.Context(), id, status, req.PreciseAmount)
+		a.respondPreview(c, preview, err)
+		return
+	}
+
 	cnf, err := config.Fetch()
 	if err != nil {
 		respondError(c, err)
@@ -463,12 +492,6 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 			return
 		}
 		amount = req.PreciseAmount
-	}
-
-	status := req.Status
-	if status != blnk.InflightActionCommit && status != blnk.InflightActionVoid {
-		respondCode(c, apierror.ErrTxnInvalidStatusAction, "status not supported. use either commit or void", nil)
-		return
 	}
 
 	// Default: route the action through the inflight-commit queue. The response
@@ -559,6 +582,21 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 	}
 
 	bulkReq := req.ToBulkTransactionRequest()
+
+	// Projected after the per-item validation above, so a dry run is held to
+	// the same input rules as a real batch, but before anything is dispatched.
+	if req.DryRun {
+		preview, err := a.blnk.PreviewBulkTransactions(c.Request.Context(), bulkReq)
+		if err != nil {
+			respondError(c, err,
+				withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound),
+				withDefault(apierror.ErrTxnValidation))
+			return
+		}
+		resolvePreviewRejectionCodes(preview.Results)
+		c.JSON(http.StatusOK, preview)
+		return
+	}
 
 	// Call the service layer method to handle bulk transaction creation
 	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), bulkReq)
