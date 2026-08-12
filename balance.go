@@ -18,8 +18,8 @@ package blnk
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
@@ -33,6 +33,24 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// isAlreadyExists reports whether err means the balance already exists
+// (apierror.ErrConflict), e.g. a duplicate (indicator, currency) pair from
+// CreateBalance. Used by get-or-create so a concurrent create race can fall
+// through to a re-fetch instead of failing. Checking the error code (rather
+// than an empty balance ID or a substring of the message) keeps this resilient
+// to message changes.
+func isAlreadyExists(err error) bool {
+	var apiErr apierror.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == apierror.ErrConflict
+	}
+	var apiErrPtr *apierror.APIError
+	if errors.As(err, &apiErrPtr) && apiErrPtr != nil {
+		return apiErrPtr.Code == apierror.ErrConflict
+	}
+	return false
+}
 
 // balanceTracer is an OpenTelemetry tracer for tracking balance-related transactions.
 var (
@@ -154,7 +172,7 @@ func (l *Blnk) getOrCreateBalanceByIndicator(ctx context.Context, indicator, cur
 			Currency:  currency,
 		}
 		_, err := l.CreateBalance(ctx, *balance)
-		if err != nil && !strings.Contains(err.Error(), "Balance already exist") {
+		if err != nil && !isAlreadyExists(err) {
 			span.RecordError(err)
 			return nil, err
 		}
@@ -232,21 +250,10 @@ func (l *Blnk) CreateBalance(ctx context.Context, balance model.Balance) (model.
 	ctx, span := balanceTracer.Start(ctx, "CreateBalance")
 	defer span.End()
 
-	requestedIndicator := balance.Indicator
-
 	balance, err := l.datasource.CreateBalance(balance)
 	if err != nil {
 		span.RecordError(err)
 		return model.Balance{}, err
-	}
-
-	// The datasource signals a duplicate (indicator, currency) pair by returning
-	// an empty balance with a nil error (see database/balance.go unique_indicator_currency
-	// handling). Without this check the API would respond 201 with an empty body.
-	if requestedIndicator != "" && balance.BalanceID == "" {
-		conflictErr := apierror.NewAPIError(apierror.ErrConflict, fmt.Sprintf("Balance already exists for indicator '%s' and this currency", requestedIndicator), nil)
-		span.RecordError(conflictErr)
-		return model.Balance{}, conflictErr
 	}
 
 	l.postBalanceActions(ctx, &balance)

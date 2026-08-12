@@ -117,6 +117,38 @@ func TestCreateBalance_UniqueViolation(t *testing.T) {
 	assert.Equal(t, apierror.ErrConflict, apiErr.Code)
 }
 
+func TestCreateBalance_DuplicateIndicatorCurrency(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+
+	balance := model.Balance{
+		Balance:       big.NewInt(0),
+		CreditBalance: big.NewInt(0),
+		DebitBalance:  big.NewInt(0),
+		Currency:      "USD",
+		LedgerID:      "general_ledger_id",
+		Indicator:     "@cash",
+	}
+
+	metaDataJSON, err := json.Marshal(balance.MetaData)
+	assert.NoError(t, err)
+
+	mock.ExpectExec("INSERT INTO blnk.balances").
+		WithArgs(sqlmock.AnyArg(), balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.Currency, balance.LedgerID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), metaDataJSON, false, "FIFO").
+		WillReturnError(&pq.Error{Code: "23505", Message: `duplicate key value violates unique constraint "unique_indicator_currency"`})
+
+	_, err = ds.CreateBalance(balance)
+	assert.Error(t, err, "a duplicate (indicator, currency) pair must surface as a real error, not a silent empty balance")
+
+	apiErr, ok := err.(apierror.APIError)
+	assert.True(t, ok)
+	assert.Equal(t, apierror.ErrConflict, apiErr.Code)
+	assert.Contains(t, apiErr.Message, "@cash")
+}
+
 func TestGetBalanceByID_Success(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)

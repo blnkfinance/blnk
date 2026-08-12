@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"regexp"
 	"testing"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/brianvoe/gofakeit/v6"
 
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -555,4 +557,47 @@ func TestGetBalanceByIndicator(t *testing.T) {
 	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.Balance), "Balance should be 0")
 	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.CreditBalance), "Credit balance should be 0")
 	assert.Equal(t, 0, big.NewInt(0).Cmp(retrievedBalance.DebitBalance), "Debit balance should be 0")
+}
+
+func TestIsAlreadyExists(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "APIError value with ErrConflict code",
+			err:  apierror.NewAPIError(apierror.ErrConflict, "Balance already exists for indicator '@cash' and this currency", nil),
+			want: true,
+		},
+		{
+			name: "APIError pointer with ErrConflict code",
+			err: func() error {
+				e := apierror.NewAPIError(apierror.ErrConflict, "conflict", nil)
+				return &e
+			}(),
+			want: true,
+		},
+		{
+			name: "APIError with a different code",
+			err:  apierror.NewAPIError(apierror.ErrBadRequest, "Invalid ledger ID", nil),
+			want: false,
+		},
+		{
+			name: "generic non-APIError",
+			err:  errors.New("some unrelated failure"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAlreadyExists(tt.err))
+		})
+	}
 }
