@@ -260,7 +260,7 @@ func (d Datasource) CreateBalance(balance model.Balance) (model.Balance, error) 
 			switch pqErr.Code.Name() {
 			case "unique_violation":
 				if strings.Contains(pqErr.Message, "unique_indicator_currency") {
-					return model.Balance{}, nil
+					return model.Balance{}, apierror.NewAPIError(apierror.ErrConflict, fmt.Sprintf("Balance already exists for indicator '%s' and '%s'", balance.Indicator, balance.Currency), err)
 				}
 				return model.Balance{}, apierror.NewAPIError(apierror.ErrConflict, fmt.Sprintf("Balance already exists: %s", balance.BalanceID), err)
 			case "foreign_key_violation":
