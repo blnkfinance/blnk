@@ -47,7 +47,8 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 	txn := &model.Transaction{}
 	var metaDataJSON []byte
 	var preciseAmountStr string
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction, &txn.Hash)
+	var parentTransaction sql.NullString
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Precision, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &parentTransaction, &txn.Hash)
 	// Handle errors, including no rows found
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -57,6 +58,7 @@ func (d Datasource) GetTransaction(ctx context.Context, id string) (*model.Trans
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transaction", err)
 	}
+	txn.ParentTransaction = nullableString(parentTransaction)
 
 	// Unmarshal the metadata JSON into the transaction's MetaData field
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
@@ -225,7 +227,8 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 	txn := model.Transaction{}
 	var metaDataJSON []byte
 	var preciseAmountStr string
-	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &txn.ParentTransaction)
+	var parentTransaction sql.NullString
+	err := row.Scan(&txn.TransactionID, &txn.Source, &txn.Reference, &txn.Amount, &preciseAmountStr, &txn.Currency, &txn.Destination, &txn.Description, &txn.Status, &txn.CreatedAt, &metaDataJSON, &parentTransaction)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			span.RecordError(err)
@@ -234,6 +237,7 @@ func (d Datasource) GetTransactionByRef(ctx context.Context, reference string) (
 		span.RecordError(err)
 		return model.Transaction{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve transaction", err)
 	}
+	txn.ParentTransaction = nullableString(parentTransaction)
 
 	// Unmarshal the metadata JSON into the transaction's MetaData field
 	err = json.Unmarshal(metaDataJSON, &txn.MetaData)
@@ -324,9 +328,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 		if effectiveDate.Valid {
 			transaction.EffectiveDate = &effectiveDate.Time
 		}
-		if parentTransaction.Valid {
-			transaction.ParentTransaction = parentTransaction.String
-		}
+		transaction.ParentTransaction = nullableString(parentTransaction)
 
 		// Parse the precise amount (NUMERIC) into a big.Int, mirroring the other
 		// transaction row scans in this package.
@@ -360,6 +362,15 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 
 	// Return the slice of transactions
 	return transactions, nil
+}
+
+// nullableString maps a nullable TEXT column to a Go string. Root transactions
+// store parent_transaction as NULL; scanning that into a string 500s the read.
+func nullableString(v sql.NullString) string {
+	if v.Valid {
+		return v.String
+	}
+	return ""
 }
 
 // GetTotalCommittedTransactions calculates the total committed transaction amounts for a given parent transaction.
