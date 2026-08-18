@@ -283,7 +283,6 @@ func (l *Blnk) validateTxn(ctx context.Context, transaction *model.Transaction) 
 	if txn {
 		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
 		span.RecordError(err)
-		notification.NotifyError(err)
 		return err
 	}
 
@@ -529,7 +528,6 @@ func (l *Blnk) recordTransactionSingle(ctx context.Context, transaction *model.T
 		l.runTransactionPostCommitWork(ctx, span, []*model.Balance{sourceBalance, destinationBalance}, []queuedBatchPostCommitWork{work})
 
 		span.AddEvent("Transaction processed", trace.WithAttributes(attribute.String("transaction.id", work.transaction.TransactionID)))
-		logrus.Infof("Transaction %s processed successfully", work.transaction.TransactionID)
 		return work.transaction, nil
 	})
 

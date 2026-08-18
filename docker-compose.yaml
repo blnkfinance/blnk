@@ -32,14 +32,12 @@ services:
       - "blnk migrate up && blnk start"
     environment:
       TZ: ${TZ:-Etc/UTC}
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "5001:5001"
     depends_on:
       - init
       - redis
       - postgres
-      - jaeger
     volumes:
       - ./blnk.json:/blnk.json
 
@@ -48,15 +46,12 @@ services:
     container_name: worker
     restart: on-failure
     entrypoint: ["blnk", "workers"]
-    environment:
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "5004:5004"
     depends_on:
       - init
       - redis
       - postgres
-      - jaeger
     volumes:
       - ./blnk.json:/blnk.json
 
@@ -87,6 +82,8 @@ services:
   typesense:
     image: typesense/typesense:29.0
     container_name: typesense
+    profiles:
+      - search
     command:
       ["--data-dir", "/data", "--api-key=blnk-api-key", "--listen-port", "8108"]
     environment:
@@ -106,6 +103,8 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
+    profiles:
+      - tracing
     ports:
       - "16686:16686" # Jaeger UI
       - "4317:4317" # OTLP gRPC

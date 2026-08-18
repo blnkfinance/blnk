@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,6 +87,31 @@ func TestProcessTransaction_InsufficientFundsRejects(t *testing.T) {
 	dstAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(dst.BalanceID)
 	require.NoError(t, err)
 	assert.Equal(t, "0", dstAfter.Balance.String())
+}
+
+func TestProcessTransaction_DuplicateReferenceAcks(t *testing.T) {
+	b := newCmdTestInstance(t)
+	src, dst := createBalancePair(t, b)
+
+	txn := queuedTransaction(src.BalanceID, dst.BalanceID, 50, true)
+	original := *txn
+	payload, err := json.Marshal(txn)
+	require.NoError(t, err)
+
+	task := asynq.NewTask("transaction_queue_cmd_test_1", payload)
+	require.NoError(t, b.processTransaction(context.Background(), task))
+
+	replay := original
+	replay.TransactionID = model.GenerateUUIDWithSuffix("txn")
+	replayPayload, err := json.Marshal(&replay)
+	require.NoError(t, err)
+
+	replayTask := asynq.NewTask("transaction_queue_cmd_test_1", replayPayload)
+	require.NoError(t, b.processTransaction(context.Background(), replayTask), "duplicate reference is a handled outcome, not a handler error")
+
+	dstAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(dst.BalanceID)
+	require.NoError(t, err)
+	assert.Equal(t, "5000", dstAfter.Balance.String(), "destination must not be credited twice")
 }
 
 func TestProcessInflightCommitAndExpiry(t *testing.T) {
