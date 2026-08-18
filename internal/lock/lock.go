@@ -100,11 +100,15 @@ func (l *Locker) Lock(ctx context.Context, timeout time.Duration) error {
 
 // Unlock releases the lock if the calling instance is the lock holder (based on the value).
 // The operation is atomic, ensuring only the holder of the lock can release it.
+// ctx's cancellation is ignored: an abandoned request must still free the lock.
 // Parameters:
 // - ctx: The context for managing the unlock request lifecycle.
 // Returns an error if the unlock operation fails, either because the lock expired or
 // the caller is not the lock holder.
 func (l *Locker) Unlock(ctx context.Context) error {
+	ctx, cancel := releaseContext(ctx)
+	defer cancel()
+
 	// Lua script ensures atomicity: checks the value and deletes the key if the value matches.
 	script := "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
 	result, err := l.client.Eval(ctx, script, []string{l.key}, l.value).Result()
@@ -303,7 +307,14 @@ func (m *MultiLocker) Keys() []string {
 const (
 	lockBackoffBase = 5 * time.Millisecond
 	lockBackoffMax  = 100 * time.Millisecond
+
+	lockReleaseTimeout = 5 * time.Second
 )
+
+// releaseContext keeps ctx's values but drops its cancellation, bounded by lockReleaseTimeout.
+func releaseContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), lockReleaseTimeout)
+}
 
 // sleepWithJitter sleeps for an exponentially growing, jittered backoff period:
 // the cap starts at lockBackoffBase and doubles per attempt up to lockBackoffMax,

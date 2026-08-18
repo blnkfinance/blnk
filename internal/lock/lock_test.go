@@ -21,8 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redismock/v9"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLocker_Lock_Success(t *testing.T) {
@@ -71,6 +74,29 @@ func TestLocker_Unlock_Failure(t *testing.T) {
 	err := locker.Unlock(context.Background())
 	assert.EqualError(t, err, "unlock failed, either lock expired or you're not the lock holder for key test-key")
 	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// newRedisTestClient starts an in-process redis, for tests that assert real key state.
+func newRedisTestClient(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	return client, mr
+}
+
+func TestLocker_Unlock_ReleasesWhenContextCancelled(t *testing.T) {
+	db, mr := newRedisTestClient(t)
+	locker := NewLocker(db, "test-key", "test-value")
+
+	require.NoError(t, locker.Lock(context.Background(), time.Minute))
+	require.True(t, mr.Exists("test-key"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	assert.NoError(t, locker.Unlock(ctx))
+	assert.False(t, mr.Exists("test-key"), "lock key survived a release on a cancelled context")
 }
 
 func TestLocker_ExtendLock_Success(t *testing.T) {
@@ -244,6 +270,22 @@ func TestMultiLocker_Unlock_ReturnsLastError(t *testing.T) {
 	// Should return the error from first failed unlock
 	assert.Error(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestMultiLocker_Unlock_ReleasesWhenContextCancelled(t *testing.T) {
+	db, mr := newRedisTestClient(t)
+	multiLocker := NewMultiLocker(db, []string{"key-b", "key-a"}, "test-value")
+
+	require.NoError(t, multiLocker.Lock(context.Background(), time.Minute))
+	require.True(t, mr.Exists("key-a"))
+	require.True(t, mr.Exists("key-b"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	assert.NoError(t, multiLocker.Unlock(ctx))
+	assert.False(t, mr.Exists("key-a"), "lock key survived a release on a cancelled context")
+	assert.False(t, mr.Exists("key-b"), "lock key survived a release on a cancelled context")
 }
 
 func TestMultiLocker_WaitLock_Success(t *testing.T) {
