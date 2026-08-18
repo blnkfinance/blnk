@@ -67,13 +67,13 @@ func expectBalanceLite(dbMock sqlmock.Sqlmock, balanceID, currency string, balan
 	rows := sqlmock.NewRows([]string{
 		"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance",
 		"inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version",
-		"track_fund_lineage", "allocation_strategy", "identity_id",
+		"track_fund_lineage", "allocation_strategy", "identity_id", "meta_data",
 	}).AddRow(
 		balanceID, nil, currency, "general_ledger_id", int64ToString(balance), int64ToString(credit), int64ToString(debit),
-		"0", "0", int64ToString(inflightDebit), time.Now(), 3, false, "FIFO", "",
+		"0", "0", int64ToString(inflightDebit), time.Now(), 3, false, "FIFO", "", nil,
 	)
 
-	dbMock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version`)).
+	dbMock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE(allocation_strategy, 'FIFO') as allocation_strategy, COALESCE(identity_id, '') as identity_id, meta_data`)).
 		WithArgs(balanceID).
 		WillReturnRows(rows)
 }

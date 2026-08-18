@@ -185,6 +185,40 @@ func TestGetTransaction_Success(t *testing.T) {
 	assert.Equal(t, "hash123", txn.Hash)
 }
 
+// TestGetTransaction_NullParentDoesNotFailScan catches GET /transactions/:id
+// 500ing on a root transaction. parent_transaction is nullable; a missing
+// parent must scan as "" rather than failing the request.
+func TestGetTransaction_NullParentDoesNotFailScan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
+	assert.NoError(t, err)
+
+	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = ?").
+		WithArgs("txn_root").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
+			"destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash",
+		}).AddRow(
+			"txn_root", "src1", "ref_root", 1000, "1000", 2, "USD",
+			"dest1", "root transaction", "APPLIED", time.Now(), metaDataJSON, nil, "hash_root",
+		))
+
+	txn, err := ds.GetTransaction(ctx, "txn_root")
+	assert.NoError(t, err)
+	if assert.NotNil(t, txn) {
+		assert.Equal(t, "txn_root", txn.TransactionID)
+		assert.Equal(t, "", txn.ParentTransaction)
+	}
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestGetTransaction_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -857,6 +891,44 @@ func TestGetTransactionByRef_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestGetTransactionByRef_NullParentDoesNotFailScan catches GET
+// /transactions/reference/:ref 500ing on a root transaction whose
+// parent_transaction is NULL.
+func TestGetTransactionByRef_NullParentDoesNotFailScan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
+	assert.NoError(t, err)
+
+	query := `
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		FROM blnk.transactions
+		WHERE reference = $1
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs("ref_root").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "precise_amount", "currency",
+			"destination", "description", "status", "created_at", "meta_data", "parent_transaction",
+		}).AddRow(
+			"txn_root", "bln_source", "ref_root", 1000.0, "100000", "USD",
+			"bln_dest", "root transaction", "APPLIED", time.Now(), metaDataJSON, nil,
+		))
+
+	txn, err := ds.GetTransactionByRef(ctx, "ref_root")
+	assert.NoError(t, err)
+	assert.Equal(t, "txn_root", txn.TransactionID)
+	assert.Equal(t, "", txn.ParentTransaction)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestGetTransactionByRef_NotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -964,6 +1036,48 @@ func TestGetAllTransactions_Success(t *testing.T) {
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
+}
+
+// TestGetAllTransactions_NullParentDoesNotFailScan is the regression for
+// GET /transactions returning 500 when any listed row has parent_transaction
+// IS NULL. Root transactions often have no parent; the unfiltered list must
+// treat that as "" instead of failing the whole page.
+func TestGetAllTransactions_NullParentDoesNotFailScan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	ctx := context.Background()
+
+	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
+	assert.NoError(t, err)
+
+	query := `
+		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, parent_transaction
+		FROM blnk.transactions
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).
+		WithArgs(20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
+			"destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction",
+		}).AddRow(
+			"txn_root", "bln_src", "ref_root", 1000.0, "1000", 100.0, "USD",
+			"bln_dst", "root txn", "APPLIED", "hash_root", time.Now(), nil, metaDataJSON, nil,
+		))
+
+	transactions, err := ds.GetAllTransactions(ctx, 20, 0)
+	assert.NoError(t, err)
+	if assert.Len(t, transactions, 1) {
+		assert.Equal(t, "txn_root", transactions[0].TransactionID)
+		assert.Equal(t, "", transactions[0].ParentTransaction)
+	}
+
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestGetAllTransactions_Empty(t *testing.T) {
