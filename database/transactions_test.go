@@ -944,7 +944,7 @@ func TestGetAllTransactions_Success(t *testing.T) {
 			"destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction",
 		}).
 			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "1000", 100.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), effectiveDate, metaDataJSON, "txn_parent_1").
-			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "2000", 100.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), nil, metaDataJSON, ""))
+			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "2000", 100.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), nil, metaDataJSON, nil))
 
 	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
 	assert.NoError(t, err)
@@ -954,6 +954,7 @@ func TestGetAllTransactions_Success(t *testing.T) {
 	// Regression guard for the reindex field-loss bug (blnk#326): the query
 	// previously omitted these, so reindexed docs lost them in Typesense.
 	assert.Equal(t, "txn_parent_1", transactions[0].ParentTransaction)
+	assert.Equal(t, "", transactions[1].ParentTransaction)
 	assert.Equal(t, "1000", transactions[0].PreciseAmount.String())
 	assert.Equal(t, 100.0, transactions[0].Precision)
 	assert.Equal(t, "2000", transactions[1].PreciseAmount.String())

@@ -294,6 +294,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 		var metaDataJSON []byte
 		var preciseAmountStr string
 		var effectiveDate sql.NullTime
+		var parentTransaction sql.NullString
 
 		// Scan each row into the Transaction struct
 		err = rows.Scan(
@@ -311,7 +312,7 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 			&transaction.CreatedAt,
 			&effectiveDate,
 			&metaDataJSON,
-			&transaction.ParentTransaction,
+			&parentTransaction,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -322,6 +323,9 @@ func (d Datasource) GetAllTransactions(ctx context.Context, limit, offset int) (
 		// where GetEffectiveDate falls back to created_at).
 		if effectiveDate.Valid {
 			transaction.EffectiveDate = &effectiveDate.Time
+		}
+		if parentTransaction.Valid {
+			transaction.ParentTransaction = parentTransaction.String
 		}
 
 		// Parse the precise amount (NUMERIC) into a big.Int, mirroring the other
