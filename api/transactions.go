@@ -86,6 +86,34 @@ func transformTransaction(txn *model.Transaction) *model.Transaction {
 	return &result
 }
 
+// respondPreview writes a dry-run projection.
+//
+// The status is 200 rather than 201 because nothing was created. A projected
+// rejection is still a 200: the request succeeded and the answer is "no".
+//
+// The rejection carries the same error code a real post would have returned,
+// resolved through the classifier every other endpoint uses, so existing
+// client-side handling for e.g. TXN_INSUFFICIENT_FUNDS works against a preview
+// without change.
+func (a Api) respondPreview(c *gin.Context, preview *model.TransactionPreview, err error) {
+	if err != nil {
+		respondError(c, err,
+			withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound),
+			withDefault(apierror.ErrTxnValidation))
+		return
+	}
+
+	if preview.Rejection != nil && preview.Rejection.Code == "" {
+		code, ok := classifyMessage(preview.Rejection.Message)
+		if !ok {
+			code = apierror.ErrTxnValidation
+		}
+		preview.Rejection.Code = string(code)
+	}
+
+	c.JSON(http.StatusOK, preview)
+}
+
 func handleRecordTransactionValidationError(c *gin.Context, err error) {
 	var validationErrors validation.Errors
 	if errors.As(err, &validationErrors) {
@@ -130,6 +158,14 @@ func (a Api) QueueTransaction(c *gin.Context) {
 		return
 	}
 
+	// A dry run answers what the transaction would do and stops there, so it
+	// never reaches the queue.
+	if newTransaction.DryRun {
+		preview, err := a.blnk.PreviewTransaction(c.Request.Context(), newTransaction.ToTransaction())
+		a.respondPreview(c, preview, err)
+		return
+	}
+
 	// Queue the transaction using the Blnk service
 	resp, err := a.blnk.QueueTransaction(c.Request.Context(), newTransaction.ToTransaction())
 	if err != nil {
@@ -151,6 +187,11 @@ type refundTransactionRequest struct {
 	// refunds where the caller needs immediate confirmation. Mirrors the
 	// skip_queue flag on Create Transaction.
 	SkipQueue bool `json:"skip_queue"`
+
+	// DryRun projects the reversal and returns the resulting balances without
+	// creating the refund. The parent transaction is not marked refunded, so a
+	// real refund afterwards still succeeds.
+	DryRun bool `json:"dry_run"`
 }
 
 // RefundTransaction processes a refund for a transaction based on the given ID.
@@ -182,6 +223,12 @@ func (a Api) RefundTransaction(c *gin.Context) {
 	var req refundTransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		return
+	}
+
+	if req.DryRun {
+		preview, err := a.blnk.PreviewRefund(c.Request.Context(), id)
+		a.respondPreview(c, preview, err)
 		return
 	}
 

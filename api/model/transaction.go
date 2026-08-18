@@ -44,6 +44,16 @@ type RecordTransaction struct {
 	Destinations       []model.Distribution   `json:"destinations"`
 	MetaData           map[string]interface{} `json:"meta_data"`
 	EffectiveDate      *time.Time             `json:"effective_date,omitempty"`
+
+	// DryRun projects the transaction's effect on the source and destination
+	// balances and returns the result without applying it. No transaction row
+	// is written, no balance changes, nothing is queued, no webhook fires, and
+	// the reference is not consumed.
+	//
+	// A dry run always responds synchronously with 200 rather than 201, and
+	// takes precedence over skip_queue: a projection is inherently an immediate
+	// answer about what a real post would do.
+	DryRun bool `json:"dry_run"`
 }
 
 // BulkTransactionRequest is the public API request shape for creating a batch
