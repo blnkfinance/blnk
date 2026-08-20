@@ -198,9 +198,22 @@ func (l *Blnk) previewSingleTransaction(ctx context.Context, transaction *model.
 // previewSplitTransaction projects a multi-source or multi-destination
 // transaction, one entry per split.
 //
-// A real split records each leg through its own lock-and-apply cycle, so later
-// legs observe earlier legs' effects. The projection mirrors that by carrying
-// each balance's working copy forward across legs.
+// How the split would really execute decides how it is projected, mirroring
+// the same distinction the bulk endpoint makes:
+//
+//	skip_queue: true   processTxns records each leg synchronously, one after
+//	                    another, and stops at the first one that fails —
+//	                    later legs are never attempted. The projection
+//	                    carries balances forward across legs and stops
+//	                    projecting as soon as one fails, for the same
+//	                    reason: it never really ran either.
+//
+//	skip_queue: false  each leg is persisted and queued for independent
+//	                    async processing with no ordering guarantee, so one
+//	                    leg's outcome doesn't depend on another's. Each leg
+//	                    here is projected on its own, against the balances
+//	                    as they stand, not carrying an earlier leg's effect
+//	                    forward.
 func (l *Blnk) previewSplitTransaction(ctx context.Context, transaction *model.Transaction) (*model.TransactionPreview, error) {
 	ctx, span := tracer.Start(ctx, "PreviewSplitTransaction")
 	defer span.End()
@@ -216,45 +229,76 @@ func (l *Blnk) previewSplitTransaction(ctx context.Context, transaction *model.T
 	preview.PreciseAmount = preciseString(transaction.PreciseAmount)
 	preview.Amount = transaction.Amount
 
-	// Working copies shared across legs, so a balance touched twice accumulates
-	// exactly as it would in a real sequential apply.
-	working := newPreviewBalanceSet(l)
+	cumulative := transaction.SkipQueue
+	if !cumulative {
+		preview.AddNote("skip_queue is false: legs are queued for independent async processing with no ordering guarantee, so each is projected on its own rather than cumulatively")
+	}
+
+	// Shared only in cumulative mode, so a balance touched twice accumulates
+	// exactly as it would in a real sequential apply. Independent mode gives
+	// each leg its own fresh set instead, so one leg's projection can't leak
+	// into another's the way it could for legs that will really run at
+	// different, uncoordinated times.
+	shared := newPreviewBalanceSet(l)
 
 	for _, leg := range legs {
 		normalizePreviewStatus(leg)
 		leg.PreciseAmount = model.ApplyPrecision(leg)
 
-		source, destination, err := working.resolvePair(ctx, leg)
+		set := shared
+		if !cumulative {
+			set = newPreviewBalanceSet(l)
+		}
+
+		source, destination, err := set.resolvePair(ctx, leg)
 		if err != nil {
 			span.RecordError(err)
 			return nil, err
 		}
 
+		failed := false
 		if err := sameBalanceErr(source, destination); err != nil {
 			preview.WouldApply = false
 			if preview.Rejection == nil {
 				preview.Rejection = previewRejection(err)
 			}
+			failed = true
 		} else if applyErr := l.processBalances(ctx, leg, source.balance, destination.balance); applyErr != nil {
 			preview.WouldApply = false
 			if preview.Rejection == nil {
 				preview.Rejection = previewRejection(applyErr)
 			}
+			failed = true
 		}
 
-		role, identifier := model.PreviewRoleDestination, leg.Destination
-		if len(transaction.Sources) > 0 {
-			role, identifier = model.PreviewRoleSource, leg.Source
+		// A failed leg was never actually recorded, so its would-be amount
+		// doesn't belong next to the legs that really would apply.
+		if !failed {
+			role, identifier := model.PreviewRoleDestination, leg.Destination
+			if len(transaction.Sources) > 0 {
+				role, identifier = model.PreviewRoleSource, leg.Source
+			}
+			preview.Legs = append(preview.Legs, model.LegProjection{
+				Identifier:    identifier,
+				Role:          role,
+				PreciseAmount: preciseString(leg.PreciseAmount),
+				Amount:        leg.Amount,
+			})
 		}
-		preview.Legs = append(preview.Legs, model.LegProjection{
-			Identifier:    identifier,
-			Role:          role,
-			PreciseAmount: preciseString(leg.PreciseAmount),
-			Amount:        leg.Amount,
-		})
+
+		if !cumulative {
+			preview.Balances = append(preview.Balances, set.projections()...)
+		} else if failed {
+			// Mirrors processTxns: a real skip_queue: true split stops at
+			// the first failing leg and never attempts the rest.
+			break
+		}
 	}
 
-	preview.Balances = working.projections()
+	if cumulative {
+		preview.Balances = shared.projections()
+	}
+
 	return preview, nil
 }
 
