@@ -230,7 +230,12 @@ func (l *Blnk) previewSplitTransaction(ctx context.Context, transaction *model.T
 			return nil, err
 		}
 
-		if applyErr := l.processBalances(ctx, leg, source.balance, destination.balance); applyErr != nil {
+		if err := sameBalanceErr(source, destination); err != nil {
+			preview.WouldApply = false
+			if preview.Rejection == nil {
+				preview.Rejection = previewRejection(err)
+			}
+		} else if applyErr := l.processBalances(ctx, leg, source.balance, destination.balance); applyErr != nil {
 			preview.WouldApply = false
 			if preview.Rejection == nil {
 				preview.Rejection = previewRejection(applyErr)
@@ -393,8 +398,31 @@ func newPreviewFor(transaction *model.Transaction) *model.TransactionPreview {
 	}
 }
 
+// sameBalanceErr reports the error a real post would fail with when source
+// and destination resolve to the same balance row, or nil if they don't.
+//
+// A real post fetches and updates source and destination as two
+// independent balance reads, each guarded by optimistic locking. When
+// they're the same row, the first update advances its version and the
+// second's WHERE version=<stale> clause matches nothing — a guaranteed
+// conflict every single time, not a rare race. In-memory preview
+// arithmetic has no such check, so without this a self-transfer would
+// always preview as would_apply: true for a transfer that can never
+// actually apply.
+func sameBalanceErr(source, destination *previewBalance) error {
+	if source.balance.BalanceID != destination.balance.BalanceID {
+		return nil
+	}
+	return fmt.Errorf("Optimistic locking failure: balance with ID '%s' may have been updated or deleted by another transaction", source.balance.BalanceID)
+}
+
 // notePreviewCaveats records conditions worth surfacing that are not rejections.
 func (l *Blnk) notePreviewCaveats(ctx context.Context, preview *model.TransactionPreview, transaction *model.Transaction, source, destination *previewBalance) {
+	if err := sameBalanceErr(source, destination); err != nil {
+		preview.WouldApply = false
+		preview.Rejection = previewRejection(err)
+	}
+
 	if !transaction.ScheduledFor.IsZero() {
 		preview.AddNote("scheduled_for is ignored in a dry run; the projection shows the effect as if applied now")
 	}

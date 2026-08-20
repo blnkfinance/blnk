@@ -102,6 +102,12 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 			return nil, err
 		}
 
+		if err := sameBalanceErr(source, destination); err != nil {
+			preview.WouldApply = false
+			legErrors = append(legErrors, err)
+			continue
+		}
+
 		if applyErr := l.processBalances(ctx, settlement, source.balance, destination.balance); applyErr != nil {
 			preview.WouldApply = false
 			legErrors = append(legErrors, applyErr)

@@ -194,6 +194,14 @@ func (l *Blnk) previewBulkItem(ctx context.Context, item *model.Transaction, wor
 			return nil, err
 		}
 
+		if err := sameBalanceErr(source, destination); err != nil {
+			preview.WouldApply = false
+			if preview.Rejection == nil {
+				preview.Rejection = previewRejection(err)
+			}
+			continue
+		}
+
 		if applyErr := l.processBalances(ctx, leg, source.balance, destination.balance); applyErr != nil {
 			preview.WouldApply = false
 			if preview.Rejection == nil {
