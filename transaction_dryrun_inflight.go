@@ -51,10 +51,15 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 		// id, or an infrastructure failure, stays a hard error.
 		switch classifyInflightError(err) {
 		case "ALREADY_VOIDED", "NOT_INFLIGHT":
+			status := StatusApplied
+			if action == InflightActionVoid {
+				status = StatusVoid
+			}
 			return &model.TransactionPreview{
 				DryRun:        true,
 				WouldApply:    false,
 				Operation:     action,
+				Status:        status,
 				Rejection:     previewRejection(err),
 				PreciseAmount: preciseString(nil),
 				Balances:      []model.BalanceProjection{},
@@ -141,6 +146,31 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 	}
 
 	preview.PreciseAmount = preciseString(total)
+
+	// Status and Amount are reported for the same reason the create and bulk
+	// previews report them: they are the headline fields of the projection,
+	// and leaving them at their zero values made an inflight preview look
+	// like it had answered "" and 0 rather than "did not populate these".
+	//
+	// Status is the status the settlement would carry once applied, which is
+	// what the real endpoint returns for the same call — APPLIED for a
+	// commit, VOID for a void — not the COMMIT/VOID action marker used
+	// internally while the settlement is being built.
+	//
+	// Amount is the float rendering of the precise total already reported
+	// above, so the two always describe the same number. Precision is only
+	// non-zero once at least one leg projected successfully; with no such leg
+	// there is no scale to divide by and the amount stays at zero alongside
+	// the zero precise total.
+	if action == InflightActionVoid {
+		preview.Status = StatusVoid
+	} else {
+		preview.Status = StatusApplied
+	}
+	if preview.Precision > 0 {
+		preview.Amount = l.convertPreciseToFloat(total, preview.Precision)
+	}
+
 	preview.Balances = working.projections()
 
 	span.SetAttributes(
