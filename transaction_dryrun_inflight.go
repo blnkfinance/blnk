@@ -79,13 +79,20 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 	working := newPreviewBalanceSet(l)
 	total := big.NewInt(0)
 
+	// Collected across every leg rather than keeping only the first, matching
+	// ProcessTransactionInBatches — the real engine behind a multi-leg
+	// commit/void — which appends every worker's error to allErrors and
+	// reports them together. A real post on a split parent doesn't stop at
+	// leg one's failure and go silent about leg two's; the preview shouldn't
+	// either, or a caller fixing the reported cause could still be surprised
+	// by an unrelated one it never heard about.
+	var legErrors []error
+
 	for _, leg := range legs {
 		settlement, err := l.buildInflightSettlementForPreview(ctx, leg, action, amount)
 		if err != nil {
 			preview.WouldApply = false
-			if preview.Rejection == nil {
-				preview.Rejection = previewRejection(err)
-			}
+			legErrors = append(legErrors, err)
 			continue
 		}
 
@@ -97,9 +104,7 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 
 		if applyErr := l.processBalances(ctx, settlement, source.balance, destination.balance); applyErr != nil {
 			preview.WouldApply = false
-			if preview.Rejection == nil {
-				preview.Rejection = previewRejection(applyErr)
-			}
+			legErrors = append(legErrors, applyErr)
 			continue
 		}
 
@@ -115,6 +120,10 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 				Amount:        settlement.Amount,
 			})
 		}
+	}
+
+	if len(legErrors) > 0 {
+		preview.Rejection = previewRejection(fmt.Errorf("error occurred during processing: %v", legErrors))
 	}
 
 	preview.PreciseAmount = preciseString(total)
