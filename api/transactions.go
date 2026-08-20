@@ -192,14 +192,29 @@ type refundTransactionRequest struct {
 	// creating the refund. The parent transaction is not marked refunded, so a
 	// real refund afterwards still succeeds.
 	DryRun bool `json:"dry_run"`
+
+	// MetaData is merged onto the metadata the reversal inherits from the
+	// original transaction, with these keys winning on conflict. Use it to
+	// classify the reversal — {"type": "refund"} — distinctly from the
+	// movement it reverses.
+	//
+	// Merging rather than replacing keeps the keys the ledger sets on the
+	// original, which downstream processing reads.
+	MetaData map[string]interface{} `json:"meta_data,omitempty"`
+
+	// Description replaces the reversal's description, which otherwise copies
+	// the original transaction's.
+	Description string `json:"description,omitempty"`
 }
 
 // RefundTransaction processes a refund for a transaction based on the given ID.
 // It retrieves the transaction to be refunded and processes it in batches. If any errors
 // occur during retrieval or processing, it responds with an appropriate error message.
 //
-// An optional JSON body {"skip_queue": true} processes the refund
+// The JSON body is optional. {"skip_queue": true} processes the refund
 // synchronously; an absent or empty body queues it (the default).
+// "description" and "meta_data" set those fields on the reversal, which
+// otherwise inherits the original transaction's.
 //
 // Parameters:
 // - c: The Gin context containing the request and response.
@@ -232,7 +247,13 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		return
 	}
 
-	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorkerWithOptions(req.SkipQueue))
+	refundOptions := blnk.RefundOptions{
+		SkipQueue:   req.SkipQueue,
+		Description: req.Description,
+		MetaData:    req.MetaData,
+	}
+
+	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorkerWithRefundOptions(refundOptions))
 	if err != nil {
 		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
 		return
