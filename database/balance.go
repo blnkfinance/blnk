@@ -304,7 +304,7 @@ func (d Datasource) GetBalanceByID(id string, include []string, withQueued bool)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// If no balance is found
-			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
+			return nil, apierror.NewAPIError(apierror.ErrBalNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
 		} else {
 			// Handle other errors
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan balance data", err)
@@ -386,7 +386,7 @@ func (d Datasource) GetBalanceByIDLite(id string) (*model.Balance, error) {
 	if err != nil {
 		logrus.WithError(err).Error("balance lite lookup failed")
 		if err == sql.ErrNoRows {
-			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
+			return nil, apierror.NewAPIError(apierror.ErrBalNotFound, fmt.Sprintf("Balance with ID '%s' not found", id), err)
 		} else {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan balance data", err)
 		}
@@ -1097,7 +1097,7 @@ func (d Datasource) UpdateBalance(balance *model.Balance) error {
 
 	// If no rows were updated, return a not-found error
 	if rowsAffected == 0 {
-		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", balance.BalanceID), nil)
+		return apierror.NewAPIError(apierror.ErrBalNotFound, fmt.Sprintf("Balance with ID '%s' not found", balance.BalanceID), nil)
 	}
 
 	// Return nil indicating a successful update
@@ -1182,7 +1182,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	if err != nil {
 		// Handle the case where the monitor with the specified ID is not found
 		if err == sql.ErrNoRows {
-			return nil, apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Monitor with ID '%s' not found", id), err)
+			return nil, apierror.NewAPIError(apierror.ErrBalMonitorNotFound, fmt.Sprintf("Monitor with ID '%s' not found", id), err)
 		}
 		// Return an internal server error for other query issues
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitor", err)
@@ -1331,7 +1331,7 @@ func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
 
 	// If no rows were affected, return a not found error indicating the monitor does not exist
 	if rowsAffected == 0 {
-		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Monitor with ID '%s' not found", monitor.MonitorID), nil)
+		return apierror.NewAPIError(apierror.ErrBalMonitorNotFound, fmt.Sprintf("Monitor with ID '%s' not found", monitor.MonitorID), nil)
 	}
 
 	// Return nil if the update was successful
@@ -1365,7 +1365,7 @@ func (d Datasource) DeleteMonitor(id string) error {
 
 	// If no rows were affected, return a not found error indicating the monitor does not exist
 	if rowsAffected == 0 {
-		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Monitor with ID '%s' not found", id), nil)
+		return apierror.NewAPIError(apierror.ErrBalMonitorNotFound, fmt.Sprintf("Monitor with ID '%s' not found", id), nil)
 	}
 
 	// Return nil if the deletion was successful
@@ -1422,7 +1422,7 @@ func (d Datasource) getBalanceInfo(ctx context.Context, tx *sql.Tx, balanceID st
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", time.Time{}, apierror.NewAPIError(
-				apierror.ErrNotFound,
+				apierror.ErrBalNotFound,
 				fmt.Sprintf("Balance '%s' not found", balanceID),
 				err,
 			)
@@ -1707,7 +1707,7 @@ func (d Datasource) UpdateBalanceIdentity(balanceID string, identityID string) e
 
 	if rowsAffected == 0 {
 		// No rows were updated – the balance record does not exist
-		return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Balance with ID '%s' not found", balanceID), nil)
+		return apierror.NewAPIError(apierror.ErrBalNotFound, fmt.Sprintf("Balance with ID '%s' not found", balanceID), nil)
 	}
 
 	return nil

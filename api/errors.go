@@ -42,6 +42,26 @@ const errorDetailKey = "error_detail"
 // 5xx responses so database/driver details never leak to clients.
 const sanitizedInternalMessage = "internal server error"
 
+// sanitizeBindError rewrites a request-decoding error into a message about
+// the request, rather than about Blnk's internals.
+//
+// encoding/json and math/big report decode failures in terms of Go types.
+// A precise_amount sent as a JSON string, for example, surfaces verbatim as:
+//
+//	math/big: cannot unmarshal "\"5000\"" into a *big.Int
+//
+// The Go type name means nothing to an API client and exposes an
+// implementation detail, so the known shape is rewritten to name the field
+// and the expected format instead. Anything unrecognised is returned
+// unchanged — this narrows a leak, it does not hide decode failures.
+func sanitizeBindError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "big.Int") || strings.HasPrefix(msg, "math/big:") {
+		return "invalid numeric value: precise amount fields must be sent as a JSON number in the smallest unit (for example 5000, not \"5000\")"
+	}
+	return msg
+}
+
 type respondOptions struct {
 	defaultCode     apierror.ErrorCode
 	fallbackMessage string

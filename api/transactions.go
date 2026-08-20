@@ -18,6 +18,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -237,7 +238,7 @@ func (a Api) RefundTransaction(c *gin.Context) {
 	// of Content-Length / chunked transfer encoding.
 	var req refundTransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 
@@ -259,7 +260,12 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		return
 	}
 	if len(transaction) == 0 {
-		respondCode(c, apierror.ErrTxnNotFound, "no transaction to refund", nil)
+		// GetRefundableTransactionsByParentID is a single query that filters on
+		// both existence and refundable status, so an empty result cannot
+		// distinguish "no such transaction" from "exists but is not
+		// refundable". Say both rather than implying only the first.
+		respondCode(c, apierror.ErrTxnNotFound,
+			fmt.Sprintf("no refundable transaction found for '%s': it does not exist, or it is not in a refundable status (only APPLIED or VOID can be refunded)", id), nil)
 		return
 	}
 	resp := transformTransaction(transaction[0])
@@ -461,7 +467,7 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	}
 	err := c.BindJSON(&req)
 	if err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 
@@ -551,7 +557,7 @@ type queuedInflightResponse struct {
 func (a Api) CreateBulkTransactions(c *gin.Context) {
 	var req model2.BulkTransactionRequest
 	if err := c.BindJSON(&req); err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, "Invalid request body: "+err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, "Invalid request body: "+sanitizeBindError(err), nil)
 		return
 	}
 
@@ -705,7 +711,7 @@ func toAPIResults(outcomes []blnk.BulkInflightOutcome) (model2.BulkInflightRespo
 func (a Api) BulkVoidInflight(c *gin.Context) {
 	var req model2.BulkInflightVoidRequest
 	if err := c.BindJSON(&req); err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 	if len(req.TransactionIDs) == 0 {
@@ -770,7 +776,7 @@ func (a Api) queueBulkInflight(ctx context.Context, action string, items []blnk.
 func (a Api) BulkCommitInflight(c *gin.Context) {
 	var req model2.BulkInflightCommitRequest
 	if err := c.BindJSON(&req); err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 	if len(req.Transactions) == 0 {
