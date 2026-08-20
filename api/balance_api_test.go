@@ -117,6 +117,102 @@ func TestCreateBalance(t *testing.T) {
 	}
 }
 
+func TestCreateBalance_WithIndicator(t *testing.T) {
+	router, b, err := setupRouter()
+	if err != nil {
+		t.Fatalf("Failed to setup router: %v", err)
+	}
+
+	// "general_ledger_id" is a pre-seeded ledger
+	// it is not created here since ledger IDs are always server-generated.
+	otherLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})
+	if err != nil {
+		t.Fatalf("Failed to create ledger: %v", err)
+	}
+
+	currency := gofakeit.Currency().Short
+	validIndicator := "@" + gofakeit.UUID()
+
+	tests := []struct {
+		name         string
+		payload      model2.CreateBalance
+		expectedCode int
+	}{
+		{
+			name: "Valid GL indicator",
+			payload: model2.CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  currency,
+				Indicator: validIndicator,
+			},
+			expectedCode: http.StatusCreated,
+		},
+		{
+			name: "Missing @ prefix",
+			payload: model2.CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  gofakeit.Currency().Short,
+				Indicator: "no-at-prefix",
+			},
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			name: "Indicator with spaces",
+			payload: model2.CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  gofakeit.Currency().Short,
+				Indicator: "@cash flow",
+			},
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			name: "Non-GL ledger with indicator",
+			payload: model2.CreateBalance{
+				LedgerId:  otherLedger.LedgerID,
+				Currency:  gofakeit.Currency().Short,
+				Indicator: "@cash",
+			},
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			name: "Duplicate indicator and currency",
+			payload: model2.CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  currency,
+				Indicator: validIndicator,
+			},
+			expectedCode: http.StatusConflict,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payloadBytes, _ := request.ToJsonReq(&tt.payload)
+			var response model.Balance
+			resp, err := SetUpTestRequest(TestRequest{
+				Payload:  payloadBytes,
+				Response: &response,
+				Method:   "POST",
+				Route:    "/balances",
+				Auth:     "",
+				Router:   router,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedCode, resp.Code)
+			if resp.Code == http.StatusCreated {
+				assert.NotEmpty(t, response.BalanceID, "a 201 response must not carry an empty balance")
+			}
+
+			if tt.expectedCode == http.StatusCreated {
+				require.NotEmpty(t, response.BalanceID)
+				balanceFromDB, err := b.GetBalanceByID(context.Background(), response.BalanceID, nil, false)
+				require.NoError(t, err)
+				assert.Equal(t, tt.payload.Indicator, balanceFromDB.Indicator)
+			}
+		})
+	}
+}
+
 func TestGetBalance(t *testing.T) {
 	router, b, _ := setupRouter()
 	newLedger, err := b.CreateLedger(model.Ledger{Name: gofakeit.Name()})

@@ -6,6 +6,7 @@ import (
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSourceOrSourcesValidation(t *testing.T) {
@@ -492,6 +493,91 @@ func TestValidateCreateBalanceMonitor(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateCreateBalance_Indicator(t *testing.T) {
+	tests := []struct {
+		name    string
+		balance CreateBalance
+		wantErr bool
+	}{
+		{
+			name: "Valid GL indicator",
+			balance: CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  "USD",
+				Indicator: "@cash",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Indicator omitted",
+			balance: CreateBalance{
+				LedgerId: "general_ledger_id",
+				Currency: "USD",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Missing @ prefix",
+			balance: CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  "USD",
+				Indicator: "cash",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Indicator with internal spaces",
+			balance: CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  "USD",
+				Indicator: "@cash flow",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Indicator with leading/trailing spaces only",
+			balance: CreateBalance{
+				LedgerId:  "general_ledger_id",
+				Currency:  "USD",
+				Indicator: "  @cash  ",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Non-GL ledger with indicator set",
+			balance: CreateBalance{
+				LedgerId:  "some_other_ledger",
+				Currency:  "USD",
+				Indicator: "@cash",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.balance.ValidateCreateBalance()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCreateBalance_ToBalance_Indicator(t *testing.T) {
+	cb := CreateBalance{
+		LedgerId:  "general_ledger_id",
+		Currency:  "USD",
+		Indicator: "@cash",
+	}
+	require.NoError(t, cb.ValidateCreateBalance())
+
+	balance := cb.ToBalance()
+	assert.Equal(t, "@cash", balance.Indicator)
 }
 
 func TestValidateMonitorCondition(t *testing.T) {

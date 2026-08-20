@@ -83,6 +83,17 @@ func IsInflightTransaction(transaction *model.Transaction) bool {
 			transaction.MetaData["inflight"] == true)
 }
 
+func clearTerminalInflightMetadata(transaction *model.Transaction) {
+	if transaction == nil || transaction.Status == StatusInflight {
+		return
+	}
+
+	transaction.Inflight = false
+	if transaction.MetaData != nil {
+		delete(transaction.MetaData, "inflight")
+	}
+}
+
 // CommitWorker processes commit transactions from the jobs channel and sends the results to the results channel.
 // It starts a tracing span, processes each transaction, and records relevant events and errors.
 //
@@ -394,6 +405,7 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 	defer span.End()
 
 	transaction.Status = StatusCommit
+	transaction.Inflight = false
 	transaction.ParentTransaction = transaction.TransactionID
 	transaction.CreatedAt = time.Now()
 	if transaction.EffectiveDate == nil {
@@ -422,6 +434,7 @@ func (l *Blnk) finalizeCommitment(ctx context.Context, transaction *model.Transa
 		return transaction, nil
 	}
 
+	clearTerminalInflightMetadata(transaction)
 	transaction.Status = StatusApplied
 
 	span.AddEvent("Commitment finalized", trace.WithAttributes(attribute.String("transaction.id", transaction.TransactionID)))
@@ -593,6 +606,7 @@ func (l *Blnk) finalizeVoidTransaction(ctx context.Context, transaction *model.T
 	defer span.End()
 
 	transaction.Status = StatusVoid
+	transaction.Inflight = false
 	transaction.PreciseAmount = amountLeft
 	transaction.CreatedAt = time.Now()
 	if transaction.EffectiveDate == nil {

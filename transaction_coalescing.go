@@ -25,7 +25,6 @@ import (
 	"github.com/blnkfinance/blnk/internal/hotpairs"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/internal/metrics"
-	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
@@ -504,15 +503,11 @@ func (l *Blnk) validateQueuedBatchTransactionReference(ctx context.Context, tran
 	}
 
 	if _, ok := batchReferences[transaction.Reference]; ok {
-		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
-		notification.NotifyError(err)
-		return err
+		return fmt.Errorf("reference %s has already been used", transaction.Reference)
 	}
 
 	if _, ok := existingReferences[transaction.Reference]; ok {
-		err := fmt.Errorf("reference %s has already been used", transaction.Reference)
-		notification.NotifyError(err)
-		return err
+		return fmt.Errorf("reference %s has already been used", transaction.Reference)
 	}
 
 	if len(prefetchedReferences) == 0 {

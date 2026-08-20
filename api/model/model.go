@@ -18,6 +18,7 @@ package model
 import (
 	"errors"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -82,17 +83,42 @@ func validateDateFormat(format, value string) error {
 	return nil
 }
 
+// generalLedgerID is the well-known ledger ID for General Ledger (@) balances.
+// Only balances under this ledger may be pre-provisioned with an explicit indicator.
+const generalLedgerID = "general_ledger_id"
+
+// indicatorPattern validates optional balance indicators: must start with "@"
+// and contain no whitespace
+var indicatorPattern = regexp.MustCompile(`^@\S+$`)
+
 func (b *CreateBalance) ValidateCreateBalance() error {
 	// Normalize allocation strategy: trim and uppercase
 	if b.AllocationStrategy != "" {
 		b.AllocationStrategy = strings.TrimSpace(strings.ToUpper(b.AllocationStrategy))
 	}
 
+	// Trim surrounding whitespace only; internal whitespace remains invalid.
+	if b.Indicator != "" {
+		b.Indicator = strings.TrimSpace(b.Indicator)
+	}
+
+	isGeneralLedger := b.LedgerId == generalLedgerID
+
 	return validation.ValidateStruct(b,
 		validation.Field(&b.LedgerId, validation.Required),
 		validation.Field(&b.Currency, validation.Required),
 		validation.Field(&b.IdentityId, validation.When(b.TrackFundLineage, validation.Required.Error("identity_id is required when track_fund_lineage is enabled"))),
 		validation.Field(&b.AllocationStrategy, validation.When(b.AllocationStrategy != "", validation.In("FIFO", "LIFO", "PROPORTIONAL").Error("allocation_strategy must be one of: FIFO, LIFO, PROPORTIONAL"))),
+		validation.Field(&b.Indicator,
+			validation.When(b.Indicator != "" && !isGeneralLedger,
+				validation.By(func(value interface{}) error {
+					return errors.New("indicator is only allowed for General Ledger balances (ledger_id = general_ledger_id)")
+				}),
+			),
+			validation.When(b.Indicator != "" && isGeneralLedger,
+				validation.Match(indicatorPattern).Error("indicator must start with '@' and contain no whitespace (e.g. '@cash')"),
+			),
+		),
 	)
 }
 
@@ -215,7 +241,7 @@ func (b *CreateBalance) ToBalance() model.Balance {
 	if allocationStrategy == "" {
 		allocationStrategy = "FIFO"
 	}
-	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, TrackFundLineage: b.TrackFundLineage, AllocationStrategy: allocationStrategy}
+	return model.Balance{LedgerID: b.LedgerId, IdentityID: b.IdentityId, Currency: b.Currency, MetaData: b.MetaData, TrackFundLineage: b.TrackFundLineage, AllocationStrategy: allocationStrategy, Indicator: b.Indicator}
 }
 
 func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {

@@ -100,7 +100,7 @@ func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.
 	// Same builder the real refund uses: source and destination swapped,
 	// overdraft allowed, status reset. skipQueue is irrelevant here because the
 	// projection never reaches the queue.
-	refund := prepareRefundTransaction(originalTxn, true)
+	refund := prepareRefundTransaction(originalTxn, RefundOptions{SkipQueue: true})
 
 	preview, err := l.PreviewTransaction(ctx, refund)
 	if err != nil {

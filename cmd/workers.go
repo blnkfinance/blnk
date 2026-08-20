@@ -37,7 +37,6 @@ import (
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/internal/hotpairs"
 	"github.com/blnkfinance/blnk/internal/metrics"
-	"github.com/blnkfinance/blnk/internal/notification"
 	redis_db "github.com/blnkfinance/blnk/internal/redis-db"
 	"github.com/blnkfinance/blnk/internal/search"
 	trace "github.com/blnkfinance/blnk/internal/traces"
@@ -88,7 +87,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 	if err != nil {
 		// Handle reference already used error
 		if blnk.IsDuplicateReferenceError(err) {
-			notification.NotifyError(err)
+			span.RecordError(err)
 			return nil
 		}
 

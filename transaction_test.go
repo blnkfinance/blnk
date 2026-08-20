@@ -167,14 +167,14 @@ func TestRecordTransaction(t *testing.T) {
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
 	// Set up source balance response
-	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "NGN", "", "ledger-id-source", int64(10000), int64(10000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(source, "NGN", "", "ledger-id-source", int64(10000), int64(10000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
 	// Set up destination balance response
-	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
-	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
+	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id, meta_data FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
 
 	// Expect balance queries with the source/destination IDs (order can vary)
@@ -306,13 +306,13 @@ func TestRecordTransaction_AtomicRollback_InsertFails(t *testing.T) {
         SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
-	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
-	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
-	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
+	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id, meta_data FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
 
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
@@ -408,13 +408,13 @@ func TestRecordTransaction_AtomicRollback_SecondBalanceUpdateFails(t *testing.T)
         SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
-	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
-	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
-	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
+	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id, meta_data FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
 
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
@@ -502,13 +502,13 @@ func TestRecordTransaction_AtomicRollback_FirstBalanceUpdateFails(t *testing.T) 
         SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)
     `)).WithArgs(txn.Reference).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
-	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	sourceBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(source, "", "NGN", "ledger-id-source", int64(100000), int64(100000), 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
-	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id"}).
-		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "")
+	destinationBalanceRows := sqlmock.NewRows([]string{"balance_id", "indicator", "currency", "ledger_id", "balance", "credit_balance", "debit_balance", "inflight_balance", "inflight_credit_balance", "inflight_debit_balance", "created_at", "version", "track_fund_lineage", "allocation_strategy", "identity_id", "meta_data"}).
+		AddRow(destination, "", "NGN", "ledger-id-destination", 0, 0, 0, 0, 0, 0, time.Now(), 0, false, "FIFO", "", nil)
 
-	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id FROM blnk.balances WHERE balance_id = \$1`
+	balanceQuery := `SELECT balance_id, indicator, currency, ledger_id, balance, credit_balance, debit_balance, inflight_balance, inflight_credit_balance, inflight_debit_balance, created_at, version, track_fund_lineage, COALESCE\(allocation_strategy, 'FIFO'\) as allocation_strategy, COALESCE\(identity_id, ''\) as identity_id, meta_data FROM blnk.balances WHERE balance_id = \$1`
 	balanceQueryPattern := regexp.MustCompile(`\s+`).ReplaceAllString(balanceQuery, `\s*`)
 
 	mock.ExpectQuery(balanceQueryPattern).WithArgs(source).WillReturnRows(sourceBalanceRows)
@@ -1129,6 +1129,11 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommit(t *testing.T) {
 	require.NoError(t, err, "Failed to partially commit transaction")
 	require.Equal(t, StatusApplied, partialCommitTxn.Status, "Partial commit transaction should have APPLIED status")
 	require.Equal(t, partialAmount, partialCommitTxn.Amount, "Partial commit amount should match specified amount")
+	require.False(t, partialCommitTxn.Inflight)
+	require.NotContains(t, partialCommitTxn.MetaData, "inflight")
+	persistedPartialCommit, err := ds.GetTransactionByRef(ctx, partialCommitTxn.Reference)
+	require.NoError(t, err)
+	require.NotContains(t, persistedPartialCommit.MetaData, "inflight")
 
 	// Verify balances were updated after partial commit
 	updatedSourceAfterPartialCommit, err := ds.GetBalanceByIDLite(source.BalanceID)
@@ -1359,6 +1364,11 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommitThenVoid(t *testin
 	voidTxn, err := blnk.VoidInflightTransaction(ctx, inflightEntry.TransactionID)
 	require.NoError(t, err, "Failed to void remaining transaction amount")
 	require.Equal(t, StatusVoid, voidTxn.Status, "Void transaction should have VOID status")
+	require.False(t, voidTxn.Inflight)
+	require.NotContains(t, voidTxn.MetaData, "inflight")
+	persistedVoid, err := ds.GetTransactionByRef(ctx, voidTxn.Reference)
+	require.NoError(t, err)
+	require.NotContains(t, persistedVoid.MetaData, "inflight")
 
 	// Verify balances after void
 	updatedSourceAfterVoid, err := ds.GetBalanceByIDLite(source.BalanceID)

@@ -23,6 +23,7 @@ type CreateBalance struct {
 	MetaData           map[string]interface{} `json:"meta_data"`
 	TrackFundLineage   bool                   `json:"track_fund_lineage"`
 	AllocationStrategy string                 `json:"allocation_strategy"`
+	Indicator          string                 `json:"indicator,omitempty"`
 }
 
 type CreateBalanceMonitor struct {
