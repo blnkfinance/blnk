@@ -465,14 +465,10 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		return
 	}
 
-	// Projected before the precision lookup below, which caches into package
-	// state, and before any queueing.
-	if req.DryRun {
-		preview, err := a.blnk.PreviewInflightAction(c.Request.Context(), id, status, req.PreciseAmount)
-		a.respondPreview(c, preview, err)
-		return
-	}
-
+	// Resolved before the dry-run branch too: a plain `amount` is the normal
+	// way callers request a partial commit, and skipping this resolution for
+	// dry runs previously meant that field was silently ignored there,
+	// letting an over-limit amount preview as would_apply: true.
 	cnf, err := config.Fetch()
 	if err != nil {
 		respondError(c, err)
@@ -492,6 +488,12 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 			return
 		}
 		amount = req.PreciseAmount
+	}
+
+	if req.DryRun {
+		preview, err := a.blnk.PreviewInflightAction(c.Request.Context(), id, status, amount)
+		a.respondPreview(c, preview, err)
+		return
 	}
 
 	// Default: route the action through the inflight-commit queue. The response
