@@ -457,6 +457,14 @@ func sameBalanceErr(source, destination *previewBalance) error {
 	if source.balance.BalanceID != destination.balance.BalanceID {
 		return nil
 	}
+	// ST1005 is suppressed rather than satisfied: this string is not written
+	// for this call site, it reproduces database.updateBalance's message
+	// verbatim so a projected rejection reads identically to the real
+	// failure. That message reaches the client through
+	// apierror.NewAPIError, whose message field the linter does not inspect,
+	// so lower-casing it here would make the preview and the real response
+	// disagree on the one field this projection exists to predict.
+	//nolint:staticcheck // ST1005: mirrors the real path's message verbatim
 	return fmt.Errorf("Optimistic locking failure: balance with ID '%s' may have been updated or deleted by another transaction", source.balance.BalanceID)
 }
 
