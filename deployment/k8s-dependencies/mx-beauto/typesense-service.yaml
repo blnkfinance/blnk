@@ -1,0 +1,16 @@
+# Adapted from infrastructure/k8s-manifests/typesense-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: typesense
+  name: typesense
+  namespace: beauto
+spec:
+  type: ClusterIP
+  ports:
+    - name: "8108"
+      port: 8108
+      targetPort: 8108
+  selector:
+    app: typesense

@@ -1,0 +1,67 @@
+# Adapted from infrastructure/k8s-manifests/typesense-deployment.yaml.
+# The shared Tala Helm chart has no first-class support for stateful sidecar
+# dependencies, so Typesense is applied directly with kubectl - see
+# deployment/README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: typesense
+  name: typesense
+  namespace: beauto
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: typesense
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: typesense
+    spec:
+      securityContext:
+        fsGroup: 10001
+        runAsUser: 10001
+        runAsNonRoot: true
+      containers:
+        - name: typesense
+          image: tala-tala-dockerhub.jfrog.io/typesense/typesense:29.0
+          args:
+            - "--data-dir"
+            - "/data"
+            - "--api-key=$(BLNK_TYPESENSE_KEY)"
+            - "--listen-port"
+            - "8108"
+          env:
+            - name: TYPESENSE_MEMORY_USED_MAX_PERCENTAGE
+              value: "85"
+            - name: BLNK_TYPESENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: blnk-typesense-secret
+                  key: api_key
+          ports:
+            - containerPort: 8108
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8108
+            failureThreshold: 5
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - mountPath: /data
+              name: typesense-data
+      restartPolicy: Always
+      volumes:
+        - name: typesense-data
+          persistentVolumeClaim:
+            claimName: typesense-data

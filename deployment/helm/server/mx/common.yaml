@@ -1,0 +1,27 @@
+# MX-wide configuration for the blnk server, applied across all MX
+# environments (dev, qa, stage, beauto).
+#
+# TODO: ${_env}-rds-postgres... and ...-blnk-redis... are placeholders
+# following the same ${_env}/${_market_hub} substitution convention as
+# Lending_Products_Service. Replace with the real RDS/ElastiCache endpoints
+# once they're provisioned - see deployment/README.md.
+
+ingress:
+  hosts:
+    - blnk.local
+
+serviceAccount:
+  enabled: true
+  create: true
+
+env:
+  APP_ENV: ${_env}
+  COUNTRY_CODE: ${_country}
+
+  # Postgres (AWS RDS - managed outside this cluster)
+  BLNK_DATA_SOURCE_DNS: "postgres://$(DB_USER):$(DB_PASSWORD)@${_env}-rds-postgres.data.${_market_hub}.atlas-antelope.com:5432/blnk?sslmode=require"
+
+  # Redis (AWS ElastiCache - managed outside this cluster). If AUTH is
+  # enabled on the cluster, prefix with "$(REDIS_PASSWORD)@" and add a
+  # matching secretEnv entry.
+  BLNK_REDIS_DNS: "${_market_hub}-${_env}-blnk-redis.${_env}.${_market_hub}.atlas-antelope.com:6379"

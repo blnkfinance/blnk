@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins-build: build-blnk
+    some-label: "build-blnk-service"
+spec:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              jenkins-build: build-blnk
+  imagePullSecrets:
+    - name: jfrog-secret
+  containers:
+    - name: tools
+      image: jenkins_runner
+      command:
+        - cat
+      tty: true
+      volumeMounts:
+        - name: shared
+          mountPath: /tmp/ecr-config
+        - name: volume-0
+          mountPath: /tmp/buildkit-cache
+          subPath: buildkit-cache
+    - name: deploy
+      image: kubectl_helm_runner
+      command:
+        - cat
+      tty: true
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: shared
+          mountPath: /tmp/ecr-config
+    - name: deploy-mx
+      image: kubectl_helm_runner
+      command:
+        - cat
+      tty: true
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: shared
+          mountPath: /tmp/ecr-config
+    # Test dependencies for `go test ./...` (matches TEST_DATABASE_URL,
+    # BLNK_REDIS_DNS, BLNK_TYPESENSE_DNS, BLNK_TEST_PG_DUMP used across the
+    # test suite)
+    - name: postgres
+      image: tala-tala-dockerhub.jfrog.io/postgres:16-alpine
+      securityContext:
+        privileged: true
+      env:
+        - name: POSTGRES_USER
+          value: "blnk"
+        - name: POSTGRES_PASSWORD
+          value: "blnk"
+        - name: POSTGRES_DB
+          value: "blnk_test"
+      volumeMounts:
+        - name: shared
+          mountPath: /tmp/ecr-config
+    - name: redis
+      image: tala-tala-dockerhub.jfrog.io/redis:7.2.4
+      securityContext:
+        privileged: true
+    - name: typesense
+      image: tala-tala-dockerhub.jfrog.io/typesense/typesense:29.0
+      args:
+        - "--data-dir"
+        - "/tmp/typesense-data"
+        - "--api-key=blnk-api-key"
+        - "--listen-port"
+        - "8108"
+      securityContext:
+        privileged: true
+    - name: cortex
+      image: cortexapp/deployer:0.2
+      command:
+        - cat
+      tty: true
+    - name: golang
+      image: tala-tala-dockerhub.jfrog.io/golang:1.25-alpine
+      command:
+        - cat
+      tty: true
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: shared
+          mountPath: /tmp/ecr-config
+      resources:
+        limits:
+          cpu: "4"
+          memory: "6Gi"
+        requests:
+          cpu: "4"
+          memory: "6Gi"
+    - name: dind
+      image: tala-tala-dockerhub.jfrog.io/docker:26.1.3-dind-rootless
+      env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+      securityContext:
+        privileged: true
+    - name: lacework
+      image: jenkins_runner
+      command:
+        - cat
+      tty: true
+      volumeMounts:
+        - name: shared
+          mountPath: /tmp/ecr-config
+      env:
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+      securityContext:
+        privileged: true
+  volumes:
+    - name: shared
+      emptyDir: {}

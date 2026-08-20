@@ -1,0 +1,149 @@
+# Global baseline configuration for the blnk server (HTTP API + migrations)
+# shared across every country/environment.
+#
+# environment variable available for substitution
+# _ns: namespace, for example - `beauto` for MX BEAUTO, or `dev`/`qa`/`stage`
+# _env: environment, for example - `dev`, `qa`, `beauto`, `stage`, `prod`
+# _country: country code, for example - `mx`
+# _market_hub: regional data hub the country's shared infra lives under
+
+serviceAccount:
+  name: "${_country}-${_env}-blnk-service"
+  create: true
+
+nameOverride: "${_ns}-blnk-service"
+fullnameOverride: "${_ns}-blnk-service"
+
+# blnk has no equivalent to Atlas' internal cert-based service auth, so no
+# EFS cert volume is mounted.
+persistence:
+  enabled: false
+
+# Healthchecks - server exposes /health on its main API port
+livenessProbe:
+  path: /health
+  port: 5001
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 15
+
+readinessProbe:
+  path: /health
+  port: 5001
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 15
+
+# The shared chart's auto-instrumentation only covers Java/Python; blnk is Go,
+# so tracing is wired manually via OTEL_EXPORTER_OTLP_TRACES_ENDPOINT instead.
+opentelemetry:
+  enabled: false
+
+datadogAPM:
+  enabled: false
+application:
+  enabled: false
+instanaAPM:
+  enabled: false
+
+antiAffinity: "soft"
+cliHealthCheck:
+  enabled: false
+
+# Container - server serves app traffic, /health and /metrics all on 5001
+containerPort: 5001
+adminPort: 5001
+
+# Docker specifics
+image:
+  repository: 004384079765.dkr.ecr.us-west-2.amazonaws.com/blnk
+  tag: latest
+  pullPolicy: IfNotPresent
+
+tolerations: []
+
+affinity: {}
+
+# Ingress endpoints - disabled by default; enable once the ALB ingress
+# class/host for MX BEAUTO is decided.
+ingress:
+  enabled: false
+  annotations: {}
+  path: /
+  hosts:
+    - blnk.local
+  tls: []
+
+# Prometheus metrics - reuse the shared chart's scrape integration instead of
+# deploying a redundant per-service Prometheus (see deployment/README.md).
+prometheus:
+  enabled: true
+  path: /metrics
+  interval: 30s
+  portname: app
+
+# HPA API v2
+hpa:
+  enabled: true
+hpav2:
+  enabled: true
+
+scalingMetrics:
+  targetCPUUtilizationPercentage: 90
+
+scalingMetricsMemory:
+  targetMemoryUtilization: 90
+
+scalingBehaviour: false
+
+# Resources requirements
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 256Mi
+
+securityContext:
+  enabled: true
+  allowPrivilegeEscalation: false
+  fsGroup: 10001
+  runAsUser: 10001
+  runAsNonRoot: true
+  readOnlyRootFilesystem: false
+
+service:
+  type: ClusterIP
+  port: 5001
+
+# Environment
+environmentShort: ${_env}
+environmentFull: ${_env}
+
+env:
+  TZ: Etc/UTC
+  BLNK_SERVER_PORT: "5001"
+  BLNK_SERVER_SECURE: "false"
+  BLNK_PROJECT_NAME: "Blnk"
+
+secretEnv:
+  DB_USER:
+    name: blnk-postgres-secret
+    key: username
+  DB_PASSWORD:
+    name: blnk-postgres-secret
+    key: password
+  BLNK_TYPESENSE_KEY:
+    name: blnk-typesense-secret
+    key: api_key
+
+externalSecretsMap:
+  blnk-postgres-secret:
+    country: ${_country}
+    env: ${_env}
+  blnk-redis-secret:
+    country: ${_country}
+    env: ${_env}
+  blnk-typesense-secret:
+    country: ${_country}
+    env: ${_env}

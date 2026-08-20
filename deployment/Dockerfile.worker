@@ -1,0 +1,51 @@
+##################################################################################
+#                                                                                #
+# Blnk Worker image                                                             #
+# Runs the async queue workers ("blnk workers")                                 #
+#                                                                                #
+# To override the ARG defaults: --build-arg <varname>=<value>                   #
+#                                                                                #
+##################################################################################
+
+ARG DOCKER_REPO_URL=tala-tala-dockerhub.jfrog.io
+
+##################################################################################
+#                                                                                #
+#            Stage 1: Build the blnk binary                                     #
+#                                                                                #
+##################################################################################
+
+FROM ${DOCKER_REPO_URL}/golang:1.25-alpine AS build-env
+WORKDIR /go/src/blnk
+
+COPY . .
+
+RUN go build -o /blnk ./cmd/*.go
+
+##################################################################################
+#                                                                                #
+#            Stage 2: Runtime image                                             #
+#                                                                                #
+##################################################################################
+
+ARG DOCKER_REPO_URL=tala-tala-dockerhub.jfrog.io
+FROM ${DOCKER_REPO_URL}/alpine:3.19
+
+RUN apk add --no-cache bash tzdata
+
+COPY --from=build-env /blnk /usr/local/bin/blnk
+RUN chmod +x /usr/local/bin/blnk
+
+# Declare application user variables
+ARG CONTAINER_USER_NAME=blnk
+ARG CONTAINER_USER_ID=10001
+
+# Create application user
+RUN adduser -D -g "" -u $CONTAINER_USER_ID $CONTAINER_USER_NAME
+
+EXPOSE 5004
+
+USER $CONTAINER_USER_NAME
+
+# blnk.json is mounted at runtime from the blnk-config ConfigMap (see helm values)
+CMD ["blnk", "workers", "--config", "/blnk.json"]

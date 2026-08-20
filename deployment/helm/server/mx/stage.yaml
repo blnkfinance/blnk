@@ -1,0 +1,16 @@
+# MX stage-specific configuration for the blnk server.
+# NOTE: Typesense/Jaeger dependency manifests are only wired up for
+# mx-beauto right now - see deployment/README.md before pointing this
+# environment at real traffic.
+
+serviceAccount:
+  enabled: true
+  create: true
+
+externalSecrets:
+  - name: "blnk-postgres-secret"
+    country: "mx"
+    env: "stage"
+  - name: "blnk-redis-secret"
+    country: "mx"
+    env: "stage"

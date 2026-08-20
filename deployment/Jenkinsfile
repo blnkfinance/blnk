@@ -1,0 +1,251 @@
+#!groovy
+@Library('atlas_shared')
+
+def deploy_mx_succeed = false
+
+service_name = "blnk"
+worker_service_name = "blnk-worker"
+// TODO: confirm the actual shared Helm chart version to pin with the platform team.
+helm_chart_version = "0.2.22"
+
+pipeline {
+    agent {
+        kubernetes {
+            label "build-blnk-$BUILD_NUMBER"
+            defaultContainer 'jnlp'
+            yaml node {
+                checkout scm
+                readFile('./deployment/jenkins-build.yaml')
+                    .replaceAll('jenkins_runner', env.JENKINS_SLAVE)
+                    .replaceAll('kubectl_helm_runner', env.KUBECTL_HELM_RUNNER)
+            }
+        }
+    }
+
+    environment {
+        GITHUB_ACCESS_TOKEN = credentials('3ba79c7b-80de-4765-9f6c-959d0c83c492')
+        GITHUB_COMMON_CREDS = credentials('b14ed09f-ca8d-4fa9-853b-8c2e0288d438')
+        JFROG_ARTIFACTORY_CREDENTIALS = credentials('55bdcd8c-e944-41dc-a5cc-9c3aa5616bdc')
+        JFROG_USERNAME = "${JFROG_ARTIFACTORY_CREDENTIALS_USR}"
+        JFROG_PASSWORD = "${JFROG_ARTIFACTORY_CREDENTIALS_PSW}"
+        JFROG_URL = "https://tala.jfrog.io/tala"
+        JFROG_XRAY_URL = "https://tala.jfrog.io/xray"
+        KNOWN_XRAY_VIOLATION_COUNT = 0
+        SERVICE_NAME = "blnk"
+        ARGOCD_CREDENTIALS = credentials('71e4260a-0b8c-4f74-b2d2-25b49677597a')
+        DOCKER_CONFIG = "/tmp/ecr-config"
+        ARTIFACTORY_USER = "${env.JFROG_ARTIFACTORY_CREDENTIALS_USR}"
+        ARTIFACTORY_PASSWORD = "${env.JFROG_ARTIFACTORY_CREDENTIALS_PSW}"
+        JENKINS_CREDENTIALS = credentials('jenkins_user_token')
+        CORTEX_TAG = "blnk-service"
+        CORTEX_API_TOKEN = credentials('CORTEX_API_TOKEN')
+        LW_ACCESS_TOKEN = credentials("LW_ACCESS_TOKEN")
+        LW_ACCOUNT_NAME = "tala"
+        LW_VIOLATION_COUNT = 14
+    }
+
+    stages {
+        stage('Abort old builds') {
+            steps {
+                abort_old_builds()
+            }
+        }
+
+        stage('Checkout SCM') {
+            steps {
+                script {
+                    checkout scm
+                }
+            }
+        }
+
+        stage('ECR Login and Repo Check') {
+            steps {
+                script {
+                    container('tools') {
+                        ecr_login()
+                        ecr_repo_check(service_name)
+                        ecr_repo_check(worker_service_name)
+                    }
+                }
+            }
+        }
+
+        stage('Run unit tests') {
+            when {
+                anyOf {
+                    expression { env.BRANCH_NAME == 'develop' }
+                    expression { env.BRANCH_NAME ==~ /^PR-\d+$/ }
+                }
+            }
+            steps {
+                container('golang') {
+                    checkout scm
+                    sh '''
+                        export TEST_DATABASE_URL="postgres://blnk:blnk@localhost:5432/blnk_test?sslmode=disable"
+                        export BLNK_REDIS_DNS="localhost:6379"
+                        export BLNK_TYPESENSE_DNS="http://localhost:8108"
+                        export BLNK_TYPESENSE_KEY="blnk-api-key"
+                        go test ./...
+                    '''
+                }
+            }
+        }
+
+        stage('Build and push Docker images') {
+            when {
+                anyOf {
+                    expression { env.BRANCH_NAME == 'main' }
+                    expression { env.BRANCH_NAME == 'develop' }
+                    expression { env.BRANCH_NAME ==~ /^PR-\d+$/ }
+                    expression { env.BRANCH_NAME ==~ /^release-.*$/ }
+                }
+            }
+            steps {
+                script {
+                    container('deploy') {
+                        checkout scm
+                        build_push_image(
+                            "004384079765.dkr.ecr.us-west-2.amazonaws.com/${service_name}",
+                            "${BRANCH_NAME}-${GIT_COMMIT.take(10)}",
+                            args = [:],
+                            dockerfilePath = "deployment",
+                            dockerfileName = "Dockerfile"
+                        )
+                        build_push_image(
+                            "004384079765.dkr.ecr.us-west-2.amazonaws.com/${worker_service_name}",
+                            "${BRANCH_NAME}-${GIT_COMMIT.take(10)}",
+                            args = [:],
+                            dockerfilePath = "deployment",
+                            dockerfileName = "Dockerfile.worker"
+                        )
+                    }
+                }
+            }
+        }
+
+        stage('Check Lacework Scan for Docker images') {
+            when {
+                anyOf {
+                    expression { env.BRANCH_NAME ==~ /^PR-\d+$/ }
+                    expression { env.BRANCH_NAME ==~ /^release-.*$/ }
+                }
+            }
+            steps {
+                script {
+                    lacework_container_scanning(service_name)
+                    lacework_container_scanning(worker_service_name)
+                }
+            }
+        }
+
+        stage('Deploy services and run AATs') {
+            failFast true
+            parallel {
+                stage('Deploy server') {
+                    steps {
+                        script {
+                            if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'develop' || env.BRANCH_NAME.startsWith('PR-') || env.BRANCH_NAME ==~ /^release-\d+\.\d+\.\d+$/) {
+                                container('deploy-mx') {
+                                    dir("$WORKSPACE-mx-server") {
+                                        deploy_service("${service_name}", "${helm_chart_version}", "mx", "./deployment/helm/server", true, true)
+                                    }
+                                }
+                                deploy_mx_succeed = true
+                            }
+                        }
+                    }
+                }
+                stage('Deploy worker') {
+                    steps {
+                        script {
+                            if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'develop' || env.BRANCH_NAME.startsWith('PR-') || env.BRANCH_NAME ==~ /^release-\d+\.\d+\.\d+$/) {
+                                container('deploy-mx') {
+                                    dir("$WORKSPACE-mx-worker") {
+                                        deploy_service("${worker_service_name}", "${helm_chart_version}", "mx", "./deployment/helm/worker", true, true)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Apply MX BEAUTO dependency manifests') {
+            // Typesense and Jaeger aren't managed by the shared Helm chart
+            // (see deployment/README.md) so they're reconciled directly.
+            when {
+                anyOf {
+                    expression { env.BRANCH_NAME == 'main' }
+                    expression { env.BRANCH_NAME ==~ /^release-.*$/ }
+                }
+            }
+            steps {
+                container('deploy-mx') {
+                    sh "kubectl config use-context beauto.mx.atlas-antelope.com --namespace=beauto"
+                    sh "kubectl apply -n beauto -f ./deployment/k8s-dependencies/mx-beauto/"
+                }
+            }
+        }
+
+        stage('Run E2E Tests') {
+            when {
+                expression {
+                    env.BRANCH_NAME ==~ /release-\d+\.\d+\.\d+/
+                }
+            }
+            steps {
+                container('tools') {
+                    run_e2e_tests(
+                        services: "${service_name}",
+                        buildThreads: "8",
+                        environments: "qa_mx"
+                    )
+                }
+            }
+        }
+
+        stage('Generate Mexico Manifests') {
+            when {
+                expression {
+                    env.TAG_NAME ==~ /release-v\d+.\d+.\d+/
+                }
+            }
+            steps {
+                container('deploy-mx') {
+                    production_release_template_generator(
+                        "${service_name}", "${helm_chart_version}", "${service_name}", "mx", [enableEnvSub: true, base_folder: "./deployment/helm/server"])
+                    production_release_template_generator(
+                        "${worker_service_name}", "${helm_chart_version}", "${worker_service_name}", "mx", [enableEnvSub: true, base_folder: "./deployment/helm/worker"])
+                }
+            }
+        }
+
+        stage('Merge release branch to master') {
+            when {
+                expression {
+                    env.BRANCH_NAME ==~ /release-\d+.\d+.\d+/
+                }
+            }
+            steps {
+                container('tools') {
+                    merge_release_branch("${service_name}", false, false)
+                }
+            }
+        }
+
+        stage('Realign develop') {
+            when {
+                expression {
+                    env.BRANCH_NAME == "main"
+                }
+            }
+            steps {
+                container('tools') {
+                    realign_develop("${service_name}")
+                }
+            }
+        }
+    }
+}

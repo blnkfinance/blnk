@@ -1,0 +1,39 @@
+# MX BEAUTO-specific configuration for the blnk worker.
+
+nameOverride: "beauto-blnk-worker"
+fullnameOverride: "beauto-blnk-worker"
+
+replicaCount: 2
+maxReplicaCount: 3
+
+nodeSelector:
+  node.kubernetes.io/role: node
+
+maxUnavailablePods: 25%
+
+environmentShort: beauto
+environmentFull: beauto
+
+serviceAccount:
+  enabled: true
+  create: true
+
+env:
+  # Typesense - deployed in-cluster in the `beauto` namespace, see
+  # deployment/k8s-dependencies/mx-beauto/
+  BLNK_TYPESENSE_DNS: "http://typesense.beauto.svc.cluster.local:8108"
+
+  # Jaeger - deployed in-cluster in the `beauto` namespace, see
+  # deployment/k8s-dependencies/mx-beauto/
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://jaeger.beauto.svc.cluster.local:4318/v1/traces"
+
+externalSecrets:
+  - name: "blnk-postgres-secret"
+    country: "mx"
+    env: "beauto"
+  - name: "blnk-redis-secret"
+    country: "mx"
+    env: "beauto"
+  - name: "blnk-typesense-secret"
+    country: "mx"
+    env: "beauto"

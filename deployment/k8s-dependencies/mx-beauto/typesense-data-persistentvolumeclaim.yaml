@@ -1,0 +1,14 @@
+# Adapted from infrastructure/k8s-manifests/typesense-data-persistentvolumeclaim.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app: typesense-data
+  name: typesense-data
+  namespace: beauto
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

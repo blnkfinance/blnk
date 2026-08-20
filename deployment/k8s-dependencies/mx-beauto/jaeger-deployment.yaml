@@ -1,0 +1,45 @@
+# Adapted from infrastructure/k8s-manifests/jaeger-deployment.yaml.
+# Deployed directly with kubectl since the shared Tala Helm chart's
+# `opentelemetry` auto-instrumentation flag only covers Java/Python - see
+# deployment/README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: jaeger
+  name: jaeger
+  namespace: beauto
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+        - name: jaeger
+          image: tala-tala-dockerhub.jfrog.io/jaegertracing/all-in-one:1.57
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          ports:
+            - containerPort: 16686
+            - containerPort: 4317
+            - containerPort: 4318
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 16686
+            failureThreshold: 3
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      restartPolicy: Always

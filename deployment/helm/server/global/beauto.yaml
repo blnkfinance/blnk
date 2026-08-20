@@ -1,0 +1,12 @@
+# Env-wide overrides applied to every "beauto" deployment of the blnk server,
+# regardless of country.
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 512Mi
+
+env:
+  BLNK_SERVER_SECURE: "false"
