@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/blnkfinance/blnk/model"
 	"go.opentelemetry.io/otel/attribute"
@@ -66,6 +67,12 @@ func (l *Blnk) PreviewBulkTransactions(ctx context.Context, request *model.BulkT
 	// distinct balance is read once rather than once per item.
 	working := newPreviewBalanceSet(l)
 
+	// References seen so far in this batch. A reference collision is a flat
+	// fact independent of cumulative vs independent execution — either mode
+	// hits the same database uniqueness constraint — so it is checked the
+	// same way, in request order, regardless of skip_queue.
+	seenRefs := make(map[string]bool, len(request.Transactions))
+
 	for _, transaction := range request.Transactions {
 		if transaction == nil {
 			continue
@@ -75,10 +82,17 @@ func (l *Blnk) PreviewBulkTransactions(ctx context.Context, request *model.BulkT
 		item.Inflight = request.Inflight
 		item.SkipQueue = request.SkipQueue
 
-		itemPreview, err := l.previewBulkItem(ctx, item, working, request.SkipQueue)
+		itemPreview, err := l.bulkItemDuplicateReference(ctx, item, seenRefs)
 		if err != nil {
 			span.RecordError(err)
 			return nil, err
+		}
+		if itemPreview == nil {
+			itemPreview, err = l.previewBulkItem(ctx, item, working, request.SkipQueue)
+			if err != nil {
+				span.RecordError(err)
+				return nil, err
+			}
 		}
 
 		if !itemPreview.WouldApply {
@@ -96,6 +110,49 @@ func (l *Blnk) PreviewBulkTransactions(ctx context.Context, request *model.BulkT
 		attribute.Bool("preview.cumulative", preview.Cumulative),
 		attribute.Int("preview.items", len(preview.Results)),
 	)
+	return preview, nil
+}
+
+// bulkItemDuplicateReference checks item's reference against every reference
+// already seen earlier in this batch, then — if it clears that — against the
+// database, recording it into seenRefs once it clears both.
+//
+// A hit either way is fatal on a real post: transaction validation rejects a
+// duplicate reference before balances are ever touched, in cumulative mode
+// or not. So a hit here is projected as a rejection without calling into
+// previewBulkItem at all — a rejected item never reaches balance application
+// for real, and in cumulative mode letting it touch the shared working
+// balances anyway would leak its amount into how later items are projected.
+//
+// Returns a non-nil preview only when item.Reference collides; nil, nil
+// means the caller should preview the item normally.
+func (l *Blnk) bulkItemDuplicateReference(ctx context.Context, item *model.Transaction, seenRefs map[string]bool) (*model.TransactionPreview, error) {
+	if item.Reference == "" {
+		return nil, nil
+	}
+
+	duplicate := seenRefs[item.Reference]
+	if !duplicate {
+		exists, err := l.datasource.TransactionExistsByRef(ctx, item.Reference)
+		if err != nil {
+			return nil, err
+		}
+		duplicate = exists
+	}
+
+	if !duplicate {
+		seenRefs[item.Reference] = true
+		return nil, nil
+	}
+
+	normalizePreviewStatus(item)
+	item.PreciseAmount = model.ApplyPrecision(item)
+
+	preview := newPreviewFor(item)
+	preview.WouldApply = false
+	preview.PreciseAmount = preciseString(item.PreciseAmount)
+	preview.Amount = item.Amount
+	preview.Rejection = previewRejection(fmt.Errorf("transaction validation failed: reference %s has already been used", item.Reference))
 	return preview, nil
 }
 
