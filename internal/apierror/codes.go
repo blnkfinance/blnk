@@ -67,6 +67,7 @@ const (
 	ErrTxnNotInflight          ErrorCode = "TXN_NOT_INFLIGHT"
 	ErrTxnAlreadyCommitted     ErrorCode = "TXN_ALREADY_COMMITTED"
 	ErrTxnAlreadyVoided        ErrorCode = "TXN_ALREADY_VOIDED"
+	ErrTxnAlreadyRefunded      ErrorCode = "TXN_ALREADY_REFUNDED"
 	ErrTxnCommitAmountExceeded ErrorCode = "TXN_COMMIT_AMOUNT_EXCEEDED"
 	ErrTxnInvalidStatusAction  ErrorCode = "TXN_INVALID_STATUS_ACTION"
 	ErrTxnBulkEmpty            ErrorCode = "TXN_BULK_EMPTY"
@@ -173,6 +174,7 @@ var statusByCode = map[ErrorCode]int{
 	ErrTxnNotInflight:          http.StatusBadRequest,
 	ErrTxnAlreadyCommitted:     http.StatusConflict,
 	ErrTxnAlreadyVoided:        http.StatusConflict,
+	ErrTxnAlreadyRefunded:      http.StatusConflict,
 	ErrTxnCommitAmountExceeded: http.StatusBadRequest,
 	ErrTxnInvalidStatusAction:  http.StatusBadRequest,
 	ErrTxnBulkEmpty:            http.StatusBadRequest,

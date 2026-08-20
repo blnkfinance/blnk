@@ -218,7 +218,7 @@ var messagePatterns = []messagePattern{
 	{[]string{"not in inflight status"}, apierror.ErrTxnNotInflight},
 	{[]string{"Transaction already committed"}, apierror.ErrTxnAlreadyCommitted},
 	{[]string{"has already been voided"}, apierror.ErrTxnAlreadyVoided},
-	{[]string{"has already been refunded"}, apierror.ErrGenConflict},
+	{[]string{"has already been refunded"}, apierror.ErrTxnAlreadyRefunded},
 	{[]string{"has already been used"}, apierror.ErrTxnDuplicateReference},
 	{[]string{"cannot commit more than"}, apierror.ErrTxnCommitAmountExceeded},
 	{[]string{"insufficient funds"}, apierror.ErrTxnInsufficientFunds},
