@@ -44,6 +44,22 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 
 	legs, err := l.inflightLegsForPreview(ctx, txID)
 	if err != nil {
+		// A transaction that's already been voided, or was never inflight,
+		// is exactly the kind of "would this apply" fact a preview answers
+		// with would_apply: false — the same treatment already-committed
+		// and over-limit amounts get further down. Only a genuinely missing
+		// id, or an infrastructure failure, stays a hard error.
+		switch classifyInflightError(err) {
+		case "ALREADY_VOIDED", "NOT_INFLIGHT":
+			return &model.TransactionPreview{
+				DryRun:        true,
+				WouldApply:    false,
+				Operation:     action,
+				Rejection:     previewRejection(err),
+				PreciseAmount: preciseString(nil),
+				Balances:      []model.BalanceProjection{},
+			}, nil
+		}
 		span.RecordError(err)
 		return nil, err
 	}
