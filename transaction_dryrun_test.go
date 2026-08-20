@@ -261,9 +261,12 @@ func TestPreviewTransactionVirtualIndicatorIsNotCreated(t *testing.T) {
 	assert.NoError(t, dbMock.ExpectationsWereMet())
 }
 
-// TestPreviewTransactionNotesReferenceInUse checks that an already-used
-// reference is surfaced as advice rather than failing the projection.
-func TestPreviewTransactionNotesReferenceInUse(t *testing.T) {
+// TestPreviewTransactionRejectsReferenceInUse checks that an already-used
+// reference is projected as a rejection, matching the real post it stands in
+// for: transaction validation rejects a duplicate reference outright, so a
+// preview that said would_apply: true here would be lying about the one
+// outcome it exists to predict.
+func TestPreviewTransactionRejectsReferenceInUse(t *testing.T) {
 	blnk, dbMock, redisMock := newPreviewTestBlnk(t, false)
 
 	dbMock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS(SELECT 1 FROM blnk.transactions WHERE reference = $1)`)).
@@ -276,9 +279,9 @@ func TestPreviewTransactionNotesReferenceInUse(t *testing.T) {
 	preview, err := blnk.PreviewTransaction(context.Background(), previewTransaction(100))
 	require.NoError(t, err)
 
-	assert.True(t, preview.WouldApply)
-	require.NotEmpty(t, preview.Notes)
-	assert.Contains(t, preview.Notes[0], "reference is already in use")
+	assert.False(t, preview.WouldApply)
+	require.NotNil(t, preview.Rejection)
+	assert.Contains(t, preview.Rejection.Message, "reference preview_ref_1 has already been used")
 }
 
 // TestPreviewTransactionNotesCurrencyMismatch pins that the preview mirrors the

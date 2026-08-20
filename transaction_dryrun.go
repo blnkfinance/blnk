@@ -158,15 +158,20 @@ func (l *Blnk) previewSingleTransaction(ctx context.Context, transaction *model.
 	if applyErr != nil {
 		preview.WouldApply = false
 		preview.Rejection = previewRejection(applyErr)
-	} else {
+	} else if preview.Rejection == nil {
+		// A caveat recorded above (e.g. a duplicate reference) already
+		// rejected this preview; balances applying cleanly on top of that
+		// doesn't undo it.
 		preview.WouldApply = true
 	}
 
 	// On rejection the balances hold whatever partial state the apply path left
-	// behind, which is not a meaningful projection — report the unchanged
+	// behind — or, for a caveat-triggered rejection like a duplicate
+	// reference, balances applied cleanly even though the preview as a whole
+	// didn't — neither is a meaningful projection. Report the unchanged
 	// snapshot as the outcome instead.
 	sourceAfter, destinationAfter := source.balance, destination.balance
-	if applyErr != nil {
+	if !preview.WouldApply {
 		sourceAfter, destinationAfter = sourceBefore, destinationBefore
 	}
 
@@ -404,7 +409,12 @@ func (l *Blnk) notePreviewCaveats(ctx context.Context, preview *model.Transactio
 
 	if transaction.Reference != "" {
 		if exists, err := l.datasource.TransactionExistsByRef(ctx, transaction.Reference); err == nil && exists {
-			preview.AddNote("reference is already in use; a real post with this reference would be rejected")
+			// A duplicate reference is fatal on a real post (transaction
+			// validation rejects it before balances are ever touched), so this
+			// is a rejection like any other — not a caveat balance projection
+			// can still say would_apply: true around.
+			preview.WouldApply = false
+			preview.Rejection = previewRejection(fmt.Errorf("transaction validation failed: reference %s has already been used", transaction.Reference))
 		}
 	}
 }
