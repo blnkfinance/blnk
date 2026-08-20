@@ -34,7 +34,13 @@ import (
 // the legacy field clients depend on today (flat "error"/"errors" string,
 // preserved verbatim) and the structured "error_detail" object with the
 // canonical error code. The legacy field is removed — and error_detail
-// renamed to error — at the next major release. See docs/errors.md.
+// renamed to error — at the next major release.
+//
+// The code catalog and its stability guarantee are published at
+// https://docs.blnkfinance.com/advanced/error-codes (source:
+// blnkfinance/blnk-docs, advanced/error-codes.mdx). error_detail.code is the
+// stable field clients branch on; error, errors and error_detail.message are
+// for display and may change between releases.
 
 const errorDetailKey = "error_detail"
 
