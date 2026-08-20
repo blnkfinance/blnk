@@ -71,24 +71,31 @@ func (l *Blnk) PreviewTransaction(ctx context.Context, transaction *model.Transa
 // PreviewRefund projects the reversal of an existing transaction without
 // creating it.
 //
-// It runs the same lookup and eligibility checks a real refund runs, and builds
-// the reversal with the same helper, so a projection that reports the refund as
-// applicable is one the ledger would accept. Nothing is written: the refund is
-// never queued and the parent is not marked refunded.
+// It runs the same lookup a real refund runs — GetRefundableTransactionsByParentID,
+// batch size 1 — rather than a separate hand-rolled eligibility check. That
+// query is a single WHERE clause covering both "does this id exist" and "is
+// it in a refundable status"; a real refund can't and doesn't distinguish
+// the two; either one comes back as an empty result set, reported as "no
+// transaction to refund" (404). A preview with its own, more detailed
+// eligibility check would answer a different question than the one the real
+// endpoint actually answers, and its rejection code would stop matching what
+// a real post returns — the one thing a preview promises. Nothing is
+// written: the refund is never queued and the parent is not marked refunded.
 func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.TransactionPreview, error) {
 	ctx, span := tracer.Start(ctx, "PreviewRefund")
 	defer span.End()
 
-	originalTxn, err := l.getOriginalTransactionForRefund(ctx, transactionID)
+	refundable, err := l.datasource.GetRefundableTransactionsByParentID(ctx, transactionID, 1, 0)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
-
-	if err := l.validateTransactionForRefund(ctx, originalTxn); err != nil {
+	if len(refundable) == 0 {
+		err := fmt.Errorf("transaction %s not found for refund", transactionID)
 		span.RecordError(err)
 		return nil, err
 	}
+	originalTxn := refundable[0]
 
 	// Same builder the real refund uses: source and destination swapped,
 	// overdraft allowed, status reset. skipQueue is irrelevant here because the
