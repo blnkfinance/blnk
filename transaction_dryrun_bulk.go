@@ -185,6 +185,10 @@ func (l *Blnk) previewBulkItem(ctx context.Context, item *model.Transaction, wor
 	preview.PreciseAmount = preciseString(item.PreciseAmount)
 	preview.Amount = item.Amount
 
+	// Whether this item is itself a split decides both what gets reported and
+	// how a failure is handled below.
+	isSplit := len(item.Sources) > 0 || len(item.Destinations) > 0
+
 	for _, leg := range legs {
 		normalizePreviewStatus(leg)
 		leg.PreciseAmount = model.ApplyPrecision(leg)
@@ -194,19 +198,44 @@ func (l *Blnk) previewBulkItem(ctx context.Context, item *model.Transaction, wor
 			return nil, err
 		}
 
+		failed := false
 		if err := sameBalanceErr(source, destination); err != nil {
 			preview.WouldApply = false
 			if preview.Rejection == nil {
 				preview.Rejection = previewRejection(err)
 			}
-			continue
-		}
-
-		if applyErr := l.processBalances(ctx, leg, source.balance, destination.balance); applyErr != nil {
+			failed = true
+		} else if applyErr := l.processBalances(ctx, leg, source.balance, destination.balance); applyErr != nil {
 			preview.WouldApply = false
 			if preview.Rejection == nil {
 				preview.Rejection = previewRejection(applyErr)
 			}
+			failed = true
+		}
+
+		// Report the per-leg breakdown a split item produces, as
+		// previewSplitTransaction does for the same item outside a batch.
+		// Without this the same split reported its legs when the batch was
+		// queued — that path runs through PreviewTransaction — and reported
+		// none when the batch was cumulative.
+		if isSplit && !failed {
+			role, identifier := model.PreviewRoleDestination, leg.Destination
+			if len(item.Sources) > 0 {
+				role, identifier = model.PreviewRoleSource, leg.Source
+			}
+			preview.Legs = append(preview.Legs, model.LegProjection{
+				Identifier:    identifier,
+				Role:          role,
+				PreciseAmount: preciseString(leg.PreciseAmount),
+				Amount:        leg.Amount,
+			})
+		}
+
+		// A cumulative batch records its items synchronously and stops at the
+		// first one that fails, and a split item's legs are recorded the same
+		// way within it, so the legs after a failure are never attempted.
+		if failed {
+			break
 		}
 	}
 
