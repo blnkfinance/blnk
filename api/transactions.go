@@ -18,10 +18,12 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -740,6 +742,31 @@ func (a Api) respondBulkInflightPreview(c *gin.Context, action string, items []b
 	preview.Notes = append(preview.Notes,
 		"items are dispatched across a worker pool, so each is projected independently against current balances and real execution order is not guaranteed")
 
+	// A transaction id repeated in one batch is projected once per occurrence,
+	// and each occurrence sees the hold still standing — so every one of them
+	// reports would_apply. Really running that batch settles the hold once and
+	// fails the rest, against a hold that is gone or already taken.
+	//
+	// The duplicate is reported rather than resolved. Which occurrence wins is
+	// decided by the worker pool, so marking a particular one as the loser
+	// would assert an ordering the ledger does not provide — the same reason
+	// the batch above is projected independently rather than cumulatively.
+	// Saying that only one can settle is both true and all that is knowable.
+	seen := make(map[string]bool, len(items))
+	dupes := make([]string, 0)
+	for _, item := range items {
+		if seen[item.TransactionID] {
+			dupes = append(dupes, item.TransactionID)
+			continue
+		}
+		seen[item.TransactionID] = true
+	}
+	if len(dupes) > 0 {
+		preview.AddNote(fmt.Sprintf(
+			"transaction id appears more than once in this batch (%s); the occurrences settle the same hold, so only one of them can succeed and which one is not determined",
+			strings.Join(uniqueStrings(dupes), ", ")))
+	}
+
 	for _, item := range items {
 		itemPreview, err := a.blnk.PreviewInflightAction(c.Request.Context(), item.TransactionID, action, item.Amount)
 		if err != nil {
@@ -761,6 +788,20 @@ func (a Api) respondBulkInflightPreview(c *gin.Context, action string, items []b
 
 	resolvePreviewRejectionCodes(preview.Results)
 	c.JSON(http.StatusOK, preview)
+}
+
+// uniqueStrings returns in, de-duplicated, preserving first-seen order.
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // bulkInflightMaxWorkers caps the worker-pool size used by the bulk handlers.
