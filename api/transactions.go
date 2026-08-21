@@ -706,6 +706,53 @@ func (a Api) RecoverQueuedTransactions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"recovered": recovered, "threshold": threshold.String()})
 }
 
+// respondBulkInflightPreview projects a bulk commit or void and writes the
+// result, without settling anything.
+//
+// Items are projected independently rather than cumulatively, because that
+// is how BulkInflightUpdate really runs them: across a worker pool with no
+// ordering between items, so no item can be said to observe another's
+// effect. Each item is therefore projected against the balances as they
+// stand, and the batch-level balances a cumulative projection would report
+// are deliberately omitted.
+//
+// A per-item projection failure is reported as that item's rejection rather
+// than failing the whole request, mirroring BulkInflightUpdate, whose
+// per-item failures do not abort the rest of the batch. Only an
+// infrastructure error aborts.
+func (a Api) respondBulkInflightPreview(c *gin.Context, action string, items []blnk.BulkInflightItem) {
+	preview := model.BulkTransactionPreview{
+		DryRun:     true,
+		WouldApply: true,
+		Cumulative: false,
+		Results:    make([]model.TransactionPreview, 0, len(items)),
+	}
+	preview.Notes = append(preview.Notes,
+		"items are dispatched across a worker pool, so each is projected independently against current balances and real execution order is not guaranteed")
+
+	for _, item := range items {
+		itemPreview, err := a.blnk.PreviewInflightAction(c.Request.Context(), item.TransactionID, action, item.Amount)
+		if err != nil {
+			// The id could not be resolved at all (missing, or an
+			// infrastructure failure). Report it against the item rather than
+			// discarding the projections already gathered.
+			itemPreview = &model.TransactionPreview{
+				DryRun:     true,
+				WouldApply: false,
+				Operation:  action,
+				Rejection:  &model.PreviewRejection{Message: err.Error()},
+			}
+		}
+		if !itemPreview.WouldApply {
+			preview.WouldApply = false
+		}
+		preview.Results = append(preview.Results, *itemPreview)
+	}
+
+	resolvePreviewRejectionCodes(preview.Results)
+	c.JSON(http.StatusOK, preview)
+}
+
 // bulkInflightMaxWorkers caps the worker-pool size used by the bulk handlers.
 // 8 is a deliberate compromise: large enough to win meaningful concurrency
 // vs sequential N round-trips, small enough not to flood the lock service or
@@ -760,6 +807,13 @@ func (a Api) BulkVoidInflight(c *gin.Context) {
 	items := make([]blnk.BulkInflightItem, len(req.TransactionIDs))
 	for i, id := range req.TransactionIDs {
 		items[i] = blnk.BulkInflightItem{TransactionID: id}
+	}
+
+	// Ahead of both the queueing and the synchronous branch: a dry run must
+	// not release a hold on either path.
+	if req.DryRun {
+		a.respondBulkInflightPreview(c, blnk.InflightActionVoid, items)
+		return
 	}
 
 	if !req.SkipQueue {
@@ -844,6 +898,13 @@ func (a Api) BulkCommitInflight(c *gin.Context) {
 			amount = model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: it.Amount, TransactionID: it.TransactionID}, ds.Conn)
 		}
 		items[i] = blnk.BulkInflightItem{TransactionID: it.TransactionID, Amount: amount}
+	}
+
+	// Ahead of both the queueing and the synchronous branch: a dry run must
+	// not settle a hold on either path.
+	if req.DryRun {
+		a.respondBulkInflightPreview(c, blnk.InflightActionCommit, items)
+		return
 	}
 
 	if !req.SkipQueue {

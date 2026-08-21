@@ -134,6 +134,14 @@ type BulkInflightVoidRequest struct {
 	// SkipQueue processes every item synchronously instead of routing them
 	// through the inflight-commit queue (the default).
 	SkipQueue bool `json:"skip_queue"`
+
+	// DryRun projects every void and returns the resulting balances without
+	// releasing any hold: no settlement is recorded and nothing is queued.
+	//
+	// Items are projected independently of one another, because that is how
+	// they really run — BulkInflightUpdate dispatches them across a worker
+	// pool with no ordering between them.
+	DryRun bool `json:"dry_run"`
 }
 
 // BulkInflightCommitItem describes one transaction in a bulk commit request.
@@ -154,6 +162,15 @@ type BulkInflightCommitRequest struct {
 	// SkipQueue processes every item synchronously instead of routing them
 	// through the inflight-commit queue (the default).
 	SkipQueue bool `json:"skip_queue"`
+
+	// DryRun projects every commit and returns the resulting balances without
+	// settling anything: no settlement is recorded, the holds stay in place,
+	// and nothing is queued.
+	//
+	// Items are projected independently of one another, because that is how
+	// they really run — BulkInflightUpdate dispatches them across a worker
+	// pool with no ordering between them.
+	DryRun bool `json:"dry_run"`
 }
 
 // BulkInflightResult is the per-item outcome reported in BulkInflightResponse.
