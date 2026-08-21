@@ -45,6 +45,63 @@ func validatePrecisionIsInteger(value interface{}) error {
 	return nil
 }
 
+// validatePrecisionNotNegative rejects a negative precision.
+//
+// Precision is a scaling factor — "the number you used to convert the
+// smallest unit to an integer" — so it is only meaningful as a positive
+// value. Zero is left valid because it means "not supplied" and is
+// defaulted to 1 downstream (see model.ApplyPrecision).
+//
+// A negative precision is not merely meaningless, it is load-bearing for
+// the bypass described on validateAmountNotNegative below: it flips the
+// sign of the computed precise amount.
+func validatePrecisionNotNegative(value interface{}) error {
+	precision, ok := value.(float64)
+	if !ok {
+		return errors.New("invalid precision type")
+	}
+
+	if precision < 0 {
+		return errors.New("precision cannot be negative")
+	}
+
+	return nil
+}
+
+// validateAmountNotNegative rejects negative amounts on both the float
+// `amount` field and the big.Int `precise_amount` field.
+//
+// The ledger's intent is that amounts are positive — model.Transaction's own
+// validate() reports "transaction amount must be positive" — but that check
+// runs deep in the apply path and, for `amount`, is unreachable: by the time
+// it runs, PreciseAmount has been computed and its non-nil branch returns
+// early. That left the effective guard against a negative `amount` to be an
+// unrelated split-distribution check firing by accident on a negative total.
+//
+// That accidental guard is bypassable, because precision multiplies:
+//
+//	amount(-25) x precision(-100) = precise_amount(+2500)
+//
+// The product is positive, so every downstream positivity check passes, and
+// the transaction applies — while `amount: -25` and `precision: -100` are
+// persisted as sent. The stored record then reports the opposite sign of the
+// movement it describes, and is invisible to an `amount > 0` filter.
+//
+// Zero is left to the existing downstream handling rather than rejected
+// here, so that the current zero-amount semantics (and issue #334's request
+// to make them opt-in) are not changed by this fix.
+func validateAmountNotNegative(t *RecordTransaction) validation.RuleFunc {
+	return func(value interface{}) error {
+		if t.Amount < 0 {
+			return errors.New("amount cannot be negative")
+		}
+		if t.PreciseAmount != nil && t.PreciseAmount.Sign() < 0 {
+			return errors.New("precise_amount cannot be negative")
+		}
+		return nil
+	}
+}
+
 func sourceOrSourcesValidation(t *RecordTransaction) validation.RuleFunc {
 	return func(value interface{}) error {
 		if (t.Source == "" && len(t.Sources) == 0) || (t.Source != "" && len(t.Sources) > 0) {
@@ -142,7 +199,7 @@ func (c *MonitorCondition) ValidateMonitorCondition() error {
 	return validation.ValidateStruct(c,
 		validation.Field(&c.Field, validation.Required, validation.In("debit_balance", "credit_balance", "balance", "inflight_debit_balance", "inflight_credit_balance", "inflight_balance")),
 		validation.Field(&c.Operator, validation.Required),
-		validation.Field(&c.Precision, validation.Required),
+		validation.Field(&c.Precision, validation.Required, validation.By(validatePrecisionNotNegative)),
 		validation.Field(&c.Value, validation.Required),
 	)
 }
@@ -178,8 +235,8 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 			}
 
 			return nil
-		})),
-		validation.Field(&t.Precision, validation.By(validatePrecisionIsInteger)),
+		}), validation.By(validateAmountNotNegative(t))),
+		validation.Field(&t.Precision, validation.By(validatePrecisionIsInteger), validation.By(validatePrecisionNotNegative)),
 		validation.Field(&t.Currency, validation.Required),
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.Description, validation.Required),
