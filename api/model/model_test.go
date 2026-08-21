@@ -786,3 +786,90 @@ func TestToBalanceMonitor(t *testing.T) {
 	assert.Equal(t, createMonitor.Condition.Value, monitor.Condition.Value)
 	assert.Equal(t, createMonitor.Condition.Precision, monitor.Condition.Precision)
 }
+
+// TestSplitOnOneSideValidation pins that a transaction cannot split both
+// sides at once. SplitTransactionPrecise distributes over Sources when they
+// are present and Destinations otherwise, clearing both on the legs it
+// produces, so a transaction carrying both had its Destinations silently
+// dropped and every leg left with an empty Destination — reported downstream
+// as "Balance with ID ” not found", which names neither the field at fault
+// nor the reason.
+func TestSplitOnOneSideValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		transaction RecordTransaction
+		wantErr     bool
+	}{
+		{
+			name: "Invalid - both sources and destinations split",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref_both",
+				Description: "d",
+				Sources: []model.Distribution{
+					{Identifier: "bln_a", Distribution: "60"},
+					{Identifier: "bln_b", Distribution: "40"},
+				},
+				Destinations: []model.Distribution{
+					{Identifier: "bln_c", Distribution: "60"},
+					{Identifier: "bln_d", Distribution: "40"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Valid - sources split only (fan-in)",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref_fanin",
+				Description: "d",
+				Sources: []model.Distribution{
+					{Identifier: "bln_a", Distribution: "60"},
+					{Identifier: "bln_b", Distribution: "40"},
+				},
+				Destination: "bln_c",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid - destinations split only (fan-out)",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref_fanout",
+				Description: "d",
+				Source:      "bln_a",
+				Destinations: []model.Distribution{
+					{Identifier: "bln_c", Distribution: "60"},
+					{Identifier: "bln_d", Distribution: "40"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid - neither side split",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref_plain",
+				Description: "d",
+				Source:      "bln_a",
+				Destination: "bln_b",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.transaction.ValidateRecordTransaction()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
