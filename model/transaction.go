@@ -425,9 +425,33 @@ func (transaction *Transaction) SplitTransactionPrecise(ctx context.Context) ([]
 		return nil, err
 	}
 
+	// Walk the distributions in the order the caller supplied them rather than
+	// ranging over the map CalculateDistributionsPrecise returns.
+	//
+	// Go randomises map iteration, and both the write-back below and the
+	// reference suffix are positional, so map order decided which Distribution
+	// entry received which leg's TransactionID. With two sources that was wrong
+	// roughly a quarter of the time: the response told the caller that the
+	// first source's leg was some transaction id that actually belonged to the
+	// second. The "-1"/"-2" reference suffixes moved between identifiers the
+	// same way, so the same split produced a different identifier-to-reference
+	// mapping on each run.
+	//
+	// Iterating ds fixes both: leg n always belongs to ds[n], and every entry
+	// is matched to its own amount by identifier instead of by position.
 	var transactions []*Transaction
 	counter := 1
-	for direction, preciseAmount := range distributions {
+	emitted := make(map[string]bool, len(ds))
+	for _, d := range ds {
+		// The distribution map is keyed by identifier, so repeating one
+		// identifier yields a single merged amount. Emit it once; the extra
+		// entries share that leg rather than duplicating the money.
+		preciseAmount, ok := distributions[d.Identifier]
+		if !ok || emitted[d.Identifier] {
+			continue
+		}
+		emitted[d.Identifier] = true
+
 		newTransaction := *transaction                               // Create a copy of the original transaction
 		newTransaction.TransactionID = GenerateUUIDWithSuffix("txn") // Set the transaction ID
 		newTransaction.PreciseAmount = preciseAmount                 // Set the precise amount based on the distribution
@@ -440,12 +464,22 @@ func (transaction *Transaction) SplitTransactionPrecise(ctx context.Context) ([]
 		newTransaction.Destinations = nil                            // Clear the Destinations slice
 		newTransaction.ParentTransaction = transaction.TransactionID // Set the parent transaction ID
 
+		// Attribute the leg to every entry naming this identifier, so a
+		// repeated identifier does not leave one of its entries blank.
 		if len(transaction.Sources) > 0 {
-			newTransaction.Source = direction // Set the source
-			transaction.Sources[counter-1].TransactionID = newTransaction.TransactionID
+			newTransaction.Source = d.Identifier // Set the source
+			for i := range transaction.Sources {
+				if transaction.Sources[i].Identifier == d.Identifier {
+					transaction.Sources[i].TransactionID = newTransaction.TransactionID
+				}
+			}
 		} else if len(transaction.Destinations) > 0 {
-			newTransaction.Destination = direction // Set the destination
-			transaction.Destinations[counter-1].TransactionID = newTransaction.TransactionID
+			newTransaction.Destination = d.Identifier // Set the destination
+			for i := range transaction.Destinations {
+				if transaction.Destinations[i].Identifier == d.Identifier {
+					transaction.Destinations[i].TransactionID = newTransaction.TransactionID
+				}
+			}
 		}
 
 		newTransaction.Reference = fmt.Sprintf("%s-%d", transaction.Reference, counter)
