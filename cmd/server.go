@@ -42,11 +42,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-/*
-serveTLS starts an HTTPS server with TLS enabled using CertMagic for automatic certificate management.
-It accepts a gin.Engine instance as the router and a ServerConfig struct for server configurations.
-If no domain is specified, the server will default to running on localhost.
-*/
 // resolveCertStoragePath returns the configured certificate storage path,
 // falling back to the default location when unset.
 func resolveCertStoragePath(conf config.ServerConfig) string {
@@ -65,7 +60,11 @@ func resolveTLSDomains(conf config.ServerConfig) []string {
 	return []string{conf.Domain}
 }
 
-func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
+// newTLSServer builds the HTTPS server with CertMagic-managed certificates.
+//
+// It returns the server rather than serving it, so the HTTPS listener runs
+// through the same start-and-graceful-shutdown path as the plaintext one.
+func newTLSServer(r *gin.Engine, conf config.ServerConfig) (*http.Server, error) {
 	// Configure CertMagic's ACME (Automatic Certificate Management Environment) for automatic TLS
 	certmagic.DefaultACME.Agreed = true      // Agree to ACME TOS
 	certmagic.DefaultACME.Email = conf.Email // Set email for certificate recovery/notifications
@@ -75,29 +74,20 @@ func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
 
 	// Define domain(s) for the certificate
 	if conf.Domain == "" {
-		logrus.Error("No domain specified, defaulting to localhost")
+		logrus.Warn("server.ssl is enabled but no domain is configured; defaulting to localhost")
 	}
 	domains := resolveTLSDomains(conf)
 
 	// Manage TLS certificates for the specified domains
 	if err := cfg.ManageSync(context.Background(), domains); err != nil {
-		return err
+		return nil, fmt.Errorf("failed to obtain a TLS certificate for %v: %w", domains, err)
 	}
 
-	// Create and configure the HTTPS server
-	server := &http.Server{
+	return &http.Server{
 		Addr:      ":" + conf.Port, // Server address and port
 		Handler:   r,               // Handler for HTTP requests (gin router)
 		TLSConfig: cfg.TLSConfig(), // TLS configuration from CertMagic
-	}
-
-	logrus.Errorf("Starting HTTPS server on %s\n", conf.Port)
-	// Start the HTTPS server with automatic certificate management
-	if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-		logrus.Fatalf("Failed to start HTTPS server: %v", err)
-	}
-
-	return nil
+	}, nil
 }
 
 /*
@@ -274,13 +264,29 @@ func initializePostHog() (posthog.Client, string) {
 	return client, heartbeatID
 }
 
-func startServer(router *gin.Engine, port string) error {
-	server := newHTTPServer(router, port)
+func startServer(router *gin.Engine, conf config.ServerConfig) error {
+	var (
+		server *http.Server
+		serve  func() error
+		scheme string
+	)
+
+	if conf.SSL {
+		tlsServer, err := newTLSServer(router, conf)
+		if err != nil {
+			return err
+		}
+		server, scheme = tlsServer, "https"
+		serve = func() error { return server.ListenAndServeTLS("", "") }
+	} else {
+		server, scheme = newHTTPServer(router, conf.Port), "http"
+		serve = server.ListenAndServe
+	}
 
 	// Start server in goroutine
 	go func() {
-		logrus.Infof("Server started on port %s", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logrus.Infof("Server started on %s port %s", scheme, conf.Port)
+		if err := serve(); err != nil && err != http.ErrServerClosed {
 			logrus.Fatalf("Server error: %v", err)
 		}
 	}()
@@ -412,7 +418,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			// Start server
-			if err := startServer(router, cfg.Server.Port); err != nil {
+			if err := startServer(router, cfg.Server); err != nil {
 				logrus.Fatal(err)
 			}
 		},
