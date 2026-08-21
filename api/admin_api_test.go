@@ -17,15 +17,11 @@ limitations under the License.
 package api
 
 import (
-	"database/sql"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
+	"runtime"
 	"testing"
 
 	"github.com/blnkfinance/blnk/config"
@@ -33,57 +29,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// pgDumpUsable reports whether the happy path can actually run here, and why
-// not when it cannot.
+// installFakePgDump puts an executable pg_dump stub first on PATH, mirroring
+// the helper the pg-backups package already uses. The stub honours -f by
+// writing the dump file the real binary would produce.
 //
-// This used to be gated behind BLNK_TEST_PG_DUMP, which nothing sets — not the
-// workflows, not the compose files — so the happy path never ran anywhere,
-// including CI. The gate now tests the two real preconditions instead, so the
-// backup succeeds wherever the environment permits it.
+// The happy path used to be gated behind BLNK_TEST_PG_DUMP, which nothing sets
+// — not the workflows, not the compose files, nothing in the repo — so it never
+// ran anywhere, including CI. Depending on a real pg_dump instead would only
+// half-fix that: pg_dump refuses to dump from a server newer than its own major
+// version, and CI pins postgres:latest against ubuntu-latest's bundled client,
+// so the happy path would still skip on exactly the machine that matters.
 //
-// The version check is the subtle one: pg_dump refuses to dump from a server
-// newer than itself. CI pins postgres:latest against ubuntu-latest's bundled
-// client, so that skew is expected rather than a defect, and it is reported as
-// a skip with both versions named rather than as a failure.
-func pgDumpUsable(t *testing.T, dsn string) (bool, string) {
+// A stub removes the environment from the question entirely. What this test
+// covers is the endpoint wiring — route, config, BackupDir, response — and that
+// is worth asserting on every run rather than never.
+func installFakePgDump(t *testing.T) {
 	t.Helper()
-
-	if _, err := exec.LookPath("pg_dump"); err != nil {
-		return false, "pg_dump is not installed"
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pg_dump stub requires a POSIX shell")
 	}
 
-	out, err := exec.Command("pg_dump", "--version").Output()
-	if err != nil {
-		return false, fmt.Sprintf("pg_dump --version failed: %v", err)
-	}
-	m := regexp.MustCompile(`(\d+)`).FindStringSubmatch(string(out))
-	if m == nil {
-		return false, fmt.Sprintf("could not parse pg_dump version from %q", string(out))
-	}
-	clientMajor, _ := strconv.Atoi(m[1])
-
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return false, fmt.Sprintf("cannot open database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	var serverNum int
-	if err := db.QueryRow("SHOW server_version_num").Scan(&serverNum); err != nil {
-		return false, fmt.Sprintf("cannot read server version: %v", err)
-	}
-	serverMajor := serverNum / 10000
-
-	if clientMajor < serverMajor {
-		return false, fmt.Sprintf("pg_dump %d is older than server %d; pg_dump refuses to dump a newer server",
-			clientMajor, serverMajor)
-	}
-	return true, ""
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "pg_dump")
+	script := `#!/bin/sh
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-f" ]; then out="$a"; fi
+  prev="$a"
+done
+echo "-- fake dump" > "$out"
+`
+	require.NoError(t, os.WriteFile(stub, []byte(script), 0o755))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// Backups shell out to pg_dump and write under BackupDir. The happy path needs
-// a usable pg_dump (see pgDumpUsable); the error path runs everywhere using an
-// unwritable BackupDir.
+// Backups shell out to pg_dump and write under BackupDir. The happy path runs
+// against a stub so it is environment-independent; the error path runs
+// everywhere using an unwritable BackupDir.
 func TestBackupDB(t *testing.T) {
 	t.Run("Unwritable backup dir", func(t *testing.T) {
 		router, _, _ := setupRouterWithConfig(t, func(cfg *config.Configuration) {
@@ -98,13 +80,12 @@ func TestBackupDB(t *testing.T) {
 	})
 
 	t.Run("Successful backup to disk", func(t *testing.T) {
+		installFakePgDump(t)
+
 		backupDir := t.TempDir()
-		router, _, cfg := setupRouterWithConfig(t, func(cfg *config.Configuration) {
+		router, _, _ := setupRouterWithConfig(t, func(cfg *config.Configuration) {
 			cfg.BackupDir = backupDir
 		})
-		if ok, why := pgDumpUsable(t, cfg.DataSource.Dns); !ok {
-			t.Skip("skipping backup happy path: " + why)
-		}
 
 		req := httptest.NewRequest("GET", "/backup", nil)
 		resp := httptest.NewRecorder()
