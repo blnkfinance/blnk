@@ -439,7 +439,17 @@ func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 }
 
 // validate checks if the transaction has a positive amount.
+//
+// Amount is checked first, and unconditionally. PreciseAmount is derived from
+// Amount x Precision and is set on every path that reaches here, so the
+// PreciseAmount branch below always returns early — which left the Amount
+// check unreachable in practice. A negative Amount paired with a negative
+// Precision yields a positive PreciseAmount, so checking only the product
+// silently accepted a transaction whose own recorded amount was negative.
 func (transaction *Transaction) validate() error {
+	if transaction.Amount < 0 {
+		return errors.New("transaction amount must be positive")
+	}
 	if transaction.PreciseAmount != nil {
 		if transaction.PreciseAmount.Sign() <= 0 {
 			return errors.New("transaction precise amount must be positive")
