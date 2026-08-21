@@ -28,9 +28,17 @@ import (
 )
 
 // Declare a package-level variable to hold the singleton instance.
+//
+// instanceMu guards instance. A plain mutex is used rather than sync.Once
+// because a Once latches on its first run whether that run succeeded or not:
+// if the very first connection attempt in the process failed, the body would
+// never run again, instance would stay nil forever, and every later caller
+// would be handed that nil back. Connecting is exactly the kind of work that
+// deserves a second attempt, so failures leave instance unset and the next
+// call tries again.
 var (
-	instance *Datasource
-	once     sync.Once
+	instance   *Datasource
+	instanceMu sync.Mutex
 )
 
 type Datasource struct {
@@ -61,26 +69,31 @@ func NewDataSource(configuration *config.Configuration) (IDataSource, error) {
 }
 
 // GetDBConnection ensures a single database connection instance.
+//
+// It never returns a nil *Datasource alongside a nil error: either the
+// singleton is returned, or the connection error that prevented building it.
 func GetDBConnection(configuration *config.Configuration) (*Datasource, error) {
-	var err error
-	once.Do(func() {
-		con, errConn := ConnectDB(configuration.DataSource)
-		if errConn != nil {
-			err = errConn
-			return
-		}
+	instanceMu.Lock()
+	defer instanceMu.Unlock()
 
-		cacheInstance, errCache := cache.NewCache()
-		if errCache != nil {
-			logrus.Errorf("Error creating cache: %v", errCache)
-			// Continue without cache instead of failing completely.
-		}
+	if instance != nil {
+		return instance, nil
+	}
 
-		instance = &Datasource{Conn: con, Cache: cacheInstance}
-	})
+	con, err := ConnectDB(configuration.DataSource)
 	if err != nil {
+		// Leave instance nil so a later call can retry rather than being
+		// permanently poisoned by one unreachable-database moment.
 		return nil, err
 	}
+
+	cacheInstance, errCache := cache.NewCache()
+	if errCache != nil {
+		logrus.Errorf("Error creating cache: %v", errCache)
+		// Continue without cache instead of failing completely.
+	}
+
+	instance = &Datasource{Conn: con, Cache: cacheInstance}
 	return instance, nil
 }
 
