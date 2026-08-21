@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
+	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -194,12 +195,14 @@ func TestSlackNotification_ConnectionRefused(t *testing.T) {
 }
 
 func TestSlackNotification_HangingReceiverShouldTimeOut(t *testing.T) {
-	// FIXED: request.Call now uses an http.Client with a 30s Timeout, so a
-	// hung Slack endpoint no longer blocks the NotifyError goroutine forever.
-	// The positive verification is still skipped because it needs a ~30s
-	// wall-clock wait for the real timeout to fire.
-	t.Skip("verifying the 30s client timeout requires a 30s wall-clock wait; " +
-		"the timeout is set in internal/request/request.go Call()")
+	// request.Call bounds every outbound request with an http.Client timeout,
+	// so a hung Slack endpoint cannot block the NotifyError goroutine forever.
+	//
+	// This used to be skipped because asserting the real 30s default meant a
+	// 30s wall-clock wait. The timeout is now adjustable, so the same property
+	// is verified against a short one instead: what matters is that some bound
+	// exists and fires, not its exact duration.
+	defer request.SetCallTimeout(request.SetCallTimeout(200 * time.Millisecond))
 
 	blockForever := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +224,7 @@ func TestSlackNotification_HangingReceiverShouldTimeOut(t *testing.T) {
 	select {
 	case <-done:
 		// returned in bounded time: a timeout exists
-	case <-time.After(35 * time.Second): // generous bound > the 30s used elsewhere
+	case <-time.After(10 * time.Second): // generous bound > the 200ms set above
 		t.Fatal("SlackNotification blocked indefinitely on a hung receiver: no HTTP timeout configured")
 	}
 }
