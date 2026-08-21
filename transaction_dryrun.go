@@ -85,7 +85,7 @@ func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.
 	ctx, span := tracer.Start(ctx, "PreviewRefund")
 	defer span.End()
 
-	refundable, err := l.datasource.GetRefundableTransactionsByParentID(ctx, transactionID, 1, 0)
+	refundable, err := l.refundableLegsForPreview(ctx, transactionID)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -95,21 +95,118 @@ func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.
 		span.RecordError(err)
 		return nil, err
 	}
-	originalTxn := refundable[0]
 
-	// Same builder the real refund uses: source and destination swapped,
-	// overdraft allowed, status reset. skipQueue is irrelevant here because the
-	// projection never reaches the queue.
-	refund := prepareRefundTransaction(originalTxn, RefundOptions{SkipQueue: true})
+	// Every refundable leg is projected, not just the first. A refund of a
+	// split reverses each of its legs — ProcessTransactionInBatches walks the
+	// same query this one does — so projecting a single leg would answer for
+	// part of the movement and report a smaller amount than the refund
+	// actually moves.
+	//
+	// Legs are carried forward through one balance set because the real
+	// refund runs them on a single worker, one after another, so a later leg
+	// does observe an earlier leg's effect.
+	working := newPreviewBalanceSet(l)
+	total := big.NewInt(0)
+	var legErrors []error
 
-	preview, err := l.PreviewTransaction(ctx, refund)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
+	preview := &model.TransactionPreview{DryRun: true, WouldApply: true}
+
+	for _, original := range refundable {
+		// The same eligibility check each leg passes through on the real
+		// path. GetRefundableTransactionsByParentID filters on status alone,
+		// so without this a leg that has already been reversed still comes
+		// back from the query — its reversal is itself an APPLIED row under
+		// the same parent — and would be projected as refundable again, both
+		// claiming the refund would apply and counting the reversal into the
+		// total.
+		if err := l.validateTransactionForRefund(ctx, original); err != nil {
+			preview.WouldApply = false
+			legErrors = append(legErrors, err)
+			continue
+		}
+
+		// Same builder the real refund uses: source and destination swapped,
+		// overdraft allowed, status reset. SkipQueue only selects which real
+		// dispatch path would run; the projection reaches neither.
+		refund := prepareRefundTransaction(original, RefundOptions{SkipQueue: true})
+		normalizePreviewStatus(refund)
+		refund.PreciseAmount = model.ApplyPrecision(refund)
+
+		source, destination, err := working.resolvePair(ctx, refund)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+
+		if err := sameBalanceErr(source, destination); err != nil {
+			preview.WouldApply = false
+			legErrors = append(legErrors, err)
+			continue
+		}
+
+		if applyErr := l.processBalances(ctx, refund, source.balance, destination.balance); applyErr != nil {
+			preview.WouldApply = false
+			legErrors = append(legErrors, applyErr)
+			continue
+		}
+
+		total = new(big.Int).Add(total, refund.PreciseAmount)
+		preview.Status = refund.Status
+		preview.Currency = refund.Currency
+		preview.Precision = refund.Precision
+		preview.Reference = refund.Reference
+
+		if len(refundable) > 1 {
+			preview.Legs = append(preview.Legs, model.LegProjection{
+				Identifier:    original.TransactionID,
+				Role:          model.PreviewRoleSource,
+				PreciseAmount: preciseString(refund.PreciseAmount),
+				Amount:        refund.Amount,
+			})
+		}
 	}
 
-	preview.AddNote(fmt.Sprintf("projected refund of transaction %s", originalTxn.TransactionID))
+	if len(legErrors) > 0 {
+		preview.Rejection = previewRejection(fmt.Errorf("error occurred during processing: %v", legErrors))
+	}
+
+	preview.PreciseAmount = preciseString(total)
+	if preview.Precision > 0 {
+		preview.Amount = l.convertPreciseToFloat(total, preview.Precision)
+	}
+	preview.Balances = working.projections()
+
+	if len(refundable) == 1 {
+		preview.AddNote(fmt.Sprintf("projected refund of transaction %s", refundable[0].TransactionID))
+	} else {
+		preview.AddNote(fmt.Sprintf("projected refund of %d refundable transactions under %s", len(refundable), transactionID))
+	}
 	return preview, nil
+}
+
+// refundableLegsForPreview collects every transaction a refund of transactionID
+// would reverse.
+//
+// The real refund reaches these through ProcessTransactionInBatches, which
+// pages the same query until it is exhausted, so the projection pages it too
+// rather than reading a single row and answering for that one.
+func (l *Blnk) refundableLegsForPreview(ctx context.Context, transactionID string) ([]*model.Transaction, error) {
+	batchSize := l.Config().Transaction.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	var all []*model.Transaction
+	for offset := int64(0); ; offset += int64(batchSize) {
+		batch, err := l.datasource.GetRefundableTransactionsByParentID(ctx, transactionID, batchSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < batchSize {
+			return all, nil
+		}
+	}
 }
 
 // normalizePreviewStatus assigns the status the transaction would carry by the
