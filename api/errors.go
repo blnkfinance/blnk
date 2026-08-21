@@ -228,6 +228,15 @@ var messagePatterns = []messagePattern{
 	{[]string{"has already been used"}, apierror.ErrTxnDuplicateReference},
 	{[]string{"cannot commit more than"}, apierror.ErrTxnCommitAmountExceeded},
 	{[]string{"insufficient funds"}, apierror.ErrTxnInsufficientFunds},
+	// UpdateBalances reports a settlement that outruns its hold as
+	// "insufficient inflight debit balance" / "insufficient inflight credit
+	// balance", which the pattern above does not match. Unclassified, the
+	// condition inherited whichever fallback the calling handler happened to
+	// set — GEN_BAD_REQUEST from the inflight route, GEN_INTERNAL elsewhere —
+	// so the same failure surfaced under different codes depending on where
+	// it was raised. It is an insufficient-funds condition against the
+	// inflight balance, so it is classified as one.
+	{[]string{"insufficient inflight"}, apierror.ErrTxnInsufficientFunds},
 	{[]string{"transaction amount must be positive"}, apierror.ErrTxnInvalidAmount},
 	{[]string{"transaction validation failed"}, apierror.ErrTxnValidation},
 	{[]string{"reference is required"}, apierror.ErrTxnValidation},
