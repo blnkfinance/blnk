@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS blnk.balance_snapshots
     inflight_credit_balance BIGINT    NOT NULL,
     inflight_debit_balance  BIGINT    NOT NULL,
     currency               TEXT      NOT NULL,
-    snapshot_time          TIMESTAMP WITH TIME ZONE NOT NULL,
+    snapshot_time          TIMESTAMP NOT NULL,
     created_at             TIMESTAMP NOT NULL,
     last_tx_id             TEXT,
     meta_data              JSONB
