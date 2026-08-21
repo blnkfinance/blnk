@@ -384,6 +384,26 @@ func (l *Blnk) fetchBalanceForPreview(balanceID string) (*model.Balance, error) 
 // previewBalanceSet caches balances across the legs of a split so that a
 // balance touched more than once accumulates, and so each distinct balance is
 // read once.
+//
+// Unlike previewSingleTransaction, the paths built on this set — splits,
+// cumulative bulk items and inflight legs — read without holding the balance
+// lock, so the balances behind a multi-leg projection are not guaranteed to
+// be read as of one instant. Two reasons, and the trade-off is deliberate:
+//
+// acquireLock takes exactly one source and one destination. A leg set spans
+// an arbitrary number of balances, so there is no existing lock to reuse, and
+// holding one per balance across a whole batch would mean a read-only call
+// holding many balance locks at once — the shape that starves the writers it
+// is supposed to be predicting for. previewSingleTransaction locks because
+// there the pair is fixed and the hold spans two reads and some in-memory
+// arithmetic.
+//
+// The second reason is that the guarantee is worth little here. A projection
+// is advisory by construction: it describes balances as they stand, and any
+// transaction may move them between the answer and a real post. A torn read
+// across legs widens a window that is already open, so it does not change the
+// kind of answer a caller is getting, only its precision within a window they
+// were told not to rely on.
 type previewBalanceSet struct {
 	blnk  *Blnk
 	order []string
