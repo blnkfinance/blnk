@@ -1,7 +1,9 @@
 package database
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/blnkfinance/blnk/config"
 	"github.com/stretchr/testify/assert"
@@ -14,7 +16,7 @@ import (
 func resetDBSingleton() {
 	instanceMu.Lock()
 	defer instanceMu.Unlock()
-	instance = nil
+	instance.Store(nil)
 }
 
 func TestGetDBConnection_Singleton(t *testing.T) {
@@ -106,6 +108,78 @@ func TestNewDataSource_NoPanicAfterFailedAttempt(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, ds)
 	})
+}
+
+// Concurrent callers must all receive the same singleton, and exactly one
+// connection must be built. GetDBConnection is called per request by the
+// health endpoint and by two transaction handlers, so it has to stay safe
+// under parallel use.
+func TestGetDBConnection_ConcurrentCallersShareOneInstance(t *testing.T) {
+	resetDBSingleton()
+	t.Cleanup(resetDBSingleton)
+
+	cfg := &config.Configuration{
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost/blnk?sslmode=disable",
+		},
+	}
+
+	const goroutines = 64
+	var wg sync.WaitGroup
+	results := make([]*Datasource, goroutines)
+	errs := make([]error, goroutines)
+
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // release them together to maximise overlap
+			results[i], errs[i] = GetDBConnection(cfg)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i := 0; i < goroutines; i++ {
+		require.NoError(t, errs[i])
+		require.NotNil(t, results[i])
+		assert.Same(t, results[0], results[i], "every caller must get the same singleton")
+	}
+}
+
+// The fast path must not take the construction lock. If a future change moves
+// the lock back to the top of GetDBConnection, this deadlocks and fails on the
+// timeout rather than passing silently.
+func TestGetDBConnection_FastPathDoesNotBlockOnTheBuildLock(t *testing.T) {
+	resetDBSingleton()
+	t.Cleanup(resetDBSingleton)
+
+	cfg := &config.Configuration{
+		DataSource: config.DataSourceConfig{
+			Dns: "postgres://postgres:password@localhost/blnk?sslmode=disable",
+		},
+	}
+	// Build the singleton first so subsequent calls take the fast path.
+	ds, err := GetDBConnection(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, ds)
+
+	instanceMu.Lock() // hold the construction lock
+	defer instanceMu.Unlock()
+
+	done := make(chan *Datasource, 1)
+	go func() {
+		got, _ := GetDBConnection(cfg)
+		done <- got
+	}()
+
+	select {
+	case got := <-done:
+		assert.Same(t, ds, got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetDBConnection blocked on the construction lock: the cached read is not lock-free")
+	}
 }
 
 func TestConnectDB_Success(t *testing.T) {
