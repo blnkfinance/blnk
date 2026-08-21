@@ -78,9 +78,21 @@ func newTLSServer(r *gin.Engine, conf config.ServerConfig) (*http.Server, error)
 	}
 	domains := resolveTLSDomains(conf)
 
-	// Manage TLS certificates for the specified domains
+	// Manage TLS certificates for the specified domains.
+	//
+	// Issuance is an ACME challenge, not a local operation: CertMagic solves
+	// HTTP-01 on port 80 and TLS-ALPN-01 on port 443, independently of
+	// server.port, and the CA must reach both from the internet to validate
+	// the domain. The shipped docker-compose publishes only 5001, so a failure
+	// here is usually a missing port mapping rather than anything wrong with
+	// the certificate. Say so, because the raw ACME error does not.
 	if err := cfg.ManageSync(context.Background(), domains); err != nil {
-		return nil, fmt.Errorf("failed to obtain a TLS certificate for %v: %w", domains, err)
+		return nil, fmt.Errorf(
+			"failed to obtain a TLS certificate for %v: %w; "+
+				"ACME validation needs ports %d (HTTP-01) and %d (TLS-ALPN-01) reachable from the internet, "+
+				"separately from server.port=%s -- publish them (add \"80:80\" and \"443:443\" to the server "+
+				"service) or terminate TLS at a proxy and leave server.ssl false",
+			domains, err, certmagic.HTTPPort, certmagic.HTTPSPort, conf.Port)
 	}
 
 	return &http.Server{
