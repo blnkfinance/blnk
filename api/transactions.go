@@ -490,6 +490,16 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	// way callers request a partial commit, and skipping this resolution for
 	// dry runs previously meant that field was silently ignored there,
 	// letting an over-limit amount preview as would_apply: true.
+	//
+	// This does mean a dry run now reaches ApplyPrecisionWithDBLookup, which
+	// the branch used to sit ahead of because it writes into a package-level
+	// precision cache. That is a read-through cache of a value that never
+	// changes for a given transaction, so the entry a projection leaves is
+	// the same one the real commit would have written and can never be
+	// stale; the only cost is that a projection can contribute to the
+	// entry-count bound that resets the map. Preferred over resolving the
+	// amount twice, once per branch, and risking the two drifting apart —
+	// which is the class of bug this resolution was moved to fix.
 	cnf, err := config.Fetch()
 	if err != nil {
 		respondError(c, err)
