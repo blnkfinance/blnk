@@ -320,6 +320,64 @@ func TestValidateRecordTransaction(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "Invalid Transaction - Source equals Destination",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Source:      "bln_same",
+				Destination: "bln_same",
+				SkipQueue:   true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Source appears among Destinations (fan-out)",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Source:      "bln_a",
+				Destinations: []model.Distribution{
+					{Identifier: "bln_a", Distribution: "50%"},
+					{Identifier: "bln_b", Distribution: "50%"},
+				},
+				SkipQueue: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Destination appears among Sources (fan-in)",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Destination: "bln_b",
+				Sources: []model.Distribution{
+					{Identifier: "bln_a", Distribution: "50%"},
+					{Identifier: "bln_b", Distribution: "50%"},
+				},
+				SkipQueue: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Valid Transaction - Source and Destination distinct",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Source:      "bln_a",
+				Destination: "bln_b",
+				SkipQueue:   true,
+			},
+			wantErr: false,
+		},
+		{
 			// The bypass: negative x negative yields a positive precise
 			// amount, so every downstream positivity check passes while the
 			// persisted record still reports a negative amount.

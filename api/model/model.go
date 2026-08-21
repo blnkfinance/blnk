@@ -120,6 +120,45 @@ func destinationOrDestinationsValidation(t *RecordTransaction) validation.RuleFu
 	}
 }
 
+// sameBalanceValidation rejects a source and destination that resolve to the
+// same balance, whether directly or through a split.
+//
+// updateBalance guards each row with optimistic locking: UPDATE ... WHERE
+// balance_id = $1 AND version = $N. Source and destination are fetched as
+// two independent balance reads, both carrying the row's version from
+// before either update runs. When they name the same row, the first UPDATE
+// advances the version and the second's WHERE version=<now stale> clause
+// matches nothing — a deterministic conflict every single time this is
+// attempted, not a rare race. Rejecting it here, before any balance is
+// fetched, avoids both the confusing downstream "optimistic locking
+// failure" (which reads as a transient race, not a guaranteed one) and,
+// on the default queued path, several retry cycles spent on a transaction
+// that can never succeed.
+func sameBalanceValidation(t *RecordTransaction) validation.RuleFunc {
+	return func(value interface{}) error {
+		const msg = "source and destination cannot be the same balance"
+
+		if t.Source != "" && t.Destination != "" && t.Source == t.Destination {
+			return errors.New(msg)
+		}
+		if t.Source != "" {
+			for _, d := range t.Destinations {
+				if d.Identifier == t.Source {
+					return errors.New(msg)
+				}
+			}
+		}
+		if t.Destination != "" {
+			for _, s := range t.Sources {
+				if s.Identifier == t.Destination {
+					return errors.New(msg)
+				}
+			}
+		}
+		return nil
+	}
+}
+
 func (l *CreateLedger) ValidateCreateLedger() error {
 	return validation.ValidateStruct(l,
 		validation.Field(&l.Name, validation.Required),
@@ -241,7 +280,7 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.Description, validation.Required),
 		validation.Field(&t.Source, validation.By(sourceOrSourcesValidation(t))),
-		validation.Field(&t.Destination, validation.By(destinationOrDestinationsValidation(t))),
+		validation.Field(&t.Destination, validation.By(destinationOrDestinationsValidation(t)), validation.By(sameBalanceValidation(t))),
 		validation.Field(&t.ScheduledFor, validation.When(t.ScheduledFor != "", validation.By(func(value interface{}) error {
 			dateStr, ok := value.(string)
 			if !ok {
