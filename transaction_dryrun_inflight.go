@@ -136,7 +136,15 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 	}
 
 	if len(legErrors) > 0 {
-		preview.Rejection = previewRejection(fmt.Errorf("error occurred during processing: %v", legErrors))
+		// Mirrors ProcessTransactionInBatches exactly, including its
+		// single-error case: one failing leg is reported as itself, several
+		// are reported together. Kept in lockstep with that function so a
+		// projected rejection keeps reading the same as the real one.
+		if len(legErrors) == 1 {
+			preview.Rejection = previewRejection(legErrors[0])
+		} else {
+			preview.Rejection = previewRejection(fmt.Errorf("error occurred during processing: %v", legErrors))
+		}
 	}
 
 	preview.PreciseAmount = preciseString(total)
