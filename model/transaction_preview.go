@@ -37,8 +37,13 @@ type TransactionPreview struct {
 
 	// Operation names the settlement being projected on the inflight endpoint:
 	// "commit" or "void". Empty for ordinary transaction projections.
-	Operation     string              `json:"operation,omitempty"`
-	Status        string              `json:"status"`
+	Operation string `json:"operation,omitempty"`
+
+	// Status is the status the transaction would carry once applied. It is
+	// omitted when WouldApply is false: a rejected projection has no resulting
+	// status, because the real endpoint returns an error and writes no
+	// transaction at all. See Finalize.
+	Status        string              `json:"status,omitempty"`
 	Reference     string              `json:"reference,omitempty"`
 	Currency      string              `json:"currency"`
 	Amount        float64             `json:"amount"`
@@ -135,4 +140,34 @@ type BulkTransactionPreview struct {
 // AddNote appends an advisory note to the batch projection.
 func (preview *BulkTransactionPreview) AddNote(note string) {
 	preview.Notes = append(preview.Notes, note)
+}
+
+// Finalize reconciles fields that only describe a transaction that would
+// actually apply.
+//
+// Status is set early, from the status the transaction would carry once
+// applied, and the projection only later discovers it would be rejected -- an
+// insufficient balance, a failing leg, a validation failure downstream. Left
+// alone, the response then asserts two things that cannot both be true:
+//
+//	"would_apply": false,
+//	"rejection":   { "code": "TXN_INSUFFICIENT_FUNDS", ... },
+//	"status":      "APPLIED"
+//
+// A rejected projection has no resulting status. The real endpoint returns an
+// error and writes no transaction, so there is no status to report; clearing
+// it lets the omitempty tag drop the field rather than name an outcome that
+// cannot happen. Callers read would_apply and rejection for that answer.
+func (preview *TransactionPreview) Finalize() {
+	if !preview.WouldApply {
+		preview.Status = ""
+	}
+}
+
+// Finalize applies the same reconciliation to a batch and to each of its
+// items, so a rejected item does not report a status either.
+func (preview *BulkTransactionPreview) Finalize() {
+	for i := range preview.Results {
+		preview.Results[i].Finalize()
+	}
 }

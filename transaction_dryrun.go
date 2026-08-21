@@ -65,6 +65,7 @@ func (l *Blnk) PreviewTransaction(ctx context.Context, transaction *model.Transa
 	}
 
 	span.SetAttributes(attribute.Bool("preview.would_apply", preview.WouldApply))
+	preview.Finalize()
 	return preview, nil
 }
 
@@ -181,6 +182,7 @@ func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.
 	} else {
 		preview.AddNote(fmt.Sprintf("projected refund of %d refundable transactions under %s", len(refundable), transactionID))
 	}
+	preview.Finalize()
 	return preview, nil
 }
 
@@ -289,6 +291,7 @@ func (l *Blnk) previewSingleTransaction(ctx context.Context, transaction *model.
 	span.AddEvent("Transaction projected", trace.WithAttributes(
 		attribute.Bool("preview.would_apply", preview.WouldApply),
 	))
+	preview.Finalize()
 	return preview, nil
 }
 
@@ -396,6 +399,7 @@ func (l *Blnk) previewSplitTransaction(ctx context.Context, transaction *model.T
 		preview.Balances = shared.projections()
 	}
 
+	preview.Finalize()
 	return preview, nil
 }
 

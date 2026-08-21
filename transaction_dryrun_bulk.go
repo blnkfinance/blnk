@@ -110,6 +110,7 @@ func (l *Blnk) PreviewBulkTransactions(ctx context.Context, request *model.BulkT
 		attribute.Bool("preview.cumulative", preview.Cumulative),
 		attribute.Int("preview.items", len(preview.Results)),
 	)
+	preview.Finalize()
 	return preview, nil
 }
 
@@ -153,6 +154,7 @@ func (l *Blnk) bulkItemDuplicateReference(ctx context.Context, item *model.Trans
 	preview.PreciseAmount = preciseString(item.PreciseAmount)
 	preview.Amount = item.Amount
 	preview.Rejection = previewRejection(fmt.Errorf("transaction validation failed: reference %s has already been used", item.Reference))
+	preview.Finalize()
 	return preview, nil
 }
 
@@ -239,5 +241,6 @@ func (l *Blnk) previewBulkItem(ctx context.Context, item *model.Transaction, wor
 		}
 	}
 
+	preview.Finalize()
 	return preview, nil
 }

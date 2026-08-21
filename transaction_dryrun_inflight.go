@@ -55,7 +55,7 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 			if action == InflightActionVoid {
 				status = StatusVoid
 			}
-			return &model.TransactionPreview{
+			rejected := &model.TransactionPreview{
 				DryRun:        true,
 				WouldApply:    false,
 				Operation:     action,
@@ -63,7 +63,9 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 				Rejection:     previewRejection(err),
 				PreciseAmount: preciseString(nil),
 				Balances:      []model.BalanceProjection{},
-			}, nil
+			}
+			rejected.Finalize()
+			return rejected, nil
 		}
 		span.RecordError(err)
 		return nil, err
@@ -169,6 +171,7 @@ func (l *Blnk) PreviewInflightAction(ctx context.Context, txID, action string, a
 		attribute.Bool("preview.would_apply", preview.WouldApply),
 		attribute.Int("preview.legs", len(legs)),
 	)
+	preview.Finalize()
 	return preview, nil
 }
 
