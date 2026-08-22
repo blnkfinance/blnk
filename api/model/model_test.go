@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math/big"
 	"testing"
 	"time"
 
@@ -317,6 +318,151 @@ func TestValidateRecordTransaction(t *testing.T) {
 				InflightCommitDate: "invalid-date",
 			},
 			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Source equals Destination",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Source:      "bln_same",
+				Destination: "bln_same",
+				SkipQueue:   true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Source appears among Destinations (fan-out)",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Source:      "bln_a",
+				Destinations: []model.Distribution{
+					{Identifier: "bln_a", Distribution: "50%"},
+					{Identifier: "bln_b", Distribution: "50%"},
+				},
+				SkipQueue: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Destination appears among Sources (fan-in)",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Destination: "bln_b",
+				Sources: []model.Distribution{
+					{Identifier: "bln_a", Distribution: "50%"},
+					{Identifier: "bln_b", Distribution: "50%"},
+				},
+				SkipQueue: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Valid Transaction - Source and Destination distinct",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Currency:    "USD",
+				Reference:   "ref1",
+				Description: "Test transaction",
+				Source:      "bln_a",
+				Destination: "bln_b",
+				SkipQueue:   true,
+			},
+			wantErr: false,
+		},
+		{
+			// The bypass: negative x negative yields a positive precise
+			// amount, so every downstream positivity check passes while the
+			// persisted record still reports a negative amount.
+			name: "Invalid Transaction - Negative amount with negative precision (bypass)",
+			transaction: RecordTransaction{
+				Amount:      -25,
+				Precision:   -100,
+				Currency:    "USD",
+				Reference:   "ref_neg_bypass",
+				Description: "Test transaction",
+				Source:      "source1",
+				Destination: "dest1",
+				SkipQueue:   true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Negative amount alone",
+			transaction: RecordTransaction{
+				Amount:      -25,
+				Precision:   100,
+				Currency:    "USD",
+				Reference:   "ref_neg_amount",
+				Description: "Test transaction",
+				Source:      "source1",
+				Destination: "dest1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Negative precision alone",
+			transaction: RecordTransaction{
+				Amount:      25,
+				Precision:   -100,
+				Currency:    "USD",
+				Reference:   "ref_neg_precision",
+				Description: "Test transaction",
+				Source:      "source1",
+				Destination: "dest1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid Transaction - Negative precise_amount",
+			transaction: RecordTransaction{
+				PreciseAmount: big.NewInt(-1000),
+				Precision:     100,
+				Currency:      "USD",
+				Reference:     "ref_neg_precise",
+				Description:   "Test transaction",
+				Source:        "source1",
+				Destination:   "dest1",
+			},
+			wantErr: true,
+		},
+		{
+			// Zero precision means "not supplied" and is defaulted to 1
+			// downstream, so it must stay valid.
+			name: "Valid Transaction - Zero precision is still allowed",
+			transaction: RecordTransaction{
+				Amount:      100,
+				Precision:   0,
+				Currency:    "USD",
+				Reference:   "ref_zero_precision",
+				Description: "Test transaction",
+				Source:      "source1",
+				Destination: "dest1",
+			},
+			wantErr: false,
+		},
+		{
+			// Zero amount alongside precise_amount is the existing sentinel
+			// for "use precise_amount"; this fix must not disturb it.
+			name: "Valid Transaction - Zero amount with positive precise_amount",
+			transaction: RecordTransaction{
+				Amount:        0,
+				PreciseAmount: big.NewInt(1000),
+				Precision:     100,
+				Currency:      "USD",
+				Reference:     "ref_zero_amount",
+				Description:   "Test transaction",
+				Source:        "source1",
+				Destination:   "dest1",
+			},
+			wantErr: false,
 		},
 	}
 

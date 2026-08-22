@@ -18,10 +18,12 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -103,15 +105,30 @@ func (a Api) respondPreview(c *gin.Context, preview *model.TransactionPreview, e
 		return
 	}
 
-	if preview.Rejection != nil && preview.Rejection.Code == "" {
-		code, ok := classifyMessage(preview.Rejection.Message)
-		if !ok {
-			code = apierror.ErrTxnValidation
-		}
-		preview.Rejection.Code = string(code)
+	resolvePreviewRejectionCode(preview)
+	c.JSON(http.StatusOK, preview)
+}
+
+// resolvePreviewRejectionCode fills in the error code a real post would have
+// returned for a projected rejection, using the same classifier the other
+// endpoints resolve errors through.
+func resolvePreviewRejectionCode(preview *model.TransactionPreview) {
+	if preview == nil || preview.Rejection == nil || preview.Rejection.Code != "" {
+		return
 	}
 
-	c.JSON(http.StatusOK, preview)
+	code, ok := classifyMessage(preview.Rejection.Message)
+	if !ok {
+		code = apierror.ErrTxnValidation
+	}
+	preview.Rejection.Code = string(code)
+}
+
+// resolvePreviewRejectionCodes fills in rejection codes across a batch.
+func resolvePreviewRejectionCodes(previews []model.TransactionPreview) {
+	for i := range previews {
+		resolvePreviewRejectionCode(&previews[i])
+	}
 }
 
 func handleRecordTransactionValidationError(c *gin.Context, err error) {
@@ -465,6 +482,26 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		return
 	}
 
+	status := req.Status
+	if status != blnk.InflightActionCommit && status != blnk.InflightActionVoid {
+		respondCode(c, apierror.ErrTxnInvalidStatusAction, "status not supported. use either commit or void", nil)
+		return
+	}
+
+	// Resolved before the dry-run branch too: a plain `amount` is the normal
+	// way callers request a partial commit, and skipping this resolution for
+	// dry runs previously meant that field was silently ignored there,
+	// letting an over-limit amount preview as would_apply: true.
+	//
+	// This does mean a dry run now reaches ApplyPrecisionWithDBLookup, which
+	// the branch used to sit ahead of because it writes into a package-level
+	// precision cache. That is a read-through cache of a value that never
+	// changes for a given transaction, so the entry a projection leaves is
+	// the same one the real commit would have written and can never be
+	// stale; the only cost is that a projection can contribute to the
+	// entry-count bound that resets the map. Preferred over resolving the
+	// amount twice, once per branch, and risking the two drifting apart —
+	// which is the class of bug this resolution was moved to fix.
 	cnf, err := config.Fetch()
 	if err != nil {
 		respondError(c, err)
@@ -486,9 +523,9 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 		amount = req.PreciseAmount
 	}
 
-	status := req.Status
-	if status != blnk.InflightActionCommit && status != blnk.InflightActionVoid {
-		respondCode(c, apierror.ErrTxnInvalidStatusAction, "status not supported. use either commit or void", nil)
+	if req.DryRun {
+		preview, err := a.blnk.PreviewInflightAction(c.Request.Context(), id, status, amount)
+		a.respondPreview(c, preview, err)
 		return
 	}
 
@@ -581,6 +618,21 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 
 	bulkReq := req.ToBulkTransactionRequest()
 
+	// Projected after the per-item validation above, so a dry run is held to
+	// the same input rules as a real batch, but before anything is dispatched.
+	if req.DryRun {
+		preview, err := a.blnk.PreviewBulkTransactions(c.Request.Context(), bulkReq)
+		if err != nil {
+			respondError(c, err,
+				withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound),
+				withDefault(apierror.ErrTxnValidation))
+			return
+		}
+		resolvePreviewRejectionCodes(preview.Results)
+		c.JSON(http.StatusOK, preview)
+		return
+	}
+
 	// Call the service layer method to handle bulk transaction creation
 	result, err := a.blnk.CreateBulkTransactions(c.Request.Context(), bulkReq)
 	// Handle the response based on the result and error from the service layer
@@ -666,6 +718,92 @@ func (a Api) RecoverQueuedTransactions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"recovered": recovered, "threshold": threshold.String()})
 }
 
+// respondBulkInflightPreview projects a bulk commit or void and writes the
+// result, without settling anything.
+//
+// Items are projected independently rather than cumulatively, because that
+// is how BulkInflightUpdate really runs them: across a worker pool with no
+// ordering between items, so no item can be said to observe another's
+// effect. Each item is therefore projected against the balances as they
+// stand, and the batch-level balances a cumulative projection would report
+// are deliberately omitted.
+//
+// A per-item projection failure is reported as that item's rejection rather
+// than failing the whole request, mirroring BulkInflightUpdate, whose
+// per-item failures do not abort the rest of the batch. Only an
+// infrastructure error aborts.
+func (a Api) respondBulkInflightPreview(c *gin.Context, action string, items []blnk.BulkInflightItem) {
+	preview := model.BulkTransactionPreview{
+		DryRun:     true,
+		WouldApply: true,
+		Cumulative: false,
+		Results:    make([]model.TransactionPreview, 0, len(items)),
+	}
+	preview.Notes = append(preview.Notes,
+		"items are dispatched across a worker pool, so each is projected independently against current balances and real execution order is not guaranteed")
+
+	// A transaction id repeated in one batch is projected once per occurrence,
+	// and each occurrence sees the hold still standing — so every one of them
+	// reports would_apply. Really running that batch settles the hold once and
+	// fails the rest, against a hold that is gone or already taken.
+	//
+	// The duplicate is reported rather than resolved. Which occurrence wins is
+	// decided by the worker pool, so marking a particular one as the loser
+	// would assert an ordering the ledger does not provide — the same reason
+	// the batch above is projected independently rather than cumulatively.
+	// Saying that only one can settle is both true and all that is knowable.
+	seen := make(map[string]bool, len(items))
+	dupes := make([]string, 0)
+	for _, item := range items {
+		if seen[item.TransactionID] {
+			dupes = append(dupes, item.TransactionID)
+			continue
+		}
+		seen[item.TransactionID] = true
+	}
+	if len(dupes) > 0 {
+		preview.AddNote(fmt.Sprintf(
+			"transaction id appears more than once in this batch (%s); the occurrences settle the same hold, so only one of them can succeed and which one is not determined",
+			strings.Join(uniqueStrings(dupes), ", ")))
+	}
+
+	for _, item := range items {
+		itemPreview, err := a.blnk.PreviewInflightAction(c.Request.Context(), item.TransactionID, action, item.Amount)
+		if err != nil {
+			// The id could not be resolved at all (missing, or an
+			// infrastructure failure). Report it against the item rather than
+			// discarding the projections already gathered.
+			itemPreview = &model.TransactionPreview{
+				DryRun:     true,
+				WouldApply: false,
+				Operation:  action,
+				Rejection:  &model.PreviewRejection{Message: err.Error()},
+			}
+		}
+		if !itemPreview.WouldApply {
+			preview.WouldApply = false
+		}
+		preview.Results = append(preview.Results, *itemPreview)
+	}
+
+	resolvePreviewRejectionCodes(preview.Results)
+	c.JSON(http.StatusOK, preview)
+}
+
+// uniqueStrings returns in, de-duplicated, preserving first-seen order.
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
 // bulkInflightMaxWorkers caps the worker-pool size used by the bulk handlers.
 // 8 is a deliberate compromise: large enough to win meaningful concurrency
 // vs sequential N round-trips, small enough not to flood the lock service or
@@ -720,6 +858,13 @@ func (a Api) BulkVoidInflight(c *gin.Context) {
 	items := make([]blnk.BulkInflightItem, len(req.TransactionIDs))
 	for i, id := range req.TransactionIDs {
 		items[i] = blnk.BulkInflightItem{TransactionID: id}
+	}
+
+	// Ahead of both the queueing and the synchronous branch: a dry run must
+	// not release a hold on either path.
+	if req.DryRun {
+		a.respondBulkInflightPreview(c, blnk.InflightActionVoid, items)
+		return
 	}
 
 	if !req.SkipQueue {
@@ -804,6 +949,13 @@ func (a Api) BulkCommitInflight(c *gin.Context) {
 			amount = model.ApplyPrecisionWithDBLookup(&model.Transaction{Amount: it.Amount, TransactionID: it.TransactionID}, ds.Conn)
 		}
 		items[i] = blnk.BulkInflightItem{TransactionID: it.TransactionID, Amount: amount}
+	}
+
+	// Ahead of both the queueing and the synchronous branch: a dry run must
+	// not settle a hold on either path.
+	if req.DryRun {
+		a.respondBulkInflightPreview(c, blnk.InflightActionCommit, items)
+		return
 	}
 
 	if !req.SkipQueue {
