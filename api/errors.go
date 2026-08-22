@@ -34,13 +34,39 @@ import (
 // the legacy field clients depend on today (flat "error"/"errors" string,
 // preserved verbatim) and the structured "error_detail" object with the
 // canonical error code. The legacy field is removed — and error_detail
-// renamed to error — at the next major release. See docs/errors.md.
+// renamed to error — at the next major release.
+//
+// The code catalog and its stability guarantee are published at
+// https://docs.blnkfinance.com/advanced/error-codes (source:
+// blnkfinance/blnk-docs, advanced/error-codes.mdx). error_detail.code is the
+// stable field clients branch on; error, errors and error_detail.message are
+// for display and may change between releases.
 
 const errorDetailKey = "error_detail"
 
 // sanitizedInternalMessage replaces raw internal error text on unclassified
 // 5xx responses so database/driver details never leak to clients.
 const sanitizedInternalMessage = "internal server error"
+
+// sanitizeBindError rewrites a request-decoding error into a message about
+// the request, rather than about Blnk's internals.
+//
+// encoding/json and math/big report decode failures in terms of Go types.
+// A precise_amount sent as a JSON string, for example, surfaces verbatim as:
+//
+//	math/big: cannot unmarshal "\"5000\"" into a *big.Int
+//
+// The Go type name means nothing to an API client and exposes an
+// implementation detail, so the known shape is rewritten to name the field
+// and the expected format instead. Anything unrecognised is returned
+// unchanged — this narrows a leak, it does not hide decode failures.
+func sanitizeBindError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "big.Int") || strings.HasPrefix(msg, "math/big:") {
+		return "invalid numeric value: precise amount fields must be sent as a JSON number in the smallest unit (for example 5000, not \"5000\")"
+	}
+	return msg
+}
 
 type respondOptions struct {
 	defaultCode     apierror.ErrorCode
@@ -198,10 +224,19 @@ var messagePatterns = []messagePattern{
 	{[]string{"not in inflight status"}, apierror.ErrTxnNotInflight},
 	{[]string{"Transaction already committed"}, apierror.ErrTxnAlreadyCommitted},
 	{[]string{"has already been voided"}, apierror.ErrTxnAlreadyVoided},
-	{[]string{"has already been refunded"}, apierror.ErrGenConflict},
+	{[]string{"has already been refunded"}, apierror.ErrTxnAlreadyRefunded},
 	{[]string{"has already been used"}, apierror.ErrTxnDuplicateReference},
 	{[]string{"cannot commit more than"}, apierror.ErrTxnCommitAmountExceeded},
 	{[]string{"insufficient funds"}, apierror.ErrTxnInsufficientFunds},
+	// UpdateBalances reports a settlement that outruns its hold as
+	// "insufficient inflight debit balance" / "insufficient inflight credit
+	// balance", which the pattern above does not match. Unclassified, the
+	// condition inherited whichever fallback the calling handler happened to
+	// set — GEN_BAD_REQUEST from the inflight route, GEN_INTERNAL elsewhere —
+	// so the same failure surfaced under different codes depending on where
+	// it was raised. It is an insufficient-funds condition against the
+	// inflight balance, so it is classified as one.
+	{[]string{"insufficient inflight"}, apierror.ErrTxnInsufficientFunds},
 	{[]string{"transaction amount must be positive"}, apierror.ErrTxnInvalidAmount},
 	{[]string{"transaction validation failed"}, apierror.ErrTxnValidation},
 	{[]string{"reference is required"}, apierror.ErrTxnValidation},

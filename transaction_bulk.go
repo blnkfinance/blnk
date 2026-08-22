@@ -44,9 +44,13 @@ func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*mode
 
 		// Queue the transaction (which will record it if SkipQueue is true)
 		if _, err := l.QueueTransaction(ctx, txn); err != nil {
-			// Create a more descriptive error that includes transaction reference details
-			return fmt.Errorf("failed to queue transaction %d (Reference: %s, Source: %s, Destination: %s, Amount: %.2f): %w",
-				i+1, txn.Reference, txn.Source, txn.Destination, txn.Amount, err)
+			// Create a more descriptive error that includes transaction reference details.
+			// The index is 0-based to match the position reported by the request
+			// validation errors for the same batch ("transactions[0]", and the
+			// "index" field of error_detail.details), so a client pointing at the
+			// offending item does not have to know which layer rejected it.
+			return fmt.Errorf("failed to queue transactions[%d] (Reference: %s, Source: %s, Destination: %s, Amount: %.2f): %w",
+				i, txn.Reference, txn.Source, txn.Destination, txn.Amount, err)
 		}
 	}
 	return nil
