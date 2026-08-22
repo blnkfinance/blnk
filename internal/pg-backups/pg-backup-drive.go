@@ -182,7 +182,11 @@ func (bm *BackupManager) BackupToS3(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to open file for S3 upload")
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); cerr != nil {
+			log.Warnf("failed to close %s after S3 upload: %v", filePath, cerr)
+		}
+	}()
 
 	_, filename := filepath.Split(filePath) // Get the filename from the full path
 

@@ -127,7 +127,7 @@ func TestConnectionReuse(t *testing.T) {
 	// Create Blnk instance
 	blnk, err := NewBlnk(nil)
 	assert.NoError(t, err)
-	defer blnk.Close()
+	defer func() { _ = blnk.Close() }()
 
 	// Send multiple webhook requests directly (bypass queue for immediate testing)
 	numRequests := 10
@@ -191,7 +191,7 @@ func TestHTTPClientConfiguration(t *testing.T) {
 	// Create Blnk instance
 	blnk, err := NewBlnk(nil)
 	assert.NoError(t, err)
-	defer blnk.Close()
+	defer func() { _ = blnk.Close() }()
 
 	// Verify HTTP client is configured properly
 	assert.NotNil(t, blnk.httpClient, "HTTP client should be initialized")
@@ -241,7 +241,7 @@ func TestProcessWebhookWithReusedClient(t *testing.T) {
 
 	blnk, err := NewBlnk(nil)
 	assert.NoError(t, err)
-	defer blnk.Close()
+	defer func() { _ = blnk.Close() }()
 
 	// Store reference to the HTTP client
 	clientMutex.Lock()

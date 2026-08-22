@@ -970,7 +970,7 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			query.WriteString(",")
 		}
 		base := i*11 + 1
-		query.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&query,
 			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
 			base,
 			base+1,
@@ -983,7 +983,7 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			base+8,
 			base+9,
 			base+10,
-		))
+		)
 		args = append(args,
 			balance.BalanceID,
 			balance.Balance.String(),
@@ -1452,7 +1452,8 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 
 	err = snapshot.Scan(&snapshotBalance, &snapshotCredit, &snapshotDebit, &snapshotTime)
 
-	if err == nil {
+	switch err {
+	case nil:
 		// Snapshot found, use it as starting point
 		creditBalance, err = parseBigInt(snapshotCredit)
 		if err != nil {
@@ -1469,7 +1470,7 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 			"debit":      snapshotDebit,
 		}).Debug("found snapshot for balance")
 		return creditBalance, debitBalance, snapshotTime, nil
-	} else if err == sql.ErrNoRows {
+	case sql.ErrNoRows:
 		// No snapshot found, calculate from genesis (all transactions)
 		logrus.WithField("balance_id", balanceID).Debug("no snapshot found, calculating from genesis")
 		return new(big.Int).SetInt64(0), new(big.Int).SetInt64(0), time.Time{}, nil
