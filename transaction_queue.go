@@ -76,11 +76,28 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	setTransactionStatus(transaction)
 	originalTxnID := transaction.TransactionID
 
-	// Handle split transactions if needed
-	transactions, err := l.handleSplitTransactions(ctx, transaction)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
+	// Handle split transactions if needed.
+	//
+	// Only when there is actually something to split. handleSplitTransactions
+	// used to run for every transaction, and for a plain source-to-destination
+	// one it walked the whole distribution machinery with an empty
+	// distribution list — normally a no-op that returns no legs, but it still
+	// reached validateDistributions, whose "total distributions exceed 100% or
+	// total amount" check compares a zero running total against the
+	// transaction's precise amount. For any transaction whose amount is not
+	// positive that comparison is trivially true, so a plain transfer was
+	// rejected with a message about distributions it never had.
+	//
+	// PreviewTransaction already gates the split path this way, so this also
+	// brings the posting path in line with the preview that models it.
+	var transactions []*model.Transaction
+	var err error
+	if len(transaction.Sources) > 0 || len(transaction.Destinations) > 0 {
+		transactions, err = l.handleSplitTransactions(ctx, transaction)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
 	}
 
 	// If SkipQueue is true, process synchronously
