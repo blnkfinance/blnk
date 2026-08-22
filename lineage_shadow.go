@@ -155,7 +155,7 @@ func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, 
 	outbox := &model.LineageOutbox{
 		TransactionID: shadowWorkID,
 		LineageType:   lineageType,
-		Payload:       []byte(fmt.Sprintf(`{"parent_transaction_id":"%s"}`, parentTransactionID)),
+		Payload:       fmt.Appendf(nil, `{"parent_transaction_id":"%s"}`, parentTransactionID),
 		MaxAttempts:   5,
 	}
 
@@ -175,16 +175,3 @@ func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, 
 	// Return original error since processing failed
 	return processingErr
 }
-
-// PrepareLineageOutbox creates a LineageOutbox entry for atomic insertion with the transaction.
-// This ensures lineage processing intent is captured in the same database transaction,
-// guaranteeing no lineage work is lost even if subsequent async operations fail.
-//
-// Parameters:
-// - ctx context.Context: The context for the operation.
-// - txn *model.Transaction: The transaction being processed.
-// - sourceBalance *model.Balance: The source balance (may be nil).
-// - destinationBalance *model.Balance: The destination balance (may be nil).
-//
-// Returns:
-// - *model.LineageOutbox: The outbox entry to insert, or nil if no lineage processing needed.
