@@ -108,7 +108,7 @@ func getResourceFromPath(path string) Resource {
 	}
 
 	// Treat paths like /entity-id/metadata as the metadata resource.
-	if len(parts) >= 2 && parts[len(parts)-1] == "metadata" {
+	if parts[len(parts)-1] == "metadata" {
 		return ResourceMetadata
 	}
 
