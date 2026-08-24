@@ -73,6 +73,9 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 	comprehensiveKey, err := blnkService.CreateAPIKey(context.Background(), "comprehensive-key", "test-owner", allPermissionsScopes, time.Now().Add(24*time.Hour))
 	assert.NoError(t, err)
 
+	metadataWriterKey, err := blnkService.CreateAPIKey(context.Background(), "metadata-writer", "test-owner", []string{"metadata:write"}, time.Now().Add(24*time.Hour))
+	assert.NoError(t, err)
+
 	tests := []struct {
 		name          string
 		path          string
@@ -551,6 +554,35 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 			expectedCode:  http.StatusUnauthorized,
 			expectedError: "Invalid API key",
 		},
+		{
+			name:   "metadata:write scoped key allows POST /:id/metadata",
+			path:   "/:id/metadata",
+			method: "POST",
+			apiKey: metadataWriterKey.Key,
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:   "scoped key without metadata:write gets insufficient permissions not unknown resource",
+			path:   "/:id/metadata",
+			method: "POST",
+			apiKey: insufficientKey.Key,
+			setupConfig: func() *config.Configuration {
+				return &config.Configuration{
+					Server: config.ServerConfig{
+						Secure: true,
+					},
+				}
+			},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for metadata:write",
+		},
 	}
 
 	for _, tt := range tests {
@@ -657,6 +689,11 @@ func TestGetResourceFromPath(t *testing.T) {
 		{
 			name:     "Valid metadata path",
 			path:     "/metadata",
+			expected: ResourceMetadata,
+		},
+		{
+			name:     "/:id/metadata path",
+			path:     "/:id/metadata",
 			expected: ResourceMetadata,
 		},
 		{

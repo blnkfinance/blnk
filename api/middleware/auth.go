@@ -107,6 +107,11 @@ func getResourceFromPath(path string) Resource {
 		return ResourceTransactions
 	}
 
+	// Treat paths like /entity-id/metadata as the metadata resource.
+	if len(parts) >= 2 && parts[len(parts)-1] == "metadata" {
+		return ResourceMetadata
+	}
+
 	// Check if the path segment maps to a known resource
 	if resource, ok := pathToResource[parts[0]]; ok {
 		return resource
