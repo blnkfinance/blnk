@@ -585,12 +585,6 @@ func TestRecordTransactionWithBalances_AtomicSuccess_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			t.Skipf("Skipping test: recovered from panic (likely database connection issue): %v", r)
-		}
-	}()
-
 	ctx := context.Background()
 	cnf := &config.Configuration{
 		Redis: config.RedisConfig{
@@ -698,12 +692,6 @@ func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *te
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Skipf("Skipping test: recovered from panic (likely database connection issue): %v", r)
-		}
-	}()
 
 	ctx := context.Background()
 	cnf := &config.Configuration{
