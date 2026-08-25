@@ -34,9 +34,40 @@ import (
 )
 
 // Genuinely untestable in-process and deliberately not faked here: main(),
-// executeCLI's os.Exit path, ACME certificate issuance in serveTLS, and
+// executeCLI's os.Exit path, ACME certificate issuance in newTLSServer, and
 // delivery of real SIGTERM signals (gracefulShutdown is tested by sending on
 // its quit channel instead).
+
+// startServer must consult conf.SSL. The regression this guards against was
+// silent: the SSL branch was dropped during a graceful-shutdown refactor, so
+// an operator following the "Enable HTTPs" guide got a plaintext listener and
+// no indication anything was wrong.
+//
+// Certificate issuance needs ACME, so this drives the failure path instead:
+// an unwritable certificate directory makes CertMagic fail before any network
+// call. Reaching that error at all proves the TLS path was entered. Were the
+// SSL flag ignored again, startServer would bind a plaintext listener and
+// block in gracefulShutdown rather than returning.
+func TestStartServerHonoursSSLFlag(t *testing.T) {
+	conf := config.ServerConfig{
+		SSL:             true,
+		Port:            "0",
+		Domain:          "ledger.invalid",
+		Email:           "ops@example.com",
+		CertStoragePath: filepath.Join(t.TempDir(), "unwritable", "certs"),
+	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(conf.CertStoragePath), 0o500))
+
+	done := make(chan error, 1)
+	go func() { done <- startServer(gin.New(), conf) }()
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "SSL enabled must not fall through to a plaintext listener")
+	case <-time.After(30 * time.Second):
+		t.Fatal("startServer did not return: the SSL flag was ignored and a plaintext listener started")
+	}
+}
 
 func TestRetryWithBackoff(t *testing.T) {
 	t.Run("succeeds after transient failures", func(t *testing.T) {
