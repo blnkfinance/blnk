@@ -339,7 +339,7 @@ func gracefulShutdown(server *http.Server, quit <-chan os.Signal, timeout time.D
 // Renamed from initializeObservability to better reflect its purpose
 func initializeTelemetryAndObservability(ctx context.Context, cfg *config.Configuration) (posthog.Client, func(context.Context) error, error) {
 	var phClient posthog.Client
-	var tracingShutdown func(context.Context) error = func(context.Context) error { return nil }
+	tracingShutdown := func(context.Context) error { return nil }
 	var err error
 
 	// Initialize tracing if observability is enabled
@@ -390,7 +390,11 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 				}()
 			}
 			if phClient != nil {
-				defer phClient.Close()
+				defer func() {
+					if err := phClient.Close(); err != nil {
+						logrus.Warnf("failed to close PostHog client: %v", err)
+					}
+				}()
 			}
 
 			// Initialize router (after OTel so /metrics handler is available)
