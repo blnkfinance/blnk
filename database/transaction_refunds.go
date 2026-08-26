@@ -29,11 +29,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
-	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetRefundableTransactionsByParentID")
-	defer span.End()
-
-	rows, err := d.Conn.QueryContext(ctx, `
+func refundableTransactionsByParentIDSQL() string {
+	return fmt.Sprintf(`
 		SELECT 
 			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
 			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
@@ -44,32 +41,28 @@ func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, par
 			-- Case 1: The transaction is the parent itself and is APPLIED
 			(t.transaction_id = $1 AND t.status = 'APPLIED')
 			
-			-- Case 2: The transaction is a child and is APPLIED or VOID.
-			--
-			-- A refund is itself a child of what it refunds: prepareRefundTransaction
-			-- sets ParentTransaction to the original's id and the reference to
-			-- "<original id>_refund". Without the exclusion below, refunding X a
-			-- second time selects both X and the refund of X. The refund has not
-			-- itself been refunded, so it passes validateTransactionForRefund and
-			-- is reversed -- which re-applies the original payment -- while X fails
-			-- as already refunded. The aggregated error surfaces as 409 after that
-			-- money has already moved.
-			--
-			-- Split legs are children too and must stay refundable, so exclude by
-			-- the refund reference rather than by parentage.
+			-- Case 2: APPLIED/VOID children, excluding auto-refunds (model.RefundReferenceSuffix).
+			-- Split legs stay refundable; refund rows are excluded by reference, not parentage.
 			OR (t.parent_transaction = $1
 				AND t.status IN ('APPLIED', 'VOID')
-				AND t.reference IS DISTINCT FROM t.parent_transaction || '_refund')
+				AND t.reference IS DISTINCT FROM t.parent_transaction || '%[1]s')
 
-			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
+			-- Case 3: APPLIED rows linked via QUEUED_PARENT_TRANSACTION, same refund exclusion
 			OR (t.status = 'APPLIED'
 				AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1
-				AND t.reference IS DISTINCT FROM t.meta_data->>'QUEUED_PARENT_TRANSACTION' || '_refund')
+				AND t.reference IS DISTINCT FROM t.meta_data->>'QUEUED_PARENT_TRANSACTION' || '%[1]s')
 
 		ORDER BY 
 			t.created_at DESC
 		LIMIT $2 OFFSET $3
-	`, parentTransactionID, batchSize, offset)
+	`, model.RefundReferenceSuffix)
+}
+
+func (d Datasource) GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetRefundableTransactionsByParentID")
+	defer span.End()
+
+	rows, err := d.Conn.QueryContext(ctx, refundableTransactionsByParentIDSQL(), parentTransactionID, batchSize, offset)
 	if err != nil {
 		span.RecordError(err)
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve refundable transactions", err)
