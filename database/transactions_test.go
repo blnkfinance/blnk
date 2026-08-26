@@ -591,7 +591,7 @@ func TestRecordTransactionWithBalances_AtomicSuccess_Integration(t *testing.T) {
 			Dns: "localhost:6379",
 		},
 		DataSource: config.DataSourceConfig{
-			Dns: "postgres://postgres:password@localhost/blnk?sslmode=disable",
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
 		},
 		Queue: config.QueueConfig{
 			WebhookQueue:     "webhook_queue_test",
@@ -699,7 +699,7 @@ func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *te
 			Dns: "localhost:6379",
 		},
 		DataSource: config.DataSourceConfig{
-			Dns: "postgres://postgres:password@localhost/blnk?sslmode=disable",
+			Dns: "postgres://postgres:password@localhost:5432/blnk?sslmode=disable",
 		},
 		Queue: config.QueueConfig{
 			WebhookQueue:     "webhook_queue_test",
@@ -1229,43 +1229,7 @@ func TestGetRefundableTransactionsByParentID_Success(t *testing.T) {
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
 
-	query := `
-		SELECT 
-			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
-			t.meta_data, t.scheduled_for, t.hash
-		FROM 
-			blnk.transactions t
-		WHERE 
-			-- Case 1: The transaction is the parent itself and is APPLIED
-			(t.transaction_id = $1 AND t.status = 'APPLIED')
-			
-			-- Case 2: The transaction is a child and is APPLIED or VOID.
-			--
-			-- A refund is itself a child of what it refunds: prepareRefundTransaction
-			-- sets ParentTransaction to the original's id and the reference to
-			-- "<original id>_refund". Without the exclusion below, refunding X a
-			-- second time selects both X and the refund of X. The refund has not
-			-- itself been refunded, so it passes validateTransactionForRefund and
-			-- is reversed -- which re-applies the original payment -- while X fails
-			-- as already refunded. The aggregated error surfaces as 409 after that
-			-- money has already moved.
-			--
-			-- Split legs are children too and must stay refundable, so exclude by
-			-- the refund reference rather than by parentage.
-			OR (t.parent_transaction = $1
-				AND t.status IN ('APPLIED', 'VOID')
-				AND t.reference IS DISTINCT FROM t.parent_transaction || '_refund')
-
-			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
-			OR (t.status = 'APPLIED'
-				AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1
-				AND t.reference IS DISTINCT FROM t.meta_data->>'QUEUED_PARENT_TRANSACTION' || '_refund')
-
-		ORDER BY 
-			t.created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+	query := refundableTransactionsByParentIDSQL()
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("parent_txn_123", 100, int64(0)).
@@ -1297,43 +1261,7 @@ func TestGetRefundableTransactionsByParentID_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
 
-	query := `
-		SELECT 
-			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
-			t.meta_data, t.scheduled_for, t.hash
-		FROM 
-			blnk.transactions t
-		WHERE 
-			-- Case 1: The transaction is the parent itself and is APPLIED
-			(t.transaction_id = $1 AND t.status = 'APPLIED')
-			
-			-- Case 2: The transaction is a child and is APPLIED or VOID.
-			--
-			-- A refund is itself a child of what it refunds: prepareRefundTransaction
-			-- sets ParentTransaction to the original's id and the reference to
-			-- "<original id>_refund". Without the exclusion below, refunding X a
-			-- second time selects both X and the refund of X. The refund has not
-			-- itself been refunded, so it passes validateTransactionForRefund and
-			-- is reversed -- which re-applies the original payment -- while X fails
-			-- as already refunded. The aggregated error surfaces as 409 after that
-			-- money has already moved.
-			--
-			-- Split legs are children too and must stay refundable, so exclude by
-			-- the refund reference rather than by parentage.
-			OR (t.parent_transaction = $1
-				AND t.status IN ('APPLIED', 'VOID')
-				AND t.reference IS DISTINCT FROM t.parent_transaction || '_refund')
-
-			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
-			OR (t.status = 'APPLIED'
-				AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1
-				AND t.reference IS DISTINCT FROM t.meta_data->>'QUEUED_PARENT_TRANSACTION' || '_refund')
-
-		ORDER BY 
-			t.created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+	query := refundableTransactionsByParentIDSQL()
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("nonexistent_parent", 100, int64(0)).
@@ -1359,43 +1287,7 @@ func TestGetRefundableTransactionsByParentID_QueryError(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
 
-	query := `
-		SELECT 
-			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
-			t.meta_data, t.scheduled_for, t.hash
-		FROM 
-			blnk.transactions t
-		WHERE 
-			-- Case 1: The transaction is the parent itself and is APPLIED
-			(t.transaction_id = $1 AND t.status = 'APPLIED')
-			
-			-- Case 2: The transaction is a child and is APPLIED or VOID.
-			--
-			-- A refund is itself a child of what it refunds: prepareRefundTransaction
-			-- sets ParentTransaction to the original's id and the reference to
-			-- "<original id>_refund". Without the exclusion below, refunding X a
-			-- second time selects both X and the refund of X. The refund has not
-			-- itself been refunded, so it passes validateTransactionForRefund and
-			-- is reversed -- which re-applies the original payment -- while X fails
-			-- as already refunded. The aggregated error surfaces as 409 after that
-			-- money has already moved.
-			--
-			-- Split legs are children too and must stay refundable, so exclude by
-			-- the refund reference rather than by parentage.
-			OR (t.parent_transaction = $1
-				AND t.status IN ('APPLIED', 'VOID')
-				AND t.reference IS DISTINCT FROM t.parent_transaction || '_refund')
-
-			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
-			OR (t.status = 'APPLIED'
-				AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1
-				AND t.reference IS DISTINCT FROM t.meta_data->>'QUEUED_PARENT_TRANSACTION' || '_refund')
-
-		ORDER BY 
-			t.created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+	query := refundableTransactionsByParentIDSQL()
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("parent_txn_123", 100, int64(0)).
