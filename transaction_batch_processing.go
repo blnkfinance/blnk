@@ -18,7 +18,7 @@ package blnk
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"math/big"
 	"sync"
 
@@ -119,7 +119,7 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 			if len(allErrors) == 1 {
 				return allTxns, allErrors[0]
 			}
-			return allTxns, fmt.Errorf("error occurred during processing: %v", allErrors)
+			return allTxns, errors.Join(allErrors...)
 		}
 
 		span.AddEvent("Processed all transactions in batches")

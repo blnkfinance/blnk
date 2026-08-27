@@ -270,7 +270,7 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		MetaData:    req.MetaData,
 	}
 
-	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, big.NewInt(0), 1, false, a.blnk.GetRefundableTransactionsByParentID, a.blnk.RefundWorkerWithRefundOptions(refundOptions))
+	transaction, err := a.blnk.ProcessRefundsInBatches(c.Request.Context(), id, refundOptions)
 	if err != nil {
 		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
 		return

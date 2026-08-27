@@ -164,7 +164,7 @@ func (l *Blnk) validateTransactionForRefund(ctx context.Context, originalTxn *mo
 		return fmt.Errorf("failed to check if transaction %s was already refunded: %w", originalTxn.TransactionID, err)
 	}
 	if isRefunded {
-		err := fmt.Errorf("transaction %s has already been refunded", originalTxn.TransactionID)
+		err := &errTransactionAlreadyRefunded{transactionID: originalTxn.TransactionID}
 		span.RecordError(err)
 		return err
 	}
@@ -295,4 +295,80 @@ func (l *Blnk) RefundTransactionWithOptions(ctx context.Context, transactionID s
 
 	span.AddEvent("Refund transaction queued", trace.WithAttributes(attribute.String("refund.transaction.id", queuedRefundTxn.TransactionID)))
 	return queuedRefundTxn, nil
+}
+
+// errTransactionAlreadyRefunded marks a leg that was already reversed. Fan-out
+// refunds treat this as skippable so a parent refund can finish remaining legs.
+type errTransactionAlreadyRefunded struct {
+	transactionID string
+}
+
+func (e *errTransactionAlreadyRefunded) Error() string {
+	return fmt.Sprintf("transaction %s has already been refunded", e.transactionID)
+}
+
+func isTransactionAlreadyRefundedError(err error) bool {
+	var target *errTransactionAlreadyRefunded
+	return errors.As(err, &target)
+}
+
+func allRefundBatchErrorsAreAlreadyRefunded(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isTransactionAlreadyRefundedError(err) {
+		return true
+	}
+	type unwrapMultiple interface {
+		Unwrap() []error
+	}
+	u, ok := err.(unwrapMultiple)
+	if !ok {
+		return false
+	}
+	errs := u.Unwrap()
+	if len(errs) == 0 {
+		return false
+	}
+	for _, e := range errs {
+		if !isTransactionAlreadyRefundedError(e) {
+			return false
+		}
+	}
+	return true
+}
+
+func reconcileRefundBatchResults(applied []*model.Transaction, err error) ([]*model.Transaction, error) {
+	if err == nil {
+		return applied, nil
+	}
+	// Some legs refunded, others were already done — success for the caller.
+	if len(applied) > 0 && allRefundBatchErrorsAreAlreadyRefunded(err) {
+		return applied, nil
+	}
+	return applied, err
+}
+
+// ProcessRefundsInBatches fans out a refund across every refundable leg under
+// parentTransactionID. Legs that were already reversed are skipped; the call
+// succeeds when at least one leg is refunded and fails with conflict only when
+// nothing was left to refund.
+func (l *Blnk) ProcessRefundsInBatches(ctx context.Context, parentTransactionID string, opts RefundOptions) ([]*model.Transaction, error) {
+	ctx, span := tracer.Start(ctx, "ProcessRefundsInBatches")
+	defer span.End()
+
+	applied, err := l.ProcessTransactionInBatches(
+		ctx,
+		parentTransactionID,
+		big.NewInt(0),
+		1,
+		false,
+		l.GetRefundableTransactionsByParentID,
+		l.RefundWorkerWithRefundOptions(opts),
+	)
+	result, reconcileErr := reconcileRefundBatchResults(applied, err)
+	if reconcileErr != nil {
+		span.RecordError(reconcileErr)
+	}
+	return result, reconcileErr
 }
