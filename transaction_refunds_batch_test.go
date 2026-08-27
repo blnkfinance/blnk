@@ -3,6 +3,7 @@ package blnk
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/blnkfinance/blnk/model"
@@ -53,5 +54,41 @@ func TestReconcileRefundBatchResults(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, applied, got)
 		assert.Equal(t, fatal, err)
+	})
+
+	t.Run("applied with mixed already-refunded and fatal errors", func(t *testing.T) {
+		batchErr := errors.Join(
+			&errTransactionAlreadyRefunded{transactionID: "txn_leg_a"},
+			fmt.Errorf("failed to queue refund transaction"),
+		)
+		got, err := reconcileRefundBatchResults(applied, batchErr)
+		require.Error(t, err)
+		assert.Equal(t, applied, got)
+		assert.False(t, isTransactionAlreadyRefundedError(err))
+		assert.NotContains(t, err.Error(), "has already been refunded")
+		assert.Contains(t, err.Error(), "failed to queue refund transaction")
+	})
+
+	t.Run("mixed errors without apply keeps skippable-only conflict", func(t *testing.T) {
+		batchErr := errors.Join(
+			&errTransactionAlreadyRefunded{transactionID: "txn_leg_a"},
+			fmt.Errorf("failed to queue refund transaction"),
+		)
+		got, err := reconcileRefundBatchResults(nil, batchErr)
+		require.Error(t, err)
+		assert.Nil(t, got)
+		assert.Contains(t, err.Error(), "failed to queue refund transaction")
+		assert.NotContains(t, err.Error(), "has already been refunded")
+	})
+}
+
+func TestNonSkippableRefundBatchErrors(t *testing.T) {
+	t.Run("joined mixed strips skippable phrase", func(t *testing.T) {
+		err := nonSkippableRefundBatchErrors(errors.Join(
+			&errTransactionAlreadyRefunded{transactionID: "txn_leg_a"},
+			fmt.Errorf("failed to queue refund transaction"),
+		))
+		require.Error(t, err)
+		assert.False(t, strings.Contains(err.Error(), "has already been refunded"))
 	})
 }

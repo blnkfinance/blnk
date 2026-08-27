@@ -312,21 +312,29 @@ func isTransactionAlreadyRefundedError(err error) bool {
 	return errors.As(err, &target)
 }
 
-func allRefundBatchErrorsAreAlreadyRefunded(err error) bool {
+func unwrapRefundBatchErrors(err error) ([]error, bool) {
 	if err == nil {
-		return false
-	}
-	if isTransactionAlreadyRefundedError(err) {
-		return true
+		return nil, false
 	}
 	type unwrapMultiple interface {
 		Unwrap() []error
 	}
 	u, ok := err.(unwrapMultiple)
 	if !ok {
-		return false
+		return []error{err}, false
 	}
 	errs := u.Unwrap()
+	if len(errs) == 0 {
+		return nil, true
+	}
+	return errs, true
+}
+
+func allRefundBatchErrorsAreAlreadyRefunded(err error) bool {
+	errs, joined := unwrapRefundBatchErrors(err)
+	if !joined {
+		return isTransactionAlreadyRefundedError(err)
+	}
 	if len(errs) == 0 {
 		return false
 	}
@@ -338,6 +346,32 @@ func allRefundBatchErrorsAreAlreadyRefunded(err error) bool {
 	return true
 }
 
+// nonSkippableRefundBatchErrors drops already-refunded legs from a batch error
+// so API classifiers do not treat a mixed failure as a safe idempotent conflict
+// when a fatal leg error is also present.
+func nonSkippableRefundBatchErrors(err error) error {
+	errs, joined := unwrapRefundBatchErrors(err)
+	if !joined {
+		if isTransactionAlreadyRefundedError(err) {
+			return nil
+		}
+		return err
+	}
+	var fatal []error
+	for _, e := range errs {
+		if !isTransactionAlreadyRefundedError(e) {
+			fatal = append(fatal, e)
+		}
+	}
+	if len(fatal) == 0 {
+		return nil
+	}
+	if len(fatal) == 1 {
+		return fatal[0]
+	}
+	return errors.Join(fatal...)
+}
+
 func reconcileRefundBatchResults(applied []*model.Transaction, err error) ([]*model.Transaction, error) {
 	if err == nil {
 		return applied, nil
@@ -346,6 +380,10 @@ func reconcileRefundBatchResults(applied []*model.Transaction, err error) ([]*mo
 	if len(applied) > 0 && allRefundBatchErrorsAreAlreadyRefunded(err) {
 		return applied, nil
 	}
+	if fatal := nonSkippableRefundBatchErrors(err); fatal != nil {
+		return applied, fatal
+	}
+	// Only skippable errors remain and nothing new was applied.
 	return applied, err
 }
 
