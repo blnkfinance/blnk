@@ -20,11 +20,21 @@
 --     WHERE COALESCE(effective_date, created_at) > $snapshot_time
 --
 -- Postgres resolves that comparison by converting the TIMESTAMPTZ bound into
--- the session time zone. On a UTC server the offset is zero and the bound is
--- correct; on any other server it shifts by the UTC offset, widening the
--- range so that transactions from *before* the snapshot are applied on top of
--- it. The snapshot is then double-counted and GetBalanceAtTime silently
--- returns a wrong historical balance -- no error, just bad numbers.
+-- the session time zone. created_at is written by Go as txn.CreatedAt.UTC(),
+-- so it is a UTC wall clock on every host. On a UTC session the conversion is
+-- a no-op and the bound lines up; on any other session it moves by the UTC
+-- offset and GetBalanceAtTime silently returns a wrong historical balance --
+-- no error, just bad numbers, in whichever direction the offset runs. East of
+-- UTC the range narrows and post-snapshot transactions are dropped; west of
+-- UTC it widens and pre-snapshot transactions are applied on top of the
+-- snapshot that already accounts for them.
+--
+-- This migration removes the reinterpretation at read time. It is half the
+-- fix: it does not say which clock the writer records, and the writer records
+-- the session's. The companion migration 1781200001 pins that side to UTC.
+-- Neither alone is correct on a non-UTC session; together they make the
+-- endpoint independent of the session's TimeZone. Covered by
+-- TestGetBalanceAtTime_NonUTCSession_RealDB.
 --
 -- The mismatch was almost certainly unintentional: snapshot_time and the
 -- created_at directly beneath it in the original CREATE TABLE were declared
@@ -35,11 +45,10 @@
 -- down to the columns it is actually compared with, rather than converting
 -- the transaction history up.
 --
--- USING snapshot_time AT TIME ZONE 'UTC' reads each stored instant as UTC
--- wall-clock, matching how the writer records it: take_daily_balance_snapshots
--- and the Go caller both pass values derived from time.Now(), and the shipped
--- docker-compose pins TZ=Etc/UTC. Existing rows therefore keep the instant
--- they already represent.
+-- USING snapshot_time AT TIME ZONE 'UTC' reads each stored instant as its UTC
+-- wall clock, which is the clock blnk.transactions.created_at is already on.
+-- Existing rows therefore keep the instant they already represent, and land on
+-- the same timeline as the transactions they are compared against.
 
 -- +migrate Up
 ALTER TABLE blnk.balance_snapshots
