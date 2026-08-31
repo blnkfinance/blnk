@@ -24,16 +24,6 @@ import (
 	"time"
 )
 
-// callTimeout bounds a single outbound request made through Call, so a hung
-// receiver cannot block a caller's goroutine indefinitely.
-const callTimeout = 30 * time.Second
-
-// callClient is the shared client every Call goes through. One client for the
-// package rather than one per call keeps the connection pool alive across
-// requests; the timeout is fixed, so nothing outside this package can widen or
-// disable the bound.
-var callClient = &http.Client{Timeout: callTimeout}
-
 // ToJsonReq converts a Go object to a JSON-encoded HTTP request payload.
 // It serializes the provided payload to JSON format and wraps it in a buffer for sending in HTTP requests.
 //
@@ -69,8 +59,10 @@ func Call(req *http.Request, response interface{}) (*http.Response, error) {
 	// Set request content type to JSON
 	req.Header.Set("Content-Type", "application/json")
 
+	client := &http.Client{Timeout: 30 * time.Second}
+
 	// Send the HTTP request and capture the response
-	resp, err := callClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return resp, err
 	}

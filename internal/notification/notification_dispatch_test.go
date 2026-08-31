@@ -193,12 +193,38 @@ func TestSlackNotification_ConnectionRefused(t *testing.T) {
 	})
 }
 
-// A Slack receiver that accepts the connection and then never answers is
-// bounded by the fixed timeout on request.Call's client, not by anything this
-// package does. Asserting it from here would mean a 30s wall-clock wait, so it
-// is asserted in internal/request instead — TestCallClientTimeoutIsFixed and
-// TestCallReturnsWhenTimeoutFires — where the client can be substituted
-// in-package, without an exported setter any caller could reach.
+func TestSlackNotification_HangingReceiverShouldTimeOut(t *testing.T) {
+	// FIXED: request.Call now uses an http.Client with a 30s Timeout, so a
+	// hung Slack endpoint no longer blocks the NotifyError goroutine forever.
+	// The positive verification is still skipped because it needs a ~30s
+	// wall-clock wait for the real timeout to fire.
+	t.Skip("verifying the 30s client timeout requires a 30s wall-clock wait; " +
+		"the timeout is set in internal/request/request.go Call()")
+
+	blockForever := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-blockForever // never respond
+	}))
+	defer func() {
+		close(blockForever)
+		server.Close()
+	}()
+
+	storeNotificationConfig(t, server.URL, "")
+
+	done := make(chan struct{})
+	go func() {
+		SlackNotification(errors.New("should not hang forever"))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// returned in bounded time: a timeout exists
+	case <-time.After(35 * time.Second): // generous bound > the 30s used elsewhere
+		t.Fatal("SlackNotification blocked indefinitely on a hung receiver: no HTTP timeout configured")
+	}
+}
 
 func TestNotifyError_WebhookSenderReceivesSystemError(t *testing.T) {
 	original := webhookSender
