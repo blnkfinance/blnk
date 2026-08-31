@@ -18,7 +18,6 @@ package blnk
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -28,6 +27,23 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+// BulkTransactionError reports the failure of a synchronous bulk batch.
+//
+// Message is the client-facing sentence: the failing item's error plus what
+// happened to the rest of the batch (rolled back, or left in place). cause is
+// the error the item itself raised, kept so callers can unwrap to it — the
+// API layer resolves the response's error code from there, which is how a
+// missing balance inside a batch reports BAL_NOT_FOUND rather than being
+// text-matched into TXN_NOT_FOUND.
+type BulkTransactionError struct {
+	Message string
+	cause   error
+}
+
+func (e *BulkTransactionError) Error() string { return e.Message }
+
+func (e *BulkTransactionError) Unwrap() error { return e.cause }
 
 func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*model.Transaction, batchID string, inflight bool, skipQueue bool) error {
 	for i, txn := range transactions {
@@ -252,12 +268,16 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 			responseError = fmt.Sprintf("%s. Previous transactions were not rolled back.", err.Error())
 		}
 
-		// Return error result for synchronous failure
+		// Return error result for synchronous failure. The returned error
+		// carries the same text as result.Error but keeps the failing item's
+		// error chain underneath, so the caller can still recover the typed
+		// error the item actually raised (errors.As / errors.Is) rather than
+		// having to pattern-match the assembled sentence.
 		return &model.BulkTransactionResult{
 			BatchID: batchID,
 			Status:  "failed",
 			Error:   responseError,
-		}, errors.New(responseError) // Return the error itself as well
+		}, &BulkTransactionError{Message: responseError, cause: err}
 	}
 
 	// Synchronous success

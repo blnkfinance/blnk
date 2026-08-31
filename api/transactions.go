@@ -18,7 +18,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -260,12 +259,7 @@ func (a Api) RefundTransaction(c *gin.Context) {
 		return
 	}
 	if len(transaction) == 0 {
-		// GetRefundableTransactionsByParentID is a single query that filters on
-		// both existence and refundable status, so an empty result cannot
-		// distinguish "no such transaction" from "exists but is not
-		// refundable". Say both rather than implying only the first.
-		respondCode(c, apierror.ErrTxnNotFound,
-			fmt.Sprintf("no refundable transaction found for '%s': it does not exist, or it is not in a refundable status (only APPLIED or VOID can be refunded)", id), nil)
+		respondCode(c, apierror.ErrTxnNotFound, "no transaction to refund", nil)
 		return
 	}
 	resp := transformTransaction(transaction[0])
@@ -599,10 +593,16 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 			return
 		}
 		// If there was an error during synchronous processing.
-		// classifyMessage picks the most specific catalog code from the
-		// detailed result error; batch_id stays a top-level sibling field.
+		// The code is resolved from the error itself, not from result.Error:
+		// the batch error wraps whatever the failing item raised, so a typed
+		// APIError — BAL_NOT_FOUND for a missing source balance, say —
+		// resolves to its own code here exactly as it does on the single-
+		// transaction route. Matching on the flattened message instead would
+		// hit the broad "transaction ... not found" pattern first and report
+		// TXN_NOT_FOUND for a balance that does not exist. batch_id stays a
+		// top-level sibling field.
 		logrus.WithError(err).WithField("batch_id", result.BatchID).Error("bulk transaction API error")
-		code, ok := classifyMessage(result.Error)
+		code, ok := resolveErrorCode(err)
 		if !ok {
 			code = apierror.ErrGenBadRequest
 		}

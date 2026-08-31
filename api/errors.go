@@ -58,12 +58,14 @@ const sanitizedInternalMessage = "internal server error"
 //
 // The Go type name means nothing to an API client and exposes an
 // implementation detail, so the known shape is rewritten to name the field
-// and the expected format instead. Anything unrecognised is returned
-// unchanged — this narrows a leak, it does not hide decode failures.
+// class at fault and the type it expects. The JSON shape itself is the
+// documentation's job, so no example is inlined here. Anything unrecognised
+// is returned unchanged — this narrows a leak, it does not hide decode
+// failures.
 func sanitizeBindError(err error) string {
 	msg := err.Error()
 	if strings.Contains(msg, "big.Int") || strings.HasPrefix(msg, "math/big:") {
-		return "invalid numeric value: precise amount fields must be sent as a JSON number in the smallest unit (for example 5000, not \"5000\")"
+		return "invalid numeric value: precise amount must be a JSON number"
 	}
 	return msg
 }
@@ -268,6 +270,29 @@ var messagePatterns = []messagePattern{
 	{[]string{"no rows in result set"}, apierror.ErrGenNotFound},
 	// Broad catch-all; must stay last.
 	{[]string{"not found"}, apierror.ErrGenNotFound},
+}
+
+// resolveErrorCode picks the catalog code for err using the same resolution
+// order respondError applies: typed APIError, then known sentinels, then
+// message patterns. Handlers that write a body shape of their own — and so
+// cannot call respondError — use it to reach the same code respondError
+// would have chosen for the same error.
+//
+// Resolving from the error rather than from a message string matters: a
+// wrapped APIError still carries its own code, whereas the flattened text
+// only matches whichever pattern happens to fire first.
+func resolveErrorCode(err error) (apierror.ErrorCode, bool) {
+	if err == nil {
+		return "", false
+	}
+	var apiErr apierror.APIError
+	if errors.As(err, &apiErr) {
+		return apierror.Normalize(apiErr.Code), true
+	}
+	if code, ok := classifySentinel(err); ok {
+		return code, true
+	}
+	return classifyMessage(err.Error())
 }
 
 func classifyMessage(msg string) (apierror.ErrorCode, bool) {
