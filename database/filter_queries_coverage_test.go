@@ -637,7 +637,7 @@ func insertTestTransaction(t *testing.T, ds Datasource, txnID, source, destinati
 		INSERT INTO blnk.transactions
 			(transaction_id, source, destination, reference, amount, precise_amount, precision, currency, status, description, hash, created_at, meta_data)
 		VALUES ($1, $2, $3, $4, $5, $6, 100, $7, $8, 'coverage fixture', 'cov-hash', $9, $10::jsonb)
-	`, txnID, source, destination, reference, amount, preciseAmount, currency, status, createdAt, metaJSON)
+	`, txnID, source, destination, reference, amount, preciseAmount, currency, status, createdAt.UTC(), metaJSON)
 	require.NoError(t, err)
 }
 
