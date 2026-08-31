@@ -1411,10 +1411,11 @@ func TestInflightTransactionFlowWithSkipQueueThenPartialCommitThenVoid(t *testin
 	hasVoid := false
 
 	for _, historyTxn := range txnHistory {
-		if historyTxn.Status == StatusApplied {
+		switch historyTxn.Status {
+		case StatusApplied:
 			hasApplied = true
 			require.Equal(t, partialAmount, historyTxn.Amount, "Applied transaction should have partial amount")
-		} else if historyTxn.Status == StatusVoid {
+		case StatusVoid:
 			hasVoid = true
 			remainingAmount := originalAmount - partialAmount
 			require.InDelta(t, remainingAmount, historyTxn.Amount, 0.01,

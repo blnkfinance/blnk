@@ -42,11 +42,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-/*
-serveTLS starts an HTTPS server with TLS enabled using CertMagic for automatic certificate management.
-It accepts a gin.Engine instance as the router and a ServerConfig struct for server configurations.
-If no domain is specified, the server will default to running on localhost.
-*/
 // resolveCertStoragePath returns the configured certificate storage path,
 // falling back to the default location when unset.
 func resolveCertStoragePath(conf config.ServerConfig) string {
@@ -65,7 +60,11 @@ func resolveTLSDomains(conf config.ServerConfig) []string {
 	return []string{conf.Domain}
 }
 
-func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
+// newTLSServer builds the HTTPS server with CertMagic-managed certificates.
+//
+// It returns the server rather than serving it, so the HTTPS listener runs
+// through the same start-and-graceful-shutdown path as the plaintext one.
+func newTLSServer(r *gin.Engine, conf config.ServerConfig) (*http.Server, error) {
 	// Configure CertMagic's ACME (Automatic Certificate Management Environment) for automatic TLS
 	certmagic.DefaultACME.Agreed = true      // Agree to ACME TOS
 	certmagic.DefaultACME.Email = conf.Email // Set email for certificate recovery/notifications
@@ -75,29 +74,32 @@ func serveTLS(r *gin.Engine, conf config.ServerConfig) error {
 
 	// Define domain(s) for the certificate
 	if conf.Domain == "" {
-		logrus.Error("No domain specified, defaulting to localhost")
+		logrus.Warn("server.ssl is enabled but no domain is configured; defaulting to localhost")
 	}
 	domains := resolveTLSDomains(conf)
 
-	// Manage TLS certificates for the specified domains
+	// Manage TLS certificates for the specified domains.
+	//
+	// Issuance is an ACME challenge, not a local operation: CertMagic solves
+	// HTTP-01 on port 80 and TLS-ALPN-01 on port 443, independently of
+	// server.port, and the CA must reach both from the internet to validate
+	// the domain. The shipped docker-compose publishes only 5001, so a failure
+	// here is usually a missing port mapping rather than anything wrong with
+	// the certificate. Say so, because the raw ACME error does not.
 	if err := cfg.ManageSync(context.Background(), domains); err != nil {
-		return err
+		return nil, fmt.Errorf(
+			"failed to obtain a TLS certificate for %v: %w; "+
+				"ACME validation needs ports %d (HTTP-01) and %d (TLS-ALPN-01) reachable from the internet, "+
+				"separately from server.port=%s -- publish them (add \"80:80\" and \"443:443\" to the server "+
+				"service) or terminate TLS at a proxy and leave server.ssl false",
+			domains, err, certmagic.HTTPPort, certmagic.HTTPSPort, conf.Port)
 	}
 
-	// Create and configure the HTTPS server
-	server := &http.Server{
+	return &http.Server{
 		Addr:      ":" + conf.Port, // Server address and port
 		Handler:   r,               // Handler for HTTP requests (gin router)
 		TLSConfig: cfg.TLSConfig(), // TLS configuration from CertMagic
-	}
-
-	logrus.Errorf("Starting HTTPS server on %s\n", conf.Port)
-	// Start the HTTPS server with automatic certificate management
-	if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-		logrus.Fatalf("Failed to start HTTPS server: %v", err)
-	}
-
-	return nil
+	}, nil
 }
 
 /*
@@ -274,13 +276,29 @@ func initializePostHog() (posthog.Client, string) {
 	return client, heartbeatID
 }
 
-func startServer(router *gin.Engine, port string) error {
-	server := newHTTPServer(router, port)
+func startServer(router *gin.Engine, conf config.ServerConfig) error {
+	var (
+		server *http.Server
+		serve  func() error
+		scheme string
+	)
+
+	if conf.SSL {
+		tlsServer, err := newTLSServer(router, conf)
+		if err != nil {
+			return err
+		}
+		server, scheme = tlsServer, "https"
+		serve = func() error { return server.ListenAndServeTLS("", "") }
+	} else {
+		server, scheme = newHTTPServer(router, conf.Port), "http"
+		serve = server.ListenAndServe
+	}
 
 	// Start server in goroutine
 	go func() {
-		logrus.Infof("Server started on port %s", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logrus.Infof("Server started on %s port %s", scheme, conf.Port)
+		if err := serve(); err != nil && err != http.ErrServerClosed {
 			logrus.Fatalf("Server error: %v", err)
 		}
 	}()
@@ -321,7 +339,7 @@ func gracefulShutdown(server *http.Server, quit <-chan os.Signal, timeout time.D
 // Renamed from initializeObservability to better reflect its purpose
 func initializeTelemetryAndObservability(ctx context.Context, cfg *config.Configuration) (posthog.Client, func(context.Context) error, error) {
 	var phClient posthog.Client
-	var tracingShutdown func(context.Context) error = func(context.Context) error { return nil }
+	tracingShutdown := func(context.Context) error { return nil }
 	var err error
 
 	// Initialize tracing if observability is enabled
@@ -372,7 +390,11 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 				}()
 			}
 			if phClient != nil {
-				defer phClient.Close()
+				defer func() {
+					if err := phClient.Close(); err != nil {
+						logrus.Warnf("failed to close PostHog client: %v", err)
+					}
+				}()
 			}
 
 			// Initialize router (after OTel so /metrics handler is available)
@@ -412,7 +434,7 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 			}
 
 			// Start server
-			if err := startServer(router, cfg.Server.Port); err != nil {
+			if err := startServer(router, cfg.Server); err != nil {
 				logrus.Fatal(err)
 			}
 		},

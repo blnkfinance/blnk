@@ -199,7 +199,7 @@ type RefundOptions struct {
 func prepareRefundTransaction(originalTxn *model.Transaction, opts RefundOptions) *model.Transaction {
 	newTransaction := *originalTxn // Create a copy
 	newTransaction.TransactionID = model.GenerateUUIDWithSuffix("txn")
-	newTransaction.Reference = fmt.Sprintf("%s_refund", originalTxn.TransactionID)
+	newTransaction.Reference = model.RefundReference(originalTxn.TransactionID)
 	newTransaction.ParentTransaction = originalTxn.TransactionID
 	newTransaction.Source = originalTxn.Destination // Swap source and destination
 	newTransaction.Destination = originalTxn.Source

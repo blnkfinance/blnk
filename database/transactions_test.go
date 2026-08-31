@@ -585,12 +585,6 @@ func TestRecordTransactionWithBalances_AtomicSuccess_Integration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			t.Skipf("Skipping test: recovered from panic (likely database connection issue): %v", r)
-		}
-	}()
-
 	ctx := context.Background()
 	cnf := &config.Configuration{
 		Redis: config.RedisConfig{
@@ -698,12 +692,6 @@ func TestRecordTransactionWithBalances_DuplicateTxnID_Rollback_Integration(t *te
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Skipf("Skipping test: recovered from panic (likely database connection issue): %v", r)
-		}
-	}()
 
 	ctx := context.Background()
 	cnf := &config.Configuration{
@@ -1241,27 +1229,7 @@ func TestGetRefundableTransactionsByParentID_Success(t *testing.T) {
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
 
-	query := `
-		SELECT 
-			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
-			t.meta_data, t.scheduled_for, t.hash
-		FROM 
-			blnk.transactions t
-		WHERE 
-			-- Case 1: The transaction is the parent itself and is APPLIED
-			(t.transaction_id = $1 AND t.status = 'APPLIED')
-			
-			-- Case 2: The transaction is a child and is APPLIED or VOID
-			OR (t.parent_transaction = $1 AND t.status IN ('APPLIED', 'VOID'))
-
-			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
-			OR (t.status = 'APPLIED' AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
-
-		ORDER BY 
-			t.created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+	query := refundableTransactionsByParentIDSQL()
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("parent_txn_123", 100, int64(0)).
@@ -1293,27 +1261,7 @@ func TestGetRefundableTransactionsByParentID_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
 
-	query := `
-		SELECT 
-			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
-			t.meta_data, t.scheduled_for, t.hash
-		FROM 
-			blnk.transactions t
-		WHERE 
-			-- Case 1: The transaction is the parent itself and is APPLIED
-			(t.transaction_id = $1 AND t.status = 'APPLIED')
-			
-			-- Case 2: The transaction is a child and is APPLIED or VOID
-			OR (t.parent_transaction = $1 AND t.status IN ('APPLIED', 'VOID'))
-
-			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
-			OR (t.status = 'APPLIED' AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
-
-		ORDER BY 
-			t.created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+	query := refundableTransactionsByParentIDSQL()
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("nonexistent_parent", 100, int64(0)).
@@ -1339,27 +1287,7 @@ func TestGetRefundableTransactionsByParentID_QueryError(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
 
-	query := `
-		SELECT 
-			t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, 
-			t.precision, t.currency, t.destination, t.description, t.status, t.created_at, 
-			t.meta_data, t.scheduled_for, t.hash
-		FROM 
-			blnk.transactions t
-		WHERE 
-			-- Case 1: The transaction is the parent itself and is APPLIED
-			(t.transaction_id = $1 AND t.status = 'APPLIED')
-			
-			-- Case 2: The transaction is a child and is APPLIED or VOID
-			OR (t.parent_transaction = $1 AND t.status IN ('APPLIED', 'VOID'))
-
-			-- Case 3: Transaction is APPLIED and linked via metadata QUEUED_PARENT_TRANSACTION
-			OR (t.status = 'APPLIED' AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
-
-		ORDER BY 
-			t.created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+	query := refundableTransactionsByParentIDSQL()
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("parent_txn_123", 100, int64(0)).

@@ -189,7 +189,7 @@ func insertLineageOutboxesInTx(ctx context.Context, tx *sql.Tx, outboxes []*mode
 			query.WriteString(",")
 		}
 		base := len(args) + 1
-		query.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)", base, base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9))
+		fmt.Fprintf(&query, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)", base, base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9)
 		args = append(args,
 			outbox.TransactionID,
 			outbox.SourceBalanceID,
