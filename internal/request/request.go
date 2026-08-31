@@ -21,36 +21,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"sync/atomic"
 	"time"
 )
 
-// DefaultCallTimeout bounds a single outbound request made through Call. It
-// exists so a hung receiver cannot block a caller's goroutine indefinitely.
-const DefaultCallTimeout = 30 * time.Second
+// callTimeout bounds a single outbound request made through Call, so a hung
+// receiver cannot block a caller's goroutine indefinitely.
+const callTimeout = 30 * time.Second
 
-// callTimeout holds the active timeout in nanoseconds. It is atomic because
-// Call may run concurrently with a test adjusting the value.
-var callTimeout atomic.Int64
-
-func init() {
-	callTimeout.Store(int64(DefaultCallTimeout))
-}
-
-// CallTimeout reports the timeout currently applied to outbound requests.
-func CallTimeout() time.Duration {
-	return time.Duration(callTimeout.Load())
-}
-
-// SetCallTimeout sets the timeout for outbound requests and returns the
-// previous value, so a caller can restore it:
-//
-//	defer request.SetCallTimeout(request.SetCallTimeout(time.Second))
-//
-// Tests use this to assert the timeout fires without waiting the full default.
-func SetCallTimeout(d time.Duration) time.Duration {
-	return time.Duration(callTimeout.Swap(int64(d)))
-}
+// callClient is the shared client every Call goes through. One client for the
+// package rather than one per call keeps the connection pool alive across
+// requests; the timeout is fixed, so nothing outside this package can widen or
+// disable the bound.
+var callClient = &http.Client{Timeout: callTimeout}
 
 // ToJsonReq converts a Go object to a JSON-encoded HTTP request payload.
 // It serializes the provided payload to JSON format and wraps it in a buffer for sending in HTTP requests.
@@ -87,10 +69,8 @@ func Call(req *http.Request, response interface{}) (*http.Response, error) {
 	// Set request content type to JSON
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: CallTimeout()}
-
 	// Send the HTTP request and capture the response
-	resp, err := client.Do(req)
+	resp, err := callClient.Do(req)
 	if err != nil {
 		return resp, err
 	}

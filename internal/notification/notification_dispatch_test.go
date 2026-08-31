@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/blnkfinance/blnk/config"
-	"github.com/blnkfinance/blnk/internal/request"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -194,40 +193,12 @@ func TestSlackNotification_ConnectionRefused(t *testing.T) {
 	})
 }
 
-func TestSlackNotification_HangingReceiverShouldTimeOut(t *testing.T) {
-	// request.Call bounds every outbound request with an http.Client timeout,
-	// so a hung Slack endpoint cannot block the NotifyError goroutine forever.
-	//
-	// This used to be skipped because asserting the real 30s default meant a
-	// 30s wall-clock wait. The timeout is now adjustable, so the same property
-	// is verified against a short one instead: what matters is that some bound
-	// exists and fires, not its exact duration.
-	defer request.SetCallTimeout(request.SetCallTimeout(200 * time.Millisecond))
-
-	blockForever := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-blockForever // never respond
-	}))
-	defer func() {
-		close(blockForever)
-		server.Close()
-	}()
-
-	storeNotificationConfig(t, server.URL, "")
-
-	done := make(chan struct{})
-	go func() {
-		SlackNotification(errors.New("should not hang forever"))
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// returned in bounded time: a timeout exists
-	case <-time.After(10 * time.Second): // generous bound > the 200ms set above
-		t.Fatal("SlackNotification blocked indefinitely on a hung receiver: no HTTP timeout configured")
-	}
-}
+// A Slack receiver that accepts the connection and then never answers is
+// bounded by the fixed timeout on request.Call's client, not by anything this
+// package does. Asserting it from here would mean a 30s wall-clock wait, so it
+// is asserted in internal/request instead — TestCallClientTimeoutIsFixed and
+// TestCallReturnsWhenTimeoutFires — where the client can be substituted
+// in-package, without an exported setter any caller could reach.
 
 func TestNotifyError_WebhookSenderReceivesSystemError(t *testing.T) {
 	original := webhookSender
