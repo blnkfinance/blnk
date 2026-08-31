@@ -1603,6 +1603,19 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 		return nil, err
 	}
 
+	// targetTime bounds two ranges over plain TIMESTAMP columns —
+	// balance_snapshots.snapshot_time and transactions.created_at /
+	// effective_date — and those columns hold UTC wall clocks, because every
+	// writer normalises to UTC before the insert.
+	//
+	// A TIMESTAMP comparison discards the offset on whatever it is given, so a
+	// caller's zone would otherwise be dropped rather than applied:
+	// ?timestamp=2024-01-01T15:00:00+05:30 would cut off at 15:00 UTC, five and
+	// a half hours after the instant that was actually asked for, and quietly
+	// include transactions from the gap. Converting first keeps the instant and
+	// makes the answer identical for every way of writing the same moment.
+	targetTime = targetTime.UTC()
+
 	// Start transaction
 	tx, err := d.Conn.BeginTx(ctx, &sql.TxOptions{
 		ReadOnly:  true,

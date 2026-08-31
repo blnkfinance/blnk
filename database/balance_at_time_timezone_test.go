@@ -140,6 +140,50 @@ func TestGetBalanceAtTime_NonUTCSession_RealDB(t *testing.T) {
 	}
 }
 
+// TestGetBalanceAtTime_TargetTimeOffset_RealDB pins the other end of the same
+// comparison: the caller's own timestamp.
+//
+// GET /balances/:id/at parses ?timestamp= with time.Parse(time.RFC3339), which
+// keeps the offset the client wrote. The cutoff is then applied against plain
+// TIMESTAMP columns holding UTC wall clocks, and a TIMESTAMP comparison
+// discards the offset rather than applying it — so the same instant written
+// three different ways has to come back with the same balance, or the endpoint
+// is answering a question nobody asked.
+func TestGetBalanceAtTime_TargetTimeOffset_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	ctx := context.Background()
+
+	marker := gofakeit.UUID()
+	ledger, err := ds.CreateLedger(model.Ledger{Name: "bat-offset-" + marker})
+	require.NoError(t, err)
+	src, err := ds.CreateBalance(model.Balance{Currency: "USD", LedgerID: ledger.LedgerID})
+	require.NoError(t, err)
+	dst, err := ds.CreateBalance(model.Balance{Currency: "USD", LedgerID: ledger.LedgerID})
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	// Inside the cutoff.
+	insertUTCTransaction(t, ds, src.BalanceID, dst.BalanceID,
+		"bat-offset-in-"+marker, 1000, now.Add(-4*time.Hour))
+	// Outside it — and inside the window a dropped +05:30 offset would open up.
+	insertUTCTransaction(t, ds, src.BalanceID, dst.BalanceID,
+		"bat-offset-out-"+marker, 500, now.Add(-1*time.Hour))
+
+	cutoff := now.Add(-2 * time.Hour)
+	for _, zone := range []*time.Location{
+		time.UTC,
+		time.FixedZone("+0530", 5*3600+30*60),
+		time.FixedZone("-0400", -4*3600),
+	} {
+		t.Run(zone.String(), func(t *testing.T) {
+			bal, err := ds.GetBalanceAtTime(ctx, dst.BalanceID, cutoff.In(zone), true)
+			require.NoError(t, err)
+			assert.Equal(t, 0, bal.CreditBalance.Cmp(big.NewInt(1000)),
+				"the cutoff is an instant, not a wall-clock reading: expected 1000, got %s", bal.CreditBalance)
+		})
+	}
+}
+
 // insertUTCTransaction writes a transaction the way the production insert in
 // RecordTransaction does: created_at normalised to UTC before it reaches the
 // plain TIMESTAMP column.
