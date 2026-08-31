@@ -13,8 +13,12 @@ var errHooksRequireMasterKey = errors.New("hook management requires master key")
 
 // hookFailureCode distinguishes a missing hook (the manager returns
 // "hook not found: <id>") from genuine infrastructure failures.
+//
+// resolveErrorCode rather than classifyMessage: a not-found the manager
+// reports as a typed APIError, or as a wrapped sql.ErrNoRows, is still a
+// not-found even when its text matches no pattern.
 func hookFailureCode(err error) apierror.ErrorCode {
-	if code, ok := classifyMessage(err.Error()); ok && apierror.StatusForCode(code) == http.StatusNotFound {
+	if code, ok := resolveErrorCode(err); ok && apierror.StatusForCode(code) == http.StatusNotFound {
 		return apierror.ErrHookNotFound
 	}
 	return apierror.ErrHookOperationFailed

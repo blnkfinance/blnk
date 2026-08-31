@@ -92,6 +92,27 @@ func TestResolveErrorCodeUnwrapsTypedError(t *testing.T) {
 	require.Equal(t, apierror.ErrTxnNotFound, byMessage)
 }
 
+// TestHookFailureCodeUsesTheErrorChain covers the other place a code was being
+// chosen from message text alone. A hook manager that reports a missing hook
+// as a typed APIError, in wording no pattern matches, is still reporting a
+// missing hook — and used to be answered as an infrastructure failure.
+func TestHookFailureCodeUsesTheErrorChain(t *testing.T) {
+	typed := apierror.NewAPIError(apierror.ErrHookNotFound, "no such hook", nil)
+	require.Equal(t, apierror.ErrHookNotFound, hookFailureCode(typed))
+
+	// Wrapping does not lose it.
+	require.Equal(t, apierror.ErrHookNotFound,
+		hookFailureCode(fmt.Errorf("delete hook: %w", typed)))
+
+	// The message-matched path still works.
+	require.Equal(t, apierror.ErrHookNotFound,
+		hookFailureCode(fmt.Errorf("hook not found: hook_1")))
+
+	// Anything that is not a not-found stays an operation failure.
+	require.Equal(t, apierror.ErrHookOperationFailed,
+		hookFailureCode(fmt.Errorf("redis: connection reset by peer")))
+}
+
 // TestSanitizeBindErrorNamesFieldClassOnly checks the rewritten decode error:
 // it must name what is wrong and which field class raised it, without
 // exposing a Go type or restating the JSON shape that the docs cover.
