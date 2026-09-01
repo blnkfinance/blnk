@@ -781,7 +781,7 @@ func TestGetBalanceByIDLite_NotFound(t *testing.T) {
 	assert.Nil(t, balance)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
-	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+	assert.Equal(t, apierror.ErrBalNotFound, apiErr.Code)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1284,7 +1284,7 @@ func TestGetMonitorByID_NotFound(t *testing.T) {
 	assert.Nil(t, monitor)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
-	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+	assert.Equal(t, apierror.ErrBalMonitorNotFound, apiErr.Code)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1469,7 +1469,7 @@ func TestUpdateMonitor_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
-	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+	assert.Equal(t, apierror.ErrBalMonitorNotFound, apiErr.Code)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1516,7 +1516,7 @@ func TestDeleteMonitor_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
-	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+	assert.Equal(t, apierror.ErrBalMonitorNotFound, apiErr.Code)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1611,7 +1611,7 @@ func TestUpdateBalance_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
-	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+	assert.Equal(t, apierror.ErrBalNotFound, apiErr.Code)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1711,7 +1711,7 @@ func TestUpdateBalanceIdentity_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
-	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+	assert.Equal(t, apierror.ErrBalNotFound, apiErr.Code)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1819,7 +1819,7 @@ func TestGetBalanceAtTime_BalanceNotFound(t *testing.T) {
 	assert.Nil(t, balance)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
-	assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+	assert.Equal(t, apierror.ErrBalNotFound, apiErr.Code)
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)

@@ -122,10 +122,10 @@ func (l *Blnk) getOriginalTransactionForRefund(ctx context.Context, transactionI
 			if queueErr != nil {
 				span.RecordError(queueErr)
 				// Return the original DB error if queue retrieval also fails
-				return nil, fmt.Errorf("transaction %s not found in DB or queue: %w", transactionID, err)
+				return nil, fmt.Errorf("transaction %s not found: %w", transactionID, err)
 			}
 			if queuedTxn == nil {
-				err := fmt.Errorf("transaction %s not found in DB or queue", transactionID)
+				err := fmt.Errorf("transaction %s not found", transactionID)
 				span.RecordError(err)
 				return nil, err
 			}

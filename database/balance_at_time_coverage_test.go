@@ -169,7 +169,7 @@ func TestGetBalanceAtTime_RealDB(t *testing.T) {
 		require.Error(t, err)
 		apiErr, ok := err.(apierror.APIError)
 		require.True(t, ok)
-		assert.Equal(t, apierror.ErrNotFound, apiErr.Code)
+		assert.Equal(t, apierror.ErrBalNotFound, apiErr.Code)
 	})
 }
 

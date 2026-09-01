@@ -359,7 +359,10 @@ func (a Api) GetReconciliation(c *gin.Context) {
 	reconciliation, err := a.blnk.GetReconciliation(c.Request.Context(), reconciliationID)
 	if err != nil {
 		logrus.Error(err)
-		if code, ok := classifyMessage(err.Error()); ok && apierror.StatusForCode(code) == http.StatusNotFound {
+		// resolveErrorCode rather than classifyMessage, so a not-found raised
+		// as a typed APIError or a wrapped sql.ErrNoRows is recognised as one
+		// even when its text matches no pattern.
+		if code, ok := resolveErrorCode(err); ok && apierror.StatusForCode(code) == http.StatusNotFound {
 			// Historical fixed message preserved for the legacy field.
 			respondCode(c, apierror.ErrReconNotFound, "Reconciliation not found", nil)
 			return

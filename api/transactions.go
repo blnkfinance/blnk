@@ -254,7 +254,7 @@ func (a Api) RefundTransaction(c *gin.Context) {
 	// of Content-Length / chunked transfer encoding.
 	var req refundTransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 
@@ -478,7 +478,7 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	}
 	err := c.BindJSON(&req)
 	if err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 
@@ -588,7 +588,7 @@ type queuedInflightResponse struct {
 func (a Api) CreateBulkTransactions(c *gin.Context) {
 	var req model2.BulkTransactionRequest
 	if err := c.BindJSON(&req); err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, "Invalid request body: "+err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, "Invalid request body: "+sanitizeBindError(err), nil)
 		return
 	}
 
@@ -645,10 +645,16 @@ func (a Api) CreateBulkTransactions(c *gin.Context) {
 			return
 		}
 		// If there was an error during synchronous processing.
-		// classifyMessage picks the most specific catalog code from the
-		// detailed result error; batch_id stays a top-level sibling field.
+		// The code is resolved from the error itself, not from result.Error:
+		// the batch error wraps whatever the failing item raised, so a typed
+		// APIError — BAL_NOT_FOUND for a missing source balance, say —
+		// resolves to its own code here exactly as it does on the single-
+		// transaction route. Matching on the flattened message instead would
+		// hit the broad "transaction ... not found" pattern first and report
+		// TXN_NOT_FOUND for a balance that does not exist. batch_id stays a
+		// top-level sibling field.
 		logrus.WithError(err).WithField("batch_id", result.BatchID).Error("bulk transaction API error")
-		code, ok := classifyMessage(result.Error)
+		code, ok := resolveErrorCode(err)
 		if !ok {
 			code = apierror.ErrGenBadRequest
 		}
@@ -843,7 +849,7 @@ func toAPIResults(outcomes []blnk.BulkInflightOutcome) (model2.BulkInflightRespo
 func (a Api) BulkVoidInflight(c *gin.Context) {
 	var req model2.BulkInflightVoidRequest
 	if err := c.BindJSON(&req); err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 	if len(req.TransactionIDs) == 0 {
@@ -915,7 +921,7 @@ func (a Api) queueBulkInflight(ctx context.Context, action string, items []blnk.
 func (a Api) BulkCommitInflight(c *gin.Context) {
 	var req model2.BulkInflightCommitRequest
 	if err := c.BindJSON(&req); err != nil {
-		respondCode(c, apierror.ErrGenMalformedRequest, err.Error(), nil)
+		respondCode(c, apierror.ErrGenMalformedRequest, sanitizeBindError(err), nil)
 		return
 	}
 	if len(req.Transactions) == 0 {
