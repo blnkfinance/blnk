@@ -120,6 +120,30 @@ func destinationOrDestinationsValidation(t *RecordTransaction) validation.RuleFu
 	}
 }
 
+// splitOnOneSideValidation rejects a transaction that splits both sides at
+// once.
+//
+// SplitTransactionPrecise distributes over one side only — it takes Sources
+// when they are present and Destinations otherwise — and clears both on the
+// legs it produces. A transaction carrying both therefore has its
+// Destinations silently dropped, and every leg is left with an empty
+// Destination, which surfaces downstream as a lookup for a balance with a
+// blank id:
+//
+//	Balance with ID '' not found
+//
+// That names neither the field at fault nor the reason, for a request the
+// ledger cannot express in the first place. Reject it where the shape is
+// still visible.
+func splitOnOneSideValidation(t *RecordTransaction) validation.RuleFunc {
+	return func(value interface{}) error {
+		if len(t.Sources) > 0 && len(t.Destinations) > 0 {
+			return errors.New("a transaction can split either sources or destinations, not both")
+		}
+		return nil
+	}
+}
+
 // sameBalanceValidation rejects a source and destination that resolve to the
 // same balance, whether directly or through a split.
 //
@@ -279,7 +303,7 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Currency, validation.Required),
 		validation.Field(&t.Reference, validation.Required),
 		validation.Field(&t.Description, validation.Required),
-		validation.Field(&t.Source, validation.By(sourceOrSourcesValidation(t))),
+		validation.Field(&t.Source, validation.By(sourceOrSourcesValidation(t)), validation.By(splitOnOneSideValidation(t))),
 		validation.Field(&t.Destination, validation.By(destinationOrDestinationsValidation(t)), validation.By(sameBalanceValidation(t))),
 		validation.Field(&t.ScheduledFor, validation.When(t.ScheduledFor != "", validation.By(func(value interface{}) error {
 			dateStr, ok := value.(string)
