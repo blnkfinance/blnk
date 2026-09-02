@@ -221,14 +221,16 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(), // version
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	// Expect transaction insertion within the same atomic transaction
+	// Expect transaction insertion within the same atomic transaction.
+	// RecordTransaction applies precision before persist, so amount is the
+	// materialised AmountString ("10"), not the empty value on the input txn.
 	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).WithArgs(
 		sqlmock.AnyArg(), // transaction_id
 		sqlmock.AnyArg(), // parent_transaction
 		source,           // source
 		reference,        // reference
-		txn.AmountString, // amount
+		"10",             // amount (filled by ApplyPrecision)
 		"1000",           // precise amount
 		txn.Precision,    // precision
 		txn.Currency,     // currency
