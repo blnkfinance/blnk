@@ -117,22 +117,22 @@ func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID s
 // follow source TrackFundLineage; credit shadows require a provider and destination
 // TrackFundLineage. Shadow children never have nested shadows.
 //
-// When a balance lookup fails, the second return value is non-nil and the bool is true
-// so callers process shadows conservatively rather than skipping and stranding inflight
-// companions after the parent is already committed or voided.
-func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *model.Transaction) (bool, error) {
-	ctx, span := tracer.Start(ctx, "InflightTransactionNeedsShadowWork")
+// A balance lookup failure is treated as unknown eligibility: the error is recorded on
+// the span and the function returns true so callers process shadows conservatively
+// instead of skipping and stranding inflight companions.
+func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *model.Transaction) bool {
+	_, span := tracer.Start(ctx, "InflightTransactionNeedsShadowWork")
 	defer span.End()
 
 	if txn == nil {
-		return false, nil
+		return false
 	}
 	if txn.MetaData != nil {
 		if _, isShadow := txn.MetaData["_lineage_type"]; isShadow {
-			return false, nil
+			return false
 		}
 		if _, hasAlloc := txn.MetaData[LineageFundAllocation]; hasAlloc {
-			return true, nil
+			return true
 		}
 	}
 
@@ -141,22 +141,22 @@ func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *mode
 		dst, err := l.datasource.GetBalanceByIDLite(txn.Destination)
 		if err != nil {
 			span.RecordError(err)
-			return true, fmt.Errorf("failed to check destination lineage eligibility: %w", err)
+			return true
 		}
-		return dst != nil && dst.TrackFundLineage, nil
+		return dst != nil && dst.TrackFundLineage
 	}
 
 	// Only real balance IDs can track lineage; @ indicators (e.g. @world) cannot.
 	if strings.HasPrefix(txn.Source, "@") {
-		return false, nil
+		return false
 	}
 
 	src, err := l.datasource.GetBalanceByIDLite(txn.Source)
 	if err != nil {
 		span.RecordError(err)
-		return true, fmt.Errorf("failed to check source lineage eligibility: %w", err)
+		return true
 	}
-	return src != nil && src.TrackFundLineage, nil
+	return src != nil && src.TrackFundLineage
 }
 
 // queueShadowWork processes shadow commit or void work synchronously first, and queues
@@ -176,8 +176,7 @@ func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *mode
 // Returns:
 // - error: An error if all processing attempts failed.
 func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, txn *model.Transaction, lineageType string) error {
-	needsShadow, _ := l.inflightTransactionNeedsShadowWork(ctx, txn)
-	if !needsShadow {
+	if !l.inflightTransactionNeedsShadowWork(ctx, txn) {
 		return nil
 	}
 

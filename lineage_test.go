@@ -1253,7 +1253,6 @@ func TestInflightTransactionNeedsShadowWork(t *testing.T) {
 		txn         *model.Transaction
 		setupMock   func(*mocks.MockDataSource)
 		expectNeeds bool
-		expectErr   bool
 	}{
 		{
 			name: "typical inflight from @world without lineage metadata",
@@ -1371,7 +1370,6 @@ func TestInflightTransactionNeedsShadowWork(t *testing.T) {
 				m.On("GetBalanceByIDLite", "bln_dest").Return((*model.Balance)(nil), fmt.Errorf("db timeout"))
 			},
 			expectNeeds: true,
-			expectErr:   true,
 		},
 		{
 			name: "source lookup error proceeds conservatively",
@@ -1384,7 +1382,6 @@ func TestInflightTransactionNeedsShadowWork(t *testing.T) {
 				m.On("GetBalanceByIDLite", "bln_source").Return((*model.Balance)(nil), fmt.Errorf("db timeout"))
 			},
 			expectNeeds: true,
-			expectErr:   true,
 		},
 	}
 
@@ -1396,14 +1393,7 @@ func TestInflightTransactionNeedsShadowWork(t *testing.T) {
 			}
 			blnkInstance := &Blnk{datasource: mockDS}
 
-			needs, err := blnkInstance.inflightTransactionNeedsShadowWork(ctx, tt.txn)
-			if tt.expectErr {
-				require.Error(t, err)
-				assert.True(t, needs, "lookup failures must proceed conservatively")
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tt.expectNeeds, needs)
-			}
+			assert.Equal(t, tt.expectNeeds, blnkInstance.inflightTransactionNeedsShadowWork(ctx, tt.txn))
 			mockDS.AssertExpectations(t)
 		})
 	}
