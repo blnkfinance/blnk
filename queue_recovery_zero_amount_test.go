@@ -26,7 +26,7 @@ func TestRecoverZeroAmountQueuedTransactionWritesRejectedChild(t *testing.T) {
 		Source:        src.BalanceID,
 		Destination:   dst.BalanceID,
 		Amount:        0,
-		AmountString:  "",
+		AmountString:  "0",
 		PreciseAmount: big.NewInt(0),
 		Precision:     100,
 		Currency:      "WBTC",

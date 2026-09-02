@@ -36,12 +36,15 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 
 	cutoff := time.Now().UTC().Add(-threshold)
 
+	// Leave the parent in this set until a terminal child exists. Metadata
+	// flags must not hide a QUEUED row with no lineage: recovery has to retry
+	// a failed REJECTED write, and operators can still find it here or via
+	// POST /transactions/recover.
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, parent_transaction, source, reference, amount, COALESCE(precise_amount::text, '0'), precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions t
 		WHERE t.status = 'QUEUED'
 		  AND t.created_at < $1
-		  AND COALESCE(t.meta_data->>'recovery_status', '') <> 'unrecoverable'
 		  AND NOT EXISTS (
 		      SELECT 1 FROM blnk.transactions child
 		      WHERE child.parent_transaction = t.transaction_id

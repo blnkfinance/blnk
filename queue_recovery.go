@@ -30,7 +30,6 @@ const (
 	recoveryStatusRecovered        = "recovered"
 	recoveryStatusFailed           = "failed"
 	recoveryStatusAlreadyProcessed = "already_processed"
-	recoveryStatusUnrecoverable    = "unrecoverable"
 )
 
 type QueuedTransactionRecoveryProcessor struct {
@@ -182,12 +181,12 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 
 	if isZeroPreciseAmount(stuckTxn) {
 		logrus.Warnf("Stuck transaction %s has a zero amount, rejecting", stuckTxn.TransactionID)
-		return p.rejectStuckTransaction(ctx, stuckTxn, attempts, "zero amount")
+		return p.rejectStuckTransaction(ctx, stuckTxn, "zero amount")
 	}
 
 	if attempts > p.maxRecoveryAttempts {
 		logrus.Warnf("Stuck transaction %s exceeded max recovery attempts (%d), rejecting", stuckTxn.TransactionID, p.maxRecoveryAttempts)
-		return p.rejectStuckTransaction(ctx, stuckTxn, attempts, "exceeded max queued recovery attempts")
+		return p.rejectStuckTransaction(ctx, stuckTxn, "exceeded max queued recovery attempts")
 	}
 
 	if stuckTxn.Atomic {
@@ -228,18 +227,19 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 }
 
 // rejectStuckTransaction writes a REJECTED child for a stuck QUEUED parent.
-// If that insert still fails, the parent is marked unrecoverable so it no
-// longer occupies the oldest-100 recovery window forever.
-func (p *QueuedTransactionRecoveryProcessor) rejectStuckTransaction(ctx context.Context, stuckTxn *model.Transaction, attempts int, reason string) error {
+// A failed write is returned so the parent stays in the stuck set (QUEUED,
+// no child) and recovery can retry. Do not metadata-exclude a parent that
+// still has no terminal child: that would leave it QUEUED forever with no
+// lineage and no automatic retry.
+func (p *QueuedTransactionRecoveryProcessor) rejectStuckTransaction(ctx context.Context, stuckTxn *model.Transaction, reason string) error {
 	rejectionCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
 	_, err := p.blnk.RejectTransaction(ctx, rejectionCopy, reason)
 	if err != nil {
 		if isReferenceAlreadyUsedError(err) {
 			return nil
 		}
-		p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusUnrecoverable)
-		logrus.Errorf("failed to reject stuck transaction %s: %v; marking unrecoverable so it no longer blocks recovery", stuckTxn.TransactionID, err)
-		return nil
+		logrus.Errorf("failed to reject stuck transaction %s: %v; leaving QUEUED so recovery can retry", stuckTxn.TransactionID, err)
+		return err
 	}
 	return nil
 }
@@ -263,6 +263,7 @@ func (p *QueuedTransactionRecoveryProcessor) updateRecoveryMetadata(ctx context.
 
 	if err := p.blnk.datasource.UpdateTransactionMetadata(ctx, txn.TransactionID, txn.MetaData); err != nil {
 		logrus.Errorf("failed to update recovery metadata for transaction %s: %v", txn.TransactionID, err)
+		return
 	}
 }
 

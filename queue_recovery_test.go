@@ -133,22 +133,20 @@ func TestProcessStuckTransaction_ZeroAmountFillsNumericAmountOnReject(t *testing
 		Run(func(args mock.Arguments) {
 			recorded = args.Get(1).(*model.Transaction)
 		}).
-		Return(&model.Transaction{}, errors.New(`pq: invalid input syntax for type numeric: ""`)).Once()
-
-	mockDS.On("UpdateTransactionMetadata", mock.Anything, stuckTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
-		return metadata["recovery_status"] == recoveryStatusUnrecoverable
-	})).Return(nil).Once()
+		Return(&model.Transaction{}, errors.New("db unavailable")).Once()
 
 	err := processor.processStuckTransaction(context.Background(), stuckTxn)
-	require.NoError(t, err, "a failed reject must not keep the parent in the retry loop")
+	require.Error(t, err, "a failed reject must stay visible so recovery can retry")
+	assert.Contains(t, err.Error(), "db unavailable")
 	require.NotNil(t, recorded)
 	assert.Equal(t, StatusRejected, recorded.Status)
 	assert.Equal(t, "0", recorded.AmountString)
 	assert.Equal(t, "0", recorded.PreciseAmount.String())
+	mockDS.AssertNotCalled(t, "UpdateTransactionMetadata", mock.Anything, mock.Anything, mock.Anything)
 	mockDS.AssertExpectations(t)
 }
 
-func TestProcessStuckTransaction_RejectFailureMarksUnrecoverable(t *testing.T) {
+func TestProcessStuckTransaction_RejectFailureRemainsRetryable(t *testing.T) {
 	mockDS := &dbmocks.MockDataSource{}
 	blnk := &Blnk{datasource: mockDS}
 	processor := NewQueuedTransactionRecoveryProcessor(blnk)
@@ -158,12 +156,31 @@ func TestProcessStuckTransaction_RejectFailureMarksUnrecoverable(t *testing.T) {
 
 	mockDS.On("RecordTransaction", mock.Anything, mock.Anything).
 		Return(&model.Transaction{}, errors.New("db unavailable")).Once()
-	mockDS.On("UpdateTransactionMetadata", mock.Anything, stuckTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
-		return metadata["recovery_status"] == recoveryStatusUnrecoverable && metadata["recovery_attempts"] == 4
-	})).Return(nil).Once()
 
 	err := processor.processStuckTransaction(context.Background(), stuckTxn)
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db unavailable")
+	mockDS.AssertNotCalled(t, "UpdateTransactionMetadata", mock.Anything, mock.Anything, mock.Anything)
+	mockDS.AssertExpectations(t)
+}
+
+func TestProcessStuckTransaction_MetadataUpdateFailureKeepsTxnRetryable(t *testing.T) {
+	mockDS := &dbmocks.MockDataSource{}
+	blnk := &Blnk{datasource: mockDS}
+	processor := NewQueuedTransactionRecoveryProcessor(blnk)
+
+	stuckTxn := positiveStuckTxn()
+	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
+		return transactionExecutionResult{}, errors.New("lock contention")
+	}
+
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, stuckTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
+		return metadata["recovery_status"] == recoveryStatusFailed
+	})).Return(errors.New("metadata write failed")).Once()
+
+	err := processor.processStuckTransaction(context.Background(), stuckTxn)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lock contention", "the original recovery error must remain so the parent is retried")
 	mockDS.AssertExpectations(t)
 }
 

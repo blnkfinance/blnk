@@ -21,7 +21,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
@@ -42,21 +41,33 @@ func utcOrNil(t *time.Time) *time.Time {
 	return &u
 }
 
-// persistAmountString is the value written to the numeric amount column.
-// An empty string is not valid numeric input for Postgres.
-func persistAmountString(amount string) string {
-	if amount == "" {
-		return "0"
-	}
-	return amount
-}
+const rejectedPersistStatus = "REJECTED"
 
-// persistPreciseAmount is the value written to the numeric precise_amount column.
-func persistPreciseAmount(amount *big.Int) string {
-	if amount == nil {
-		return "0"
+// persistNumericColumns is the amount pair written to numeric columns.
+// Missing values are not coerced to zero for applied/queued rows: that hid
+// upstream bugs as valid-looking zero transactions. REJECTED is the exception,
+// because RejectTransaction materializes a zero-amount terminal child.
+func persistNumericColumns(txn *model.Transaction) (amount string, preciseAmount string, err error) {
+	if txn == nil {
+		return "", "", fmt.Errorf("transaction is required")
 	}
-	return amount.String()
+	if txn.Status == rejectedPersistStatus {
+		amount = txn.AmountString
+		if amount == "" {
+			amount = "0"
+		}
+		if txn.PreciseAmount == nil {
+			return amount, "0", nil
+		}
+		return amount, txn.PreciseAmount.String(), nil
+	}
+	if txn.AmountString == "" {
+		return "", "", fmt.Errorf("amount is required")
+	}
+	if txn.PreciseAmount == nil {
+		return "", "", fmt.Errorf("precise_amount is required")
+	}
+	return txn.AmountString, txn.PreciseAmount.String(), nil
 }
 
 func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transaction) (*model.Transaction, error) {
@@ -71,11 +82,17 @@ func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transactio
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
+	amount, preciseAmount, err := persistNumericColumns(txn)
+	if err != nil {
+		span.RecordError(err)
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record transaction", err)
+	}
+
 	// Execute the SQL insert statement to record the transaction
 	_, err = d.Conn.ExecContext(ctx,
 		`INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, persistAmountString(txn.AmountString), persistPreciseAmount(txn.PreciseAmount), txn.Precision, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt.UTC(), metaDataJSON, txn.ScheduledFor.UTC(), txn.Hash, utcOrNil(txn.EffectiveDate),
+		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, amount, preciseAmount, txn.Precision, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt.UTC(), metaDataJSON, txn.ScheduledFor.UTC(), txn.Hash, utcOrNil(txn.EffectiveDate),
 	)
 	// Handle errors that may occur during the execution of the query
 	if err != nil {
@@ -104,10 +121,16 @@ func recordTransactionInTx(ctx context.Context, tx *sql.Tx, txn *model.Transacti
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 	}
 
+	amount, preciseAmount, err := persistNumericColumns(txn)
+	if err != nil {
+		span.RecordError(err)
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record transaction", err)
+	}
+
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, persistAmountString(txn.AmountString), persistPreciseAmount(txn.PreciseAmount), txn.Precision, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt.UTC(), metaDataJSON, txn.ScheduledFor.UTC(), txn.Hash, utcOrNil(txn.EffectiveDate),
+		txn.TransactionID, txn.ParentTransaction, txn.Source, txn.Reference, amount, preciseAmount, txn.Precision, txn.Currency, txn.Destination, txn.Description, txn.Status, txn.CreatedAt.UTC(), metaDataJSON, txn.ScheduledFor.UTC(), txn.Hash, utcOrNil(txn.EffectiveDate),
 	)
 	if err != nil {
 		span.RecordError(err)
@@ -167,13 +190,19 @@ func recordTransactionsInTx(ctx context.Context, tx *sql.Tx, txns []*model.Trans
 			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 		}
 
+		amount, preciseAmount, err := persistNumericColumns(txn)
+		if err != nil {
+			span.RecordError(err)
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to stream transaction copy row", err)
+		}
+
 		if _, err := stmt.ExecContext(ctx,
 			txn.TransactionID,
 			txn.ParentTransaction,
 			txn.Source,
 			txn.Reference,
-			persistAmountString(txn.AmountString),
-			persistPreciseAmount(txn.PreciseAmount),
+			amount,
+			preciseAmount,
 			txn.Precision,
 			txn.Currency,
 			txn.Destination,
