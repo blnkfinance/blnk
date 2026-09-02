@@ -89,9 +89,8 @@ func recordAppliedTxn(t *testing.T, b *Blnk, src, dst string, amount float64) *m
 		Status:         StatusApplied,
 	}
 	// Direct RecordTransaction (unlike the queue flow) neither assigns a
-	// TransactionID nor applies precision twice: the ID must be preset, and
-	// priming PreciseAmount makes the in-flow ApplyPrecision take the
-	// precise->decimal branch that fills AmountString.
+	// TransactionID nor applies precision: the ID must be preset. One
+	// ApplyPrecision pass fills PreciseAmount and AmountString.
 	model.ApplyPrecision(draft)
 	txn, err := b.RecordTransaction(context.Background(), draft)
 	require.NoError(t, err)
@@ -177,10 +176,7 @@ func TestRefundTransaction_RejectedTransactionFails(t *testing.T) {
 		Currency:      "USD",
 		CreatedAt:     time.Now(),
 	}
-	// Two passes: the first fills PreciseAmount, the second takes the
-	// precise->decimal branch that fills AmountString (RejectTransaction
-	// persists directly without the queue flow's metadata preparation).
-	model.ApplyPrecision(queued)
+	// ApplyPrecision fills PreciseAmount and AmountString in one pass.
 	model.ApplyPrecision(queued)
 	rej, err := b.RejectTransaction(context.Background(), queued, "insufficient funds")
 	require.NoError(t, err)
@@ -255,7 +251,6 @@ func TestRefundTransaction_RejectsNonRefundableStatus(t *testing.T) {
 				Status:        status,
 				CreatedAt:     time.Now(),
 			}
-			model.ApplyPrecision(draft)
 			model.ApplyPrecision(draft)
 			persisted, err := ds.RecordTransaction(context.Background(), draft)
 			require.NoError(t, err)

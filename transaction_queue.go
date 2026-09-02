@@ -73,6 +73,10 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	// Initialize transaction metadata and status
 	originalRef := transaction.Reference
 	setTransactionMetadata(transaction)
+	if err := transaction.ValidateAmount(); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 	setTransactionStatus(transaction)
 	originalTxnID := transaction.TransactionID
 

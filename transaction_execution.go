@@ -507,6 +507,16 @@ func (l *Blnk) recordTransactionSingle(ctx context.Context, transaction *model.T
 			return nil, err
 		}
 
+		if isZeroPreciseAmount(transaction) {
+			rejected, err := l.RejectTransaction(ctx, transaction, "zero amount")
+			if err != nil {
+				span.RecordError(err)
+				return nil, err
+			}
+			span.AddEvent("Zero-amount transaction rejected", trace.WithAttributes(attribute.String("transaction.id", rejected.TransactionID)))
+			return rejected, nil
+		}
+
 		// Process the balances by applying the transaction
 		if err := l.processBalances(ctx, transaction, sourceBalance, destinationBalance); err != nil {
 			span.RecordError(err)
@@ -515,8 +525,13 @@ func (l *Blnk) recordTransactionSingle(ctx context.Context, transaction *model.T
 
 		work, skipPersist := l.buildTransactionExecutionWork(ctx, transaction, sourceBalance, destinationBalance)
 		if skipPersist {
-			span.AddEvent("Transaction with zero amount discarded, not persisted", trace.WithAttributes(attribute.String("transaction.id", work.transaction.TransactionID)))
-			return work.transaction, nil
+			rejected, err := l.RejectTransaction(ctx, work.transaction, "zero amount")
+			if err != nil {
+				span.RecordError(err)
+				return nil, err
+			}
+			span.AddEvent("Zero-amount transaction rejected instead of discarded", trace.WithAttributes(attribute.String("transaction.id", rejected.TransactionID)))
+			return rejected, nil
 		}
 
 		work, err = l.persistSingleTransactionExecutionWork(ctx, work)

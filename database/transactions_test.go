@@ -146,12 +146,45 @@ func TestRecordTransaction_Failure(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount.String(), transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, persistAmountString(transaction.AmountString), persistPreciseAmount(transaction.PreciseAmount), transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt.UTC(), metaDataJSON, transaction.ScheduledFor.UTC(), transaction.Hash, nil).
 		WillReturnError(errors.New("db error"))
 
 	_, err = ds.RecordTransaction(ctx, transaction)
 	assert.Error(t, err)
 	assert.IsType(t, apierror.APIError{}, err)
+}
+
+func TestRecordTransaction_EmptyAmountStringPersistsZero(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	transaction := &model.Transaction{
+		TransactionID: "txn_zero",
+		Source:        "src1",
+		Reference:     "ref_zero",
+		Currency:      "WBTC",
+		Destination:   "dest1",
+		Status:        "QUEUED",
+		CreatedAt:     time.Now(),
+		MetaData:      map[string]interface{}{},
+		ScheduledFor:  time.Now(),
+		Hash:          "hash123",
+		PreciseAmount: nil,
+		Precision:     100,
+	}
+
+	metaDataJSON, err := json.Marshal(transaction.MetaData)
+	assert.NoError(t, err)
+
+	mock.ExpectExec("INSERT INTO blnk.transactions").
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, "0", "0", transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt.UTC(), metaDataJSON, transaction.ScheduledFor.UTC(), transaction.Hash, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	result, err := ds.RecordTransaction(context.Background(), transaction)
+	assert.NoError(t, err)
+	assert.Equal(t, transaction, result)
 }
 
 func TestGetTransaction_Success(t *testing.T) {

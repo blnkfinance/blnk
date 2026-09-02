@@ -135,12 +135,18 @@ func TestApplyPrecision_EdgeCases(t *testing.T) {
 		assert.Equal(t, "42", got.String())
 	})
 
-	t.Run("existing positive precise amount drives the decimal amount", func(t *testing.T) {
-		txn := &Transaction{PreciseAmount: big.NewInt(1001), Precision: 100}
+	t.Run("zero precise amount fills AmountString", func(t *testing.T) {
+		txn := &Transaction{PreciseAmount: big.NewInt(0), Amount: 0, Precision: 100}
 		got := ApplyPrecision(txn)
-		assert.Equal(t, "1001", got.String())
-		assert.Equal(t, 10.01, txn.Amount)
-		assert.Equal(t, "10.01", txn.AmountString)
+		assert.Equal(t, "0", got.String())
+		assert.Equal(t, "0", txn.AmountString)
+	})
+
+	t.Run("amount-only conversion fills AmountString in one pass", func(t *testing.T) {
+		txn := &Transaction{Amount: 10, Precision: 100}
+		got := ApplyPrecision(txn)
+		assert.Equal(t, "1000", got.String())
+		assert.Equal(t, "10", txn.AmountString)
 	})
 
 	t.Run("float-hostile decimal amounts convert exactly", func(t *testing.T) {

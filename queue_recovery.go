@@ -26,6 +26,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	recoveryStatusRecovered        = "recovered"
+	recoveryStatusFailed           = "failed"
+	recoveryStatusAlreadyProcessed = "already_processed"
+	recoveryStatusUnrecoverable    = "unrecoverable"
+)
+
 type QueuedTransactionRecoveryProcessor struct {
 	blnk                     *Blnk
 	batchSize                int
@@ -173,17 +180,14 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	}
 	attempts++
 
+	if isZeroPreciseAmount(stuckTxn) {
+		logrus.Warnf("Stuck transaction %s has a zero amount, rejecting", stuckTxn.TransactionID)
+		return p.rejectStuckTransaction(ctx, stuckTxn, attempts, "zero amount")
+	}
+
 	if attempts > p.maxRecoveryAttempts {
 		logrus.Warnf("Stuck transaction %s exceeded max recovery attempts (%d), rejecting", stuckTxn.TransactionID, p.maxRecoveryAttempts)
-		rejectionCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
-		_, err := p.blnk.RejectTransaction(ctx, rejectionCopy, "exceeded max queued recovery attempts")
-		if err != nil {
-			if isReferenceAlreadyUsedError(err) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return p.rejectStuckTransaction(ctx, stuckTxn, attempts, "exceeded max queued recovery attempts")
 	}
 
 	if stuckTxn.Atomic {
@@ -206,11 +210,11 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	if err != nil {
 		if isReferenceAlreadyUsedError(err) {
 			logrus.Infof("Stuck transaction %s already processed (reference %s already used)", stuckTxn.TransactionID, queueCopy.Reference)
-			p.updateRecoveryMetadata(ctx, stuckTxn, attempts, "already_processed")
+			p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusAlreadyProcessed)
 			return nil
 		}
 
-		p.updateRecoveryMetadata(ctx, stuckTxn, attempts, "failed")
+		p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusFailed)
 		return err
 	}
 
@@ -219,7 +223,24 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	} else {
 		logrus.Infof("Successfully recovered stuck transaction %s via queue copy %s", stuckTxn.TransactionID, queueCopy.TransactionID)
 	}
-	p.updateRecoveryMetadata(ctx, stuckTxn, attempts, "recovered")
+	p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusRecovered)
+	return nil
+}
+
+// rejectStuckTransaction writes a REJECTED child for a stuck QUEUED parent.
+// If that insert still fails, the parent is marked unrecoverable so it no
+// longer occupies the oldest-100 recovery window forever.
+func (p *QueuedTransactionRecoveryProcessor) rejectStuckTransaction(ctx context.Context, stuckTxn *model.Transaction, attempts int, reason string) error {
+	rejectionCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
+	_, err := p.blnk.RejectTransaction(ctx, rejectionCopy, reason)
+	if err != nil {
+		if isReferenceAlreadyUsedError(err) {
+			return nil
+		}
+		p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusUnrecoverable)
+		logrus.Errorf("failed to reject stuck transaction %s: %v; marking unrecoverable so it no longer blocks recovery", stuckTxn.TransactionID, err)
+		return nil
+	}
 	return nil
 }
 
@@ -247,4 +268,8 @@ func (p *QueuedTransactionRecoveryProcessor) updateRecoveryMetadata(ctx context.
 
 func isReferenceAlreadyUsedError(err error) bool {
 	return IsDuplicateReferenceError(err)
+}
+
+func isZeroPreciseAmount(txn *model.Transaction) bool {
+	return txn != nil && txn.PreciseAmount != nil && txn.PreciseAmount.Sign() <= 0
 }

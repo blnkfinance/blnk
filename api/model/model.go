@@ -87,9 +87,8 @@ func validatePrecisionNotNegative(value interface{}) error {
 // persisted as sent. The stored record then reports the opposite sign of the
 // movement it describes, and is invisible to an `amount > 0` filter.
 //
-// Zero is left to the existing downstream handling rather than rejected
-// here, so that the current zero-amount semantics (and issue #334's request
-// to make them opt-in) are not changed by this fix.
+// Zero amount is still the sentinel for "use precise_amount instead".
+// A zero precise_amount is rejected in ValidateRecordTransaction.
 func validateAmountNotNegative(t *RecordTransaction) validation.RuleFunc {
 	return func(value interface{}) error {
 		if t.Amount < 0 {
@@ -275,6 +274,9 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 			}
 			if t.Amount == 0 && t.PreciseAmount == nil {
 				return errors.New("either amount or precise_amount is required")
+			}
+			if t.PreciseAmount != nil && t.PreciseAmount.Sign() == 0 {
+				return errors.New("precise_amount must be positive")
 			}
 
 			// Check for high precision amounts that might lead to rounding errors

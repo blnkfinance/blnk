@@ -304,6 +304,10 @@ func applyPrecisionLogic(transaction *Transaction) *big.Int {
 	}
 
 	transaction.PreciseAmount = convertDecimalToPrecise(transaction)
+	// Always materialize AmountString, including for a precise amount of 0.
+	// The persist path writes AmountString into a numeric column; leaving it
+	// blank makes Postgres reject the insert with invalid input syntax.
+	convertPreciseToDecimal(transaction)
 	return transaction.PreciseAmount
 }
 
@@ -436,6 +440,12 @@ func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 	result.SetString(preciseAmount.String(), 10)
 
 	return result
+}
+
+// ValidateAmount is the exported ingest check used by QueueTransaction so
+// zero/empty amounts never land on the queue.
+func (transaction *Transaction) ValidateAmount() error {
+	return transaction.validate()
 }
 
 // validate checks if the transaction has a positive amount.

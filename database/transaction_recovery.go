@@ -37,10 +37,11 @@ func (d Datasource) GetStuckQueuedTransactions(ctx context.Context, threshold ti
 	cutoff := time.Now().UTC().Add(-threshold)
 
 	rows, err := d.Conn.QueryContext(ctx, `
-		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+		SELECT transaction_id, parent_transaction, source, reference, amount, COALESCE(precise_amount::text, '0'), precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
 		FROM blnk.transactions t
 		WHERE t.status = 'QUEUED'
 		  AND t.created_at < $1
+		  AND COALESCE(t.meta_data->>'recovery_status', '') <> 'unrecoverable'
 		  AND NOT EXISTS (
 		      SELECT 1 FROM blnk.transactions child
 		      WHERE child.parent_transaction = t.transaction_id
