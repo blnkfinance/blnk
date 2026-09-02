@@ -27,6 +27,19 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// PrepareLineageOutbox creates a LineageOutbox entry for atomic insertion with the transaction.
+// This ensures lineage processing intent is captured in the same database transaction,
+// guaranteeing no lineage work is lost even if subsequent async operations fail.
+//
+// Parameters:
+// - ctx context.Context: The context for the operation.
+// - txn *model.Transaction: The transaction being processed.
+// - sourceBalance *model.Balance: The source balance (may be nil).
+// - destinationBalance *model.Balance: The destination balance (may be nil).
+//
+// Returns:
+// - *model.LineageOutbox: The outbox entry to insert, or nil if no lineage processing needed.
+
 func (l *Blnk) PrepareLineageOutbox(ctx context.Context, txn *model.Transaction, sourceBalance, destinationBalance *model.Balance) *model.LineageOutbox {
 	_, span := tracer.Start(ctx, "PrepareLineageOutbox")
 	defer span.End()

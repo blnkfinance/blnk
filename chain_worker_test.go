@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"sync"
 	"testing"
@@ -103,10 +104,31 @@ func TestChainProcessor_ChainsAcrossTicks(t *testing.T) {
 	defer p.Stop()
 	assert.True(t, p.IsRunning())
 
+	// Wait on this test's own transaction rather than on
+	// CountUnchainedTransactions, which counts every unchained row in the
+	// database. That global count only reaches zero when no other test has
+	// left unchained rows behind, so the assertion depended on which tests
+	// ran first: it passed in a full-suite run (TestChain_SealsTransactions
+	// happens to drain the backlog via chainAll first) and failed when this
+	// test ran alone against a database that already had rows in it.
+	//
+	// The wait is also why that dependence was time-zone sensitive.
+	// transactions.created_at is a naive TIMESTAMP written from local
+	// time.Now(), so a database carrying rows recorded under different TZ
+	// settings holds created_at values in different frames, and the
+	// created_at < cutoff bound shared by the counter and the chainer then
+	// admits a different set of rows depending on the TZ of the run.
+	//
+	// What this test actually verifies is the line below it: that the
+	// processor picks the transaction up on a poll tick. Scope the wait to
+	// that, and the test stops depending on unrelated rows entirely.
+	conn := ds.(*database.Datasource).Conn
 	require.Eventually(t, func() bool {
-		n, err := ds.CountUnchainedTransactions(ctx, time.Now())
-		return err == nil && n == 0
-	}, 15*time.Second, 200*time.Millisecond, "processor should drain the backlog")
+		var seq sql.NullInt64
+		err := conn.QueryRowContext(ctx,
+			`SELECT chain_seq FROM blnk.transactions WHERE transaction_id = $1`, id).Scan(&seq)
+		return err == nil && seq.Valid
+	}, 15*time.Second, 200*time.Millisecond, "processor should chain the transaction across poll ticks")
 
 	assertSealed(t, ds, id)
 }

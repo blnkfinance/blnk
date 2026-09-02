@@ -109,6 +109,16 @@ func (l *Blnk) ProcessTransactionInBatches(ctx context.Context, parentTransactio
 				logrus.Errorf("Error during processing: %v", err)
 				span.RecordError(err)
 			}
+			// A single failure is returned as itself. This function is the
+			// engine behind single-transaction commits and voids as well as
+			// multi-leg ones, so wrapping unconditionally meant the caller of
+			// a plain commit saw its reason wrapped in batch language and
+			// slice brackets — "error occurred during processing: [cannot
+			// commit more than the original transaction amount...]" — for an
+			// operation that had no batch and one leg.
+			if len(allErrors) == 1 {
+				return allTxns, allErrors[0]
+			}
 			return allTxns, fmt.Errorf("error occurred during processing: %v", allErrors)
 		}
 

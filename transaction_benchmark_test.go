@@ -111,8 +111,7 @@ func setupMockDataSource() *mocks.MockDataSource {
 func BenchmarkConfigFetch(b *testing.B) {
 	setupBenchmarkConfig()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		cfg, err := config.Fetch()
 		if err != nil {
 			b.Fatal(err)
@@ -126,8 +125,7 @@ func BenchmarkConfigFetch(b *testing.B) {
 func BenchmarkConfigCached(b *testing.B) {
 	cfg := setupBenchmarkConfig()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = cfg.Transaction.LockDuration
 	}
 }
@@ -143,8 +141,7 @@ func BenchmarkTransactionMarshal(b *testing.B) {
 		"description": "Payment for services",
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := json.Marshal(txn)
 		if err != nil {
 			b.Fatal(err)
@@ -165,8 +162,7 @@ func BenchmarkTransactionUnmarshal(b *testing.B) {
 
 	data, _ := json.Marshal(txn)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var result model.Transaction
 		err := json.Unmarshal(data, &result)
 		if err != nil {
@@ -183,8 +179,7 @@ func BenchmarkApplyTransactionToBalances(b *testing.B) {
 	txn.PreciseAmount = big.NewInt(10000)
 	txn.Precision = 100
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		sourceBalance := createTestBalance("source-001", 100000)
 		destBalance := createTestBalance("dest-001", 0)
 
@@ -228,8 +223,7 @@ func BenchmarkValidateTxn(b *testing.B) {
 
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		txn := createTestTransaction("source-001", "dest-001", fmt.Sprintf("ref-%d", i), 100.00)
 		err := blnkInstance.validateTxn(ctx, txn)
 		if err != nil {
@@ -242,8 +236,7 @@ func BenchmarkValidateTxn(b *testing.B) {
 func BenchmarkHashBalanceID(b *testing.B) {
 	balanceID := "bln_abc123def456ghi789"
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = hashBalanceID(balanceID)
 	}
 }
@@ -255,8 +248,7 @@ func BenchmarkHashBalanceIDVaried(b *testing.B) {
 		balanceIDs[i] = fmt.Sprintf("bln_%d", i)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		_ = hashBalanceID(balanceIDs[i%1000])
 	}
 }
@@ -268,16 +260,14 @@ func BenchmarkTransactionHashTxn(b *testing.B) {
 	txn.CreatedAt = time.Now()
 	txn.PreciseAmount = big.NewInt(10000)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = txn.HashTxn()
 	}
 }
 
 // BenchmarkApplyPrecision measures precision application to transactions
 func BenchmarkApplyPrecision(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		txn := createTestTransaction("source-001", "dest-001", "ref-001", 100.50)
 		txn.Precision = 100
 		_ = model.ApplyPrecision(txn)
@@ -286,8 +276,7 @@ func BenchmarkApplyPrecision(b *testing.B) {
 
 // BenchmarkSetTransactionMetadata measures transaction metadata setup
 func BenchmarkSetTransactionMetadata(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		txn := createTestTransaction("source-001", "dest-001", fmt.Sprintf("ref-%d", i), 100.00)
 		setTransactionMetadata(txn)
 	}
@@ -298,8 +287,7 @@ func BenchmarkBigIntOperations(b *testing.B) {
 	amount := big.NewInt(10000)
 	balance := big.NewInt(100000)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		result := new(big.Int)
 		result.Sub(balance, amount)
 	}
@@ -320,8 +308,7 @@ func BenchmarkBigIntOperationsParallel(b *testing.B) {
 
 // BenchmarkGenerateUUID measures UUID generation overhead
 func BenchmarkGenerateUUID(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = model.GenerateUUIDWithSuffix("txn")
 	}
 }
@@ -351,8 +338,7 @@ func BenchmarkIsInflightTransaction(b *testing.B) {
 
 	transactions := []*model.Transaction{txnInflight, txnQueued, txnApplied}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		_ = IsInflightTransaction(transactions[i%3])
 	}
 }
@@ -364,8 +350,7 @@ func BenchmarkCreateQueueCopy(b *testing.B) {
 	txn.CreatedAt = time.Now()
 	txn.PreciseAmount = big.NewInt(10000)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = createQueueCopy(txn, "ref-original")
 	}
 }

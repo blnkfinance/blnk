@@ -32,9 +32,18 @@ type TransactionPreview struct {
 	// WouldApply reports whether a real post of this transaction would be
 	// accepted against the balances as they currently stand. When false,
 	// Rejection carries the reason.
-	WouldApply    bool                `json:"would_apply"`
-	Rejection     *PreviewRejection   `json:"rejection,omitempty"`
-	Status        string              `json:"status"`
+	WouldApply bool              `json:"would_apply"`
+	Rejection  *PreviewRejection `json:"rejection,omitempty"`
+
+	// Operation names the settlement being projected on the inflight endpoint:
+	// "commit" or "void". Empty for ordinary transaction projections.
+	Operation string `json:"operation,omitempty"`
+
+	// Status is the status the transaction would carry once applied. It is
+	// omitted when WouldApply is false: a rejected projection has no resulting
+	// status, because the real endpoint returns an error and writes no
+	// transaction at all. See Finalize.
+	Status        string              `json:"status,omitempty"`
 	Reference     string              `json:"reference,omitempty"`
 	Currency      string              `json:"currency"`
 	Amount        float64             `json:"amount"`
@@ -101,4 +110,64 @@ type LegProjection struct {
 // AddNote appends an advisory note to the projection.
 func (preview *TransactionPreview) AddNote(note string) {
 	preview.Notes = append(preview.Notes, note)
+}
+
+// BulkTransactionPreview is the projected effect of a batch that was evaluated
+// but never applied.
+type BulkTransactionPreview struct {
+	DryRun bool `json:"dry_run"`
+
+	// WouldApply is false when any item in the batch would be rejected.
+	WouldApply bool `json:"would_apply"`
+
+	// Cumulative reports whether items were projected against each other's
+	// effects. That mirrors how the batch would really run: items are applied
+	// one after another only when skip_queue is set, and are otherwise
+	// dispatched concurrently with no guaranteed order.
+	Cumulative bool `json:"cumulative"`
+	Atomic     bool `json:"atomic"`
+
+	Results []TransactionPreview `json:"results"`
+
+	// Balances is the batch's combined effect per balance, and is reported only
+	// in cumulative mode — without a guaranteed order there is no single
+	// combined outcome to state.
+	Balances []BalanceProjection `json:"balances,omitempty"`
+
+	Notes []string `json:"notes,omitempty"`
+}
+
+// AddNote appends an advisory note to the batch projection.
+func (preview *BulkTransactionPreview) AddNote(note string) {
+	preview.Notes = append(preview.Notes, note)
+}
+
+// Finalize reconciles fields that only describe a transaction that would
+// actually apply.
+//
+// Status is set early, from the status the transaction would carry once
+// applied, and the projection only later discovers it would be rejected -- an
+// insufficient balance, a failing leg, a validation failure downstream. Left
+// alone, the response then asserts two things that cannot both be true:
+//
+//	"would_apply": false,
+//	"rejection":   { "code": "TXN_INSUFFICIENT_FUNDS", ... },
+//	"status":      "APPLIED"
+//
+// A rejected projection has no resulting status. The real endpoint returns an
+// error and writes no transaction, so there is no status to report; clearing
+// it lets the omitempty tag drop the field rather than name an outcome that
+// cannot happen. Callers read would_apply and rejection for that answer.
+func (preview *TransactionPreview) Finalize() {
+	if !preview.WouldApply {
+		preview.Status = ""
+	}
+}
+
+// Finalize applies the same reconciliation to a batch and to each of its
+// items, so a rejected item does not report a status either.
+func (preview *BulkTransactionPreview) Finalize() {
+	for i := range preview.Results {
+		preview.Results[i].Finalize()
+	}
 }

@@ -199,7 +199,7 @@ func TestRefundTransaction_DeterministicReference(t *testing.T) {
 
 	refund, err := b.RefundTransaction(context.Background(), txn.TransactionID, true)
 	require.NoError(t, err)
-	assert.Equal(t, txn.TransactionID+"_refund", refund.Reference,
+	assert.Equal(t, model.RefundReference(txn.TransactionID), refund.Reference,
 		"refund reference must be deterministic for idempotency")
 }
 
