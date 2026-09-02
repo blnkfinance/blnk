@@ -169,6 +169,17 @@ func TestRespondErrorMessagePatterns(t *testing.T) {
 	}
 }
 
+func TestClassifyMessageMixedRefundBatchError(t *testing.T) {
+	joined := "transaction txn_1 has already been refunded\nfailed to queue refund transaction"
+	code, ok := classifyMessage(joined)
+	require.True(t, ok, "unfiltered joined batch errors must still classify as conflict")
+	assert.Equal(t, apierror.ErrGenConflict, code)
+
+	fatalOnly := "failed to queue refund transaction"
+	_, ok = classifyMessage(fatalOnly)
+	assert.False(t, ok, "fatal-only batch errors must not inherit conflict from skippable legs")
+}
+
 func TestRespondErrorFallbackSanitizes(t *testing.T) {
 	c, w := newTestContext()
 	respondError(c, errors.New("pq: connection refused on 10.0.0.5"))

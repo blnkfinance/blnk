@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -112,6 +113,7 @@ func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.
 
 	preview := &model.TransactionPreview{DryRun: true, WouldApply: true}
 
+	skippedAlreadyRefunded := 0
 	for _, original := range refundable {
 		// The same eligibility check each leg passes through on the real
 		// path. GetRefundableTransactionsByParentID filters on status alone,
@@ -119,8 +121,12 @@ func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.
 		// back from the query — its reversal is itself an APPLIED row under
 		// the same parent — and would be projected as refundable again, both
 		// claiming the refund would apply and counting the reversal into the
-		// total.
+		// total. Already-refunded legs are skipped, matching ProcessRefundsInBatches.
 		if err := l.validateTransactionForRefund(ctx, original); err != nil {
+			if isTransactionAlreadyRefundedError(err) {
+				skippedAlreadyRefunded++
+				continue
+			}
 			preview.WouldApply = false
 			legErrors = append(legErrors, err)
 			continue
@@ -168,7 +174,10 @@ func (l *Blnk) PreviewRefund(ctx context.Context, transactionID string) (*model.
 	}
 
 	if len(legErrors) > 0 {
-		preview.Rejection = previewRejection(fmt.Errorf("error occurred during processing: %v", legErrors))
+		preview.Rejection = previewRejection(errors.Join(legErrors...))
+	} else if total.Sign() == 0 && skippedAlreadyRefunded > 0 {
+		preview.WouldApply = false
+		preview.Rejection = previewRejection(&errTransactionAlreadyRefunded{transactionID: transactionID})
 	}
 
 	preview.PreciseAmount = preciseString(total)

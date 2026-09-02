@@ -104,15 +104,7 @@ func (l *Blnk) voidInflightBatchTransactions(ctx context.Context, batchID string
 
 // refundNonInflightBatchTransactions refunds all non-inflight transactions in a batch
 func (l *Blnk) refundNonInflightBatchTransactions(ctx context.Context, batchID string) (string, error) {
-	_, err := l.ProcessTransactionInBatches(
-		ctx,
-		batchID,
-		big.NewInt(0),
-		1, // Assuming 1 worker is sufficient for rollback, adjust if needed
-		false,
-		l.GetRefundableTransactionsByParentID,
-		l.RefundWorker,
-	)
+	_, err := l.ProcessRefundsInBatches(ctx, batchID, RefundOptions{})
 	return "refunded", err
 }
 
