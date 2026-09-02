@@ -39,7 +39,7 @@ func insertSnapshot(t *testing.T, ds Datasource, balanceID, ledgerID string, bal
 			 inflight_balance, inflight_credit_balance, inflight_debit_balance,
 			 currency, snapshot_time, created_at)
 		VALUES ($1, $2, $3, $4, $5, 0, 0, 0, 'USD', $6, $7)
-	`, balanceID, ledgerID, balance, credit, debit, snapshotTime, snapshotTime)
+	`, balanceID, ledgerID, balance, credit, debit, snapshotTime.UTC(), snapshotTime.UTC())
 	require.NoError(t, err)
 }
 
@@ -192,7 +192,7 @@ func TestGetBalanceAtTime_EffectiveDateOverridesCreatedAt_RealDB(t *testing.T) {
 		INSERT INTO blnk.transactions
 			(transaction_id, source, destination, reference, amount, precise_amount, precision, currency, status, description, hash, created_at, effective_date, meta_data)
 		VALUES ($1, $2, $3, $4, 5, 500, 100, 'USD', 'APPLIED', 'backdated fixture', 'cov-hash', $5, $6, '{}'::jsonb)
-	`, txnID, src.BalanceID, dst.BalanceID, "cov-bat-eff-"+marker, now, now.Add(-5*time.Hour))
+	`, txnID, src.BalanceID, dst.BalanceID, "cov-bat-eff-"+marker, now.UTC(), now.Add(-5*time.Hour).UTC())
 	require.NoError(t, err)
 
 	t.Run("backdated transaction is visible at its effective date", func(t *testing.T) {
