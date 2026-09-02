@@ -116,32 +116,47 @@ func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID s
 // propagate to shadow transactions. Matches PrepareLineageOutbox semantics: debit shadows
 // follow source TrackFundLineage; credit shadows require a provider and destination
 // TrackFundLineage. Shadow children never have nested shadows.
-func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *model.Transaction) bool {
+//
+// When a balance lookup fails, the second return value is non-nil and the bool is true
+// so callers process shadows conservatively rather than skipping and stranding inflight
+// companions after the parent is already committed or voided.
+func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *model.Transaction) (bool, error) {
+	ctx, span := tracer.Start(ctx, "InflightTransactionNeedsShadowWork")
+	defer span.End()
+
 	if txn == nil {
-		return false
+		return false, nil
 	}
 	if txn.MetaData != nil {
 		if _, isShadow := txn.MetaData["_lineage_type"]; isShadow {
-			return false
+			return false, nil
 		}
 		if _, hasAlloc := txn.MetaData[LineageFundAllocation]; hasAlloc {
-			return true
+			return true, nil
 		}
 	}
 
 	provider := l.getLineageProvider(txn)
 	if provider != "" {
 		dst, err := l.datasource.GetBalanceByIDLite(txn.Destination)
-		return err == nil && dst != nil && dst.TrackFundLineage
+		if err != nil {
+			span.RecordError(err)
+			return true, fmt.Errorf("failed to check destination lineage eligibility: %w", err)
+		}
+		return dst != nil && dst.TrackFundLineage, nil
 	}
 
 	// Only real balance IDs can track lineage; @ indicators (e.g. @world) cannot.
 	if strings.HasPrefix(txn.Source, "@") {
-		return false
+		return false, nil
 	}
 
 	src, err := l.datasource.GetBalanceByIDLite(txn.Source)
-	return err == nil && src != nil && src.TrackFundLineage
+	if err != nil {
+		span.RecordError(err)
+		return true, fmt.Errorf("failed to check source lineage eligibility: %w", err)
+	}
+	return src != nil && src.TrackFundLineage, nil
 }
 
 // queueShadowWork processes shadow commit or void work synchronously first, and queues
@@ -161,7 +176,8 @@ func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *mode
 // Returns:
 // - error: An error if all processing attempts failed.
 func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, txn *model.Transaction, lineageType string) error {
-	if !l.inflightTransactionNeedsShadowWork(ctx, txn) {
+	needsShadow, _ := l.inflightTransactionNeedsShadowWork(ctx, txn)
+	if !needsShadow {
 		return nil
 	}
 
