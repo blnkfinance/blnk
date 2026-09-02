@@ -18,6 +18,8 @@ package blnk
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -124,41 +126,54 @@ func (p *QueuedTransactionRecoveryProcessor) run(ctx context.Context) {
 
 // processBatch performs one periodic stuck-queue recovery pass using the configured threshold.
 func (p *QueuedTransactionRecoveryProcessor) processBatch(ctx context.Context) {
-	p.recoverWithThreshold(ctx, p.stuckThreshold)
+	recovered, err := p.recoverWithThreshold(ctx, p.stuckThreshold)
+	if err != nil {
+		logrus.Errorf("stuck queue recovery pass recovered %d with failures: %v", recovered, err)
+	}
 }
 
 // RecoverQueuedTransactions triggers an immediate recovery of stuck queued transactions
 // using the provided threshold. This is exposed for the manual trigger API endpoint.
+// recovered is the number of stuck rows successfully resolved; err is non-nil when
+// any row in the batch could not be recovered.
 func (b *Blnk) RecoverQueuedTransactions(ctx context.Context, threshold time.Duration) (int, error) {
 	if threshold < 2*time.Minute {
 		threshold = 2 * time.Minute
 	}
 
 	processor := NewQueuedTransactionRecoveryProcessor(b)
-	return processor.recoverWithThreshold(ctx, threshold), nil
+	return processor.recoverWithThreshold(ctx, threshold)
 }
 
 // recoverWithThreshold loads currently stuck queued transactions and reprocesses them serially.
-func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Context, threshold time.Duration) int {
+func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Context, threshold time.Duration) (int, error) {
 	stuckTxns, err := p.blnk.datasource.GetStuckQueuedTransactions(ctx, threshold, p.batchSize)
 	if err != nil {
 		logrus.Errorf("failed to get stuck queued transactions: %v", err)
-		return 0
+		return 0, err
 	}
 
 	if len(stuckTxns) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	logrus.Infof("Processing %d stuck queued transactions with %d workers (threshold=%v)", len(stuckTxns), p.maxWorkers, threshold)
 
+	var recovered int
+	var failures []error
 	for _, txn := range stuckTxns {
 		if err := p.processStuckTransaction(ctx, txn); err != nil {
 			logrus.Errorf("failed to process stuck transaction %s: %v", txn.TransactionID, err)
+			failures = append(failures, fmt.Errorf("%s: %w", txn.TransactionID, err))
+			continue
 		}
+		recovered++
 	}
 
-	return len(stuckTxns)
+	if len(failures) > 0 {
+		return recovered, fmt.Errorf("recovery failed for %d of %d stuck transactions: %w", len(failures), len(stuckTxns), errors.Join(failures...))
+	}
+	return recovered, nil
 }
 
 // processStuckTransaction replays one stuck queued transaction, preserving the existing recovery

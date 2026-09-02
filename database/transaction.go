@@ -41,25 +41,12 @@ func utcOrNil(t *time.Time) *time.Time {
 	return &u
 }
 
-const rejectedPersistStatus = "REJECTED"
-
 // persistNumericColumns is the amount pair written to numeric columns.
-// Missing values are not coerced to zero for applied/queued rows: that hid
-// upstream bugs as valid-looking zero transactions. REJECTED is the exception,
-// because RejectTransaction materializes a zero-amount terminal child.
+// Every status requires both fields; RejectTransaction materializes them via
+// ApplyPrecision before persist. Missing values must fail, not be coerced.
 func persistNumericColumns(txn *model.Transaction) (amount string, preciseAmount string, err error) {
 	if txn == nil {
 		return "", "", fmt.Errorf("transaction is required")
-	}
-	if txn.Status == rejectedPersistStatus {
-		amount = txn.AmountString
-		if amount == "" {
-			amount = "0"
-		}
-		if txn.PreciseAmount == nil {
-			return amount, "0", nil
-		}
-		return amount, txn.PreciseAmount.String(), nil
 	}
 	if txn.AmountString == "" {
 		return "", "", fmt.Errorf("amount is required")

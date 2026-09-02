@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/big"
 	"testing"
+	"time"
 
 	dbmocks "github.com/blnkfinance/blnk/database/mocks"
 	"github.com/blnkfinance/blnk/internal/hotpairs"
@@ -198,4 +199,38 @@ func TestQueueTransaction_RejectsZeroAmount(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be positive")
+}
+
+func TestRecoverWithThreshold_CountsOnlySuccessfulRecoveries(t *testing.T) {
+	mockDS := &dbmocks.MockDataSource{}
+	blnk := &Blnk{datasource: mockDS}
+	processor := NewQueuedTransactionRecoveryProcessor(blnk)
+
+	okTxn := positiveStuckTxn()
+	failTxn := positiveStuckTxn()
+	failTxn.TransactionID = "txn_fail"
+	failTxn.Reference = "ref_fail"
+
+	mockDS.On("GetStuckQueuedTransactions", mock.Anything, mock.Anything, 100).
+		Return([]*model.Transaction{okTxn, failTxn}, nil).Once()
+
+	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
+		if txn.ParentTransaction == failTxn.TransactionID {
+			return transactionExecutionResult{}, errors.New("lock contention")
+		}
+		return transactionExecutionResult{mode: transactionExecutionModeSingle, transaction: txn}, nil
+	}
+
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, okTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
+		return metadata["recovery_status"] == recoveryStatusRecovered
+	})).Return(nil).Once()
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, failTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
+		return metadata["recovery_status"] == recoveryStatusFailed
+	})).Return(nil).Once()
+
+	recovered, err := processor.recoverWithThreshold(context.Background(), time.Hour)
+	assert.Equal(t, 1, recovered)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "recovery failed for 1 of 2 stuck transactions")
+	mockDS.AssertExpectations(t)
 }

@@ -156,8 +156,28 @@ func TestRecordTransaction_Failure(t *testing.T) {
 }
 
 func TestPersistNumericColumns(t *testing.T) {
-	t.Run("rejected missing amounts persist as zero", func(t *testing.T) {
-		amount, precise, err := persistNumericColumns(&model.Transaction{Status: "REJECTED"})
+	t.Run("rejected missing amount string is rejected", func(t *testing.T) {
+		_, _, err := persistNumericColumns(&model.Transaction{
+			Status:        "REJECTED",
+			PreciseAmount: model.Int64ToBigInt(0),
+		})
+		assert.EqualError(t, err, "amount is required")
+	})
+
+	t.Run("rejected missing precise amount is rejected", func(t *testing.T) {
+		_, _, err := persistNumericColumns(&model.Transaction{
+			Status:       "REJECTED",
+			AmountString: "10",
+		})
+		assert.EqualError(t, err, "precise_amount is required")
+	})
+
+	t.Run("rejected explicit zero is allowed", func(t *testing.T) {
+		amount, precise, err := persistNumericColumns(&model.Transaction{
+			Status:        "REJECTED",
+			AmountString:  "0",
+			PreciseAmount: model.Int64ToBigInt(0),
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, "0", amount)
 		assert.Equal(t, "0", precise)
@@ -191,7 +211,7 @@ func TestPersistNumericColumns(t *testing.T) {
 	})
 }
 
-func TestRecordTransaction_RejectedAllowsZeroAmounts(t *testing.T) {
+func TestRecordTransaction_RejectedRequiresMaterializedAmounts(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -208,7 +228,8 @@ func TestRecordTransaction_RejectedAllowsZeroAmounts(t *testing.T) {
 		MetaData:      map[string]interface{}{},
 		ScheduledFor:  time.Now(),
 		Hash:          "hash123",
-		PreciseAmount: nil,
+		AmountString:  "0",
+		PreciseAmount: model.Int64ToBigInt(0),
 		Precision:     100,
 	}
 
@@ -224,7 +245,7 @@ func TestRecordTransaction_RejectedAllowsZeroAmounts(t *testing.T) {
 	assert.Equal(t, transaction, result)
 }
 
-func TestRecordTransaction_MissingAmountRejectedForNonRejectedStatus(t *testing.T) {
+func TestRecordTransaction_MissingAmountRejectedForAllStatuses(t *testing.T) {
 	cases := []struct {
 		name string
 		txn  *model.Transaction
@@ -247,6 +268,17 @@ func TestRecordTransaction_MissingAmountRejectedForNonRejectedStatus(t *testing.
 				Reference:     "ref_applied_missing",
 				AmountString:  "10",
 				Status:        "APPLIED",
+				CreatedAt:     time.Now(),
+				ScheduledFor:  time.Now(),
+			},
+		},
+		{
+			name: "rejected partial numeric fields",
+			txn: &model.Transaction{
+				TransactionID: "txn_rejected_partial",
+				Reference:     "ref_rejected_partial",
+				AmountString:  "10",
+				Status:        "REJECTED",
 				CreatedAt:     time.Now(),
 				ScheduledFor:  time.Now(),
 			},
