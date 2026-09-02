@@ -296,6 +296,15 @@ func resolveErrorCode(err error) (apierror.ErrorCode, bool) {
 }
 
 func classifyMessage(msg string) (apierror.ErrorCode, bool) {
+	// A joined refund batch can surface both a skippable already-refunded leg
+	// and a fatal queue failure in one string. Matching only the skippable
+	// phrase would answer 409 TXN_ALREADY_REFUNDED after money already moved on
+	// another leg — the mixed case is a batch conflict, not idempotent success.
+	if strings.Contains(msg, "has already been refunded") &&
+		strings.Contains(msg, "failed to queue refund transaction") {
+		return apierror.ErrGenConflict, true
+	}
+
 	for _, p := range messagePatterns {
 		matched := true
 		for _, sub := range p.contains {
