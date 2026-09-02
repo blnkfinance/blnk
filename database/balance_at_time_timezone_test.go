@@ -73,20 +73,20 @@ func openTestDBInTimeZone(t *testing.T, tz string) Datasource {
 //	WHERE COALESCE(effective_date, created_at) > $snapshot_time
 //
 // created_at is written by Go as txn.CreatedAt.UTC(), so it is always a UTC
-// wall clock. snapshot_time is written by
-// blnk.take_daily_balance_snapshots_batched. If that side records the session's
-// wall clock instead — or if the column's type leaves Postgres to reinterpret
-// it in the session zone at comparison time — the bound sits at the session's
-// UTC offset away from the transaction timeline, and the endpoint answers with
-// a wrong number and no error:
+// wall clock. snapshot_time is a TIMESTAMPTZ, and the driver hands it back in
+// the session's zone; if it is not converted to UTC before it is used as the
+// bound, the plain TIMESTAMP comparison discards that offset rather than
+// applying it. The bound then sits at the session's UTC offset away from the
+// transaction timeline, and the endpoint answers with a wrong number and no
+// error:
 //
 //	east of UTC   the range narrows, post-snapshot transactions are dropped
 //	west of UTC   the range widens, pre-snapshot transactions are applied on
 //	              top of the snapshot that already accounts for them
 //
-// Both offsets are exercised, and the snapshot comes from the real function
-// rather than a hand-written row, so the writer and the column type are both
-// covered.
+// Both offsets are exercised, and the snapshot is written by the production
+// function rather than by a hand-written row, so the writer's own clock is
+// covered too.
 func TestGetBalanceAtTime_NonUTCSession_RealDB(t *testing.T) {
 	for _, tz := range []string{"UTC", "Asia/Kolkata", "America/New_York"} {
 		t.Run(tz, func(t *testing.T) {
@@ -111,7 +111,8 @@ func TestGetBalanceAtTime_NonUTCSession_RealDB(t *testing.T) {
 				"bat-tz-before-"+marker, 1000, now.Add(-3*time.Hour))
 
 			// The snapshot itself, written by the production writer on whatever
-			// clock it chooses.
+			// clock it chooses. It goes into a TIMESTAMPTZ, so the instant
+			// survives the session zone; the read side is what has to convert.
 			var snapshotted int
 			require.NoError(t,
 				ds.Conn.QueryRowContext(ctx, "SELECT blnk.take_daily_balance_snapshots_batched($1)", 1000).

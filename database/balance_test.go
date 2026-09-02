@@ -1904,7 +1904,12 @@ func TestGetMostRecentSnapshot_Found(t *testing.T) {
 	assert.NotNil(t, debitBalance)
 	assert.Equal(t, big.NewInt(500), creditBalance)
 	assert.Equal(t, big.NewInt(500), debitBalance)
-	assert.Equal(t, snapshotTime, resultTime)
+	// The bound is an instant, and it is returned normalised to UTC so it can
+	// be compared against the UTC wall clocks in blnk.transactions. Equal
+	// compares the instant; assert.Equal would compare the zone too.
+	assert.True(t, snapshotTime.Equal(resultTime),
+		"expected the same instant as %s, got %s", snapshotTime, resultTime)
+	assert.Equal(t, time.UTC, resultTime.Location())
 }
 
 func TestGetMostRecentSnapshot_NotFound(t *testing.T) {

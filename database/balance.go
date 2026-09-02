@@ -1468,7 +1468,21 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 			"credit":     snapshotCredit,
 			"debit":      snapshotDebit,
 		}).Debug("found snapshot for balance")
-		return creditBalance, debitBalance, snapshotTime, nil
+
+		// snapshot_time is the one TIMESTAMPTZ in the ledger's time arithmetic,
+		// so the driver hands it back in the session's zone. The caller passes
+		// it straight to fetchTransactions as the lower bound of a range over
+		// blnk.transactions.created_at / effective_date, which are plain
+		// TIMESTAMP holding UTC wall clocks -- every writer normalises with
+		// txn.CreatedAt.UTC() before the insert. A plain TIMESTAMP comparison
+		// discards the offset rather than applying it, so an unconverted bound
+		// arrives shifted by the session's UTC offset and the range silently
+		// moves: east of UTC it narrows and post-snapshot transactions are
+		// dropped, west of UTC it widens and pre-snapshot transactions are
+		// applied on top of the snapshot that already accounts for them. No
+		// error either way -- just a wrong historical balance. Converting here
+		// puts the bound on the same clock as the columns it bounds.
+		return creditBalance, debitBalance, snapshotTime.UTC(), nil
 	} else if err == sql.ErrNoRows {
 		// No snapshot found, calculate from genesis (all transactions)
 		logrus.WithField("balance_id", balanceID).Debug("no snapshot found, calculating from genesis")
@@ -1603,10 +1617,9 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 		return nil, err
 	}
 
-	// targetTime bounds two ranges over plain TIMESTAMP columns —
-	// balance_snapshots.snapshot_time and transactions.created_at /
-	// effective_date — and those columns hold UTC wall clocks, because every
-	// writer normalises to UTC before the insert.
+	// targetTime is the upper bound of a range over blnk.transactions.created_at
+	// / effective_date, which are plain TIMESTAMP holding UTC wall clocks
+	// because every writer normalises to UTC before the insert.
 	//
 	// A TIMESTAMP comparison discards the offset on whatever it is given, so a
 	// caller's zone would otherwise be dropped rather than applied:
@@ -1614,6 +1627,8 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	// a half hours after the instant that was actually asked for, and quietly
 	// include transactions from the gap. Converting first keeps the instant and
 	// makes the answer identical for every way of writing the same moment.
+	// Unlike the snapshot bound this one is wrong on a UTC session too — it
+	// depends on the caller's offset, not the server's.
 	targetTime = targetTime.UTC()
 
 	// Start transaction
