@@ -112,18 +112,59 @@ func (l *Blnk) voidShadowTransactions(ctx context.Context, parentTransactionID s
 	return nil
 }
 
+// inflightTransactionNeedsShadowWork reports whether an inflight commit or void should
+// propagate to shadow transactions. Matches PrepareLineageOutbox semantics: debit shadows
+// follow source TrackFundLineage; credit shadows require a provider and destination
+// TrackFundLineage. Shadow children never have nested shadows.
+func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *model.Transaction) bool {
+	if txn == nil {
+		return false
+	}
+	if txn.MetaData != nil {
+		if _, isShadow := txn.MetaData["_lineage_type"]; isShadow {
+			return false
+		}
+		if _, hasAlloc := txn.MetaData[LineageFundAllocation]; hasAlloc {
+			return true
+		}
+	}
+
+	provider := l.getLineageProvider(txn)
+	if provider != "" {
+		dst, err := l.datasource.GetBalanceByIDLite(txn.Destination)
+		return err == nil && dst != nil && dst.TrackFundLineage
+	}
+
+	// Only real balance IDs can track lineage; @ indicators (e.g. @world) cannot.
+	if strings.HasPrefix(txn.Source, "@") {
+		return false
+	}
+
+	src, err := l.datasource.GetBalanceByIDLite(txn.Source)
+	return err == nil && src != nil && src.TrackFundLineage
+}
+
 // queueShadowWork processes shadow commit or void work synchronously first, and queues
 // to outbox for retry only if there are failures. This provides both immediate processing
 // and guaranteed delivery for failed operations.
 //
+// parentTransactionID is the original inflight transaction ID. Callers must pass the ID
+// captured before finalizeCommitment/finalizeVoidTransaction reassign txn.TransactionID
+// to the commit/void child row — shadows are keyed by _shadow_for on that original ID.
+//
 // Parameters:
 // - ctx context.Context: The context for the operation.
-// - parentTransactionID string: The parent transaction ID whose shadows need processing.
+// - parentTransactionID string: The original inflight parent transaction ID.
+// - txn *model.Transaction: The parent inflight transaction (for lineage eligibility).
 // - lineageType string: Either LineageTypeShadowCommit or LineageTypeShadowVoid.
 //
 // Returns:
 // - error: An error if all processing attempts failed.
-func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, lineageType string) error {
+func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, txn *model.Transaction, lineageType string) error {
+	if !l.inflightTransactionNeedsShadowWork(ctx, txn) {
+		return nil
+	}
+
 	ctx, span := tracer.Start(ctx, "QueueShadowWork")
 	defer span.End()
 

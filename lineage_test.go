@@ -1243,6 +1243,133 @@ func TestPrepareLineageOutbox(t *testing.T) {
 	}
 }
 
+func TestInflightTransactionNeedsShadowWork(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		txn         *model.Transaction
+		setupMock   func(*mocks.MockDataSource)
+		expectNeeds bool
+	}{
+		{
+			name: "typical inflight from @world without lineage metadata",
+			txn: &model.Transaction{
+				TransactionID: "txn_inflight",
+				Source:        "@world",
+				Destination:   "bln_dest",
+			},
+			expectNeeds: false,
+		},
+		{
+			name: "shadow child transaction",
+			txn: &model.Transaction{
+				TransactionID: "txn_shadow",
+				Source:        "bln_shadow",
+				Destination:   "bln_aggregate",
+				MetaData: map[string]interface{}{
+					"_lineage_type": "release",
+					"_shadow_for":   "txn_parent",
+				},
+			},
+			expectNeeds: false,
+		},
+		{
+			name: "debit lineage stamped fund allocation",
+			txn: &model.Transaction{
+				TransactionID: "txn_debit",
+				Source:        "bln_source",
+				Destination:   "bln_dest",
+				MetaData: map[string]interface{}{
+					LineageFundAllocation: []interface{}{
+						map[string]interface{}{"provider": "stripe", "amount": float64(50)},
+					},
+				},
+			},
+			expectNeeds: true,
+		},
+		{
+			name: "credit lineage with tracking destination",
+			txn: &model.Transaction{
+				TransactionID: "txn_credit",
+				Source:        "@world",
+				Destination:   "bln_dest",
+				MetaData: map[string]interface{}{
+					LineageProviderKey: "stripe",
+				},
+			},
+			setupMock: func(m *mocks.MockDataSource) {
+				m.On("GetBalanceByIDLite", "bln_dest").Return(&model.Balance{
+					BalanceID:        "bln_dest",
+					TrackFundLineage: true,
+				}, nil)
+			},
+			expectNeeds: true,
+		},
+		{
+			name: "provider metadata but destination does not track lineage",
+			txn: &model.Transaction{
+				TransactionID: "txn_credit_no_track",
+				Source:        "@world",
+				Destination:   "bln_dest",
+				MetaData: map[string]interface{}{
+					LineageProviderKey: "stripe",
+				},
+			},
+			setupMock: func(m *mocks.MockDataSource) {
+				m.On("GetBalanceByIDLite", "bln_dest").Return(&model.Balance{
+					BalanceID:        "bln_dest",
+					TrackFundLineage: false,
+				}, nil)
+			},
+			expectNeeds: false,
+		},
+		{
+			name: "debit path source tracks lineage",
+			txn: &model.Transaction{
+				TransactionID: "txn_debit_source",
+				Source:        "bln_source",
+				Destination:   "bln_dest",
+			},
+			setupMock: func(m *mocks.MockDataSource) {
+				m.On("GetBalanceByIDLite", "bln_source").Return(&model.Balance{
+					BalanceID:        "bln_source",
+					TrackFundLineage: true,
+				}, nil)
+			},
+			expectNeeds: true,
+		},
+		{
+			name: "balance-to-balance without lineage tracking",
+			txn: &model.Transaction{
+				TransactionID: "txn_plain",
+				Source:        "bln_source",
+				Destination:   "bln_dest",
+			},
+			setupMock: func(m *mocks.MockDataSource) {
+				m.On("GetBalanceByIDLite", "bln_source").Return(&model.Balance{
+					BalanceID:        "bln_source",
+					TrackFundLineage: false,
+				}, nil)
+			},
+			expectNeeds: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDS := new(mocks.MockDataSource)
+			if tt.setupMock != nil {
+				tt.setupMock(mockDS)
+			}
+			blnkInstance := &Blnk{datasource: mockDS}
+
+			assert.Equal(t, tt.expectNeeds, blnkInstance.inflightTransactionNeedsShadowWork(ctx, tt.txn))
+			mockDS.AssertExpectations(t)
+		})
+	}
+}
+
 func TestProcessLineageFromOutbox(t *testing.T) {
 	ctx := context.Background()
 

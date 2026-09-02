@@ -228,7 +228,7 @@ func (l *Blnk) CommitInflightTransactionWithRef(ctx context.Context, transaction
 		return nil, err
 	}
 
-	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowCommit); err != nil {
+	if err := l.queueShadowWork(ctx, transactionID, transaction, model.LineageTypeShadowCommit); err != nil {
 		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to queue shadow commit")
 	}
 
@@ -267,7 +267,7 @@ func (l *Blnk) CommitInflightTransactionWithQueue(ctx context.Context, transacti
 		return nil, err
 	}
 
-	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowCommit); err != nil {
+	if err := l.queueShadowWork(ctx, transactionID, transaction, model.LineageTypeShadowCommit); err != nil {
 		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to queue shadow commit")
 	}
 
@@ -497,7 +497,7 @@ func (l *Blnk) VoidInflightTransactionWithRef(ctx context.Context, transactionID
 		return nil, err
 	}
 
-	if err := l.queueShadowWork(ctx, transactionID, model.LineageTypeShadowVoid); err != nil {
+	if err := l.queueShadowWork(ctx, transactionID, transaction, model.LineageTypeShadowVoid); err != nil {
 		logrus.WithError(err).WithField("transaction_id", transactionID).Error("failed to queue shadow void")
 	}
 
