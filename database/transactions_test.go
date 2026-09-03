@@ -34,6 +34,7 @@ import (
 	"github.com/blnkfinance/blnk/model"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 )
 
@@ -468,17 +469,18 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, err := json.Marshal(metaData)
 	assert.NoError(t, err)
+	effectiveDate := time.Now().Add(-72 * time.Hour)
 
 	mockRows := sqlmock.NewRows([]string{
 		"transaction_id", "parent_transaction", "source", "reference",
 		"amount", "precise_amount", "precision", "currency",
 		"destination", "description", "status", "created_at",
-		"meta_data", "scheduled_for", "hash",
+		"meta_data", "scheduled_for", "hash", "effective_date",
 	}).AddRow(
 		"txn123", parentID, "source1", "ref123",
 		1000, 1000, 2, "USD",
 		"dest1", "Test Transaction", "INFLIGHT", time.Now(),
-		metaDataJSON, time.Now(), "hash123",
+		metaDataJSON, time.Now(), "hash123", effectiveDate,
 	)
 
 	// Expect the query with the correct WHERE clause
@@ -486,14 +488,14 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.effective_date
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -530,6 +532,7 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	assert.Len(t, transactions, 1)
 	assert.Equal(t, "txn123", transactions[0].TransactionID)
 	assert.Equal(t, "INFLIGHT", transactions[0].Status)
+	assert.Equal(t, &effectiveDate, transactions[0].EffectiveDate)
 }
 
 func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
@@ -548,14 +551,14 @@ func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.effective_date
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -608,14 +611,14 @@ func TestGetInflightTransactionsByParentID_Error(t *testing.T) {
 	expectedQuery := `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.effective_date
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -1950,22 +1953,27 @@ func TestGetTransactionsByParent_DatabaseSuccess(t *testing.T) {
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
 	parentID := "txn_parent_123"
+	effectiveDate := time.Now().Add(-72 * time.Hour)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3`)).
 		WithArgs(parentID, 10, int64(0)).
-		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
-			AddRow("txn_child_123", parentID, "bln_source", "ref_123", 100.0, "10000", 100, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}).
+			AddRow("txn_child_123", parentID, "bln_source", "ref_123", 100.0, "10000", 100, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123", effectiveDate))
 
 	txns, err := ds.GetTransactionsByParent(ctx, parentID, 10, 0)
 	assert.NoError(t, err)
 	assert.Len(t, txns, 1)
 	assert.Equal(t, "txn_child_123", txns[0].TransactionID)
 	assert.Equal(t, parentID, txns[0].ParentTransaction)
+	if assert.NotNil(t, txns[0].EffectiveDate, "parent lookup dropped effective_date") {
+		assert.True(t, txns[0].EffectiveDate.Equal(effectiveDate),
+			"expected effective_date %v, got %v", effectiveDate, txns[0].EffectiveDate)
+	}
 }
 
 func TestGetTransactionsByParent_DatabaseError(t *testing.T) {
@@ -1979,7 +1987,7 @@ func TestGetTransactionsByParent_DatabaseError(t *testing.T) {
 	parentID := "txn_parent_123"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
@@ -2006,13 +2014,13 @@ func TestGetTransactionsByParent_EmptyResults(t *testing.T) {
 	parentID := "txn_parent_123"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, 
-			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
 		FROM blnk.transactions
 		WHERE parent_transaction = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3`)).
 		WithArgs(parentID, 10, int64(0)).
-		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}))
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}))
 
 	txns, err := ds.GetTransactionsByParent(ctx, parentID, 10, 0)
 	assert.NoError(t, err)
@@ -2537,5 +2545,110 @@ func TestUpdateBalanceSet_ReturnsConflictWhenAChunkMissesABalance(t *testing.T) 
 	}
 
 	assert.NoError(t, tx.Rollback())
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetQueuedTransactionsForCoalescing_PreservesEffectiveDate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	now := time.Now().UTC()
+	threeDaysAgo := now.Add(-72 * time.Hour)
+	oneHourAgo := now.Add(-time.Hour)
+
+	rows := sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}).
+		AddRow("txn_backdated", "txn_parent_1", "bln_src", "ref_backdated", 10.0, "1000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_1", threeDaysAgo).
+		AddRow("txn_default", "txn_parent_2", "bln_src", "ref_default", 20.0, "2000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_2", nil)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date")).
+		WithArgs("bln_src", "bln_dest", "NGN", "txn_leader", oneHourAgo, 9).
+		WillReturnRows(rows)
+
+	transactions, err := ds.GetQueuedTransactionsForCoalescing(context.Background(), "bln_src", "bln_dest", "NGN", "txn_leader", oneHourAgo, 9)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 2)
+
+	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetQueuedTransactionsForSourceCoalescing_PreservesEffectiveDate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	now := time.Now().UTC()
+	threeDaysAgo := now.Add(-72 * time.Hour)
+	theLastHour := now.Add(-time.Hour)
+
+	rows := sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}).
+		AddRow("txn_backdated", "txn_parent_1", "bln_src", "ref_backdated", 10.0, "1000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_1", threeDaysAgo).
+		AddRow("txn_default", "txn_parent_2", "bln_src", "ref_default", 20.0, "2000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_2", nil)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date")).
+		WithArgs("bln_src", "NGN", "txn_leader", theLastHour, 9).
+		WillReturnRows(rows)
+
+	transactions, err := ds.GetQueuedTransactionsForSourceCoalescing(context.Background(), "bln_src", "NGN", "txn_leader", theLastHour, 9)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 2)
+	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetQueuedTransactionsForDestinationCoalescing_PreservesEffectiveDate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	now := time.Now().UTC()
+	threeDaysAgo := now.Add(-72 * time.Hour)
+	theLastHour := now.Add(-time.Hour)
+
+	rows := sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}).
+		AddRow("txn_backdated", "txn_parent_1", "bln_src", "ref_backdated", 10.0, "1000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_1", threeDaysAgo).
+		AddRow("txn_default", "txn_parent_2", "bln_src", "ref_default", 20.0, "2000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_2", nil)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date")).
+		WithArgs("bln_dest", "NGN", "txn_leader", theLastHour, 9).
+		WillReturnRows(rows)
+
+	transactions, err := ds.GetQueuedTransactionsForDestinationCoalescing(context.Background(), "bln_dest", "NGN", "txn_leader", theLastHour, 9)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 2)
+
+	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetStuckQueuedTransactions_PreservesEffectiveDate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	now := time.Now().UTC()
+	threeDaysAgo := now.Add(-72 * time.Hour)
+
+	rows := sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}).
+		AddRow("txn_backdated", "txn_parent_1", "bln_src", "ref_backdated", 10.0, "1000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_1", threeDaysAgo).
+		AddRow("txn_default", "txn_parent_2", "bln_src", "ref_default", 20.0, "2000", 100.0, "NGN", "bln_dest", "", "QUEUED", now, []byte(`{}`), time.Time{}, "hash_2", nil)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT transaction_id, parent_transaction, source, reference, amount, COALESCE(precise_amount::text, '0'), precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date")).
+		WillReturnRows(rows)
+
+	transactions, err := ds.GetStuckQueuedTransactions(context.Background(), 2*time.Hour, 100)
+	assert.NoError(t, err)
+	assert.Len(t, transactions, 2)
+
+	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
