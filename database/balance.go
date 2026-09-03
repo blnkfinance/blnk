@@ -1494,7 +1494,12 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 }
 
 // fetchTransactions retrieves transactions for a balance within a specific time range
-// using effective_date if available, otherwise falling back to created_at
+// using effective_date if available, otherwise falling back to created_at.
+//
+// created_at / effective_date are plain TIMESTAMP holding UTC wall clocks. Compare
+// them as UTC instants via AT TIME ZONE 'UTC' so a non-UTC session TimeZone
+// cannot shift the range when timestamptz bind parameters are coerced to
+// timestamp for a plain-column comparison.
 func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime, targetTime time.Time) (*sql.Rows, error) {
 	logrus.WithFields(logrus.Fields{
 		"balance_id": balanceID,
@@ -1506,8 +1511,8 @@ func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startT
                COALESCE(effective_date, created_at) as effective_date
         FROM blnk.transactions
         WHERE (source = $1 OR destination = $1)
-        AND COALESCE(effective_date, created_at) > $2
-        AND COALESCE(effective_date, created_at) <= $3
+        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') > $2
+        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') <= $3
         AND status = 'APPLIED'
         ORDER BY COALESCE(effective_date, created_at) ASC
     `, balanceID, startTime, targetTime)
