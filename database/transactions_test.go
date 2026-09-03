@@ -128,6 +128,7 @@ func TestRecordTransaction_Failure(t *testing.T) {
 		Source:            "src1",
 		Reference:         "ref123",
 		Amount:            1000,
+		AmountString:      "1000",
 		Currency:          "USD",
 		Destination:       "dest1",
 		Description:       "Test Transaction",
@@ -146,12 +147,157 @@ func TestRecordTransaction_Failure(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock.ExpectExec("INSERT INTO blnk.transactions").
-		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.Amount, transaction.PreciseAmount.String(), transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt, metaDataJSON, transaction.ScheduledFor, transaction.Hash, transaction.EffectiveDate).
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, transaction.AmountString, transaction.PreciseAmount.String(), transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt.UTC(), metaDataJSON, transaction.ScheduledFor.UTC(), transaction.Hash, nil).
 		WillReturnError(errors.New("db error"))
 
 	_, err = ds.RecordTransaction(ctx, transaction)
 	assert.Error(t, err)
 	assert.IsType(t, apierror.APIError{}, err)
+}
+
+func TestPersistNumericColumns(t *testing.T) {
+	t.Run("rejected missing amount string is rejected", func(t *testing.T) {
+		_, _, err := persistNumericColumns(&model.Transaction{
+			Status:        "REJECTED",
+			PreciseAmount: model.Int64ToBigInt(0),
+		})
+		assert.EqualError(t, err, "amount is required")
+	})
+
+	t.Run("rejected missing precise amount is rejected", func(t *testing.T) {
+		_, _, err := persistNumericColumns(&model.Transaction{
+			Status:       "REJECTED",
+			AmountString: "10",
+		})
+		assert.EqualError(t, err, "precise_amount is required")
+	})
+
+	t.Run("rejected explicit zero is allowed", func(t *testing.T) {
+		amount, precise, err := persistNumericColumns(&model.Transaction{
+			Status:        "REJECTED",
+			AmountString:  "0",
+			PreciseAmount: model.Int64ToBigInt(0),
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "0", amount)
+		assert.Equal(t, "0", precise)
+	})
+
+	t.Run("queued missing amount string is rejected", func(t *testing.T) {
+		_, _, err := persistNumericColumns(&model.Transaction{
+			Status:        "QUEUED",
+			PreciseAmount: model.Int64ToBigInt(1000),
+		})
+		assert.EqualError(t, err, "amount is required")
+	})
+
+	t.Run("applied nil precise amount is rejected", func(t *testing.T) {
+		_, _, err := persistNumericColumns(&model.Transaction{
+			Status:       "APPLIED",
+			AmountString: "10",
+		})
+		assert.EqualError(t, err, "precise_amount is required")
+	})
+
+	t.Run("queued explicit zero is allowed for legacy rows", func(t *testing.T) {
+		amount, precise, err := persistNumericColumns(&model.Transaction{
+			Status:        "QUEUED",
+			AmountString:  "0",
+			PreciseAmount: model.Int64ToBigInt(0),
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "0", amount)
+		assert.Equal(t, "0", precise)
+	})
+}
+
+func TestRecordTransaction_RejectedRequiresMaterializedAmounts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	transaction := &model.Transaction{
+		TransactionID: "txn_rejected_zero",
+		Source:        "src1",
+		Reference:     "ref_rejected_zero",
+		Currency:      "WBTC",
+		Destination:   "dest1",
+		Status:        "REJECTED",
+		CreatedAt:     time.Now(),
+		MetaData:      map[string]interface{}{},
+		ScheduledFor:  time.Now(),
+		Hash:          "hash123",
+		AmountString:  "0",
+		PreciseAmount: model.Int64ToBigInt(0),
+		Precision:     100,
+	}
+
+	metaDataJSON, err := json.Marshal(transaction.MetaData)
+	assert.NoError(t, err)
+
+	mock.ExpectExec("INSERT INTO blnk.transactions").
+		WithArgs(transaction.TransactionID, transaction.ParentTransaction, transaction.Source, transaction.Reference, "0", "0", transaction.Precision, transaction.Currency, transaction.Destination, transaction.Description, transaction.Status, transaction.CreatedAt.UTC(), metaDataJSON, transaction.ScheduledFor.UTC(), transaction.Hash, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	result, err := ds.RecordTransaction(context.Background(), transaction)
+	assert.NoError(t, err)
+	assert.Equal(t, transaction, result)
+}
+
+func TestRecordTransaction_MissingAmountRejectedForAllStatuses(t *testing.T) {
+	cases := []struct {
+		name string
+		txn  *model.Transaction
+	}{
+		{
+			name: "queued missing amount string",
+			txn: &model.Transaction{
+				TransactionID: "txn_queued_missing",
+				Reference:     "ref_queued_missing",
+				Status:        "QUEUED",
+				CreatedAt:     time.Now(),
+				ScheduledFor:  time.Now(),
+				PreciseAmount: model.Int64ToBigInt(0),
+			},
+		},
+		{
+			name: "applied nil precise amount",
+			txn: &model.Transaction{
+				TransactionID: "txn_applied_missing",
+				Reference:     "ref_applied_missing",
+				AmountString:  "10",
+				Status:        "APPLIED",
+				CreatedAt:     time.Now(),
+				ScheduledFor:  time.Now(),
+			},
+		},
+		{
+			name: "rejected partial numeric fields",
+			txn: &model.Transaction{
+				TransactionID: "txn_rejected_partial",
+				Reference:     "ref_rejected_partial",
+				AmountString:  "10",
+				Status:        "REJECTED",
+				CreatedAt:     time.Now(),
+				ScheduledFor:  time.Now(),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			assert.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			ds := Datasource{Conn: db}
+			_, err = ds.RecordTransaction(context.Background(), tc.txn)
+			assert.Error(t, err)
+			assert.IsType(t, apierror.APIError{}, err)
+			assert.NoError(t, mock.ExpectationsWereMet(), "missing amount fields must fail before SQL")
+		})
+	}
 }
 
 func TestGetTransaction_Success(t *testing.T) {

@@ -121,6 +121,7 @@ func TestApplyPrecision_ZeroPreciseAmountFallsThroughToAmount(t *testing.T) {
 	txn := &Transaction{PreciseAmount: big.NewInt(0), Amount: 5, Precision: 100}
 	got := ApplyPrecision(txn)
 	assert.Equal(t, "500", got.String())
+	assert.Equal(t, "5", txn.AmountString)
 }
 
 func TestValidate_ZeroAmountRejected(t *testing.T) {

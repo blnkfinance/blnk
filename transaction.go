@@ -77,6 +77,15 @@ const (
 type transactionExecutionPlan struct {
 	mode        transactionExecutionMode
 	transaction *model.Transaction
+	// viaQueue is true when this plan originated from queued transaction
+	// processing (ProcessQueuedTransaction), as opposed to a direct
+	// RecordTransaction call (e.g. a skip_queue split leg). It controls how a
+	// zero-amount transaction is handled: queued processing must persist a
+	// REJECTED record so a stuck QUEUED parent gets a terminal child instead
+	// of looping forever in recovery, while a direct/split-leg zero-amount
+	// leg (a legitimate rounding remainder, see issue #142/#334) is still
+	// discarded silently without persisting anything.
+	viaQueue bool
 }
 
 type transactionExecutionResult struct {

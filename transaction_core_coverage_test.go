@@ -89,9 +89,8 @@ func recordAppliedTxn(t *testing.T, b *Blnk, src, dst string, amount float64) *m
 		Status:         StatusApplied,
 	}
 	// Direct RecordTransaction (unlike the queue flow) neither assigns a
-	// TransactionID nor applies precision twice: the ID must be preset, and
-	// priming PreciseAmount makes the in-flow ApplyPrecision take the
-	// precise->decimal branch that fills AmountString.
+	// TransactionID nor applies precision: the ID must be preset. One
+	// ApplyPrecision pass fills PreciseAmount and AmountString.
 	model.ApplyPrecision(draft)
 	txn, err := b.RecordTransaction(context.Background(), draft)
 	require.NoError(t, err)
@@ -177,10 +176,7 @@ func TestRefundTransaction_RejectedTransactionFails(t *testing.T) {
 		Currency:      "USD",
 		CreatedAt:     time.Now(),
 	}
-	// Two passes: the first fills PreciseAmount, the second takes the
-	// precise->decimal branch that fills AmountString (RejectTransaction
-	// persists directly without the queue flow's metadata preparation).
-	model.ApplyPrecision(queued)
+	// ApplyPrecision fills PreciseAmount and AmountString in one pass.
 	model.ApplyPrecision(queued)
 	rej, err := b.RejectTransaction(context.Background(), queued, "insufficient funds")
 	require.NoError(t, err)
@@ -255,7 +251,6 @@ func TestRefundTransaction_RejectsNonRefundableStatus(t *testing.T) {
 				Status:        status,
 				CreatedAt:     time.Now(),
 			}
-			model.ApplyPrecision(draft)
 			model.ApplyPrecision(draft)
 			persisted, err := ds.RecordTransaction(context.Background(), draft)
 			require.NoError(t, err)
@@ -492,4 +487,83 @@ func TestProcessQueuedTransaction_AppliesAndIsIdempotent(t *testing.T) {
 	dstFinal, err := ds.GetBalanceByIDLite(dst.BalanceID)
 	require.NoError(t, err)
 	assert.Equal(t, "8000", dstFinal.Balance.String(), "balance must be unchanged after a duplicate replay")
+}
+
+// --- zero-amount viaQueue semantics ------------------------------------------
+
+// TestRecordTransaction_DirectZeroAmountIsDiscardedNotRejected locks in the issue #142/#334
+// semantics: a zero-amount transaction reaching RecordTransaction directly (e.g. a split leg
+// whose share rounds down to zero) must still be discarded silently, not persisted as a
+// REJECTED record. Only queue-originated processing (see the sibling test below) needs to
+// persist a REJECTED child, because only a QUEUED row can get stuck in recovery.
+func TestRecordTransaction_DirectZeroAmountIsDiscardedNotRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	b, ds := newCoreTestBlnk(t)
+	src, dst := newBalancePair(t, ds)
+	ctx := context.Background()
+
+	leg := &model.Transaction{
+		TransactionID: model.GenerateUUIDWithSuffix("txn"),
+		Reference:     "split_leg_zero_" + model.GenerateUUIDWithSuffix("ref"),
+		Source:        src.BalanceID,
+		Destination:   dst.BalanceID,
+		Amount:        0,
+		PreciseAmount: big.NewInt(0),
+		Precision:     100,
+		Currency:      "USD",
+		Status:        StatusApplied,
+		SkipQueue:     true,
+	}
+
+	result, err := b.RecordTransaction(ctx, leg)
+	require.NoError(t, err, "a zero-amount direct leg must be discarded without error, not rejected")
+	assert.Equal(t, StatusApplied, result.Status, "the discarded transaction keeps its original status, it is not flipped to REJECTED")
+
+	children, err := ds.GetTransactionsByParent(ctx, leg.TransactionID, 10, 0)
+	require.NoError(t, err)
+	assert.Empty(t, children, "a discarded zero-amount leg must not persist a REJECTED child")
+}
+
+// TestProcessQueuedTransaction_ZeroAmountIsRejectedAndPersisted verifies the queue-originated
+// counterpart: a zero-amount transaction processed via the queue worker must persist a
+// REJECTED child so the parent gets a terminal child and never becomes a stuck-queue
+// recovery candidate.
+func TestProcessQueuedTransaction_ZeroAmountIsRejectedAndPersisted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	b, ds := newCoreTestBlnk(t)
+	src, dst := newBalancePair(t, ds)
+	ctx := context.Background()
+
+	parent := &model.Transaction{
+		TransactionID: model.GenerateUUIDWithSuffix("txn"),
+		Reference:     "queued_zero_" + model.GenerateUUIDWithSuffix("ref"),
+		Source:        src.BalanceID,
+		Destination:   dst.BalanceID,
+		Amount:        0,
+		AmountString:  "0",
+		PreciseAmount: big.NewInt(0),
+		Precision:     100,
+		Currency:      "USD",
+		Status:        StatusQueued,
+		MetaData:      map[string]interface{}{},
+	}
+
+	_, err := ds.RecordTransaction(ctx, parent)
+	require.NoError(t, err, "parent QUEUED row must persist with amount 0")
+
+	queueCopy := createQueueCopy(parent, parent.Reference)
+	result, err := b.ProcessQueuedTransaction(ctx, queueCopy, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusRejected, result.Status)
+
+	children, err := ds.GetTransactionsByParent(ctx, parent.TransactionID, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, children, 1, "queue processing of a zero-amount row must write a REJECTED child")
+	assert.Equal(t, StatusRejected, children[0].Status)
 }

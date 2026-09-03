@@ -240,6 +240,8 @@ var messagePatterns = []messagePattern{
 	// inflight balance, so it is classified as one.
 	{[]string{"insufficient inflight"}, apierror.ErrTxnInsufficientFunds},
 	{[]string{"transaction amount must be positive"}, apierror.ErrTxnInvalidAmount},
+	{[]string{"transaction precise amount must be positive"}, apierror.ErrTxnInvalidAmount},
+	{[]string{"precise_amount must be positive"}, apierror.ErrTxnInvalidAmount},
 	{[]string{"transaction validation failed"}, apierror.ErrTxnValidation},
 	{[]string{"reference is required"}, apierror.ErrTxnValidation},
 	// Balances

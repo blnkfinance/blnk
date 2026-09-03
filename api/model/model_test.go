@@ -449,6 +449,19 @@ func TestValidateRecordTransaction(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Invalid Transaction - Zero precise_amount",
+			transaction: RecordTransaction{
+				PreciseAmount: big.NewInt(0),
+				Precision:     100,
+				Currency:      "USD",
+				Reference:     "ref_zero_precise",
+				Description:   "Test transaction",
+				Source:        "source1",
+				Destination:   "dest1",
+			},
+			wantErr: true,
+		},
+		{
 			// Zero amount alongside precise_amount is the existing sentinel
 			// for "use precise_amount"; this fix must not disturb it.
 			name: "Valid Transaction - Zero amount with positive precise_amount",

@@ -44,6 +44,10 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 	}
 	transaction.MetaData["blnk_rejection_reason"] = reason
 
+	// Fill AmountString (including "0") before insert. Recovery copies of
+	// zero-amount QUEUED parents otherwise persist "" into a numeric column.
+	model.ApplyPrecision(transaction)
+
 	// Persist the transaction with the updated status and metadata
 	transaction, err := l.datasource.RecordTransaction(ctx, transaction)
 	if err != nil {

@@ -18,12 +18,20 @@ package blnk
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/hotpairs"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	recoveryStatusRecovered        = "recovered"
+	recoveryStatusFailed           = "failed"
+	recoveryStatusAlreadyProcessed = "already_processed"
 )
 
 type QueuedTransactionRecoveryProcessor struct {
@@ -118,41 +126,54 @@ func (p *QueuedTransactionRecoveryProcessor) run(ctx context.Context) {
 
 // processBatch performs one periodic stuck-queue recovery pass using the configured threshold.
 func (p *QueuedTransactionRecoveryProcessor) processBatch(ctx context.Context) {
-	p.recoverWithThreshold(ctx, p.stuckThreshold)
+	recovered, err := p.recoverWithThreshold(ctx, p.stuckThreshold)
+	if err != nil {
+		logrus.Errorf("stuck queue recovery pass recovered %d with failures: %v", recovered, err)
+	}
 }
 
 // RecoverQueuedTransactions triggers an immediate recovery of stuck queued transactions
 // using the provided threshold. This is exposed for the manual trigger API endpoint.
+// recovered is the number of stuck rows successfully resolved; err is non-nil when
+// any row in the batch could not be recovered.
 func (b *Blnk) RecoverQueuedTransactions(ctx context.Context, threshold time.Duration) (int, error) {
 	if threshold < 2*time.Minute {
 		threshold = 2 * time.Minute
 	}
 
 	processor := NewQueuedTransactionRecoveryProcessor(b)
-	return processor.recoverWithThreshold(ctx, threshold), nil
+	return processor.recoverWithThreshold(ctx, threshold)
 }
 
 // recoverWithThreshold loads currently stuck queued transactions and reprocesses them serially.
-func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Context, threshold time.Duration) int {
+func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Context, threshold time.Duration) (int, error) {
 	stuckTxns, err := p.blnk.datasource.GetStuckQueuedTransactions(ctx, threshold, p.batchSize)
 	if err != nil {
 		logrus.Errorf("failed to get stuck queued transactions: %v", err)
-		return 0
+		return 0, err
 	}
 
 	if len(stuckTxns) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	logrus.Infof("Processing %d stuck queued transactions with %d workers (threshold=%v)", len(stuckTxns), p.maxWorkers, threshold)
 
+	var recovered int
+	var failures []error
 	for _, txn := range stuckTxns {
 		if err := p.processStuckTransaction(ctx, txn); err != nil {
 			logrus.Errorf("failed to process stuck transaction %s: %v", txn.TransactionID, err)
+			failures = append(failures, fmt.Errorf("%s: %w", txn.TransactionID, err))
+			continue
 		}
+		recovered++
 	}
 
-	return len(stuckTxns)
+	if len(failures) > 0 {
+		return recovered, fmt.Errorf("recovery failed for %d of %d stuck transactions: %w", len(failures), len(stuckTxns), errors.Join(failures...))
+	}
+	return recovered, nil
 }
 
 // processStuckTransaction replays one stuck queued transaction, preserving the existing recovery
@@ -173,17 +194,14 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	}
 	attempts++
 
+	if isZeroPreciseAmount(stuckTxn) {
+		logrus.Warnf("Stuck transaction %s has a zero amount, rejecting", stuckTxn.TransactionID)
+		return p.rejectStuckTransaction(ctx, stuckTxn, "zero amount")
+	}
+
 	if attempts > p.maxRecoveryAttempts {
 		logrus.Warnf("Stuck transaction %s exceeded max recovery attempts (%d), rejecting", stuckTxn.TransactionID, p.maxRecoveryAttempts)
-		rejectionCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
-		_, err := p.blnk.RejectTransaction(ctx, rejectionCopy, "exceeded max queued recovery attempts")
-		if err != nil {
-			if isReferenceAlreadyUsedError(err) {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return p.rejectStuckTransaction(ctx, stuckTxn, "exceeded max queued recovery attempts")
 	}
 
 	if stuckTxn.Atomic {
@@ -206,11 +224,11 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	if err != nil {
 		if isReferenceAlreadyUsedError(err) {
 			logrus.Infof("Stuck transaction %s already processed (reference %s already used)", stuckTxn.TransactionID, queueCopy.Reference)
-			p.updateRecoveryMetadata(ctx, stuckTxn, attempts, "already_processed")
+			p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusAlreadyProcessed)
 			return nil
 		}
 
-		p.updateRecoveryMetadata(ctx, stuckTxn, attempts, "failed")
+		p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusFailed)
 		return err
 	}
 
@@ -219,7 +237,25 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 	} else {
 		logrus.Infof("Successfully recovered stuck transaction %s via queue copy %s", stuckTxn.TransactionID, queueCopy.TransactionID)
 	}
-	p.updateRecoveryMetadata(ctx, stuckTxn, attempts, "recovered")
+	p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusRecovered)
+	return nil
+}
+
+// rejectStuckTransaction writes a REJECTED child for a stuck QUEUED parent.
+// A failed write is returned so the parent stays in the stuck set (QUEUED,
+// no child) and recovery can retry. Do not metadata-exclude a parent that
+// still has no terminal child: that would leave it QUEUED forever with no
+// lineage and no automatic retry.
+func (p *QueuedTransactionRecoveryProcessor) rejectStuckTransaction(ctx context.Context, stuckTxn *model.Transaction, reason string) error {
+	rejectionCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
+	_, err := p.blnk.RejectTransaction(ctx, rejectionCopy, reason)
+	if err != nil {
+		if isReferenceAlreadyUsedError(err) {
+			return nil
+		}
+		logrus.Errorf("failed to reject stuck transaction %s: %v; leaving QUEUED so recovery can retry", stuckTxn.TransactionID, err)
+		return err
+	}
 	return nil
 }
 
@@ -242,9 +278,14 @@ func (p *QueuedTransactionRecoveryProcessor) updateRecoveryMetadata(ctx context.
 
 	if err := p.blnk.datasource.UpdateTransactionMetadata(ctx, txn.TransactionID, txn.MetaData); err != nil {
 		logrus.Errorf("failed to update recovery metadata for transaction %s: %v", txn.TransactionID, err)
+		return
 	}
 }
 
 func isReferenceAlreadyUsedError(err error) bool {
 	return IsDuplicateReferenceError(err)
+}
+
+func isZeroPreciseAmount(txn *model.Transaction) bool {
+	return txn != nil && txn.PreciseAmount != nil && txn.PreciseAmount.Sign() <= 0
 }
