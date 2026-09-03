@@ -209,27 +209,29 @@ func setupMetadataWebhookBlnk(t *testing.T, mockDS *mocks.MockDataSource, webhoo
 	return b, queueName
 }
 
-func waitForWebhookTask(t *testing.T, redisAddr, queueName string) *asynq.TaskInfo {
+func listWebhookTasks(t *testing.T, redisAddr, queueName string) []*asynq.TaskInfo {
 	t.Helper()
-
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr})
 	t.Cleanup(func() {
 		_, _ = inspector.DeleteAllPendingTasks(queueName)
 		_ = inspector.DeleteQueue(queueName, true)
 		_ = inspector.Close()
 	})
+	tasks, err := inspector.ListPendingTasks(queueName)
+	if err != nil {
+		// Queue does not exist until the first task is enqueued.
+		return nil
+	}
+	return tasks
+}
 
-	var task *asynq.TaskInfo
-	require.Eventually(t, func() bool {
-		tasks, err := inspector.ListPendingTasks(queueName)
-		if err != nil || len(tasks) == 0 {
-			return false
-		}
-		task = tasks[0]
-		return true
-	}, 2*time.Second, 20*time.Millisecond, "expected a metadata webhook task on %s", queueName)
-
-	return task
+func decodeMetadataWebhook(t *testing.T, task *asynq.TaskInfo) (event string, data map[string]interface{}) {
+	t.Helper()
+	var wh NewWebhook
+	require.NoError(t, json.Unmarshal(task.Payload, &wh))
+	data, ok := wh.Payload.(map[string]interface{})
+	require.True(t, ok, "payload must decode as an object")
+	return wh.Event, data
 }
 
 func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
@@ -252,19 +254,18 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 					Name:     "Main",
 					MetaData: map[string]interface{}{"existing": "value"},
 				}
-				updated := &model.Ledger{
-					LedgerID: "ldg_wh_1",
-					Name:     "Main",
-					MetaData: map[string]interface{}{"existing": "value", "new": "value"},
-				}
 				mockDS.On("GetLedgerByID", "ldg_wh_1").Return(ledger, nil).Once()
 				mockDS.On("UpdateLedgerMetadata", "ldg_wh_1", mock.Anything).Return(nil).Once()
-				mockDS.On("GetLedgerByID", "ldg_wh_1").Return(updated, nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
-				assert.Equal(t, "ldg_wh_1", data["ledger_id"])
-				meta, ok := data["meta_data"].(map[string]interface{})
+				require.NotEmpty(t, data["event_id"])
+				require.NotEmpty(t, data["timestamp"])
+				entity, ok := data["entity"].(map[string]interface{})
 				require.True(t, ok)
+				assert.Equal(t, "ldg_wh_1", entity["ledger_id"])
+				meta, ok := entity["meta_data"].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "value", meta["existing"])
 				assert.Equal(t, "value", meta["new"])
 			},
 		},
@@ -278,17 +279,13 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 					Currency:  "USD",
 					MetaData:  map[string]interface{}{"existing": "value"},
 				}
-				updated := &model.Balance{
-					BalanceID: "bln_wh_1",
-					Currency:  "USD",
-					MetaData:  map[string]interface{}{"existing": "value", "new": "value"},
-				}
 				mockDS.On("GetBalanceByID", "bln_wh_1", mock.Anything, false).Return(balance, nil).Once()
 				mockDS.On("UpdateBalanceMetadata", mock.Anything, "bln_wh_1", mock.Anything).Return(nil).Once()
-				mockDS.On("GetBalanceByID", "bln_wh_1", mock.Anything, false).Return(updated, nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
-				assert.Equal(t, "bln_wh_1", data["balance_id"])
+				entity, ok := data["entity"].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "bln_wh_1", entity["balance_id"])
 			},
 		},
 		{
@@ -300,16 +297,13 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 					IdentityID: "idt_wh_1",
 					MetaData:   map[string]interface{}{"existing": "value"},
 				}
-				updated := &model.Identity{
-					IdentityID: "idt_wh_1",
-					MetaData:   map[string]interface{}{"existing": "value", "new": "value"},
-				}
 				mockDS.On("GetIdentityByID", "idt_wh_1").Return(identity, nil).Once()
 				mockDS.On("UpdateIdentityMetadata", "idt_wh_1", mock.Anything).Return(nil).Once()
-				mockDS.On("GetIdentityByID", "idt_wh_1").Return(updated, nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
-				assert.Equal(t, "idt_wh_1", data["identity_id"])
+				entity, ok := data["entity"].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "idt_wh_1", entity["identity_id"])
 			},
 		},
 		{
@@ -317,16 +311,16 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 			entityID: "txn_wh_1",
 			event:    "transaction.metadata.updated",
 			setupMock: func(mockDS *mocks.MockDataSource, newMetadata map[string]interface{}) {
-				txn := &model.Transaction{
-					TransactionID: "txn_wh_1",
-					MetaData:      map[string]interface{}{"new": "value"},
-				}
 				mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "txn_wh_1").Return(true, nil).Once()
 				mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_wh_1", newMetadata).Return(nil).Once()
-				mockDS.On("GetTransaction", mock.Anything, "txn_wh_1").Return(txn, nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
-				assert.Equal(t, "txn_wh_1", data["transaction_id"])
+				entity, ok := data["entity"].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "txn_wh_1", entity["transaction_id"])
+				meta, ok := entity["meta_data"].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, "value", meta["new"])
 			},
 		},
 	}
@@ -341,15 +335,13 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 			_, err := b.UpdateMetadata(ctx, tc.entityID, newMetadata)
 			require.NoError(t, err)
 
-			task := waitForWebhookTask(t, b.Config().Redis.Dns, queueName)
-			assert.Equal(t, queueName, task.Type)
+			// Enqueue is synchronous: the task must already be pending.
+			tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+			require.Len(t, tasks, 1)
+			assert.Equal(t, queueName, tasks[0].Type)
 
-			var event NewWebhook
-			require.NoError(t, json.Unmarshal(task.Payload, &event))
-			assert.Equal(t, tc.event, event.Event)
-
-			data, ok := event.Payload.(map[string]interface{})
-			require.True(t, ok)
+			event, data := decodeMetadataWebhook(t, tasks[0])
+			assert.Equal(t, tc.event, event)
 			tc.assertData(t, data)
 			mockDS.AssertExpectations(t)
 		})
@@ -362,22 +354,16 @@ func TestUpdateMetadata_NoWebhookWhenURLNotConfigured(t *testing.T) {
 		LedgerID: "ldg_nowh",
 		MetaData: map[string]interface{}{},
 	}
-	mockDS.On("GetLedgerByID", "ldg_nowh").Return(ledger, nil)
-	mockDS.On("UpdateLedgerMetadata", "ldg_nowh", mock.Anything).Return(nil)
+	mockDS.On("GetLedgerByID", "ldg_nowh").Return(ledger, nil).Once()
+	mockDS.On("UpdateLedgerMetadata", "ldg_nowh", mock.Anything).Return(nil).Once()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "")
 	_, err := b.UpdateMetadata(context.Background(), "ldg_nowh", map[string]interface{}{"k": "v"})
 	require.NoError(t, err)
 
-	// Give the async post-actions goroutine time to run (and no-op).
-	time.Sleep(150 * time.Millisecond)
-
-	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: b.Config().Redis.Dns})
-	t.Cleanup(func() { _ = inspector.Close() })
-	tasks, err := inspector.ListPendingTasks(queueName)
-	if err == nil {
-		assert.Empty(t, tasks, "nothing should be enqueued when webhook URL is empty")
-	}
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	assert.Empty(t, tasks, "nothing should be enqueued when webhook URL is empty")
+	mockDS.AssertExpectations(t)
 }
 
 // Internal writers (reconciliation, queue recovery, lineage) call
@@ -391,38 +377,84 @@ func TestUpdateEntityMetadata_DoesNotEmitWebhook(t *testing.T) {
 	err := b.updateEntityMetadata(context.Background(), "ledgers", "ldg_internal", map[string]interface{}{"internal": true})
 	require.NoError(t, err)
 
-	time.Sleep(150 * time.Millisecond)
-
-	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: b.Config().Redis.Dns})
-	t.Cleanup(func() { _ = inspector.Close() })
-	tasks, err := inspector.ListPendingTasks(queueName)
-	if err == nil {
-		assert.Empty(t, tasks, "internal metadata writes must not enqueue webhooks")
-	}
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	assert.Empty(t, tasks, "internal metadata writes must not enqueue webhooks")
 	mockDS.AssertExpectations(t)
 }
 
-func TestUpdateMetadata_TransactionFallbackPayloadWhenRefetchFails(t *testing.T) {
+func TestUpdateMetadata_TransactionPatchPayloadWithoutRefetch(t *testing.T) {
 	mockDS := new(mocks.MockDataSource)
 	newMetadata := map[string]interface{}{"tag": "bulk"}
 	mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "bulk_wh_1").Return(true, nil).Once()
 	mockDS.On("UpdateTransactionMetadata", mock.Anything, "bulk_wh_1", newMetadata).Return(nil).Once()
-	mockDS.On("GetTransaction", mock.Anything, "bulk_wh_1").Return(nil, assert.AnError).Once()
+	// No GetTransaction: webhook payload is built from the committed patch.
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 	_, err := b.UpdateMetadata(context.Background(), "bulk_wh_1", newMetadata)
 	require.NoError(t, err)
 
-	task := waitForWebhookTask(t, b.Config().Redis.Dns, queueName)
-	var event NewWebhook
-	require.NoError(t, json.Unmarshal(task.Payload, &event))
-	assert.Equal(t, "transaction.metadata.updated", event.Event)
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	require.Len(t, tasks, 1)
+	event, data := decodeMetadataWebhook(t, tasks[0])
+	assert.Equal(t, "transaction.metadata.updated", event)
+	require.NotEmpty(t, data["event_id"])
 
-	data, ok := event.Payload.(map[string]interface{})
+	entity, ok := data["entity"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "bulk_wh_1", data["transaction_id"])
-	meta, ok := data["meta_data"].(map[string]interface{})
+	assert.Equal(t, "bulk_wh_1", entity["transaction_id"])
+	meta, ok := entity["meta_data"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "bulk", meta["tag"])
 	mockDS.AssertExpectations(t)
+}
+
+func TestUpdateMetadata_ConcurrentUpdatesPreserveEachCommit(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	ledger := &model.Ledger{
+		LedgerID: "ldg_race",
+		Name:     "Race",
+		MetaData: map[string]interface{}{"base": "1"},
+	}
+	// Each UpdateMetadata loads then writes once. Sequence the two calls.
+	mockDS.On("GetLedgerByID", "ldg_race").Return(ledger, nil).Twice()
+	mockDS.On("UpdateLedgerMetadata", "ldg_race", mock.Anything).Return(nil).Twice()
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+
+	_, err := b.UpdateMetadata(context.Background(), "ldg_race", map[string]interface{}{"step": "a"})
+	require.NoError(t, err)
+	_, err = b.UpdateMetadata(context.Background(), "ldg_race", map[string]interface{}{"step": "b"})
+	require.NoError(t, err)
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	require.Len(t, tasks, 2)
+
+	eventIDs := map[string]struct{}{}
+	steps := make([]string, 0, 2)
+	for _, task := range tasks {
+		event, data := decodeMetadataWebhook(t, task)
+		assert.Equal(t, "ledger.metadata.updated", event)
+		id, _ := data["event_id"].(string)
+		require.NotEmpty(t, id)
+		eventIDs[id] = struct{}{}
+
+		entity, ok := data["entity"].(map[string]interface{})
+		require.True(t, ok)
+		meta, ok := entity["meta_data"].(map[string]interface{})
+		require.True(t, ok)
+		step, _ := meta["step"].(string)
+		steps = append(steps, step)
+	}
+	assert.Len(t, eventIDs, 2, "each update must carry a distinct event_id")
+	assert.Equal(t, []string{"a", "b"}, steps, "each queued event must reflect its own committed patch")
+	mockDS.AssertExpectations(t)
+}
+
+func TestMergeMetadataDoesNotMutateInputs(t *testing.T) {
+	current := map[string]interface{}{"a": 1}
+	newMeta := map[string]interface{}{"b": 2}
+	merged := mergeMetadata(current, newMeta)
+	assert.Equal(t, map[string]interface{}{"a": 1, "b": 2}, merged)
+	assert.Equal(t, map[string]interface{}{"a": 1}, current)
+	assert.Equal(t, map[string]interface{}{"b": 2}, newMeta)
 }
