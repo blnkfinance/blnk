@@ -309,6 +309,9 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 			setupMock: func(mockDS *mocks.MockDataSource, newMetadata map[string]interface{}) {
 				mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "txn_wh_1").Return(true, nil).Once()
 				mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_wh_1", newMetadata).Return(nil).Once()
+				// Metadata index reindexes the full row asynchronously; stub it
+				// with .Maybe() since this test only asserts the webhook payload.
+				mockDS.On("GetTransaction", mock.Anything, "txn_wh_1").Return(&model.Transaction{TransactionID: "txn_wh_1"}, nil).Maybe()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
 				assert.Equal(t, "txn_wh_1", data["transaction_id"])
@@ -383,7 +386,10 @@ func TestUpdateMetadata_TransactionPatchPayloadWithoutRefetch(t *testing.T) {
 	newMetadata := map[string]interface{}{"tag": "bulk"}
 	mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "bulk_wh_1").Return(true, nil).Once()
 	mockDS.On("UpdateTransactionMetadata", mock.Anything, "bulk_wh_1", newMetadata).Return(nil).Once()
-	// No GetTransaction: webhook payload is built from the committed patch.
+	// Webhook payload is built from the committed patch, without refetching.
+	// Metadata index reindexes the full row asynchronously and independently;
+	// stub it with .Maybe() since it is not the concern of this test.
+	mockDS.On("GetTransaction", mock.Anything, "bulk_wh_1").Return(&model.Transaction{TransactionID: "bulk_wh_1"}, nil).Maybe()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 	_, err := b.UpdateMetadata(context.Background(), "bulk_wh_1", newMetadata)
@@ -399,6 +405,59 @@ func TestUpdateMetadata_TransactionPatchPayloadWithoutRefetch(t *testing.T) {
 	meta, ok := data["meta_data_patch"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "bulk", meta["tag"])
+	mockDS.AssertExpectations(t)
+}
+
+// TestUpdateMetadata_TransactionIndexUsesFullDocumentNotPatch guards against a
+// regression where the Typesense index payload for a transaction metadata
+// update was the webhook patch stub ({transaction_id, meta_data_patch}). That
+// stub, upserted directly, would overwrite the full Typesense document
+// (amount, source, destination, status, ...) with a near-empty record.
+// Indexing must instead re-fetch and upsert the full transaction row.
+func TestUpdateMetadata_TransactionIndexUsesFullDocumentNotPatch(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	newMetadata := map[string]interface{}{"invoice": "INV-1"}
+	fullTxn := &model.Transaction{
+		TransactionID: "txn_idx_1",
+		Amount:        100,
+		Currency:      "USD",
+		Source:        "bln_src",
+		Destination:   "bln_dst",
+		Status:        "APPLIED",
+		MetaData:      map[string]interface{}{"invoice": "INV-1"},
+	}
+	mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "txn_idx_1").Return(true, nil).Once()
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_idx_1", newMetadata).Return(nil).Once()
+	// Index path must call GetTransaction to fetch the full row.
+	mockDS.On("GetTransaction", mock.Anything, "txn_idx_1").Return(fullTxn, nil).Once()
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	// Give this Blnk instance a queue so queueTransactionMetadataIndex is not
+	// skipped; NewBlnk already wires one from config, but assert it explicitly.
+	require.NotNil(t, b.queue)
+
+	_, err := b.UpdateMetadata(context.Background(), "txn_idx_1", newMetadata)
+	require.NoError(t, err)
+
+	// Webhook payload is still the patch, not the full document.
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	require.Len(t, tasks, 1)
+	_, data := decodeMetadataWebhook(t, tasks[0])
+	_, hasAmount := data["amount"]
+	assert.False(t, hasAmount, "webhook payload must remain the patch, not the full transaction")
+
+	// queueTransactionMetadataIndex runs in a goroutine; poll the mock's
+	// recorded calls (no assertion side effects) instead of sleeping a fixed
+	// duration, so the test is both fast and not flaky under load.
+	require.Eventually(t, func() bool {
+		for _, call := range mockDS.Calls {
+			if call.Method == "GetTransaction" {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond, "expected GetTransaction to be called to build the full index document")
+
 	mockDS.AssertExpectations(t)
 }
 

@@ -143,14 +143,41 @@ func (l *Blnk) enqueueMetadataUpdatedWebhook(entityType string, entitySnapshot i
 	return nil
 }
 
-// queueMetadataIndex reindexes the committed snapshot asynchronously. Indexing
-// remains best-effort and must not block the metadata API response.
+// queueMetadataIndex reindexes a full resource snapshot asynchronously.
+// Indexing is best-effort and must not block the metadata API response.
+//
+// snapshot must be the full resource document (ledger/balance/identity with
+// merged meta_data) — never the transaction webhook stub, which carries only
+// {transaction_id, meta_data_patch} and would overwrite the Typesense document
+// with a near-empty record on upsert. Transactions are reindexed separately
+// via queueTransactionMetadataIndex.
 func (l *Blnk) queueMetadataIndex(entityType, entityID string, snapshot interface{}) {
 	if l.queue == nil {
 		return
 	}
 	go func() {
 		if err := l.queue.queueIndexData(entityID, entityType, snapshot); err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
+
+// queueTransactionMetadataIndex reindexes the full transaction row after a
+// metadata update. Unlike the other entity types, the transaction webhook
+// payload is a patch, not the merged document, so indexing re-fetches the
+// current row instead of reusing that payload. Best-effort: a fetch or index
+// failure is reported via NotifyError and does not affect the API response.
+func (l *Blnk) queueTransactionMetadataIndex(entityID string) {
+	if l.queue == nil {
+		return
+	}
+	go func() {
+		updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
+		if err != nil {
+			notification.NotifyError(err)
+			return
+		}
+		if err := l.queue.queueIndexData(entityID, "transactions", updatedTransaction); err != nil {
 			notification.NotifyError(err)
 		}
 	}()
@@ -240,7 +267,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		snapshot := transactionMetadataSnapshot(entityID, newMetadata)
-		l.queueMetadataIndex(entityType, entityID, snapshot)
+		l.queueTransactionMetadataIndex(entityID)
 		if err := l.enqueueMetadataUpdatedWebhook(entityType, snapshot); err != nil {
 			return newMetadata, err
 		}
