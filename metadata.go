@@ -39,9 +39,117 @@ func getEntityTypeFromID(id string) (string, error) {
 	}
 }
 
+// metadataUpdatedEventName returns the webhook event name for a metadata update
+// on the given entity type collection name (e.g. "ledgers" → "ledger.metadata.updated").
+func metadataUpdatedEventName(entityType string) string {
+	switch entityType {
+	case "ledgers":
+		return "ledger.metadata.updated"
+	case "balances":
+		return "balance.metadata.updated"
+	case "identities":
+		return "identity.metadata.updated"
+	case "transactions":
+		return "transaction.metadata.updated"
+	default:
+		return entityType + ".metadata.updated"
+	}
+}
+
+// postMetadataUpdateActions reindexes the updated entity in Typesense and emits a
+// metadata-updated webhook. Only called from UpdateMetadata (the public metadata
+// API) so internal writers that use updateEntityMetadata or the datasource
+// directly do not spam consumers.
+//
+// asynqClient is nil-guarded so unit tests that construct &Blnk{datasource: mock}
+// without NewBlnk do not panic in the goroutine. When neither queue nor asynq
+// is configured, this is a no-op (same as the previous Typesense-only path).
+func (l *Blnk) postMetadataUpdateActions(entityType, entityID string, fallbackMetadata map[string]interface{}) {
+	if l.queue == nil && l.asynqClient == nil {
+		return
+	}
+
+	go func() {
+		payload, canIndex := l.loadMetadataUpdatePayload(entityType, entityID, fallbackMetadata)
+
+		if canIndex && l.queue != nil {
+			if err := l.queue.queueIndexData(entityID, entityType, payload); err != nil {
+				notification.NotifyError(err)
+			}
+		}
+
+		if l.asynqClient == nil {
+			return
+		}
+		if err := l.SendWebhook(NewWebhook{
+			Event:   metadataUpdatedEventName(entityType),
+			Payload: payload,
+		}); err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
+
+// loadMetadataUpdatePayload re-fetches the entity after a metadata write.
+// On success it returns the full entity (suitable for Typesense and webhooks).
+// On fetch failure it returns a minimal map with the entity id and written
+// metadata so consumers still get a webhook.
+func (l *Blnk) loadMetadataUpdatePayload(entityType, entityID string, fallbackMetadata map[string]interface{}) (interface{}, bool) {
+	switch entityType {
+	case "ledgers":
+		updated, err := l.GetLedgerByID(entityID)
+		if err == nil {
+			return updated, true
+		}
+		return map[string]interface{}{
+			"ledger_id": entityID,
+			"meta_data": fallbackMetadata,
+		}, false
+
+	case "balances":
+		updated, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
+		if err == nil {
+			return updated, true
+		}
+		return map[string]interface{}{
+			"balance_id": entityID,
+			"meta_data":  fallbackMetadata,
+		}, false
+
+	case "identities":
+		updated, err := l.GetIdentity(entityID)
+		if err == nil {
+			return updated, true
+		}
+		return map[string]interface{}{
+			"identity_id": entityID,
+			"meta_data":   fallbackMetadata,
+		}, false
+
+	case "transactions":
+		updated, err := l.GetTransaction(context.Background(), entityID)
+		if err == nil {
+			return updated, true
+		}
+		// Parent/bulk IDs may not resolve to a single transaction row; still
+		// notify with enough context for consumers to identify the update.
+		return map[string]interface{}{
+			"transaction_id": entityID,
+			"meta_data":      fallbackMetadata,
+		}, false
+
+	default:
+		return map[string]interface{}{
+			"id":        entityID,
+			"meta_data": fallbackMetadata,
+		}, false
+	}
+}
+
 // UpdateMetadata updates the metadata for a given entity ID.
-// It first determines the entity type, retrieves current metadata, merges it with new metadata,
-// updates the entity with the merged metadata, and queues the updated entity for re-indexing in Typesense.
+// It determines the entity type, merges metadata (except transactions, which
+// are merged in the database), persists the update, then asynchronously
+// reindexes the entity and emits a *.metadata.updated webhook.
 //
 // Parameters:
 // - ctx: The context for the operation.
@@ -71,19 +179,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		// Queue the updated ledger for re-indexing in Typesense
-		if l.queue != nil {
-			go func() {
-				updatedLedger, err := l.GetLedgerByID(entityID)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "ledgers", updatedLedger)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		l.postMetadataUpdateActions(entityType, entityID, mergedMetadata)
 		return mergedMetadata, nil
 
 	case "transactions":
@@ -103,19 +199,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		// Queue the updated transaction for re-indexing in Typesense
-		if l.queue != nil {
-			go func() {
-				updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "transactions", updatedTransaction)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		l.postMetadataUpdateActions(entityType, entityID, newMetadata)
 		return newMetadata, nil
 
 	case "balances":
@@ -130,19 +214,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		if l.queue != nil {
-			// Queue the updated balance for re-indexing in Typesense
-			go func() {
-				updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "balances", updatedBalance)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		l.postMetadataUpdateActions(entityType, entityID, mergedMetadata)
 		return mergedMetadata, nil
 
 	case "identities":
@@ -157,19 +229,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		// Queue the updated identity for re-indexing in Typesense
-		if l.queue != nil {
-			go func() {
-				updatedIdentity, err := l.GetIdentity(entityID)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "identities", updatedIdentity)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		l.postMetadataUpdateActions(entityType, entityID, mergedMetadata)
 		return mergedMetadata, nil
 
 	default:

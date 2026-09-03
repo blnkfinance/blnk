@@ -69,6 +69,9 @@ func (m *MockDataSource) RecordTransactionsWithBalanceSetAndOutboxes(ctx context
 
 func (m *MockDataSource) GetTransaction(ctx context.Context, id string) (*model.Transaction, error) {
 	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*model.Transaction), args.Error(1)
 }
 
