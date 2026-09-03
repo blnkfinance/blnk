@@ -2000,8 +2000,8 @@ func TestFetchTransactions_Success(t *testing.T) {
                COALESCE(effective_date, created_at) as effective_date
         FROM blnk.transactions
         WHERE (source = $1 OR destination = $1)
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') > $2
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') <= $3
+        AND COALESCE(effective_date, created_at) > $2
+        AND COALESCE(effective_date, created_at) <= $3
         AND status = 'APPLIED'
         ORDER BY COALESCE(effective_date, created_at) ASC`)).
 		WithArgs(balanceID, startTime, targetTime).
@@ -2032,8 +2032,8 @@ func TestFetchTransactions_Error(t *testing.T) {
                COALESCE(effective_date, created_at) as effective_date
         FROM blnk.transactions
         WHERE (source = $1 OR destination = $1)
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') > $2
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') <= $3
+        AND COALESCE(effective_date, created_at) > $2
+        AND COALESCE(effective_date, created_at) <= $3
         AND status = 'APPLIED'
         ORDER BY COALESCE(effective_date, created_at) ASC`)).
 		WithArgs(balanceID, startTime, targetTime).
@@ -2144,8 +2144,8 @@ func TestCalculateBalanceFromTransactions_Success(t *testing.T) {
                COALESCE(effective_date, created_at) as effective_date
         FROM blnk.transactions
         WHERE (source = $1 OR destination = $1)
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') > $2
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') <= $3
+        AND COALESCE(effective_date, created_at) > $2
+        AND COALESCE(effective_date, created_at) <= $3
         AND status = 'APPLIED'
         ORDER BY COALESCE(effective_date, created_at) ASC`)).
 		WithArgs(balanceID, startTime, targetTime).
@@ -2180,8 +2180,8 @@ func TestCalculateBalanceFromTransactions_QueryError(t *testing.T) {
                COALESCE(effective_date, created_at) as effective_date
         FROM blnk.transactions
         WHERE (source = $1 OR destination = $1)
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') > $2
-        AND (COALESCE(effective_date, created_at) AT TIME ZONE 'UTC') <= $3
+        AND COALESCE(effective_date, created_at) > $2
+        AND COALESCE(effective_date, created_at) <= $3
         AND status = 'APPLIED'
         ORDER BY COALESCE(effective_date, created_at) ASC`)).
 		WithArgs(balanceID, startTime, targetTime).
