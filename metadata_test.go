@@ -3,7 +3,9 @@ package blnk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -501,20 +503,181 @@ func TestUpdateMetadata_SequentialUpdatesPreserveEachCommit(t *testing.T) {
 	mockDS.AssertExpectations(t)
 }
 
-func TestUpdateMetadata_EnqueueFailureIsReturned(t *testing.T) {
+// TestUpdateMetadata_EnqueueFailureStillReportsCommittedWrite pins the
+// resolution of the partial-success problem: the merge is committed before the
+// event is enqueued, so an enqueue failure must not be reported as a failed
+// write.
+//
+// Returning 5xx here would tell the client a write failed that had in fact
+// applied. The client would retry, the retry would merge again and emit a
+// second event with a fresh event_id, and consumers would have two
+// undedupable events for one logical update. Reporting the commit honestly is
+// what keeps event_id usable as a dedupe key. The dropped notification is
+// logged and sent to notification.NotifyError instead.
+func TestUpdateMetadata_EnqueueFailureStillReportsCommittedWrite(t *testing.T) {
 	mockDS := new(mocks.MockDataSource)
 	ledger := &model.Ledger{
 		LedgerID: "ldg_enq_fail",
-		MetaData: map[string]interface{}{},
+		MetaData: map[string]interface{}{"existing": "value"},
 	}
 	mockDS.On("GetLedgerByID", "ldg_enq_fail").Return(ledger, nil).Once()
 	mockDS.On("UpdateLedgerMetadata", "ldg_enq_fail", mock.Anything).Return(nil).Once()
 
-	b, _ := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	// Closing the client breaks the enqueue while leaving the persist mocked
+	// as successful, which is exactly the partial-success window.
 	require.NoError(t, b.Close())
 
-	_, err := b.UpdateMetadata(context.Background(), "ldg_enq_fail", map[string]interface{}{"k": "v"})
-	require.Error(t, err, "persist succeeded; enqueue failure must still fail the call so clients can retry")
+	merged, err := b.UpdateMetadata(context.Background(), "ldg_enq_fail", map[string]interface{}{"k": "v"})
+	require.NoError(t, err, "the merge was committed; a failed enqueue must not be reported as a failed write")
+
+	// The caller still receives the authoritative merged state.
+	assert.Equal(t, "value", merged["existing"])
+	assert.Equal(t, "v", merged["k"])
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	assert.Empty(t, tasks, "enqueue failed, so no event should be pending")
+	mockDS.AssertExpectations(t)
+}
+
+// TestUpdateMetadata_PersistFailureEmitsNoEvent pins the other half of the
+// ordering: nothing is published unless the merge actually persisted, so
+// consumers never see an event for a write that did not happen.
+func TestUpdateMetadata_PersistFailureEmitsNoEvent(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	ledger := &model.Ledger{
+		LedgerID: "ldg_persist_fail",
+		MetaData: map[string]interface{}{},
+	}
+	mockDS.On("GetLedgerByID", "ldg_persist_fail").Return(ledger, nil).Once()
+	mockDS.On("UpdateLedgerMetadata", "ldg_persist_fail", mock.Anything).
+		Return(errors.New("write conflict")).Once()
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+
+	_, err := b.UpdateMetadata(context.Background(), "ldg_persist_fail", map[string]interface{}{"k": "v"})
+	require.Error(t, err, "a failed persist must fail the call")
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	assert.Empty(t, tasks, "no event may be emitted for a merge that was never committed")
+	mockDS.AssertExpectations(t)
+}
+
+// TestUpdateMetadata_BulkTransactionAppliesRawPatch covers the bulk_ entity
+// prefix, where a single ID addresses a parent and all of its child rows.
+//
+// The patch must reach the datasource unmerged so Postgres performs the JSONB
+// merge per row: pre-merging against one row's metadata would overwrite
+// sibling rows with the wrong state. The event therefore reports
+// meta_data_patch rather than claiming a merged document, and the search index
+// is rebuilt from a re-read instead of that patch.
+func TestUpdateMetadata_BulkTransactionAppliesRawPatch(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	patch := map[string]interface{}{"settlement_batch": "B-42"}
+
+	mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "bulk_meta_1").Return(true, nil).Once()
+	// mock.Anything is deliberately not used for the payload: the exact patch
+	// must be handed to the DB so the JSONB merge stays server-side.
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, "bulk_meta_1", patch).Return(nil).Once()
+
+	var indexFetchDone atomic.Bool
+	mockDS.On("GetTransaction", mock.Anything, "bulk_meta_1").
+		Return(&model.Transaction{TransactionID: "bulk_meta_1", Amount: 250, Currency: "USD"}, nil).
+		Run(func(mock.Arguments) { indexFetchDone.Store(true) }).
+		Maybe()
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+
+	returned, err := b.UpdateMetadata(context.Background(), "bulk_meta_1", patch)
+	require.NoError(t, err)
+	assert.Equal(t, patch, returned, "bulk updates report the applied patch, not a synthesized merge")
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	require.Len(t, tasks, 1)
+	event, data := decodeMetadataWebhook(t, tasks[0])
+	assert.Equal(t, "transaction.metadata.updated", event)
+	assert.Equal(t, "bulk_meta_1", data["transaction_id"])
+
+	_, claimsMerged := data["meta_data"]
+	assert.False(t, claimsMerged, "the event must not claim a merged document it never read")
+	appliedPatch, ok := data["meta_data_patch"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "B-42", appliedPatch["settlement_batch"])
+
+	require.Eventually(t, func() bool {
+		return indexFetchDone.Load()
+	}, 2*time.Second, 10*time.Millisecond, "bulk reindex must re-read the rows rather than index the patch")
+	mockDS.AssertExpectations(t)
+}
+
+// TestUpdateMetadata_ConcurrentUpdatesEachCarryOwnCommit runs genuinely
+// concurrent updates against one entity, which is what the earlier sequential
+// test could not exercise.
+//
+// Each queued event must carry the patch its own call committed. The payload is
+// built from a cloned snapshot, so a shared or late-read map would show up here
+// as a duplicated or missing step value, and any shared mutation would be
+// reported by -race in CI.
+func TestUpdateMetadata_ConcurrentUpdatesEachCarryOwnCommit(t *testing.T) {
+	const updates = 8
+
+	mockDS := new(mocks.MockDataSource)
+	ledger := &model.Ledger{
+		LedgerID: "ldg_concurrent",
+		Name:     "Concurrent",
+		MetaData: map[string]interface{}{"base": "1"},
+	}
+	mockDS.On("GetLedgerByID", "ldg_concurrent").Return(ledger, nil).Times(updates)
+	mockDS.On("UpdateLedgerMetadata", "ldg_concurrent", mock.Anything).Return(nil).Times(updates)
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+
+	var wg sync.WaitGroup
+	errs := make(chan error, updates)
+	start := make(chan struct{})
+	for i := 0; i < updates; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // maximise overlap
+			_, err := b.UpdateMetadata(context.Background(), "ldg_concurrent",
+				map[string]interface{}{"step": fmt.Sprintf("s%d", i)})
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	require.Len(t, tasks, updates, "every committed update must enqueue exactly one event")
+
+	eventIDs := map[string]struct{}{}
+	steps := map[string]struct{}{}
+	for _, task := range tasks {
+		event, data := decodeMetadataWebhook(t, task)
+		assert.Equal(t, "ledger.metadata.updated", event)
+		assert.Equal(t, "ldg_concurrent", data["ledger_id"])
+
+		id, _ := data["event_id"].(string)
+		require.NotEmpty(t, id)
+		eventIDs[id] = struct{}{}
+
+		meta, ok := data["meta_data"].(map[string]interface{})
+		require.True(t, ok)
+		// The pre-existing key survives, proving the payload is a real merge
+		// of the loaded state and not just the patch.
+		assert.Equal(t, "1", meta["base"])
+		step, _ := meta["step"].(string)
+		require.NotEmpty(t, step)
+		steps[step] = struct{}{}
+	}
+
+	assert.Len(t, eventIDs, updates, "each event needs its own event_id for consumer dedupe")
+	assert.Len(t, steps, updates, "each event must carry the patch its own call committed, with no cross-talk")
 	mockDS.AssertExpectations(t)
 }
 
