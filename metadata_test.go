@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -428,8 +429,14 @@ func TestUpdateMetadata_TransactionIndexUsesFullDocumentNotPatch(t *testing.T) {
 	}
 	mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "txn_idx_1").Return(true, nil).Once()
 	mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_idx_1", newMetadata).Return(nil).Once()
-	// Index path must call GetTransaction to fetch the full row.
-	mockDS.On("GetTransaction", mock.Anything, "txn_idx_1").Return(fullTxn, nil).Once()
+	// Index path must call GetTransaction to fetch the full row. Record completion
+	// via an atomic flag in Run — polling mock.Calls races with the async goroutine
+	// under -race because testify mutates Calls concurrently.
+	var indexFetchDone atomic.Bool
+	mockDS.On("GetTransaction", mock.Anything, "txn_idx_1").
+		Return(fullTxn, nil).
+		Run(func(mock.Arguments) { indexFetchDone.Store(true) }).
+		Once()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 	// Give this Blnk instance a queue so queueTransactionMetadataIndex is not
@@ -446,16 +453,8 @@ func TestUpdateMetadata_TransactionIndexUsesFullDocumentNotPatch(t *testing.T) {
 	_, hasAmount := data["amount"]
 	assert.False(t, hasAmount, "webhook payload must remain the patch, not the full transaction")
 
-	// queueTransactionMetadataIndex runs in a goroutine; poll the mock's
-	// recorded calls (no assertion side effects) instead of sleeping a fixed
-	// duration, so the test is both fast and not flaky under load.
 	require.Eventually(t, func() bool {
-		for _, call := range mockDS.Calls {
-			if call.Method == "GetTransaction" {
-				return true
-			}
-		}
-		return false
+		return indexFetchDone.Load()
 	}, 2*time.Second, 10*time.Millisecond, "expected GetTransaction to be called to build the full index document")
 
 	mockDS.AssertExpectations(t)
