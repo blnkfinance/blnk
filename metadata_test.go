@@ -260,10 +260,10 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 			assertData: func(t *testing.T, data map[string]interface{}) {
 				require.NotEmpty(t, data["event_id"])
 				require.NotEmpty(t, data["timestamp"])
-				entity, ok := data["entity"].(map[string]interface{})
-				require.True(t, ok)
-				assert.Equal(t, "ldg_wh_1", entity["ledger_id"])
-				meta, ok := entity["meta_data"].(map[string]interface{})
+				_, hasEntity := data["entity"]
+				assert.False(t, hasEntity, "resource fields must sit at the top of data, not nested under entity")
+				assert.Equal(t, "ldg_wh_1", data["ledger_id"])
+				meta, ok := data["meta_data"].(map[string]interface{})
 				require.True(t, ok)
 				assert.Equal(t, "value", meta["existing"])
 				assert.Equal(t, "value", meta["new"])
@@ -283,9 +283,7 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 				mockDS.On("UpdateBalanceMetadata", mock.Anything, "bln_wh_1", mock.Anything).Return(nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
-				entity, ok := data["entity"].(map[string]interface{})
-				require.True(t, ok)
-				assert.Equal(t, "bln_wh_1", entity["balance_id"])
+				assert.Equal(t, "bln_wh_1", data["balance_id"])
 			},
 		},
 		{
@@ -301,9 +299,7 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 				mockDS.On("UpdateIdentityMetadata", "idt_wh_1", mock.Anything).Return(nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
-				entity, ok := data["entity"].(map[string]interface{})
-				require.True(t, ok)
-				assert.Equal(t, "idt_wh_1", entity["identity_id"])
+				assert.Equal(t, "idt_wh_1", data["identity_id"])
 			},
 		},
 		{
@@ -315,10 +311,10 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 				mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_wh_1", newMetadata).Return(nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
-				entity, ok := data["entity"].(map[string]interface{})
-				require.True(t, ok)
-				assert.Equal(t, "txn_wh_1", entity["transaction_id"])
-				meta, ok := entity["meta_data"].(map[string]interface{})
+				assert.Equal(t, "txn_wh_1", data["transaction_id"])
+				_, hasMerged := data["meta_data"]
+				assert.False(t, hasMerged, "transaction events must not claim merged meta_data")
+				meta, ok := data["meta_data_patch"].(map[string]interface{})
 				require.True(t, ok)
 				assert.Equal(t, "value", meta["new"])
 			},
@@ -399,16 +395,14 @@ func TestUpdateMetadata_TransactionPatchPayloadWithoutRefetch(t *testing.T) {
 	assert.Equal(t, "transaction.metadata.updated", event)
 	require.NotEmpty(t, data["event_id"])
 
-	entity, ok := data["entity"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "bulk_wh_1", entity["transaction_id"])
-	meta, ok := entity["meta_data"].(map[string]interface{})
+	assert.Equal(t, "bulk_wh_1", data["transaction_id"])
+	meta, ok := data["meta_data_patch"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "bulk", meta["tag"])
 	mockDS.AssertExpectations(t)
 }
 
-func TestUpdateMetadata_ConcurrentUpdatesPreserveEachCommit(t *testing.T) {
+func TestUpdateMetadata_SequentialUpdatesPreserveEachCommit(t *testing.T) {
 	mockDS := new(mocks.MockDataSource)
 	ledger := &model.Ledger{
 		LedgerID: "ldg_race",
@@ -438,9 +432,8 @@ func TestUpdateMetadata_ConcurrentUpdatesPreserveEachCommit(t *testing.T) {
 		require.NotEmpty(t, id)
 		eventIDs[id] = struct{}{}
 
-		entity, ok := data["entity"].(map[string]interface{})
-		require.True(t, ok)
-		meta, ok := entity["meta_data"].(map[string]interface{})
+		assert.Equal(t, "ldg_race", data["ledger_id"])
+		meta, ok := data["meta_data"].(map[string]interface{})
 		require.True(t, ok)
 		step, _ := meta["step"].(string)
 		steps = append(steps, step)
@@ -448,6 +441,39 @@ func TestUpdateMetadata_ConcurrentUpdatesPreserveEachCommit(t *testing.T) {
 	assert.Len(t, eventIDs, 2, "each update must carry a distinct event_id")
 	assert.Equal(t, []string{"a", "b"}, steps, "each queued event must reflect its own committed patch")
 	mockDS.AssertExpectations(t)
+}
+
+func TestUpdateMetadata_EnqueueFailureIsReturned(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	ledger := &model.Ledger{
+		LedgerID: "ldg_enq_fail",
+		MetaData: map[string]interface{}{},
+	}
+	mockDS.On("GetLedgerByID", "ldg_enq_fail").Return(ledger, nil).Once()
+	mockDS.On("UpdateLedgerMetadata", "ldg_enq_fail", mock.Anything).Return(nil).Once()
+
+	b, _ := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	require.NoError(t, b.Close())
+
+	_, err := b.UpdateMetadata(context.Background(), "ldg_enq_fail", map[string]interface{}{"k": "v"})
+	require.Error(t, err, "persist succeeded; enqueue failure must still fail the call so clients can retry")
+	mockDS.AssertExpectations(t)
+}
+
+func TestMetadataUpdatedWebhookDataFlattensResourceFields(t *testing.T) {
+	ledger := model.Ledger{
+		LedgerID: "ldg_flat",
+		Name:     "Main",
+		MetaData: map[string]interface{}{"k": "v"},
+	}
+	data, err := metadataUpdatedWebhookData(ledger)
+	require.NoError(t, err)
+	assert.Equal(t, "ldg_flat", data["ledger_id"])
+	assert.Equal(t, "Main", data["name"])
+	require.NotEmpty(t, data["event_id"])
+	require.NotEmpty(t, data["timestamp"])
+	_, nested := data["entity"]
+	assert.False(t, nested)
 }
 
 func TestMergeMetadataDoesNotMutateInputs(t *testing.T) {
