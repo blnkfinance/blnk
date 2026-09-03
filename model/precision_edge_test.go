@@ -149,6 +149,14 @@ func TestApplyPrecision_EdgeCases(t *testing.T) {
 		assert.Equal(t, "10", txn.AmountString)
 	})
 
+	t.Run("existing positive precise amount drives the decimal amount", func(t *testing.T) {
+		txn := &Transaction{PreciseAmount: big.NewInt(1001), Precision: 100}
+		got := ApplyPrecision(txn)
+		assert.Equal(t, "1001", got.String())
+		assert.Equal(t, 10.01, txn.Amount)
+		assert.Equal(t, "10.01", txn.AmountString)
+	})
+
 	t.Run("float-hostile decimal amounts convert exactly", func(t *testing.T) {
 		// All of these are classic binary-float traps. The decimal-based
 		// conversion must produce the exact minor-unit integer.
