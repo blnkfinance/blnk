@@ -270,7 +270,11 @@ func (c *MonitorCondition) ValidateMonitorCondition() error {
 		validation.Field(&c.Field, validation.Required, validation.In("debit_balance", "credit_balance", "balance", "inflight_debit_balance", "inflight_credit_balance", "inflight_balance")),
 		validation.Field(&c.Operator, validation.Required, validation.In(">", "<", ">=", "<=", "=", "!=")),
 		validation.Field(&c.Precision, validation.Required, validation.By(validatePrecisionNotNegative)),
-		validation.Field(&c.Value, validation.Required),
+		// Value is deliberately not Required: ozzo treats a zero number as
+		// absent, which made every threshold at zero unexpressible -- no
+		// "balance > 0", no "balance != 0", no "balance <= 0". Precision keeps
+		// the rule because a zero multiplier is meaningless, a zero threshold
+		// is not.
 	)
 }
 

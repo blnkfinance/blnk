@@ -889,6 +889,15 @@ func TestValidateCreateBalanceMonitor_Trigger(t *testing.T) {
 	assert.Error(t, monitor.ValidateCreateBalanceMonitor())
 }
 
+func TestValidateMonitorCondition_AllowsAZeroThreshold(t *testing.T) {
+	// "balance > 0" and "balance != 0" are the most natural monitors there are,
+	// and a validator that treats zero as absent made all of them impossible.
+	for _, operator := range []string{">", "<", ">=", "<=", "=", "!="} {
+		condition := MonitorCondition{Field: "balance", Operator: operator, Value: 0, Precision: 100}
+		assert.NoError(t, condition.ValidateMonitorCondition(), "zero is a threshold like any other (%s)", operator)
+	}
+}
+
 func TestValidateMonitorCondition_RejectsUnsupportedOperators(t *testing.T) {
 	base := func(operator string) MonitorCondition {
 		return MonitorCondition{Field: "balance", Operator: operator, Value: 100, Precision: 100}
