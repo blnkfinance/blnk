@@ -856,6 +856,52 @@ func TestToBalanceMonitor(t *testing.T) {
 	assert.Equal(t, createMonitor.Condition.Operator, monitor.Condition.Operator)
 	assert.Equal(t, createMonitor.Condition.Value, monitor.Condition.Value)
 	assert.Equal(t, createMonitor.Condition.Precision, monitor.Condition.Precision)
+	// The request struct carries the caller's choice through untouched;
+	// model.NormalizeTrigger is the one place that resolves an unset one.
+	assert.Empty(t, monitor.Trigger)
+}
+
+func TestToBalanceMonitor_KeepsAnExplicitTrigger(t *testing.T) {
+	createMonitor := CreateBalanceMonitor{
+		BalanceId: "bln_test_123",
+		Trigger:   model.TriggerLevel,
+		Condition: MonitorCondition{Field: "balance", Operator: ">", Value: 1000, Precision: 100},
+	}
+
+	assert.Equal(t, model.TriggerLevel, createMonitor.ToBalanceMonitor().Trigger)
+}
+
+func TestValidateCreateBalanceMonitor_Trigger(t *testing.T) {
+	base := func(trigger string) CreateBalanceMonitor {
+		return CreateBalanceMonitor{
+			BalanceId: "bln_test_123",
+			Trigger:   trigger,
+			Condition: MonitorCondition{Field: "balance", Operator: ">", Value: 1000, Precision: 100},
+		}
+	}
+
+	for _, trigger := range []string{"", model.TriggerEdge, model.TriggerLevel} {
+		monitor := base(trigger)
+		assert.NoError(t, monitor.ValidateCreateBalanceMonitor(), "trigger %q must be accepted", trigger)
+	}
+
+	monitor := base("sometimes")
+	assert.Error(t, monitor.ValidateCreateBalanceMonitor())
+}
+
+func TestNormalizeTriggerIsTheOnlyDefault(t *testing.T) {
+	trigger, err := model.NormalizeTrigger("")
+	assert.NoError(t, err)
+	assert.Equal(t, model.TriggerEdge, trigger, "an unset trigger resolves to edge")
+
+	for _, valid := range []string{model.TriggerEdge, model.TriggerLevel} {
+		trigger, err := model.NormalizeTrigger(valid)
+		assert.NoError(t, err)
+		assert.Equal(t, valid, trigger, "an explicit trigger is carried through untouched")
+	}
+
+	_, err = model.NormalizeTrigger("sometimes")
+	assert.Error(t, err)
 }
 
 // TestSplitOnOneSideValidation pins that a transaction cannot split both

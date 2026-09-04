@@ -414,6 +414,16 @@ func (m *MockDataSource) DeleteMonitor(id string) error {
 	return args.Error(0)
 }
 
+func (m *MockDataSource) TransitionMonitorState(ctx context.Context, monitorID, balanceID string, conditionMet bool, balanceVersion int64) (bool, error) {
+	args := m.Called(ctx, monitorID, balanceID, conditionMet, balanceVersion)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockDataSource) ReleaseMonitorState(ctx context.Context, monitorID, balanceID string, balanceVersion int64) error {
+	args := m.Called(ctx, monitorID, balanceID, balanceVersion)
+	return args.Error(0)
+}
+
 // Identity methods
 
 func (m *MockDataSource) CreateIdentity(identity model.Identity) (model.Identity, error) {

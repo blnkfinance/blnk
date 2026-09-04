@@ -16,6 +16,7 @@ limitations under the License.
 package model
 
 import (
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -46,6 +47,31 @@ type Balance struct {
 	AllocationStrategy    string                 `json:"allocation_strategy,omitempty"`
 }
 
+// Trigger modes for a BalanceMonitor.
+//
+// TriggerEdge fires once when the condition goes from false to true and stays
+// silent until it has evaluated false again. TriggerLevel fires on every
+// committed balance update while the condition holds.
+const (
+	TriggerEdge  = "edge"
+	TriggerLevel = "level"
+)
+
+// NormalizeTrigger resolves a caller-supplied trigger mode, filling in the
+// default for an unset one and rejecting anything else. It is the only place
+// that knows what the default is, so the API, the datasource and the read path
+// cannot drift apart on it.
+func NormalizeTrigger(trigger string) (string, error) {
+	switch trigger {
+	case "":
+		return TriggerEdge, nil
+	case TriggerEdge, TriggerLevel:
+		return trigger, nil
+	default:
+		return "", fmt.Errorf("trigger must be either %q or %q", TriggerEdge, TriggerLevel)
+	}
+}
+
 type BalanceMonitor struct {
 	MonitorID   string         `json:"monitor_id"`
 	BalanceID   string         `json:"balance_id"`
@@ -53,6 +79,22 @@ type BalanceMonitor struct {
 	CallBackURL string         `json:"-"`
 	CreatedAt   time.Time      `json:"created_at"`
 	Condition   AlertCondition `json:"condition"`
+	Trigger     string         `json:"trigger,omitempty"`
+	// ConditionState is the last observed truth value of the condition. It is
+	// owned by the evaluation path and is never authoritative on a cached copy;
+	// read it from a TransitionMonitorState result, not from here.
+	ConditionState bool `json:"condition_state"`
+}
+
+// TriggerMode is the read side of NormalizeTrigger: it never fails, because a
+// stored row or a cache entry written before the field existed must still
+// resolve to something, and the default is the safe reading.
+func (bm *BalanceMonitor) TriggerMode() string {
+	trigger, err := NormalizeTrigger(bm.Trigger)
+	if err != nil {
+		return TriggerEdge
+	}
+	return trigger
 }
 
 type LineageMapping struct {

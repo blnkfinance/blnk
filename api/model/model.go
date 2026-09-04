@@ -254,6 +254,14 @@ func (b *CreateBalanceMonitor) ValidateCreateBalanceMonitor() error {
 			// Call the ValidateMonitorCondition method
 			return condition.ValidateMonitorCondition()
 		})),
+		validation.Field(&b.Trigger, validation.By(func(value interface{}) error {
+			trigger, ok := value.(string)
+			if !ok {
+				return errors.New("invalid trigger type")
+			}
+			_, err := model.NormalizeTrigger(trigger)
+			return err
+		})),
 	)
 }
 
@@ -372,7 +380,7 @@ func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
 		Operator:  b.Condition.Operator,
 		Value:     b.Condition.Value,
 		Precision: b.Condition.Precision,
-	}, CallBackURL: b.CallBackURL}
+	}, CallBackURL: b.CallBackURL, Trigger: b.Trigger}
 }
 
 func (a *CreateAccount) ToAccount() model.Account {

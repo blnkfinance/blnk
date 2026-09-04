@@ -31,6 +31,9 @@ type CreateBalanceMonitor struct {
 	Condition   MonitorCondition       `json:"condition"`
 	CallBackURL string                 `json:"call_back_url"`
 	MetaData    map[string]interface{} `json:"meta_data"`
+	// Trigger is "edge" (default) or "level". Edge alerts once when the
+	// condition becomes true; level alerts on every transaction while it holds.
+	Trigger string `json:"trigger"`
 }
 
 type MonitorCondition struct {

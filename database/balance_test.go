@@ -1148,10 +1148,10 @@ func TestCreateMonitor_Success(t *testing.T) {
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`)).
-		WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, sqlmock.AnyArg(), model.TriggerEdge).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	createdMonitor, err := ds.CreateMonitor(monitor)
@@ -1181,10 +1181,10 @@ func TestCreateMonitor_UniqueViolation(t *testing.T) {
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`)).
-		WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), model.TriggerEdge).
 		WillReturnError(&pq.Error{Code: "23505", Message: "unique_violation"})
 
 	_, err = ds.CreateMonitor(monitor)
@@ -1214,10 +1214,10 @@ func TestCreateMonitor_ForeignKeyViolation(t *testing.T) {
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`)).
-		WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), model.TriggerEdge).
 		WillReturnError(&pq.Error{Code: "23503", Message: "foreign_key_violation"})
 
 	_, err = ds.CreateMonitor(monitor)
@@ -1238,16 +1238,16 @@ func TestGetMonitorByID_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at
+		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("mon_123").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "balance_id", "field", "operator", "value", "precision", "precise_value", "description", "call_back_url", "created_at",
+			"monitor_id", "balance_id", "field", "operator", "value", "precision", "precise_value", "description", "call_back_url", "created_at", "trigger_type", "condition_state",
 		}).AddRow(
-			"mon_123", "bln_123", "balance", "<", 1000.0, 100, int64(100000), "Low balance alert", "https://example.com/webhook", time.Now(),
+			"mon_123", "bln_123", "balance", "<", 1000.0, 100, int64(100000), "Low balance alert", "https://example.com/webhook", time.Now(), model.TriggerEdge, false,
 		))
 
 	monitor, err := ds.GetMonitorByID("mon_123")
@@ -1271,7 +1271,7 @@ func TestGetMonitorByID_NotFound(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at
+		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`
 
@@ -1298,16 +1298,16 @@ func TestGetAllMonitors_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, trigger_type, condition_state
 		FROM blnk.balance_monitors
 	`
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at",
+			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state",
 		}).
-			AddRow("mon_1", "bln_1", "balance", "<", 1000.0, "Alert 1", "https://example.com/1", time.Now()).
-			AddRow("mon_2", "bln_2", "credit_balance", ">", 5000.0, "Alert 2", "https://example.com/2", time.Now()))
+			AddRow("mon_1", "bln_1", "balance", "<", 1000.0, "Alert 1", "https://example.com/1", time.Now(), model.TriggerEdge, false).
+			AddRow("mon_2", "bln_2", "credit_balance", ">", 5000.0, "Alert 2", "https://example.com/2", time.Now(), model.TriggerLevel, true))
 
 	monitors, err := ds.GetAllMonitors()
 	assert.NoError(t, err)
@@ -1327,13 +1327,13 @@ func TestGetAllMonitors_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, trigger_type, condition_state
 		FROM blnk.balance_monitors
 	`
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at",
+			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state",
 		}))
 
 	monitors, err := ds.GetAllMonitors()
@@ -1352,17 +1352,17 @@ func TestGetBalanceMonitors_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("bln_123").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value",
+			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value", "trigger_type", "condition_state",
 		}).
-			AddRow("mon_1", "bln_123", "balance", "<", 1000.0, "Low alert", "https://example.com/1", time.Now(), 100, int64(100000)).
-			AddRow("mon_2", "bln_123", "debit_balance", ">", 500.0, "High debit", "https://example.com/2", time.Now(), 100, int64(50000)))
+			AddRow("mon_1", "bln_123", "balance", "<", 1000.0, "Low alert", "https://example.com/1", time.Now(), 100, int64(100000), model.TriggerEdge, false).
+			AddRow("mon_2", "bln_123", "debit_balance", ">", 500.0, "High debit", "https://example.com/2", time.Now(), 100, int64(50000), model.TriggerLevel, true))
 
 	monitors, err := ds.GetBalanceMonitors("bln_123")
 	assert.NoError(t, err)
@@ -1383,14 +1383,14 @@ func TestGetBalanceMonitors_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("bln_no_monitors").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value",
+			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value", "trigger_type", "condition_state",
 		}))
 
 	monitors, err := ds.GetBalanceMonitors("bln_no_monitors")
@@ -1422,12 +1422,13 @@ func TestUpdateMonitor_Success(t *testing.T) {
 
 	query := `
 		UPDATE blnk.balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7,
+		    trigger_type = $8, condition_state = FALSE, state_version = 0, state_changed_at = NULL
 		WHERE monitor_id = $1
 	`
 
 	mock.ExpectExec(regexp.QuoteMeta(query)).
-		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL).
+		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, model.TriggerEdge).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	err = ds.UpdateMonitor(monitor)
@@ -1457,12 +1458,13 @@ func TestUpdateMonitor_NotFound(t *testing.T) {
 
 	query := `
 		UPDATE blnk.balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7,
+		    trigger_type = $8, condition_state = FALSE, state_version = 0, state_changed_at = NULL
 		WHERE monitor_id = $1
 	`
 
 	mock.ExpectExec(regexp.QuoteMeta(query)).
-		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL).
+		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, model.TriggerEdge).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	err = ds.UpdateMonitor(monitor)
