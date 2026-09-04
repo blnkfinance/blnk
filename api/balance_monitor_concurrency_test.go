@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/brianvoe/gofakeit/v6"
-	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -169,8 +168,7 @@ func TestBalanceMonitorEdge_WebhookPayload(t *testing.T) {
 	e.transfer(t, funding.BalanceID, wallet.BalanceID, 900)
 	e.awaitWebhooks(t, 1)
 
-	tasks, err := e.inspector.ListPendingTasks(e.queue, asynq.PageSize(500))
-	require.NoError(t, err)
+	tasks := e.pendingTasks()
 
 	// NewWebhook serialises its payload under "data", not "payload".
 	var payload struct {

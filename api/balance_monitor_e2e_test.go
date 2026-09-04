@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,17 +66,30 @@ func setupMonitorE2E(t *testing.T) *monitorE2E {
 	return &monitorE2E{router: router, blnk: b, cnf: cnf, inspector: inspector, queue: queue}
 }
 
-// webhooks counts the balance.monitor tasks waiting on the queue. The same
-// queue carries every other webhook the ledger emits, so the payload, not the
-// queue depth, is what the assertions are about.
-func (e *monitorE2E) webhooks() int {
-	tasks, err := e.inspector.ListPendingTasks(e.queue, asynq.PageSize(500))
-	if err != nil {
-		return 0
-	}
+// pendingTasks returns every pending task on this harness's queue. The ledger
+// puts its own webhooks on the same queue and a busy test overruns a single
+// page, so this pages to the end rather than sampling the first one.
+func (e *monitorE2E) pendingTasks() []*asynq.TaskInfo {
+	const pageSize = 200
 
+	var all []*asynq.TaskInfo
+	for page := 1; ; page++ {
+		batch, err := e.inspector.ListPendingTasks(e.queue, asynq.PageSize(pageSize), asynq.Page(page))
+		if err != nil {
+			return all
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			return all
+		}
+	}
+}
+
+// webhooks counts the balance.monitor tasks waiting on the queue. The payload,
+// not the queue depth, is what the assertions are about.
+func (e *monitorE2E) webhooks() int {
 	count := 0
-	for _, task := range tasks {
+	for _, task := range e.pendingTasks() {
 		var hook struct {
 			Event string `json:"event"`
 		}
@@ -83,6 +97,16 @@ func (e *monitorE2E) webhooks() int {
 			continue
 		}
 		if hook.Event == "balance.monitor" {
+			count++
+		}
+	}
+	return count
+}
+
+func (e *monitorE2E) webhooksFor(monitorID string) int {
+	count := 0
+	for _, task := range e.pendingTasks() {
+		if strings.Contains(string(task.Payload), monitorID) {
 			count++
 		}
 	}
