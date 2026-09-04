@@ -43,6 +43,7 @@ import (
 type monitorE2E struct {
 	router    *gin.Engine
 	blnk      *blnk.Blnk
+	cnf       *config.Configuration
 	inspector *asynq.Inspector
 	queue     string
 }
@@ -51,7 +52,7 @@ func setupMonitorE2E(t *testing.T) *monitorE2E {
 	t.Helper()
 
 	queue := fmt.Sprintf("monitor_e2e_%d", time.Now().UnixNano())
-	router, b, _ := setupRouterWithConfig(t, func(cfg *config.Configuration) {
+	router, b, cnf := setupRouterWithConfig(t, func(cfg *config.Configuration) {
 		cfg.Queue.WebhookQueue = queue
 		// SendWebhook returns early when no URL is set, so the queue would stay
 		// empty however correct the monitor logic was.
@@ -61,7 +62,7 @@ func setupMonitorE2E(t *testing.T) *monitorE2E {
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	t.Cleanup(func() { _ = inspector.Close() })
 
-	return &monitorE2E{router: router, blnk: b, inspector: inspector, queue: queue}
+	return &monitorE2E{router: router, blnk: b, cnf: cnf, inspector: inspector, queue: queue}
 }
 
 // webhooks counts the balance.monitor tasks waiting on the queue. The same
