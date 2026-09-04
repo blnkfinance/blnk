@@ -2,16 +2,56 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/blnkfinance/blnk/internal/notification"
+	"github.com/blnkfinance/blnk/model"
+	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 // ErrEntityNotFound is returned by UpdateMetadata when the target entity
 // does not exist. API handlers match it with errors.Is to return 404.
 var ErrEntityNotFound = errors.New("entity not found")
+
+// metadataUpdatedWebhookData flattens a resource snapshot into the webhook
+// `data` object, matching ledger.created / balance.created / identity.created:
+// resource fields sit at the top of `data`, with event_id and timestamp added
+// as sibling keys for idempotency.
+//
+// Contract:
+//   - Represents the committed update that triggered the event (not a later
+//     re-read of mutable entity state).
+//   - event_id uniquely identifies this notification for consumer idempotency.
+//   - timestamp is when the event was enqueued (UTC).
+//   - Ledgers, balances, and identities include the resource fields plus
+//     merged meta_data for this write.
+//   - Transactions include transaction_id and meta_data_patch (the JSON
+//     object this request applied). The DB JSONB-merges that patch onto the
+//     matching row(s); this event does not re-read the merged result.
+//
+// Delivery is at-least-once via the webhook queue. Ordering per entity is not
+// guaranteed when concurrent updates race. Consumers should dedupe on event_id.
+func metadataUpdatedWebhookData(entitySnapshot interface{}) (map[string]interface{}, error) {
+	raw, err := json.Marshal(entitySnapshot)
+	if err != nil {
+		return nil, err
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, err
+	}
+	if data == nil {
+		data = map[string]interface{}{}
+	}
+	data["event_id"] = uuid.NewString()
+	data["timestamp"] = time.Now().UTC()
+	return data, nil
+}
 
 // getEntityTypeFromID determines the entity type from the ID prefix.
 // It analyzes the prefix of the provided ID and returns the corresponding entity type.
@@ -39,9 +79,208 @@ func getEntityTypeFromID(id string) (string, error) {
 	}
 }
 
+// metadataUpdatedEventName returns the webhook event name for a metadata update
+// on the given entity type collection name (e.g. "ledgers" → "ledger.metadata.updated").
+func metadataUpdatedEventName(entityType string) string {
+	switch entityType {
+	case "ledgers":
+		return "ledger.metadata.updated"
+	case "balances":
+		return "balance.metadata.updated"
+	case "identities":
+		return "identity.metadata.updated"
+	case "transactions":
+		return "transaction.metadata.updated"
+	default:
+		return entityType + ".metadata.updated"
+	}
+}
+
+// cloneMetadata returns a copy of src so adding or replacing a top-level key on
+// either map afterwards does not affect webhook/index snapshots. The copy is
+// shallow: nested values are shared, which is safe here because the patch comes
+// straight off the request body and is not mutated after the merge.
+func cloneMetadata(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return map[string]interface{}{}
+	}
+	out := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+// enqueueMetadataUpdatedWebhook enqueues a *.metadata.updated webhook after the
+// metadata merge has already been committed. SendWebhook writes the task to
+// Redis before returning, so a successful call means the event is durably
+// queued rather than held in process memory.
+//
+// The enqueue is deliberately best-effort and never surfaces to the caller.
+// By the time this runs the merge is committed and authoritative, so failing
+// the HTTP request would report a successful write as failed: clients would
+// retry a write that already applied, and each retry would emit another event
+// with a fresh event_id for the same logical update — duplicates consumers
+// cannot collapse. Reporting the committed write honestly is what keeps
+// event_id meaningful as a dedupe key.
+//
+// The resulting guarantee is therefore:
+//   - the merge is authoritative and reported as 200 once committed;
+//   - event delivery is at-least-once, and asynq redelivers this exact
+//     payload, so retried deliveries carry the same event_id;
+//   - an enqueue failure drops the notification for that update. It is logged
+//     and reported through notification.NotifyError so it is observable, and
+//     entity state remains readable via the API.
+//
+// If a lost notification is ever unacceptable, the fix is a transactional
+// outbox (write the event in the same DB transaction as the merge and let a
+// processor publish it, as blnk.lineage_outbox does), not failing the request.
+//
+// No-ops when asynq is unset or no webhook URL is configured. Only called from
+// UpdateMetadata so internal metadata writers stay silent.
+func (l *Blnk) enqueueMetadataUpdatedWebhook(entityType string, entitySnapshot interface{}) {
+	if l.asynqClient == nil {
+		return
+	}
+
+	payload, err := metadataUpdatedWebhookData(entitySnapshot)
+	if err != nil {
+		logrus.WithError(err).WithField("entity_type", entityType).Error("failed to build metadata.updated webhook payload; metadata merge is committed, event dropped")
+		notification.NotifyError(err)
+		return
+	}
+	if err := l.SendWebhook(NewWebhook{
+		Event:   metadataUpdatedEventName(entityType),
+		Payload: payload,
+	}); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"event":       metadataUpdatedEventName(entityType),
+			"event_id":    payload["event_id"],
+			"entity_type": entityType,
+		}).Error("failed to enqueue metadata.updated webhook; metadata merge is committed, event dropped")
+		notification.NotifyError(err)
+	}
+}
+
+// queueMetadataIndex reindexes a full resource snapshot asynchronously.
+// Indexing is best-effort and must not block the metadata API response.
+//
+// snapshot must be the full resource document with merged meta_data, and it is
+// only safe to index a request-time snapshot for entities whose non-metadata
+// fields do not move on their own: ledgers and identities. Balances and
+// transactions are reindexed from a re-read (queueBalanceMetadataIndex,
+// queueTransactionMetadataIndex) because indexing what this request happened to
+// read would republish amounts that concurrent transactions have since changed.
+//
+// The transaction webhook stub in particular carries only
+// {transaction_id, meta_data_patch} and would overwrite the Typesense document
+// with a near-empty record on upsert.
+func (l *Blnk) queueMetadataIndex(entityType, entityID string, snapshot interface{}) {
+	if l.queue == nil {
+		return
+	}
+	go func() {
+		if err := l.queue.queueIndexData(entityID, entityType, snapshot); err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
+
+// queueBalanceMetadataIndex reindexes the balance from a fresh read after a
+// metadata update, rather than from the snapshot this request loaded.
+//
+// A balance's amounts move whenever a transaction is applied to it, so the
+// snapshot read at the start of the request is already potentially stale by the
+// time indexing runs. Upserting it would rewrite the search document with older
+// figures, and nothing re-indexes that balance again until its next
+// transaction, so a quiet balance would stay wrong in /search indefinitely.
+// Best-effort: a fetch or index failure is reported via NotifyError and does
+// not affect the API response.
+func (l *Blnk) queueBalanceMetadataIndex(entityID string) {
+	if l.queue == nil {
+		return
+	}
+	go func() {
+		updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
+		if err != nil {
+			notification.NotifyError(err)
+			return
+		}
+		if err := l.queue.queueIndexData(entityID, "balances", updatedBalance); err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
+
+// queueTransactionMetadataIndex reindexes the full transaction row after a
+// metadata update. Unlike the other entity types, the transaction webhook
+// payload is a patch, not the merged document, so indexing re-fetches the
+// current row instead of reusing that payload. Best-effort: a fetch or index
+// failure is reported via NotifyError and does not affect the API response.
+func (l *Blnk) queueTransactionMetadataIndex(entityID string) {
+	if l.queue == nil {
+		return
+	}
+	go func() {
+		updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
+		if err != nil {
+			notification.NotifyError(err)
+			return
+		}
+		if err := l.queue.queueIndexData(entityID, "transactions", updatedTransaction); err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
+
+// ledgerMetadataSnapshot copies ledger with the committed metadata for this update.
+func ledgerMetadataSnapshot(ledger *model.Ledger, committedMeta map[string]interface{}) model.Ledger {
+	snap := *ledger
+	snap.MetaData = cloneMetadata(committedMeta)
+	return snap
+}
+
+// balanceMetadataSnapshot copies balance with the committed metadata for this
+// update.
+//
+// The monetary fields on the copy are the ones this request read before the
+// merge, deliberately: the event describes a committed metadata write, not the
+// balance's current position. Consumers must not treat balance,
+// credit_balance, debit_balance or the inflight/queued fields on a
+// balance.metadata.updated event as authoritative — a transaction may have
+// applied since. Read the balance back if the position matters.
+func balanceMetadataSnapshot(balance *model.Balance, committedMeta map[string]interface{}) *model.Balance {
+	snap := balance.Clone()
+	snap.MetaData = cloneMetadata(committedMeta)
+	return snap
+}
+
+// identityMetadataSnapshot copies identity with the committed metadata for this update.
+func identityMetadataSnapshot(identity *model.Identity, committedMeta map[string]interface{}) model.Identity {
+	snap := *identity
+	snap.MetaData = cloneMetadata(committedMeta)
+	return snap
+}
+
+// transactionMetadataSnapshot is the immutable body for transaction metadata
+// updates. meta_data_patch is the object this request applied (the DB merges
+// it onto matching rows); it is not a re-read of the merged meta_data column.
+func transactionMetadataSnapshot(entityID string, patch map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"transaction_id":  entityID,
+		"meta_data_patch": cloneMetadata(patch),
+	}
+}
+
 // UpdateMetadata updates the metadata for a given entity ID.
-// It first determines the entity type, retrieves current metadata, merges it with new metadata,
-// updates the entity with the merged metadata, and queues the updated entity for re-indexing in Typesense.
+//
+// Ordering per branch is: load current state, persist the merge, then emit
+// side effects. Once the merge is persisted the call succeeds; the returned
+// error only ever describes a failure to look up or persist, never a failure
+// to publish. Both side effects are best-effort:
+//   - the *.metadata.updated webhook is enqueued to Redis (see
+//     enqueueMetadataUpdatedWebhook for the delivery guarantee), and
+//   - the Typesense reindex is queued asynchronously.
 //
 // Parameters:
 // - ctx: The context for the operation.
@@ -50,44 +289,30 @@ func getEntityTypeFromID(id string) (string, error) {
 //
 // Returns:
 // - map[string]interface{}: The merged metadata after the update.
-// - error: An error if the update operation fails.
+// - error: An error if the entity cannot be found or the merge cannot be persisted.
 func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata map[string]interface{}) (map[string]interface{}, error) {
 	entityType, err := getEntityTypeFromID(entityID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if entity exists first
 	switch entityType {
 	case "ledgers":
 		ledger, err := l.GetLedgerByID(entityID)
 		if err != nil {
 			return nil, ErrEntityNotFound
 		}
-		currentMetadata := ledger.MetaData
-		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
-		err = l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata)
-		if err != nil {
+		mergedMetadata := mergeMetadata(ledger.MetaData, newMetadata)
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		// Queue the updated ledger for re-indexing in Typesense
-		if l.queue != nil {
-			go func() {
-				updatedLedger, err := l.GetLedgerByID(entityID)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "ledgers", updatedLedger)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		snapshot := ledgerMetadataSnapshot(ledger, mergedMetadata)
+		l.queueMetadataIndex(entityType, entityID, snapshot)
+		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return mergedMetadata, nil
 
 	case "transactions":
-		// Check if transaction exists either by direct ID or as parent ID
 		exists, err := l.datasource.TransactionExistsByIDOrParentID(ctx, entityID)
 		if err != nil {
 			return nil, err
@@ -96,26 +321,15 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, ErrEntityNotFound
 		}
 
-		// Apply metadata updates directly without trying to get current metadata
-		// This preserves existing metadata in child transactions
-		err = l.updateEntityMetadata(ctx, entityType, entityID, newMetadata)
-		if err != nil {
+		// Apply metadata updates directly without reading current metadata so
+		// child rows keep DB-side JSONB merge behaviour.
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, newMetadata); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		// Queue the updated transaction for re-indexing in Typesense
-		if l.queue != nil {
-			go func() {
-				updatedTransaction, err := l.GetTransaction(context.Background(), entityID)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "transactions", updatedTransaction)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		snapshot := transactionMetadataSnapshot(entityID, newMetadata)
+		l.queueTransactionMetadataIndex(entityID)
+		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return newMetadata, nil
 
 	case "balances":
@@ -123,26 +337,14 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, ErrEntityNotFound
 		}
-		currentMetadata := balance.MetaData
-		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
-		err = l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata)
-		if err != nil {
+		mergedMetadata := mergeMetadata(balance.MetaData, newMetadata)
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		if l.queue != nil {
-			// Queue the updated balance for re-indexing in Typesense
-			go func() {
-				updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "balances", updatedBalance)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		snapshot := balanceMetadataSnapshot(balance, mergedMetadata)
+		l.queueBalanceMetadataIndex(entityID)
+		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return mergedMetadata, nil
 
 	case "identities":
@@ -150,26 +352,14 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, ErrEntityNotFound
 		}
-		currentMetadata := identity.MetaData
-		mergedMetadata := mergeMetadata(currentMetadata, newMetadata)
-		err = l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata)
-		if err != nil {
+		mergedMetadata := mergeMetadata(identity.MetaData, newMetadata)
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		// Queue the updated identity for re-indexing in Typesense
-		if l.queue != nil {
-			go func() {
-				updatedIdentity, err := l.GetIdentity(entityID)
-				if err == nil {
-					err = l.queue.queueIndexData(entityID, "identities", updatedIdentity)
-					if err != nil {
-						notification.NotifyError(err)
-					}
-				}
-			}()
-		}
-
+		snapshot := identityMetadataSnapshot(identity, mergedMetadata)
+		l.queueMetadataIndex(entityType, entityID, snapshot)
+		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return mergedMetadata, nil
 
 	default:
@@ -177,25 +367,17 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 	}
 }
 
-// mergeMetadata merges new metadata with existing metadata.
-// If the current metadata is nil, it initializes a new map.
-//
-// Parameters:
-// - current: The existing metadata map.
-// - new: The new metadata map to merge.
-//
-// Returns:
-// - map[string]interface{}: The merged metadata map.
+// mergeMetadata returns a new map with keys from current overwritten by new.
+// Neither input map is mutated.
 func mergeMetadata(current, new map[string]interface{}) map[string]interface{} {
-	if current == nil {
-		current = make(map[string]interface{})
+	out := make(map[string]interface{}, len(current)+len(new))
+	for k, v := range current {
+		out[k] = v
 	}
-
 	for k, v := range new {
-		current[k] = v
+		out[k] = v
 	}
-
-	return current
+	return out
 }
 
 // updateEntityMetadata updates the metadata for a specific entity.
