@@ -101,6 +101,11 @@ func TestBalanceMonitorEdge_MixedTriggersOnOneBalance(t *testing.T) {
 	e.transfer(t, funding.BalanceID, wallet.BalanceID, 100) // still past: level only
 	e.awaitWebhooks(t, 4)
 
+	// The totals above could be satisfied by the wrong split, so pin each
+	// monitor's own count: that is what "independent" means here.
+	assert.Equal(t, 1, e.webhooksFor(edge.MonitorID), "the edge monitor owes one alert, on the crossing")
+	assert.Equal(t, 3, e.webhooksFor(level.MonitorID), "the level monitor owes one per update while the condition holds")
+
 	assert.True(t, e.monitorState(t, edge.MonitorID))
 	assert.False(t, e.monitorState(t, level.MonitorID), "a level monitor keeps no state")
 }

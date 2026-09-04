@@ -103,6 +103,8 @@ func (e *monitorE2E) webhooks() int {
 	return count
 }
 
+// webhooksFor counts the alerts owed to one monitor, so a test with several
+// monitors on a queue can pin each one's share rather than only the total.
 func (e *monitorE2E) webhooksFor(monitorID string) int {
 	count := 0
 	for _, task := range e.pendingTasks() {
