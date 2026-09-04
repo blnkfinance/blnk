@@ -489,16 +489,28 @@ func (l *Blnk) GetBalanceMonitors(ctx context.Context, balanceID string) ([]mode
 // Returns:
 // - error: An error if the monitor could not be updated.
 func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor) error {
-	_, span := balanceTracer.Start(ctx, "UpdateMonitor")
+	ctx, span := balanceTracer.Start(ctx, "UpdateMonitor")
 	defer span.End()
 
-	err := l.datasource.UpdateMonitor(monitor)
+	// An update may move the monitor to a different balance, and the cache is
+	// keyed by balance: without the previous ID the monitor stays in the old
+	// balance's cached list and keeps being evaluated against a balance it no
+	// longer watches.
+	previous, err := l.datasource.GetMonitorByID(monitor.MonitorID)
 	if err != nil {
 		span.RecordError(err)
 		return err
 	}
 
+	if err := l.datasource.UpdateMonitor(monitor); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	_ = l.cache.Delete(ctx, "monitors:"+monitor.BalanceID)
+	if previous.BalanceID != monitor.BalanceID {
+		_ = l.cache.Delete(ctx, "monitors:"+previous.BalanceID)
+	}
 
 	span.AddEvent("Monitor updated", trace.WithAttributes(attribute.String("monitor.id", monitor.MonitorID)))
 	return nil

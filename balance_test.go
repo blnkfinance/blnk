@@ -394,8 +394,8 @@ func TestGetAllMonitors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
-	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state"}).
-		AddRow("test-monitor", gofakeit.UUID(), "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now(), model.TriggerEdge, false)
+	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state", "precision", "precise_value"}).
+		AddRow("test-monitor", gofakeit.UUID(), "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now(), model.TriggerEdge, false, 100, 100000)
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors").WillReturnRows(rows)
 
@@ -447,7 +447,11 @@ func TestUpdateMonitor(t *testing.T) {
 	}
 	monitor := &model.BalanceMonitor{MonitorID: "test-monitor", BalanceID: "test-balance", Description: "Updated Monitor"}
 
-	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, model.TriggerEdge).WillReturnResult(sqlmock.NewResult(1, 1))
+	previous := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "precision", "precise_value", "description", "call_back_url", "created_at", "trigger_type", "condition_state"}).
+		AddRow(monitor.MonitorID, monitor.BalanceID, "balance", "<", 100, 100, 10000, "Test Monitor", gofakeit.URL(), time.Now(), model.TriggerEdge, false)
+	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitor.MonitorID).WillReturnRows(previous)
+
+	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, model.TriggerEdge).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.UpdateMonitor(context.Background(), monitor)
 
@@ -473,7 +477,7 @@ func TestDeleteMonitor(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "precision", "precise_value", "description", "call_back_url", "created_at", "trigger_type", "condition_state"}).
 		AddRow(monitorID, balanceID, "balance", ">", 100.0, 100.0, int64(10000), "test", "http://test.com", time.Now(), model.TriggerEdge, false)
-	mock.ExpectQuery("SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type, condition_state FROM blnk.balance_monitors WHERE monitor_id =").
+	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE monitor_id =").
 		WithArgs(monitorID).WillReturnRows(rows)
 
 	mock.ExpectExec("DELETE FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitorID).WillReturnResult(sqlmock.NewResult(1, 1))

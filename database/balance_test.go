@@ -1238,7 +1238,7 @@ func TestGetMonitorByID_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type, condition_state
+		SELECT monitor_id, balance_id, field, operator, value, COALESCE(precision, 0), COALESCE(precise_value, 0), description, call_back_url, created_at, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`
 
@@ -1271,7 +1271,7 @@ func TestGetMonitorByID_NotFound(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type, condition_state
+		SELECT monitor_id, balance_id, field, operator, value, COALESCE(precision, 0), COALESCE(precise_value, 0), description, call_back_url, created_at, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`
 
@@ -1298,16 +1298,16 @@ func TestGetAllMonitors_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, trigger_type, condition_state
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, trigger_type, condition_state, COALESCE(precision, 0), COALESCE(precise_value, 0)
 		FROM blnk.balance_monitors
 	`
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state",
+			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state", "precision", "precise_value",
 		}).
-			AddRow("mon_1", "bln_1", "balance", "<", 1000.0, "Alert 1", "https://example.com/1", time.Now(), model.TriggerEdge, false).
-			AddRow("mon_2", "bln_2", "credit_balance", ">", 5000.0, "Alert 2", "https://example.com/2", time.Now(), model.TriggerLevel, true))
+			AddRow("mon_1", "bln_1", "balance", "<", 1000.0, "Alert 1", "https://example.com/1", time.Now(), model.TriggerEdge, false, 100, int64(100000)).
+			AddRow("mon_2", "bln_2", "credit_balance", ">", 5000.0, "Alert 2", "https://example.com/2", time.Now(), model.TriggerLevel, true, 100, int64(500000)))
 
 	monitors, err := ds.GetAllMonitors()
 	assert.NoError(t, err)
@@ -1327,13 +1327,13 @@ func TestGetAllMonitors_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, trigger_type, condition_state
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, trigger_type, condition_state, COALESCE(precision, 0), COALESCE(precise_value, 0)
 		FROM blnk.balance_monitors
 	`
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state",
+			"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state", "precision", "precise_value",
 		}))
 
 	monitors, err := ds.GetAllMonitors()
@@ -1352,7 +1352,7 @@ func TestGetBalanceMonitors_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value, trigger_type, condition_state
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, COALESCE(precision, 0), COALESCE(precise_value, 0), trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`
 
@@ -1383,7 +1383,7 @@ func TestGetBalanceMonitors_Empty(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	query := `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value, trigger_type, condition_state
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, COALESCE(precision, 0), COALESCE(precise_value, 0), trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`
 
@@ -1422,13 +1422,13 @@ func TestUpdateMonitor_Success(t *testing.T) {
 
 	query := `
 		UPDATE blnk.balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7,
-		    trigger_type = $8, condition_state = FALSE, state_version = 0, state_changed_at = NULL
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6,
+		    trigger_type = $7, condition_state = FALSE, state_version = 0, state_changed_at = NULL
 		WHERE monitor_id = $1
 	`
 
 	mock.ExpectExec(regexp.QuoteMeta(query)).
-		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, model.TriggerEdge).
+		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, model.TriggerEdge).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	err = ds.UpdateMonitor(monitor)
@@ -1458,13 +1458,13 @@ func TestUpdateMonitor_NotFound(t *testing.T) {
 
 	query := `
 		UPDATE blnk.balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7,
-		    trigger_type = $8, condition_state = FALSE, state_version = 0, state_changed_at = NULL
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6,
+		    trigger_type = $7, condition_state = FALSE, state_version = 0, state_changed_at = NULL
 		WHERE monitor_id = $1
 	`
 
 	mock.ExpectExec(regexp.QuoteMeta(query)).
-		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL, model.TriggerEdge).
+		WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, model.TriggerEdge).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	err = ds.UpdateMonitor(monitor)

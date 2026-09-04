@@ -889,6 +889,37 @@ func TestValidateCreateBalanceMonitor_Trigger(t *testing.T) {
 	assert.Error(t, monitor.ValidateCreateBalanceMonitor())
 }
 
+func TestValidateMonitorCondition_RejectsUnsupportedOperators(t *testing.T) {
+	base := func(operator string) MonitorCondition {
+		return MonitorCondition{Field: "balance", Operator: operator, Value: 100, Precision: 100}
+	}
+
+	// The whole set the table's check constraint stores, all of which
+	// model.compare can now evaluate.
+	for _, operator := range []string{">", "<", ">=", "<=", "=", "!="} {
+		condition := base(operator)
+		assert.NoError(t, condition.ValidateMonitorCondition(), "operator %q must be accepted", operator)
+	}
+
+	// An operator the ledger cannot evaluate used to be stored happily and then
+	// never fire, which is worse than a rejection.
+	for _, operator := range []string{"==", "=>", "gt", "~"} {
+		condition := base(operator)
+		assert.Error(t, condition.ValidateMonitorCondition(), "operator %q must be rejected", operator)
+	}
+}
+
+func TestToBalanceMonitor_CarriesDescription(t *testing.T) {
+	createMonitor := CreateBalanceMonitor{
+		BalanceId:   "bln_test_123",
+		Description: "low balance alert",
+		Condition:   MonitorCondition{Field: "balance", Operator: "<", Value: 1000, Precision: 100},
+	}
+
+	assert.Equal(t, "low balance alert", createMonitor.ToBalanceMonitor().Description,
+		"description is a column and is settable on update, so create must be able to set it too")
+}
+
 func TestNormalizeTriggerIsTheOnlyDefault(t *testing.T) {
 	trigger, err := model.NormalizeTrigger("")
 	assert.NoError(t, err)

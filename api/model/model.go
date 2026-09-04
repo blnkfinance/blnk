@@ -268,7 +268,7 @@ func (b *CreateBalanceMonitor) ValidateCreateBalanceMonitor() error {
 func (c *MonitorCondition) ValidateMonitorCondition() error {
 	return validation.ValidateStruct(c,
 		validation.Field(&c.Field, validation.Required, validation.In("debit_balance", "credit_balance", "balance", "inflight_debit_balance", "inflight_credit_balance", "inflight_balance")),
-		validation.Field(&c.Operator, validation.Required),
+		validation.Field(&c.Operator, validation.Required, validation.In(">", "<", ">=", "<=", "=", "!=")),
 		validation.Field(&c.Precision, validation.Required, validation.By(validatePrecisionNotNegative)),
 		validation.Field(&c.Value, validation.Required),
 	)
@@ -380,7 +380,7 @@ func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
 		Operator:  b.Condition.Operator,
 		Value:     b.Condition.Value,
 		Precision: b.Condition.Precision,
-	}, CallBackURL: b.CallBackURL, Trigger: b.Trigger}
+	}, CallBackURL: b.CallBackURL, Description: b.Description, Trigger: b.Trigger}
 }
 
 func (a *CreateAccount) ToAccount() model.Account {
