@@ -132,6 +132,12 @@ type balanceMonitor interface {
 	GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error)      // Retrieves monitors for a specific balance
 	UpdateMonitor(monitor *model.BalanceMonitor) error                        // Updates a balance monitor
 	DeleteMonitor(id string) error                                            // Deletes a balance monitor
+
+	// TransitionMonitorState records an observed condition value against a
+	// balance version and reports whether this call owned the transition.
+	TransitionMonitorState(ctx context.Context, monitorID, balanceID string, conditionMet bool, balanceVersion int64) (bool, error)
+	// ReleaseMonitorState re-arms a monitor whose owned transition could not be delivered.
+	ReleaseMonitorState(ctx context.Context, monitorID, balanceID string, balanceVersion int64) error
 }
 
 // identity defines methods for handling identities.
