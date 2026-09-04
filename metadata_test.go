@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -184,19 +185,35 @@ func TestMetadataUpdatedEventName(t *testing.T) {
 // unique webhook queue and the given mock datasource.
 func setupMetadataWebhookBlnk(t *testing.T, mockDS *mocks.MockDataSource, webhookURL string) (*Blnk, string) {
 	t.Helper()
+	b, webhookQueue, _ := setupMetadataQueuesBlnk(t, mockDS, webhookURL)
+	return b, webhookQueue
+}
+
+// setupMetadataQueuesBlnk is setupMetadataWebhookBlnk with the Typesense index
+// queue wired up too, for tests that assert on what gets reindexed. A dummy
+// Typesense DNS is enough: queueIndexData only enqueues, it never dials
+// Typesense, and it short-circuits when the DNS is empty.
+func setupMetadataQueuesBlnk(t *testing.T, mockDS *mocks.MockDataSource, webhookURL string) (b *Blnk, webhookQueue, indexQueue string) {
+	t.Helper()
 
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	t.Cleanup(mr.Close)
 
-	queueName := fmt.Sprintf("webhook_metadata_%d", time.Now().UnixNano())
+	unique := time.Now().UnixNano()
+	webhookQueue = fmt.Sprintf("webhook_metadata_%d", unique)
+	indexQueue = fmt.Sprintf("index_metadata_%d", unique)
 	cnf := &config.Configuration{
 		Redis: config.RedisConfig{
 			Dns: mr.Addr(),
 		},
 		Queue: config.QueueConfig{
-			WebhookQueue:   queueName,
+			WebhookQueue:   webhookQueue,
+			IndexQueue:     indexQueue,
 			NumberOfQueues: 1,
+		},
+		TypeSense: config.TypeSenseConfig{
+			Dns: "http://localhost:1",
 		},
 		Notification: config.Notification{
 			Webhook: config.WebhookConfig{
@@ -206,13 +223,18 @@ func setupMetadataWebhookBlnk(t *testing.T, mockDS *mocks.MockDataSource, webhoo
 	}
 	config.ConfigStore.Store(cnf)
 
-	b, err := NewBlnk(mockDS)
+	b, err = NewBlnk(mockDS)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = b.Close() })
-	return b, queueName
+	return b, webhookQueue, indexQueue
 }
 
 func listWebhookTasks(t *testing.T, redisAddr, queueName string) []*asynq.TaskInfo {
+	t.Helper()
+	return listQueuedTasks(t, redisAddr, queueName)
+}
+
+func listQueuedTasks(t *testing.T, redisAddr, queueName string) []*asynq.TaskInfo {
 	t.Helper()
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr})
 	t.Cleanup(func() {
@@ -284,6 +306,9 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 				}
 				mockDS.On("GetBalanceByID", "bln_wh_1", mock.Anything, false).Return(balance, nil).Once()
 				mockDS.On("UpdateBalanceMetadata", mock.Anything, "bln_wh_1", mock.Anything).Return(nil).Once()
+				// The index re-reads the balance asynchronously; stub it with
+				// .Maybe() since this test only asserts the webhook payload.
+				mockDS.On("GetBalanceByID", "bln_wh_1", mock.Anything, false).Return(balance, nil).Maybe()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
 				assert.Equal(t, "bln_wh_1", data["balance_id"])
@@ -459,6 +484,75 @@ func TestUpdateMetadata_TransactionIndexUsesFullDocumentNotPatch(t *testing.T) {
 		return indexFetchDone.Load()
 	}, 2*time.Second, 10*time.Millisecond, "expected GetTransaction to be called to build the full index document")
 
+	mockDS.AssertExpectations(t)
+}
+
+// TestUpdateMetadata_BalanceIndexRereadsCurrentPosition guards the search index
+// against a stale balance snapshot.
+//
+// A balance's amounts move whenever a transaction is applied to it, so the copy
+// loaded at the start of a metadata request is already potentially out of date
+// by the time the async index task runs. Upserting that copy would roll the
+// Typesense document back to the older figures, and since nothing re-indexes a
+// balance until its next transaction, a quiet balance would stay wrong in
+// /search indefinitely. Indexing must therefore re-read the row.
+//
+// The event payload is the opposite contract on purpose: it reports the state
+// this request committed, so it keeps the pre-merge amounts.
+func TestUpdateMetadata_BalanceIndexRereadsCurrentPosition(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	newMetadata := map[string]interface{}{"tier": "gold"}
+
+	preUpdate := &model.Balance{
+		BalanceID:     "bln_idx_1",
+		Currency:      "USD",
+		Balance:       big.NewInt(100),
+		CreditBalance: big.NewInt(100),
+		MetaData:      map[string]interface{}{"existing": "value"},
+	}
+	// What a concurrent transaction left behind between the read and the index.
+	postUpdate := &model.Balance{
+		BalanceID:     "bln_idx_1",
+		Currency:      "USD",
+		Balance:       big.NewInt(500),
+		CreditBalance: big.NewInt(500),
+		MetaData:      map[string]interface{}{"existing": "value", "tier": "gold"},
+	}
+
+	mockDS.On("GetBalanceByID", "bln_idx_1", mock.Anything, false).Return(preUpdate, nil).Once()
+	mockDS.On("UpdateBalanceMetadata", mock.Anything, "bln_idx_1", mock.Anything).Return(nil).Once()
+	mockDS.On("GetBalanceByID", "bln_idx_1", mock.Anything, false).Return(postUpdate, nil).Once()
+
+	b, webhookQueue, indexQueue := setupMetadataQueuesBlnk(t, mockDS, "http://localhost:1/webhooks")
+	require.NotNil(t, b.queue)
+
+	_, err := b.UpdateMetadata(context.Background(), "bln_idx_1", newMetadata)
+	require.NoError(t, err)
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, webhookQueue)
+	require.Len(t, tasks, 1)
+	event, data := decodeMetadataWebhook(t, tasks[0])
+	assert.Equal(t, "balance.metadata.updated", event)
+	assert.Equal(t, "bln_idx_1", data["balance_id"])
+	assert.EqualValues(t, 100, data["balance"], "the event reports the position this request committed against")
+
+	var indexed map[string]interface{}
+	require.Eventually(t, func() bool {
+		indexTasks := listQueuedTasks(t, b.Config().Redis.Dns, indexQueue)
+		if len(indexTasks) != 1 {
+			return false
+		}
+		var payload struct {
+			Collection string                 `json:"collection"`
+			Payload    map[string]interface{} `json:"payload"`
+		}
+		require.NoError(t, json.Unmarshal(indexTasks[0].Payload, &payload))
+		assert.Equal(t, "balances", payload.Collection)
+		indexed = payload.Payload
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "expected the balance to be reindexed")
+
+	assert.EqualValues(t, 500, indexed["balance"], "the index must carry the re-read position, not the pre-update snapshot")
 	mockDS.AssertExpectations(t)
 }
 

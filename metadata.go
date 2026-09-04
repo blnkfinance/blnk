@@ -96,8 +96,10 @@ func metadataUpdatedEventName(entityType string) string {
 	}
 }
 
-// cloneMetadata returns a shallow copy of src so webhook/index snapshots are
-// not affected by later in-place map mutations.
+// cloneMetadata returns a copy of src so adding or replacing a top-level key on
+// either map afterwards does not affect webhook/index snapshots. The copy is
+// shallow: nested values are shared, which is safe here because the patch comes
+// straight off the request body and is not mutated after the merge.
 func cloneMetadata(src map[string]interface{}) map[string]interface{} {
 	if src == nil {
 		return map[string]interface{}{}
@@ -163,17 +165,48 @@ func (l *Blnk) enqueueMetadataUpdatedWebhook(entityType string, entitySnapshot i
 // queueMetadataIndex reindexes a full resource snapshot asynchronously.
 // Indexing is best-effort and must not block the metadata API response.
 //
-// snapshot must be the full resource document (ledger/balance/identity with
-// merged meta_data) — never the transaction webhook stub, which carries only
+// snapshot must be the full resource document with merged meta_data, and it is
+// only safe to index a request-time snapshot for entities whose non-metadata
+// fields do not move on their own: ledgers and identities. Balances and
+// transactions are reindexed from a re-read (queueBalanceMetadataIndex,
+// queueTransactionMetadataIndex) because indexing what this request happened to
+// read would republish amounts that concurrent transactions have since changed.
+//
+// The transaction webhook stub in particular carries only
 // {transaction_id, meta_data_patch} and would overwrite the Typesense document
-// with a near-empty record on upsert. Transactions are reindexed separately
-// via queueTransactionMetadataIndex.
+// with a near-empty record on upsert.
 func (l *Blnk) queueMetadataIndex(entityType, entityID string, snapshot interface{}) {
 	if l.queue == nil {
 		return
 	}
 	go func() {
 		if err := l.queue.queueIndexData(entityID, entityType, snapshot); err != nil {
+			notification.NotifyError(err)
+		}
+	}()
+}
+
+// queueBalanceMetadataIndex reindexes the balance from a fresh read after a
+// metadata update, rather than from the snapshot this request loaded.
+//
+// A balance's amounts move whenever a transaction is applied to it, so the
+// snapshot read at the start of the request is already potentially stale by the
+// time indexing runs. Upserting it would rewrite the search document with older
+// figures, and nothing re-indexes that balance again until its next
+// transaction, so a quiet balance would stay wrong in /search indefinitely.
+// Best-effort: a fetch or index failure is reported via NotifyError and does
+// not affect the API response.
+func (l *Blnk) queueBalanceMetadataIndex(entityID string) {
+	if l.queue == nil {
+		return
+	}
+	go func() {
+		updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
+		if err != nil {
+			notification.NotifyError(err)
+			return
+		}
+		if err := l.queue.queueIndexData(entityID, "balances", updatedBalance); err != nil {
 			notification.NotifyError(err)
 		}
 	}()
@@ -207,7 +240,15 @@ func ledgerMetadataSnapshot(ledger *model.Ledger, committedMeta map[string]inter
 	return snap
 }
 
-// balanceMetadataSnapshot copies balance with the committed metadata for this update.
+// balanceMetadataSnapshot copies balance with the committed metadata for this
+// update.
+//
+// The monetary fields on the copy are the ones this request read before the
+// merge, deliberately: the event describes a committed metadata write, not the
+// balance's current position. Consumers must not treat balance,
+// credit_balance, debit_balance or the inflight/queued fields on a
+// balance.metadata.updated event as authoritative — a transaction may have
+// applied since. Read the balance back if the position matters.
 func balanceMetadataSnapshot(balance *model.Balance, committedMeta map[string]interface{}) *model.Balance {
 	snap := balance.Clone()
 	snap.MetaData = cloneMetadata(committedMeta)
@@ -302,7 +343,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		snapshot := balanceMetadataSnapshot(balance, mergedMetadata)
-		l.queueMetadataIndex(entityType, entityID, snapshot)
+		l.queueBalanceMetadataIndex(entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return mergedMetadata, nil
 
