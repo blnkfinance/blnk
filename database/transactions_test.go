@@ -316,10 +316,12 @@ func TestGetTransaction_Success(t *testing.T) {
 	metaDataJSON, err := json.Marshal(metaData)
 	assert.NoError(t, err)
 
-	rows := sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash"}).
-		AddRow("txn123", "src1", "ref123", 1000, 1000, 2, "USD", "dest1", "Test Transaction", "PENDING", time.Now(), metaDataJSON, "parent123", "hash123")
+	threeDaysAgo := time.Now().Add(-72 * time.Hour)
 
-	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = ?").
+	rows := sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash", "effective_date"}).
+		AddRow("txn123", "src1", "ref123", 1000, 1000, 2, "USD", "dest1", "Test Transaction", "PENDING", time.Now(), metaDataJSON, "parent123", "hash123", threeDaysAgo)
+
+	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, effective_date FROM blnk.transactions WHERE transaction_id = ?").
 		WithArgs("txn123").
 		WillReturnRows(rows)
 
@@ -330,6 +332,7 @@ func TestGetTransaction_Success(t *testing.T) {
 	assert.Equal(t, "dest1", txn.Destination)
 	assert.Equal(t, "parent123", txn.ParentTransaction)
 	assert.Equal(t, "hash123", txn.Hash)
+	assert.Equal(t, &threeDaysAgo, txn.EffectiveDate)
 }
 
 // TestGetTransaction_NullParentDoesNotFailScan catches GET /transactions/:id
@@ -346,14 +349,14 @@ func TestGetTransaction_NullParentDoesNotFailScan(t *testing.T) {
 	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
 	assert.NoError(t, err)
 
-	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = ?").
+	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, effective_date FROM blnk.transactions WHERE transaction_id = ?").
 		WithArgs("txn_root").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
-			"destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash",
+			"destination", "description", "status", "created_at", "meta_data", "parent_transaction", "hash", "effective_date",
 		}).AddRow(
 			"txn_root", "src1", "ref_root", 1000, "1000", 2, "USD",
-			"dest1", "root transaction", "APPLIED", time.Now(), metaDataJSON, nil, "hash_root",
+			"dest1", "root transaction", "APPLIED", time.Now(), metaDataJSON, nil, "hash_root", nil,
 		))
 
 	txn, err := ds.GetTransaction(ctx, "txn_root")
@@ -377,7 +380,7 @@ func TestGetTransaction_NotFound(t *testing.T) {
 
 	ds := Datasource{Conn: db}
 
-	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash FROM blnk.transactions WHERE transaction_id = ?").
+	mock.ExpectQuery("SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, parent_transaction, hash, effective_date FROM blnk.transactions WHERE transaction_id = ?").
 		WithArgs("txn123").
 		WillReturnError(sql.ErrNoRows)
 
@@ -1000,24 +1003,27 @@ func TestGetTransactionByRef_Success(t *testing.T) {
 	metaDataJSON, _ := json.Marshal(metaData)
 
 	query := `
-		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction, effective_date
 		FROM blnk.transactions
 		WHERE reference = $1
 	`
+
+	threeDaysAgo := time.Now().Add(-72 * time.Hour)
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).
 		WithArgs("ref_123").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "source", "reference", "amount", "precise_amount", "currency",
-			"destination", "description", "status", "created_at", "meta_data", "parent_transaction",
+			"destination", "description", "status", "created_at", "meta_data", "parent_transaction", "effective_date",
 		}).AddRow(
 			"txn_123", "bln_source", "ref_123", 1000.0, "100000", "USD",
-			"bln_dest", "Test transaction", "APPLIED", time.Now(), metaDataJSON, "",
+			"bln_dest", "Test transaction", "APPLIED", time.Now(), metaDataJSON, "", threeDaysAgo,
 		))
 
 	txn, err := ds.GetTransactionByRef(ctx, "ref_123")
 	assert.NoError(t, err)
 	assert.Equal(t, "txn_123", txn.TransactionID)
+	assert.Equal(t, &threeDaysAgo, txn.EffectiveDate)
 	assert.Equal(t, "ref_123", txn.Reference)
 	assert.Equal(t, "bln_source", txn.Source)
 	assert.Equal(t, "bln_dest", txn.Destination)
@@ -1043,7 +1049,7 @@ func TestGetTransactionByRef_NullParentDoesNotFailScan(t *testing.T) {
 	assert.NoError(t, err)
 
 	query := `
-		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction, effective_date
 		FROM blnk.transactions
 		WHERE reference = $1
 	`
@@ -1052,10 +1058,10 @@ func TestGetTransactionByRef_NullParentDoesNotFailScan(t *testing.T) {
 		WithArgs("ref_root").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "source", "reference", "amount", "precise_amount", "currency",
-			"destination", "description", "status", "created_at", "meta_data", "parent_transaction",
+			"destination", "description", "status", "created_at", "meta_data", "parent_transaction", "effective_date",
 		}).AddRow(
 			"txn_root", "bln_source", "ref_root", 1000.0, "100000", "USD",
-			"bln_dest", "root transaction", "APPLIED", time.Now(), metaDataJSON, nil,
+			"bln_dest", "root transaction", "APPLIED", time.Now(), metaDataJSON, nil, nil,
 		))
 
 	txn, err := ds.GetTransactionByRef(ctx, "ref_root")
@@ -1075,7 +1081,7 @@ func TestGetTransactionByRef_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	query := `
-		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction, effective_date
 		FROM blnk.transactions
 		WHERE reference = $1
 	`
@@ -1104,7 +1110,7 @@ func TestGetTransactionByRef_QueryError(t *testing.T) {
 	ctx := context.Background()
 
 	query := `
-		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction
+		SELECT transaction_id, source, reference, amount, precise_amount, currency, destination, description, status, created_at, meta_data, parent_transaction, effective_date
 		FROM blnk.transactions
 		WHERE reference = $1
 	`
@@ -1134,10 +1140,7 @@ func TestGetAllTransactions_Success(t *testing.T) {
 
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
-	// Backdated business date — must survive the scan (this is the reindex
-	// field-loss the query fix restores). txn_2 leaves it NULL to cover the
-	// sql.NullTime-invalid path (EffectiveDate stays nil).
-	effectiveDate := time.Now().Add(-48 * time.Hour)
+	twoDaysAgo := time.Now().Add(-48 * time.Hour)
 
 	query := `
 		SELECT transaction_id, source, reference, amount, precise_amount, precision, currency, destination, description, status, hash, created_at, effective_date, meta_data, parent_transaction
@@ -1152,7 +1155,7 @@ func TestGetAllTransactions_Success(t *testing.T) {
 			"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency",
 			"destination", "description", "status", "hash", "created_at", "effective_date", "meta_data", "parent_transaction",
 		}).
-			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "1000", 100.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), effectiveDate, metaDataJSON, "txn_parent_1").
+			AddRow("txn_1", "bln_src1", "ref_1", 1000.0, "1000", 100.0, "USD", "bln_dest1", "Txn 1", "APPLIED", "hash1", time.Now(), twoDaysAgo, metaDataJSON, "txn_parent_1").
 			AddRow("txn_2", "bln_src2", "ref_2", 2000.0, "2000", 100.0, "EUR", "bln_dest2", "Txn 2", "PENDING", "hash2", time.Now(), nil, metaDataJSON, ""))
 
 	transactions, err := ds.GetAllTransactions(ctx, 10, 0)
@@ -2570,7 +2573,7 @@ func TestGetQueuedTransactionsForCoalescing_PreservesEffectiveDate(t *testing.T)
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
 
-	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -2593,10 +2596,10 @@ func TestGetQueuedTransactionsForSourceCoalescing_PreservesEffectiveDate(t *test
 		WithArgs("bln_src", "USD", "txn_leader", theLastHour, 9).
 		WillReturnRows(rows)
 
-	transactions, err := ds.GetQueuedTransactionsForSourceCoalescing(context.Background(), "bln_src", "USDs", "txn_leader", theLastHour, 9)
+	transactions, err := ds.GetQueuedTransactionsForSourceCoalescing(context.Background(), "bln_src", "USD", "txn_leader", theLastHour, 9)
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
-	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -2623,7 +2626,7 @@ func TestGetQueuedTransactionsForDestinationCoalescing_PreservesEffectiveDate(t 
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
 
-	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -2648,7 +2651,7 @@ func TestGetStuckQueuedTransactions_PreservesEffectiveDate(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
 
-	assert.Equal(t, threeDaysAgo, transactions[0].EffectiveDate)
+	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
