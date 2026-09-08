@@ -1140,6 +1140,9 @@ func TestGetAllTransactions_Success(t *testing.T) {
 
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
+	// Backdated business date — must survive the scan (this is the reindex
+	// field-loss the query fix restores). txn_2 leaves it NULL to cover the
+	// sql.NullTime-invalid path (EffectiveDate stays nil).
 	twoDaysAgo := time.Now().Add(-48 * time.Hour)
 
 	query := `
