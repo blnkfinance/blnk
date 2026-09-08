@@ -393,20 +393,28 @@ func initializeWebhookQueues() map[string]int {
 	return queues
 }
 
-func initializeWebhookWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
-	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+// workerRedisConnOpt builds an asynq connection option whose pooled
+// connections are recycled before managed Redis/Valkey idle-closes them.
+func workerRedisConnOpt(conf *config.Configuration) (redis_db.ConnOpt, error) {
+	connOpt, err := redis_db.NewConnOpt(conf.Redis.Dns, conf.Redis.SkipTLSVerify, &redis_db.PoolConfig{
+		PoolSize:        conf.Redis.PoolSize,
+		MinIdleConns:    conf.Redis.MinIdleConns,
+		ConnMaxIdleTime: conf.Redis.ConnMaxIdleTime,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("error parsing Redis URL: %v", err)
+		return redis_db.ConnOpt{}, fmt.Errorf("error parsing Redis URL: %v", err)
+	}
+	return connOpt, nil
+}
+
+func initializeWebhookWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
+	connOpt, err := workerRedisConnOpt(conf)
+	if err != nil {
+		return nil, err
 	}
 
 	return asynq.NewServer(
-		asynq.RedisClientOpt{
-			Addr:      redisOption.Addr,
-			Password:  redisOption.Password,
-			DB:        redisOption.DB,
-			TLSConfig: redisOption.TLSConfig,
-			PoolSize:  conf.Redis.PoolSize,
-		},
+		connOpt,
 		asynq.Config{
 			Concurrency:     conf.Queue.WebhookConcurrency,
 			Queues:          queues,
@@ -418,19 +426,13 @@ func initializeWebhookWorkerServer(conf *config.Configuration, queues map[string
 }
 
 func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
-	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+	connOpt, err := workerRedisConnOpt(conf)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing Redis URL: %v", err)
+		return nil, err
 	}
 
 	return asynq.NewServer(
-		asynq.RedisClientOpt{
-			Addr:      redisOption.Addr,
-			Password:  redisOption.Password,
-			DB:        redisOption.DB,
-			TLSConfig: redisOption.TLSConfig,
-			PoolSize:  conf.Redis.PoolSize,
-		},
+		connOpt,
 		asynq.Config{
 			Concurrency:     conf.Queue.TransactionWorkerConcurrency,
 			Queues:          queues,
@@ -440,19 +442,13 @@ func initializeWorkerServer(conf *config.Configuration, queues map[string]int) (
 }
 
 func initializeHotWorkerServer(conf *config.Configuration, queues map[string]int) (*asynq.Server, error) {
-	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+	connOpt, err := workerRedisConnOpt(conf)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing Redis URL: %v", err)
+		return nil, err
 	}
 
 	return asynq.NewServer(
-		asynq.RedisClientOpt{
-			Addr:      redisOption.Addr,
-			Password:  redisOption.Password,
-			DB:        redisOption.DB,
-			TLSConfig: redisOption.TLSConfig,
-			PoolSize:  conf.Redis.PoolSize,
-		},
+		connOpt,
 		asynq.Config{
 			Concurrency:     conf.Queue.HotQueueConcurrency,
 			Queues:          queues,
@@ -621,16 +617,13 @@ func setupWorkerServers(b *blnkInstance, conf *config.Configuration) (*asynq.Ser
 }
 
 func startMonitoringServer(conf *config.Configuration) *http.Server {
-	redisOption, _ := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+	connOpt, err := workerRedisConnOpt(conf)
+	if err != nil {
+		logrus.Errorf("monitoring server redis setup failed: %v", err)
+	}
 	asynqmonHandler := asynqmon.New(asynqmon.Options{
-		RootPath: "/monitoring",
-		RedisConnOpt: asynq.RedisClientOpt{
-			Addr:      redisOption.Addr,
-			Password:  redisOption.Password,
-			DB:        redisOption.DB,
-			TLSConfig: redisOption.TLSConfig,
-			PoolSize:  conf.Redis.PoolSize,
-		},
+		RootPath:     "/monitoring",
+		RedisConnOpt: connOpt,
 	})
 
 	monitoringMux := http.NewServeMux()
