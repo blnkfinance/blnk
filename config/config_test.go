@@ -380,6 +380,28 @@ func TestTypeSenseBackpressureRetryIntervalDefault(t *testing.T) {
 	}
 }
 
+func TestRedisConnMaxIdleTimeDefault(t *testing.T) {
+	cnf := Configuration{
+		ProjectName: "Test Project",
+		DataSource:  DataSourceConfig{Dns: "some-dns"},
+		Redis:       RedisConfig{Dns: "localhost:6379"},
+	}
+	if err := cnf.validateAndAddDefaults(); err != nil {
+		t.Fatalf("validateAndAddDefaults failed: %v", err)
+	}
+	if cnf.Redis.ConnMaxIdleTime != 2*time.Minute {
+		t.Fatalf("default Redis conn max idle time = %v, want 2m", cnf.Redis.ConnMaxIdleTime)
+	}
+
+	cnf.Redis.ConnMaxIdleTime = 45 * time.Second
+	if err := cnf.validateAndAddDefaults(); err != nil {
+		t.Fatalf("validateAndAddDefaults failed: %v", err)
+	}
+	if cnf.Redis.ConnMaxIdleTime != 45*time.Second {
+		t.Fatalf("explicit Redis conn max idle time = %v, want 45s", cnf.Redis.ConnMaxIdleTime)
+	}
+}
+
 // TestUploadWhitelistHostsParsing verifies parsing of the comma-separated
 // whitelist: trimming, scheme-tolerance, case-folding, de-duplication, and
 // deny-by-default (empty -> nil).

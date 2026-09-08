@@ -93,8 +93,9 @@ var (
 	}
 
 	defaultRedis = RedisConfig{
-		PoolSize:     100,
-		MinIdleConns: 20,
+		PoolSize:        100,
+		MinIdleConns:    20,
+		ConnMaxIdleTime: 2 * time.Minute,
 	}
 
 	defaultDatabase = DataSourceConfig{
@@ -142,6 +143,10 @@ type RedisConfig struct {
 	SkipTLSVerify bool   `json:"skip_tls_verify" envconfig:"BLNK_REDIS_SKIP_TLS_VERIFY"`
 	PoolSize      int    `json:"pool_size"       envconfig:"BLNK_REDIS_POOL_SIZE"`
 	MinIdleConns  int    `json:"min_idle_conns"  envconfig:"BLNK_REDIS_MIN_IDLE_CONNS"`
+	// ConnMaxIdleTime must stay below any server or proxy idle timeout
+	// (managed Redis/Valkey services commonly use 300s) so pooled connections
+	// are recycled before the remote end closes them ("write: broken pipe").
+	ConnMaxIdleTime time.Duration `json:"conn_max_idle_time" envconfig:"BLNK_REDIS_CONN_MAX_IDLE_TIME"`
 }
 
 type TypeSenseConfig struct {
@@ -520,6 +525,9 @@ func (cnf *Configuration) setRedisDefaults() {
 	}
 	if cnf.Redis.MinIdleConns == 0 {
 		cnf.Redis.MinIdleConns = defaultRedis.MinIdleConns
+	}
+	if cnf.Redis.ConnMaxIdleTime == 0 {
+		cnf.Redis.ConnMaxIdleTime = defaultRedis.ConnMaxIdleTime
 	}
 }
 

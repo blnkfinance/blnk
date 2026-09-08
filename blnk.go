@@ -62,26 +62,22 @@ var SQLFiles embed.FS
 
 // initializeRedisClients sets up both the Redis client and Asynq client
 func initializeRedisClients(config *config.Configuration) (redis.UniversalClient, *asynq.Client, error) {
-	redisClient, err := redis_db.NewRedisClient([]string{config.Redis.Dns}, config.Redis.SkipTLSVerify, &redis_db.PoolConfig{
-		PoolSize:     config.Redis.PoolSize,
-		MinIdleConns: config.Redis.MinIdleConns,
-	})
+	pool := &redis_db.PoolConfig{
+		PoolSize:        config.Redis.PoolSize,
+		MinIdleConns:    config.Redis.MinIdleConns,
+		ConnMaxIdleTime: config.Redis.ConnMaxIdleTime,
+	}
+
+	redisClient, err := redis_db.NewRedisClient([]string{config.Redis.Dns}, config.Redis.SkipTLSVerify, pool)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	redisOption, err := redis_db.ParseRedisURL(config.Redis.Dns, config.Redis.SkipTLSVerify)
+	connOpt, err := redis_db.NewConnOpt(config.Redis.Dns, config.Redis.SkipTLSVerify, pool)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
-		Addr:      redisOption.Addr,
-		Password:  redisOption.Password,
-		DB:        redisOption.DB,
-		TLSConfig: redisOption.TLSConfig,
-		PoolSize:  config.Redis.PoolSize,
-	})
+	asynqClient := asynq.NewClient(connOpt)
 
 	return redisClient.Client(), asynqClient, nil
 }
