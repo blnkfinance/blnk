@@ -77,7 +77,7 @@ func NewBalanceTracker() *model.BalanceTracker {
 // - ctx context.Context: The context for the operation.
 // - updatedBalance *model.Balance: A pointer to the updated Balance model.
 func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.Balance) {
-	_, span := balanceTracer.Start(ctx, "CheckBalanceMonitors")
+	ctx, span := balanceTracer.Start(ctx, "CheckBalanceMonitors")
 	defer span.End()
 
 	// Fetch monitors using cache (avoids DB query on every transaction)
@@ -90,19 +90,53 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 
 	// Check each monitor's condition
 	for _, monitor := range monitors {
-		if monitor.CheckCondition(updatedBalance) {
-			span.AddEvent(fmt.Sprintf("Condition met for balance: %s", monitor.MonitorID))
-			go func(monitor model.BalanceMonitor) {
-				err := l.SendWebhook(NewWebhook{
-					Event:   "balance.monitor",
-					Payload: monitor,
-				})
-				if err != nil {
+		met := monitor.CheckCondition(updatedBalance)
+
+		if monitor.TriggerMode() == model.TriggerLevel {
+			if met {
+				span.AddEvent(fmt.Sprintf("Condition met for balance: %s", monitor.MonitorID))
+				if err := l.sendMonitorWebhook(monitor); err != nil {
 					notification.NotifyError(err)
 				}
-			}(monitor)
+			}
+			continue
+		}
+
+		// Edge: the state transition decides, not the condition. The cached
+		// monitor is only trusted for its trigger mode and condition; the state
+		// lives in the database, where concurrent evaluations of the same
+		// balance serialise against each other.
+		owned, err := l.datasource.TransitionMonitorState(ctx, monitor.MonitorID, updatedBalance.BalanceID, met, updatedBalance.Version)
+		if err != nil {
+			span.RecordError(err)
+			notification.NotifyError(err)
+			continue
+		}
+		if !owned || !met {
+			continue
+		}
+
+		span.AddEvent(fmt.Sprintf("Condition crossed for balance: %s", monitor.MonitorID))
+		monitor.ConditionState = true
+		if err := l.sendMonitorWebhook(monitor); err != nil {
+			notification.NotifyError(err)
+			// An edge fires once, so a transition that could not be handed off
+			// has to be given back or the crossing is lost for good.
+			if releaseErr := l.datasource.ReleaseMonitorState(ctx, monitor.MonitorID, updatedBalance.BalanceID, updatedBalance.Version); releaseErr != nil {
+				span.RecordError(releaseErr)
+				notification.NotifyError(releaseErr)
+			}
 		}
 	}
+}
+
+// sendMonitorWebhook enqueues the balance.monitor notification for a monitor
+// whose condition has been met.
+func (l *Blnk) sendMonitorWebhook(monitor model.BalanceMonitor) error {
+	return l.SendWebhook(NewWebhook{
+		Event:   "balance.monitor",
+		Payload: monitor,
+	})
 }
 
 // getBalanceMonitorsCached retrieves balance monitors with caching.

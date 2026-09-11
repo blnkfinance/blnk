@@ -27,34 +27,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/blnkfinance/blnk/config"
-	"github.com/blnkfinance/blnk/database/mocks"
 	"github.com/blnkfinance/blnk/model"
 )
-
-type monitorHarness struct {
-	blnk *Blnk
-	ds   *mocks.MockDataSource
-}
-
-func newMonitorHarness(t *testing.T) *monitorHarness {
-	t.Helper()
-
-	// Stored directly rather than through MockConfig, which runs the full
-	// validation this partial test configuration cannot satisfy.
-	config.ConfigStore.Store(&config.Configuration{
-		Redis:              config.RedisConfig{Dns: "localhost:6379"},
-		Queue:              config.QueueConfig{WebhookQueue: "monitor_cache_test", TransactionQueue: "monitor_cache_test_txn", IndexQueue: "monitor_cache_test_idx", NumberOfQueues: 1},
-		Server:             config.ServerConfig{SecretKey: "some-secret"},
-		TokenizationSecret: "12345678901234567890123456789012",
-	})
-
-	ds := new(mocks.MockDataSource)
-	b, err := NewBlnk(ds)
-	require.NoError(t, err)
-
-	return &monitorHarness{blnk: b, ds: ds}
-}
 
 // recordingCache notes which keys were invalidated.
 type recordingCache struct {
