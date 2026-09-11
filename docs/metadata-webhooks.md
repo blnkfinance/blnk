@@ -55,6 +55,11 @@ not re-read merged `meta_data`.
 - **Delivery guarantee** — the merge is authoritative once the API returns 200.
   Webhook delivery is best-effort: if Redis enqueue fails after commit, the
   notification is permanently dropped (logged and reported via
-  `notification.NotifyError`). Treat the API as source of truth; poll when
-  webhook delivery is required. A transactional outbox is the upgrade path for
-  lossless notification.
+  `notification.NotifyError`). These events reduce polling for metadata changes
+  but do not replace the API for critical workflows that require guaranteed
+  notification. A transactional outbox is the upgrade path for lossless
+  delivery.
+- **Search reindex** — transaction metadata updates reindex Typesense from a
+  full row read (including `effective_date` and flags restored from `meta_data`).
+  `inflight_expiry_date` is not stored in Postgres today, so it cannot be
+  restored on metadata-only reindex (same limitation as full DB reindex).

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -74,7 +75,7 @@ func (d *Datasource) ListTransactionsByMetadataScope(ctx context.Context, scopeI
 
 	rows, err := d.Conn.QueryContext(ctx, `
 		SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-			   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+			   currency, destination, description, status, created_at, effective_date, meta_data, scheduled_for, hash
 		FROM blnk.transactions
 		WHERE transaction_id = $1 OR parent_transaction = $1
 		ORDER BY transaction_id
@@ -90,9 +91,14 @@ func (d *Datasource) ListTransactionsByMetadataScope(ctx context.Context, scopeI
 		transaction := &model.Transaction{}
 		var metaDataJSON []byte
 		var preciseAmountStr string
+		// Root txn_ rows store parent_transaction as NULL (and often scheduled_for
+		// too). Scanning those into string/time.Time fails the whole reindex.
+		var parentTransaction sql.NullString
+		var effectiveDate sql.NullTime
+		var scheduledFor sql.NullTime
 		if err := rows.Scan(
 			&transaction.TransactionID,
-			&transaction.ParentTransaction,
+			&parentTransaction,
 			&transaction.Source,
 			&transaction.Reference,
 			&transaction.Amount,
@@ -103,14 +109,27 @@ func (d *Datasource) ListTransactionsByMetadataScope(ctx context.Context, scopeI
 			&transaction.Description,
 			&transaction.Status,
 			&transaction.CreatedAt,
+			&effectiveDate,
 			&metaDataJSON,
-			&transaction.ScheduledFor,
+			&scheduledFor,
 			&transaction.Hash,
 		); err != nil {
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction data", err)
 		}
-		if err := json.Unmarshal(metaDataJSON, &transaction.MetaData); err != nil {
-			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+		transaction.ParentTransaction = nullableString(parentTransaction)
+		if effectiveDate.Valid {
+			transaction.EffectiveDate = &effectiveDate.Time
+		}
+		if scheduledFor.Valid {
+			transaction.ScheduledFor = scheduledFor.Time
+		}
+		// SQL NULL meta_data is a nil slice; skip rather than failing the page.
+		// After UpdateTransactionMetadata the column is an object, so this is
+		// only a guard for legacy/empty rows in the same scope.
+		if len(metaDataJSON) > 0 {
+			if err := json.Unmarshal(metaDataJSON, &transaction.MetaData); err != nil {
+				return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to unmarshal metadata", err)
+			}
 		}
 		transaction.PreciseAmount, err = parseBigInt(preciseAmountStr)
 		if err != nil {

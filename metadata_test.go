@@ -14,6 +14,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database/mocks"
+	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
@@ -816,4 +817,46 @@ func TestMergeMetadataDoesNotMutateInputs(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{"a": 1, "b": 2}, merged)
 	assert.Equal(t, map[string]interface{}{"a": 1}, current)
 	assert.Equal(t, map[string]interface{}{"b": 2}, newMeta)
+}
+
+// TestPrepareTransactionForSearchIndexPreservesTypesenseFields guards against
+// metadata reindex upserts that overwrite indexed inflight documents with
+// allow_overdraft=false / inflight=false because DB reads leave those struct
+// fields unset even when meta_data carries the flags.
+func TestPrepareTransactionForSearchIndexPreservesTypesenseFields(t *testing.T) {
+	effectiveDate := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	txn := &model.Transaction{
+		TransactionID: "txn_idx_inflight",
+		Amount:        100,
+		Precision:     100,
+		PreciseAmount: big.NewInt(100),
+		Currency:      "USD",
+		Source:        "bln_src",
+		Destination:   "bln_dst",
+		Reference:     "ref-inflight",
+		Status:        "INFLIGHT",
+		CreatedAt:     time.Date(2024, 5, 1, 10, 0, 0, 0, time.UTC),
+		EffectiveDate: &effectiveDate,
+		MetaData: map[string]interface{}{
+			"inflight":        true,
+			"allow_overdraft": true,
+		},
+	}
+
+	assert.False(t, txn.Inflight, "DB read leaves struct flags false until hydrated")
+	assert.False(t, txn.AllowOverdraft)
+
+	prepareTransactionForSearchIndex(txn)
+	assert.True(t, txn.Inflight)
+	assert.True(t, txn.AllowOverdraft)
+
+	raw, err := json.Marshal(txn)
+	require.NoError(t, err)
+	var doc map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+
+	normalized := search.NormalizeTransactionDocument(doc)
+	assert.Equal(t, true, normalized["inflight"], "Typesense upsert must not default inflight to false")
+	assert.Equal(t, true, normalized["allow_overdraft"])
+	assert.Equal(t, effectiveDate.Unix(), normalized["effective_date"])
 }

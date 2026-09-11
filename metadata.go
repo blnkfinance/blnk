@@ -211,6 +211,17 @@ func (l *Blnk) queueBalanceMetadataIndex(entityID string) {
 	}()
 }
 
+// prepareTransactionForSearchIndex hydrates top-level Typesense fields from
+// meta_data before upsert. DB reads leave allow_overdraft and inflight on the
+// struct at false even when meta_data carries the flags; upserting that stub
+// would overwrite indexed inflight documents with allow_overdraft=false and
+// inflight=false. inflight_expiry_date is not persisted in Postgres today, so
+// metadata reindex cannot restore it from a row read (same limitation as full
+// reindex from GetAllTransactions).
+func prepareTransactionForSearchIndex(txn *model.Transaction) {
+	restoreTransactionFlagsFromMetadata(txn)
+}
+
 // queueTransactionMetadataIndex reindexes every transaction row touched by the
 // metadata update. UpdateTransactionMetadata matches transaction_id = scope OR
 // parent_transaction = scope, so a bulk_ ID can update many child rows while
@@ -235,6 +246,7 @@ func (l *Blnk) queueTransactionMetadataIndex(entityID string) {
 				return
 			}
 			for _, txn := range txns {
+				prepareTransactionForSearchIndex(txn)
 				if err := l.queue.queueIndexData(txn.TransactionID, "transactions", txn); err != nil {
 					notification.NotifyError(err)
 				}
