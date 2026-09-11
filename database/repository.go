@@ -60,6 +60,7 @@ type transaction interface {
 	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)              // Groups transactions based on specified criteria
 	UpdateLedgerMetadata(id string, metadata map[string]interface{}) error
 	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
+	ListTransactionsByMetadataScope(ctx context.Context, scopeID string, limit int, offset int64) ([]*model.Transaction, error)
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	UpdateIdentityMetadata(id string, metadata map[string]interface{}) error
 	TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error)
