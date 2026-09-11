@@ -260,9 +260,13 @@ func (b *CreateBalanceMonitor) ValidateCreateBalanceMonitor() error {
 func (c *MonitorCondition) ValidateMonitorCondition() error {
 	return validation.ValidateStruct(c,
 		validation.Field(&c.Field, validation.Required, validation.In("debit_balance", "credit_balance", "balance", "inflight_debit_balance", "inflight_credit_balance", "inflight_balance")),
-		validation.Field(&c.Operator, validation.Required),
+		validation.Field(&c.Operator, validation.Required, validation.In(">", "<", ">=", "<=", "=", "!=")),
 		validation.Field(&c.Precision, validation.Required, validation.By(validatePrecisionNotNegative)),
-		validation.Field(&c.Value, validation.Required),
+		// Value is deliberately not Required: ozzo treats a zero number as
+		// absent, which made every threshold at zero unexpressible -- no
+		// "balance > 0", no "balance != 0", no "balance <= 0". Precision keeps
+		// the rule because a zero multiplier is meaningless, a zero threshold
+		// is not.
 	)
 }
 
@@ -372,7 +376,7 @@ func (b *CreateBalanceMonitor) ToBalanceMonitor() model.BalanceMonitor {
 		Operator:  b.Condition.Operator,
 		Value:     b.Condition.Value,
 		Precision: b.Condition.Precision,
-	}, CallBackURL: b.CallBackURL}
+	}, CallBackURL: b.CallBackURL, Description: b.Description}
 }
 
 func (a *CreateAccount) ToAccount() model.Account {
