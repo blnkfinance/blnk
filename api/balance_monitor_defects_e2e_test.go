@@ -45,13 +45,16 @@ func execSQL(t *testing.T, cnf *config.Configuration, statement string, args ...
 
 // A monitor written before the precision migration carries NULLs. Reading it
 // used to fail, and because checkBalanceMonitors gives up when the fetch
-// errors, that one row silenced every other monitor on the same balance.
+// errors, that one row silenced every other monitor on the same balance. This
+// is the symptom an operator would actually see.
 func TestBalanceMonitor_LegacyRowDoesNotSilenceItsSiblings(t *testing.T) {
 	e := setupMonitorE2E(t)
 	funding, wallet := e.newBalance(t), e.newBalance(t)
 
-	e.createMonitorOn(t, wallet.BalanceID, "balance", ">", 500)
+	healthy := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
 
+	// The shape a row created before precision and precise_value existed still
+	// has today: both columns NULL.
 	legacyID := model.GenerateUUIDWithSuffix("mon")
 	execSQL(t, e.cnf, `
 		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, description, call_back_url, created_at)
@@ -62,15 +65,57 @@ func TestBalanceMonitor_LegacyRowDoesNotSilenceItsSiblings(t *testing.T) {
 
 	// Both monitors watch the same threshold, so both owe one alert.
 	e.awaitWebhooks(t, 2)
+	assert.True(t, e.monitorState(t, healthy.MonitorID),
+		"a legacy sibling must not stop a healthy monitor from working")
+	assert.True(t, e.monitorState(t, legacyID), "and the legacy monitor itself must work")
 }
 
-// The monitor cache is keyed by balance, so a moved monitor kept firing on the
-// balance it left until that balance's cached list expired.
-func TestBalanceMonitor_MovedMonitorStopsAlertingOnTheOldBalance(t *testing.T) {
+// A moved edge monitor stops alerting on the balance it left and starts on the
+// one it joined. This one holds even with a stale cached list, because the
+// balance guard on the state write rejects the stale evaluation; the cache fix
+// is what covers the level case below.
+func TestBalanceMonitor_MovedMonitorFollowsItsBalance(t *testing.T) {
 	e := setupMonitorE2E(t)
 	funding, oldWallet, newWallet := e.newBalance(t), e.newBalance(t), e.newBalance(t)
 
-	created := e.createMonitorOn(t, oldWallet.BalanceID, "balance", ">", 500)
+	created := e.createMonitorOn(t, oldWallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	// Warm the old balance's cached monitor list.
+	e.transfer(t, funding.BalanceID, oldWallet.BalanceID, 100)
+	e.settle()
+	require.Equal(t, 0, e.webhooks())
+
+	payloadBytes, _ := request.ToJsonReq(&model.BalanceMonitor{
+		BalanceID: newWallet.BalanceID,
+		Trigger:   model.TriggerEdge,
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	})
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Method: "PUT",
+		Route: fmt.Sprintf("/balance-monitors/%s", created.MonitorID), Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	// The balance it left must no longer produce alerts.
+	e.transfer(t, funding.BalanceID, oldWallet.BalanceID, 900)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks(), "a moved monitor must stop watching the balance it left")
+
+	// The balance it joined must.
+	e.transfer(t, funding.BalanceID, newWallet.BalanceID, 900)
+	e.awaitWebhooks(t, 1)
+	assert.True(t, e.monitorState(t, created.MonitorID))
+}
+
+// The balance guard covers an edge monitor moved between balances, because the
+// stale evaluation cannot win the state write. A level monitor keeps no state,
+// so nothing stops it firing on the balance it left -- only invalidating that
+// balance's cached list does.
+func TestBalanceMonitor_MovedLevelMonitorStopsAlertingOnTheOldBalance(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, oldWallet, newWallet := e.newBalance(t), e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, oldWallet.BalanceID, model.TriggerLevel, "balance", ">", 500)
 
 	// Put the old balance's monitor list in the cache.
 	e.transfer(t, funding.BalanceID, oldWallet.BalanceID, 100)
@@ -79,6 +124,7 @@ func TestBalanceMonitor_MovedMonitorStopsAlertingOnTheOldBalance(t *testing.T) {
 
 	payloadBytes, _ := request.ToJsonReq(&model.BalanceMonitor{
 		BalanceID: newWallet.BalanceID,
+		Trigger:   model.TriggerLevel,
 		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
 	})
 	resp, _ := SetUpTestRequest(TestRequest{
@@ -89,12 +135,14 @@ func TestBalanceMonitor_MovedMonitorStopsAlertingOnTheOldBalance(t *testing.T) {
 
 	e.transfer(t, funding.BalanceID, oldWallet.BalanceID, 900)
 	e.settle()
-	assert.Equal(t, 0, e.webhooks(), "a moved monitor must not keep alerting on the balance it left")
+	assert.Equal(t, 0, e.webhooks(), "a moved level monitor must not keep alerting on the balance it left")
 
 	e.transfer(t, funding.BalanceID, newWallet.BalanceID, 900)
 	e.awaitWebhooks(t, 1)
 }
 
+// A fractional threshold is a normal thing to want and used to fail at the
+// database with a 500.
 func TestBalanceMonitor_FractionalThresholdEndToEnd(t *testing.T) {
 	e := setupMonitorE2E(t)
 	funding, wallet := e.newBalance(t), e.newBalance(t)
@@ -118,13 +166,16 @@ func TestBalanceMonitor_FractionalThresholdEndToEnd(t *testing.T) {
 
 	e.transferPrecise(t, funding.BalanceID, wallet.BalanceID, 0.20, 100)
 	e.awaitWebhooks(t, 1)
+	assert.True(t, e.monitorState(t, created.MonitorID))
 }
 
+// A zero threshold is the most natural monitor there is and used to be
+// rejected outright.
 func TestBalanceMonitor_ZeroThresholdEndToEnd(t *testing.T) {
 	e := setupMonitorE2E(t)
 	funding, wallet := e.newBalance(t), e.newBalance(t)
 
-	e.createMonitorOn(t, wallet.BalanceID, "balance", ">", 0)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 0)
 
 	e.transfer(t, wallet.BalanceID, funding.BalanceID, 100)
 	e.settle()
@@ -132,8 +183,11 @@ func TestBalanceMonitor_ZeroThresholdEndToEnd(t *testing.T) {
 
 	e.transfer(t, funding.BalanceID, wallet.BalanceID, 200)
 	e.awaitWebhooks(t, 1)
+	assert.True(t, e.monitorState(t, created.MonitorID))
 }
 
+// The list endpoint used to report a different threshold from the detail
+// endpoint, because it did not select precision.
 func TestBalanceMonitor_ListAndDetailAgreeOnThreshold(t *testing.T) {
 	e := setupMonitorE2E(t)
 	wallet := e.newBalance(t)

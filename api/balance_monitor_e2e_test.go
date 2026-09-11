@@ -21,12 +21,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/blnkfinance/blnk"
@@ -101,6 +103,18 @@ func (e *monitorE2E) webhooks() int {
 	return count
 }
 
+// webhooksFor counts the alerts owed to one monitor, so a test with several
+// monitors on a queue can pin each one's share rather than only the total.
+func (e *monitorE2E) webhooksFor(monitorID string) int {
+	count := 0
+	for _, task := range e.pendingTasks() {
+		if strings.Contains(string(task.Payload), monitorID) {
+			count++
+		}
+	}
+	return count
+}
+
 // awaitWebhooks waits for the detached post-commit goroutines to settle.
 func (e *monitorE2E) awaitWebhooks(t *testing.T, want int) {
 	t.Helper()
@@ -124,20 +138,25 @@ func (e *monitorE2E) newBalance(t *testing.T) model.Balance {
 	return balance
 }
 
-func (e *monitorE2E) createMonitorOn(t *testing.T, balanceID, field, operator string, value float64) model.BalanceMonitor {
+func (e *monitorE2E) createMonitor(t *testing.T, balanceID, trigger string, value float64) model.BalanceMonitor {
 	t.Helper()
 
 	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
 		BalanceId: balanceID,
-		Condition: model2.MonitorCondition{Field: field, Operator: operator, Value: value, Precision: 1},
+		Trigger:   trigger,
+		Condition: model2.MonitorCondition{Field: "balance", Operator: ">", Value: value, Precision: 1},
 	})
 
 	var monitor model.BalanceMonitor
 	resp, _ := SetUpTestRequest(TestRequest{
-		Payload: payloadBytes, Response: &monitor,
-		Method: "POST", Route: "/balance-monitors", Router: e.router,
+		Payload:  payloadBytes,
+		Response: &monitor,
+		Method:   "POST",
+		Route:    "/balance-monitors",
+		Router:   e.router,
 	})
 	require.Equal(t, http.StatusCreated, resp.Code)
+
 	return monitor
 }
 
@@ -167,4 +186,84 @@ func (e *monitorE2E) transfer(t *testing.T, source, destination string, amount f
 		Router:  e.router,
 	})
 	require.Equal(t, http.StatusCreated, resp.Code)
+}
+
+func (e *monitorE2E) monitorState(t *testing.T, monitorID string) bool {
+	t.Helper()
+	monitor, err := e.blnk.GetMonitorByID(context.Background(), monitorID)
+	require.NoError(t, err)
+	return monitor.ConditionState
+}
+
+// TestBalanceMonitorEdge_EndToEnd walks a balance across its threshold twice
+// over six transactions and asserts the consumer is told twice, not five times.
+func TestBalanceMonitorEdge_EndToEnd(t *testing.T) {
+	e := setupMonitorE2E(t)
+
+	funding := e.newBalance(t)
+	wallet := e.newBalance(t)
+	monitor := e.createMonitor(t, wallet.BalanceID, model.TriggerEdge, 500)
+
+	require.Equal(t, 0, e.webhooks())
+	require.False(t, e.monitorState(t, monitor.MonitorID))
+
+	// Below the threshold: nothing to say.
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks())
+	assert.False(t, e.monitorState(t, monitor.MonitorID))
+
+	// The crossing.
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.awaitWebhooks(t, 1)
+	assert.True(t, e.monitorState(t, monitor.MonitorID), "the monitor is left triggered")
+
+	// Still past the threshold, so the consumer already knows.
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.settle()
+	assert.Equal(t, 1, e.webhooks(), "an edge monitor stays quiet while the condition holds")
+
+	// Back under: re-arm, silently.
+	e.transfer(t, wallet.BalanceID, funding.BalanceID, 400)
+	e.settle()
+	assert.Equal(t, 1, e.webhooks(), "recovering is not an alert")
+	assert.False(t, e.monitorState(t, monitor.MonitorID), "the monitor re-arms")
+
+	// The second crossing.
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.awaitWebhooks(t, 2)
+	assert.True(t, e.monitorState(t, monitor.MonitorID))
+}
+
+// TestBalanceMonitorLevel_EndToEnd runs the identical ledger activity against a
+// level-triggered monitor, which is what today's behaviour looks like and what
+// the opt-in still has to deliver.
+func TestBalanceMonitorLevel_EndToEnd(t *testing.T) {
+	e := setupMonitorE2E(t)
+
+	funding := e.newBalance(t)
+	wallet := e.newBalance(t)
+	monitor := e.createMonitor(t, wallet.BalanceID, model.TriggerLevel, 500)
+
+	require.Equal(t, 0, e.webhooks())
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks())
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.awaitWebhooks(t, 1)
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.awaitWebhooks(t, 2)
+
+	e.transfer(t, wallet.BalanceID, funding.BalanceID, 400)
+	e.settle()
+	assert.Equal(t, 2, e.webhooks())
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 300)
+	e.awaitWebhooks(t, 3)
+
+	assert.False(t, e.monitorState(t, monitor.MonitorID),
+		"a level monitor keeps no state, so nothing writes to it")
 }
