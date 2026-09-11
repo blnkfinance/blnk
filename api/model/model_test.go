@@ -856,6 +856,92 @@ func TestToBalanceMonitor(t *testing.T) {
 	assert.Equal(t, createMonitor.Condition.Operator, monitor.Condition.Operator)
 	assert.Equal(t, createMonitor.Condition.Value, monitor.Condition.Value)
 	assert.Equal(t, createMonitor.Condition.Precision, monitor.Condition.Precision)
+	// The request struct carries the caller's choice through untouched;
+	// model.NormalizeTrigger is the one place that resolves an unset one.
+	assert.Empty(t, monitor.Trigger)
+}
+
+func TestToBalanceMonitor_KeepsAnExplicitTrigger(t *testing.T) {
+	createMonitor := CreateBalanceMonitor{
+		BalanceId: "bln_test_123",
+		Trigger:   model.TriggerLevel,
+		Condition: MonitorCondition{Field: "balance", Operator: ">", Value: 1000, Precision: 100},
+	}
+
+	assert.Equal(t, model.TriggerLevel, createMonitor.ToBalanceMonitor().Trigger)
+}
+
+func TestValidateCreateBalanceMonitor_Trigger(t *testing.T) {
+	base := func(trigger string) CreateBalanceMonitor {
+		return CreateBalanceMonitor{
+			BalanceId: "bln_test_123",
+			Trigger:   trigger,
+			Condition: MonitorCondition{Field: "balance", Operator: ">", Value: 1000, Precision: 100},
+		}
+	}
+
+	for _, trigger := range []string{"", model.TriggerEdge, model.TriggerLevel} {
+		monitor := base(trigger)
+		assert.NoError(t, monitor.ValidateCreateBalanceMonitor(), "trigger %q must be accepted", trigger)
+	}
+
+	monitor := base("sometimes")
+	assert.Error(t, monitor.ValidateCreateBalanceMonitor())
+}
+
+func TestValidateMonitorCondition_AllowsAZeroThreshold(t *testing.T) {
+	// "balance > 0" and "balance != 0" are the most natural monitors there are,
+	// and a validator that treats zero as absent made all of them impossible.
+	for _, operator := range []string{">", "<", ">=", "<=", "=", "!="} {
+		condition := MonitorCondition{Field: "balance", Operator: operator, Value: 0, Precision: 100}
+		assert.NoError(t, condition.ValidateMonitorCondition(), "zero is a threshold like any other (%s)", operator)
+	}
+}
+
+func TestValidateMonitorCondition_RejectsUnsupportedOperators(t *testing.T) {
+	base := func(operator string) MonitorCondition {
+		return MonitorCondition{Field: "balance", Operator: operator, Value: 100, Precision: 100}
+	}
+
+	// The whole set the table's check constraint stores, all of which
+	// model.compare can now evaluate.
+	for _, operator := range []string{">", "<", ">=", "<=", "=", "!="} {
+		condition := base(operator)
+		assert.NoError(t, condition.ValidateMonitorCondition(), "operator %q must be accepted", operator)
+	}
+
+	// An operator the ledger cannot evaluate used to be stored happily and then
+	// never fire, which is worse than a rejection.
+	for _, operator := range []string{"==", "=>", "gt", "~"} {
+		condition := base(operator)
+		assert.Error(t, condition.ValidateMonitorCondition(), "operator %q must be rejected", operator)
+	}
+}
+
+func TestToBalanceMonitor_CarriesDescription(t *testing.T) {
+	createMonitor := CreateBalanceMonitor{
+		BalanceId:   "bln_test_123",
+		Description: "low balance alert",
+		Condition:   MonitorCondition{Field: "balance", Operator: "<", Value: 1000, Precision: 100},
+	}
+
+	assert.Equal(t, "low balance alert", createMonitor.ToBalanceMonitor().Description,
+		"description is a column and is settable on update, so create must be able to set it too")
+}
+
+func TestNormalizeTriggerIsTheOnlyDefault(t *testing.T) {
+	trigger, err := model.NormalizeTrigger("")
+	assert.NoError(t, err)
+	assert.Equal(t, model.TriggerEdge, trigger, "an unset trigger resolves to edge")
+
+	for _, valid := range []string{model.TriggerEdge, model.TriggerLevel} {
+		trigger, err := model.NormalizeTrigger(valid)
+		assert.NoError(t, err)
+		assert.Equal(t, valid, trigger, "an explicit trigger is carried through untouched")
+	}
+
+	_, err = model.NormalizeTrigger("sometimes")
+	assert.Error(t, err)
 }
 
 // TestSplitOnOneSideValidation pins that a transaction cannot split both
