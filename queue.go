@@ -114,13 +114,16 @@ func (q *Queue) EnqueueInflightAction(ctx context.Context, p InflightActionPaylo
 // Returns:
 // - *Queue: A pointer to the newly created Queue instance.
 func NewQueue(conf *config.Configuration, client *asynq.Client, redisClient redis.UniversalClient) *Queue {
-	redisOption, err := redis_db.ParseRedisURL(conf.Redis.Dns, conf.Redis.SkipTLSVerify)
+	connOpt, err := redis_db.NewConnOpt(conf.Redis.Dns, conf.Redis.SkipTLSVerify, &redis_db.PoolConfig{
+		PoolSize:        conf.Redis.PoolSize,
+		MinIdleConns:    conf.Redis.MinIdleConns,
+		ConnMaxIdleTime: conf.Redis.ConnMaxIdleTime,
+	})
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to parse Redis URL")
 	}
 
-	queueOptions := asynq.RedisClientOpt{Addr: redisOption.Addr, Password: redisOption.Password, DB: redisOption.DB, TLSConfig: redisOption.TLSConfig, PoolSize: conf.Redis.PoolSize}
-	inspector := asynq.NewInspector(queueOptions)
+	inspector := asynq.NewInspector(connOpt)
 	return &Queue{
 		Client:    client,
 		Inspector: inspector,

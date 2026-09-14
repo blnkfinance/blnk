@@ -27,10 +27,39 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// defaultConnMaxIdleTime recycles pooled connections well before managed
+// Redis/Valkey services or intermediate proxies idle-close them (commonly
+// around 300s). Reusing a connection the server already closed surfaces as
+// "write: broken pipe" on the next command.
+const defaultConnMaxIdleTime = 2 * time.Minute
+
 // PoolConfig holds Redis connection pool settings.
 type PoolConfig struct {
 	PoolSize     int
 	MinIdleConns int
+	// ConnMaxIdleTime is how long a pooled connection may sit idle before it
+	// is discarded instead of reused. Zero applies defaultConnMaxIdleTime;
+	// negative disables recycling.
+	ConnMaxIdleTime time.Duration
+}
+
+// resolvePoolConfig applies defaults to an optional caller-supplied pool
+// config so every client construction path shares the same safety floor.
+func resolvePoolConfig(pool ...*PoolConfig) PoolConfig {
+	var pc PoolConfig
+	if len(pool) > 0 && pool[0] != nil {
+		pc = *pool[0]
+	}
+	if pc.PoolSize == 0 {
+		pc.PoolSize = 100
+	}
+	if pc.MinIdleConns == 0 {
+		pc.MinIdleConns = 20
+	}
+	if pc.ConnMaxIdleTime == 0 {
+		pc.ConnMaxIdleTime = defaultConnMaxIdleTime
+	}
+	return pc
 }
 
 // Redis struct holds the Redis client and addresses of Redis instances.
@@ -118,17 +147,7 @@ func NewRedisClient(addresses []string, skipTLSVerify bool, pool ...*PoolConfig)
 		return nil, errors.New("redis addresses list cannot be empty")
 	}
 
-	// Resolve pool config (use provided or defaults)
-	var pc PoolConfig
-	if len(pool) > 0 && pool[0] != nil {
-		pc = *pool[0]
-	}
-	if pc.PoolSize == 0 {
-		pc.PoolSize = 100
-	}
-	if pc.MinIdleConns == 0 {
-		pc.MinIdleConns = 20
-	}
+	pc := resolvePoolConfig(pool...)
 
 	var client redis.UniversalClient
 
@@ -141,6 +160,7 @@ func NewRedisClient(addresses []string, skipTLSVerify bool, pool ...*PoolConfig)
 
 		opts.PoolSize = pc.PoolSize
 		opts.MinIdleConns = pc.MinIdleConns
+		opts.ConnMaxIdleTime = pc.ConnMaxIdleTime
 
 		client = redis.NewClient(opts)
 	} else {
@@ -176,11 +196,12 @@ func NewRedisClient(addresses []string, skipTLSVerify bool, pool ...*PoolConfig)
 		}
 
 		client = redis.NewUniversalClient(&redis.UniversalOptions{
-			Addrs:        clusterAddrs,
-			Password:     password,
-			TLSConfig:    tlsConfig,
-			PoolSize:     pc.PoolSize,
-			MinIdleConns: pc.MinIdleConns,
+			Addrs:           clusterAddrs,
+			Password:        password,
+			TLSConfig:       tlsConfig,
+			PoolSize:        pc.PoolSize,
+			MinIdleConns:    pc.MinIdleConns,
+			ConnMaxIdleTime: pc.ConnMaxIdleTime,
 		})
 	}
 
@@ -208,4 +229,32 @@ func (r *Redis) Client() redis.UniversalClient {
 // - interface{}: The Redis client interface.
 func (r *Redis) MakeRedisClient() interface{} {
 	return r.client
+}
+
+// ConnOpt adapts a pooled go-redis client to asynq's RedisConnOpt interface
+// without importing asynq. asynq.RedisClientOpt cannot express
+// ConnMaxIdleTime, so clients built from it reuse connections that managed
+// Redis/Valkey already idle-closed ("write: broken pipe").
+type ConnOpt struct {
+	client redis.UniversalClient
+}
+
+// MakeRedisClient satisfies asynq.RedisConnOpt.
+func (o ConnOpt) MakeRedisClient() interface{} {
+	return o.client
+}
+
+// NewConnOpt builds an asynq-compatible connection option whose underlying
+// client recycles idle connections. Each call creates a dedicated client, so
+// an asynq consumer closing its connection does not tear down another's.
+func NewConnOpt(rawURL string, skipTLSVerify bool, pool ...*PoolConfig) (ConnOpt, error) {
+	opts, err := ParseRedisURL(rawURL, skipTLSVerify)
+	if err != nil {
+		return ConnOpt{}, err
+	}
+	pc := resolvePoolConfig(pool...)
+	opts.PoolSize = pc.PoolSize
+	opts.MinIdleConns = pc.MinIdleConns
+	opts.ConnMaxIdleTime = pc.ConnMaxIdleTime
+	return ConnOpt{client: redis.NewClient(opts)}, nil
 }
