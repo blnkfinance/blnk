@@ -2689,3 +2689,33 @@ func TestGetStuckQueuedTransactions_PreservesEffectiveDate(t *testing.T) {
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestGetTransactionsByShadowFor_PreservesEffectiveDate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	now := time.Now().UTC()
+	threeDaysAgo := now.Add(-72 * time.Hour)
+	metaDataJSON := []byte(`{"_shadow_for":"txn_parent"}`)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, source, reference, amount, precise_amount, "precision", currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
+		FROM blnk.transactions
+		WHERE meta_data->>'_shadow_for' = $1
+		ORDER BY created_at ASC`)).
+		WithArgs("txn_parent").
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}).
+			AddRow("txn_shadow_1", "bln_src", "ref_shadow_1", 10.0, "1000", 100.0, "USD", "bln_shadow", "", "INFLIGHT", now, metaDataJSON, time.Time{}, "hash_1", threeDaysAgo).
+			AddRow("txn_shadow_2", "bln_src", "ref_shadow_2", 20.0, "2000", 100.0, "USD", "bln_shadow", "", "INFLIGHT", now, metaDataJSON, time.Time{}, "hash_2", nil))
+
+	transactions, err := ds.GetTransactionsByShadowFor(context.Background(), "txn_parent")
+	require.NoError(t, err)
+	require.Len(t, transactions, 2)
+	if assert.NotNil(t, transactions[0].EffectiveDate, "shadow lookup dropped effective_date") {
+		assert.True(t, transactions[0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, transactions[0].EffectiveDate)
+	}
+	assert.Nil(t, transactions[1].EffectiveDate, "NULL effective_date must stay nil")
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
