@@ -332,7 +332,9 @@ func TestGetTransaction_Success(t *testing.T) {
 	assert.Equal(t, "dest1", txn.Destination)
 	assert.Equal(t, "parent123", txn.ParentTransaction)
 	assert.Equal(t, "hash123", txn.Hash)
-	assert.Equal(t, &threeDaysAgo, txn.EffectiveDate)
+	if assert.NotNil(t, txn.EffectiveDate, "GetTransaction dropped effective_date") {
+		assert.True(t, txn.EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, txn.EffectiveDate)
+	}
 }
 
 // TestGetTransaction_NullParentDoesNotFailScan catches GET /transactions/:id
@@ -535,7 +537,9 @@ func TestGetInflightTransactionsByParentID_Success(t *testing.T) {
 	assert.Len(t, transactions, 1)
 	assert.Equal(t, "txn123", transactions[0].TransactionID)
 	assert.Equal(t, "INFLIGHT", transactions[0].Status)
-	assert.Equal(t, &effectiveDate, transactions[0].EffectiveDate)
+	if assert.NotNil(t, transactions[0].EffectiveDate, "inflight parent lookup dropped effective_date") {
+		assert.True(t, transactions[0].EffectiveDate.Equal(effectiveDate), "expected effective_date %v, got %v", effectiveDate, transactions[0].EffectiveDate)
+	}
 }
 
 func TestGetInflightTransactionsByParentID_NoRows(t *testing.T) {
@@ -1023,7 +1027,9 @@ func TestGetTransactionByRef_Success(t *testing.T) {
 	txn, err := ds.GetTransactionByRef(ctx, "ref_123")
 	assert.NoError(t, err)
 	assert.Equal(t, "txn_123", txn.TransactionID)
-	assert.Equal(t, &threeDaysAgo, txn.EffectiveDate)
+	if assert.NotNil(t, txn.EffectiveDate, "GetTransactionByRef dropped effective_date") {
+		assert.True(t, txn.EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, txn.EffectiveDate)
+	}
 	assert.Equal(t, "ref_123", txn.Reference)
 	assert.Equal(t, "bln_source", txn.Source)
 	assert.Equal(t, "bln_dest", txn.Destination)
@@ -1633,22 +1639,27 @@ func TestGroupTransactions_Success(t *testing.T) {
 	metaDataJSON, err := json.Marshal(map[string]interface{}{"key": "value"})
 	assert.NoError(t, err)
 	now := time.Now()
+	threeDaysAgo := now.Add(-72 * time.Hour)
 
 	mock.ExpectQuery(`(?s)SELECT parent_transaction::text AS group_key.*WHERE parent_transaction::text IS NOT NULL AND parent_transaction::text != ''.*ORDER BY parent_transaction::text.*LIMIT \$1 OFFSET \$2`).
 		WithArgs(10, int64(0)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_key", "transaction_id", "parent_transaction", "source", "reference",
 			"amount", "precise_amount", "precision", "currency", "destination",
-			"description", "status", "created_at", "meta_data", "scheduled_for", "hash",
+			"description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date",
 		}).
-			AddRow("parent-1", "txn_1", "parent-1", "bln_src", "ref_1", 1000.0, "100000", 100, "USD", "bln_dest", "Desc 1", "APPLIED", now, metaDataJSON, now, "hash1").
-			AddRow("parent-1", "txn_2", "parent-1", "bln_src", "ref_2", 500.0, "50000", 100, "USD", "bln_dest", "Desc 2", "APPLIED", now, metaDataJSON, now, "hash2"))
+			AddRow("parent-1", "txn_1", "parent-1", "bln_src", "ref_1", 1000.0, "100000", 100, "USD", "bln_dest", "Desc 1", "APPLIED", now, metaDataJSON, now, "hash1", threeDaysAgo).
+			AddRow("parent-1", "txn_2", "parent-1", "bln_src", "ref_2", 500.0, "50000", 100, "USD", "bln_dest", "Desc 2", "APPLIED", now, metaDataJSON, now, "hash2", nil))
 
 	txns, err := ds.GroupTransactions(ctx, "parent_transaction", 10, 0)
 	assert.NoError(t, err)
 	assert.Len(t, txns, 1)
 	assert.Contains(t, txns, "parent-1")
 	assert.Len(t, txns["parent-1"], 2)
+	if assert.NotNil(t, txns["parent-1"][0].EffectiveDate, "grouped transactions dropped effective_date") {
+		assert.True(t, txns["parent-1"][0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, txns["parent-1"][0].EffectiveDate)
+	}
+	assert.Nil(t, txns["parent-1"][1].EffectiveDate, "NULL effective_date must stay nil")
 
 	err = mock.ExpectationsWereMet()
 	assert.NoError(t, err)
@@ -1668,19 +1679,25 @@ func TestGetTransactionsByCriteria_Success(t *testing.T) {
 	minAmount := 100.0
 	maxAmount := 5000.0
 	currency := "USD"
+	threeDaysAgo := time.Now().Add(-72 * time.Hour)
 
-	mock.ExpectQuery("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash FROM blnk.transactions").
+	mock.ExpectQuery("SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date FROM blnk.transactions").
 		WithArgs(minAmount, maxAmount, currency, 10, int64(0)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount",
 			"precision", "currency", "destination", "description", "status", "created_at",
-			"meta_data", "scheduled_for", "hash",
+			"meta_data", "scheduled_for", "hash", "effective_date",
 		}).
-			AddRow("txn_1", "", "bln_src", "ref_1", 1000.0, "100000", 100, "USD", "bln_dest", "Desc", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1"))
+			AddRow("txn_1", "", "bln_src", "ref_1", 1000.0, "100000", 100, "USD", "bln_dest", "Desc", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash1", threeDaysAgo).
+			AddRow("txn_2", "", "bln_src", "ref_2", 2000.0, "200000", 100, "USD", "bln_dest", "Desc", "APPLIED", time.Now(), metaDataJSON, time.Now(), "hash2", nil))
 
 	txns, err := ds.GetTransactionsByCriteria(ctx, &minAmount, &maxAmount, &currency, nil, nil, 10, 0)
 	assert.NoError(t, err)
-	assert.Len(t, txns, 1)
+	assert.Len(t, txns, 2)
+	if assert.NotNil(t, txns[0].EffectiveDate, "criteria search dropped effective_date") {
+		assert.True(t, txns[0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, txns[0].EffectiveDate)
+	}
+	assert.Nil(t, txns[1].EffectiveDate)
 }
 
 func TestGetTransactionsByCriteria_Error(t *testing.T) {
@@ -1904,21 +1921,27 @@ func TestGetTransactionsPaginated_Success(t *testing.T) {
 
 	createdAt := time.Now()
 	scheduledFor := time.Now().Add(24 * time.Hour)
+	threeDaysAgo := createdAt.Add(-72 * time.Hour)
 	metaData := map[string]interface{}{"key": "value"}
 	metaDataJSON, _ := json.Marshal(metaData)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         ORDER BY created_at ASC
         LIMIT $1 OFFSET $2`)).
 		WithArgs(10, int64(0)).
-		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash"}).
-			AddRow("txn_123", "", "bln_source", "ref_123", 100.0, "10000", 100, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123"))
+		WillReturnRows(sqlmock.NewRows([]string{"transaction_id", "parent_transaction", "source", "reference", "amount", "precise_amount", "precision", "currency", "destination", "description", "status", "created_at", "meta_data", "scheduled_for", "hash", "effective_date"}).
+			AddRow("txn_123", "", "bln_source", "ref_123", 100.0, "10000", 100, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash123", threeDaysAgo).
+			AddRow("txn_456", "", "bln_source", "ref_456", 200.0, "20000", 100, "USD", "bln_dest", "test desc", "APPLIED", createdAt, metaDataJSON, scheduledFor, "hash456", nil))
 
 	txns, err := ds.GetTransactionsPaginated(ctx, "", 10, 0)
 	assert.NoError(t, err)
-	assert.Len(t, txns, 1)
+	assert.Len(t, txns, 2)
 	assert.Equal(t, "txn_123", txns[0].TransactionID)
+	if assert.NotNil(t, txns[0].EffectiveDate, "paginated list dropped effective_date") {
+		assert.True(t, txns[0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, txns[0].EffectiveDate)
+	}
+	assert.Nil(t, txns[1].EffectiveDate, "NULL effective_date must stay nil")
 }
 
 func TestGetTransactionsPaginated_QueryError(t *testing.T) {
@@ -1930,7 +1953,7 @@ func TestGetTransactionsPaginated_QueryError(t *testing.T) {
 	ds := Datasource{Conn: db, Cache: mc}
 	ctx := context.Background()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         ORDER BY created_at ASC
         LIMIT $1 OFFSET $2`)).
@@ -1977,8 +2000,7 @@ func TestGetTransactionsByParent_DatabaseSuccess(t *testing.T) {
 	assert.Equal(t, "txn_child_123", txns[0].TransactionID)
 	assert.Equal(t, parentID, txns[0].ParentTransaction)
 	if assert.NotNil(t, txns[0].EffectiveDate, "parent lookup dropped effective_date") {
-		assert.True(t, txns[0].EffectiveDate.Equal(effectiveDate),
-			"expected effective_date %v, got %v", effectiveDate, txns[0].EffectiveDate)
+		assert.True(t, txns[0].EffectiveDate.Equal(effectiveDate), "expected effective_date %v, got %v", effectiveDate, txns[0].EffectiveDate)
 	}
 }
 
@@ -2575,8 +2597,10 @@ func TestGetQueuedTransactionsForCoalescing_PreservesEffectiveDate(t *testing.T)
 	transactions, err := ds.GetQueuedTransactionsForCoalescing(context.Background(), "bln_src", "bln_dest", "USD", "txn_leader", oneHourAgo, 9)
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
-
-	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
+	if assert.NotNil(t, transactions[0].EffectiveDate, "queued lookup dropped effective_date") {
+		assert.True(t, transactions[0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, transactions[0].EffectiveDate)
+	}
+	assert.Nil(t, transactions[1].EffectiveDate, "NULL effective_date must stay nil")
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -2602,7 +2626,10 @@ func TestGetQueuedTransactionsForSourceCoalescing_PreservesEffectiveDate(t *test
 	transactions, err := ds.GetQueuedTransactionsForSourceCoalescing(context.Background(), "bln_src", "USD", "txn_leader", theLastHour, 9)
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
-	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
+	if assert.NotNil(t, transactions[0].EffectiveDate, "queued lookup dropped effective_date") {
+		assert.True(t, transactions[0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, transactions[0].EffectiveDate)
+	}
+	assert.Nil(t, transactions[1].EffectiveDate, "NULL effective_date must stay nil")
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -2628,8 +2655,10 @@ func TestGetQueuedTransactionsForDestinationCoalescing_PreservesEffectiveDate(t 
 	transactions, err := ds.GetQueuedTransactionsForDestinationCoalescing(context.Background(), "bln_dest", "USD", "txn_leader", theLastHour, 9)
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
-
-	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
+	if assert.NotNil(t, transactions[0].EffectiveDate, "queued lookup dropped effective_date") {
+		assert.True(t, transactions[0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, transactions[0].EffectiveDate)
+	}
+	assert.Nil(t, transactions[1].EffectiveDate, "NULL effective_date must stay nil")
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -2653,8 +2682,10 @@ func TestGetStuckQueuedTransactions_PreservesEffectiveDate(t *testing.T) {
 	transactions, err := ds.GetStuckQueuedTransactions(context.Background(), 2*time.Hour, 100)
 	assert.NoError(t, err)
 	assert.Len(t, transactions, 2)
-
-	assert.Equal(t, &threeDaysAgo, transactions[0].EffectiveDate)
+	if assert.NotNil(t, transactions[0].EffectiveDate, "queued lookup dropped effective_date") {
+		assert.True(t, transactions[0].EffectiveDate.Equal(threeDaysAgo), "expected effective_date %v, got %v", threeDaysAgo, transactions[0].EffectiveDate)
+	}
+	assert.Nil(t, transactions[1].EffectiveDate, "NULL effective_date must stay nil")
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
