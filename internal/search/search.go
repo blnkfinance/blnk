@@ -226,6 +226,20 @@ func (t *TypesenseClient) MultiSearch(ctx context.Context, searchRequests api.Mu
 	return t.Client.MultiSearch.Perform(ctx, &api.MultiSearchParams{}, searchRequests)
 }
 
+// NormalizeTransactionDocument applies the same field normalization as a
+// transactions upsert (metadata coercion, bigint strings, required defaults,
+// time fields) without writing to Typesense. Used by tests to verify reindex
+// payloads retain indexed fields.
+func NormalizeTransactionDocument(data map[string]interface{}) map[string]interface{} {
+	config := collectionConfigs[CollectionTransactions]
+	tc := &TypesenseClient{}
+	_ = tc.processMetadata(data)
+	tc.convertLargeNumbers(config, data)
+	tc.ensureSchemaFields(config, data)
+	tc.normalizeTimeFields(config, data)
+	return data
+}
+
 // HandleNotification processes incoming notifications and updates Typesense collections based on the table and data.
 // It ensures the required fields exist and upserts the data into Typesense.
 func (t *TypesenseClient) HandleNotification(ctx context.Context, table string, data map[string]interface{}) error {

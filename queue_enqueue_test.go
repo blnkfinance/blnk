@@ -216,6 +216,57 @@ func TestQueueIndexData_EnqueuesCollectionAndPayload(t *testing.T) {
 	assert.Equal(t, "USD", inner["currency"])
 }
 
+func TestQueueIndexRefresh_EnqueuesReferenceOnly(t *testing.T) {
+	indexQueue := uniqueQueueName("index")
+	conf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: testRedisAddr},
+		Queue: config.QueueConfig{
+			IndexQueue:     indexQueue,
+			NumberOfQueues: 1,
+		},
+		TypeSense: config.TypeSenseConfig{Dns: "http://localhost:8108"},
+	}
+	q, inspector := newTestQueue(t, conf, indexQueue)
+
+	require.NoError(t, q.queueIndexRefresh("bln_refresh", "balances"))
+
+	tasks, err := inspector.ListPendingTasks(indexQueue)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	var task IndexTask
+	require.NoError(t, json.Unmarshal(tasks[0].Payload, &task))
+	assert.Equal(t, IndexModeRefresh, task.Mode)
+	assert.Equal(t, "balances", task.Collection)
+	assert.Equal(t, "bln_refresh", task.DocumentID)
+	assert.Nil(t, task.Payload)
+}
+
+func TestQueueIndexRefreshScope_EnqueuesScopeReference(t *testing.T) {
+	indexQueue := uniqueQueueName("index")
+	conf := &config.Configuration{
+		Redis: config.RedisConfig{Dns: testRedisAddr},
+		Queue: config.QueueConfig{
+			IndexQueue:     indexQueue,
+			NumberOfQueues: 1,
+		},
+		TypeSense: config.TypeSenseConfig{Dns: "http://localhost:8108"},
+	}
+	q, inspector := newTestQueue(t, conf, indexQueue)
+
+	require.NoError(t, q.queueIndexRefreshScope("bulk_scope_1", "transactions"))
+
+	tasks, err := inspector.ListPendingTasks(indexQueue)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	var task IndexTask
+	require.NoError(t, json.Unmarshal(tasks[0].Payload, &task))
+	assert.Equal(t, IndexModeRefresh, task.Mode)
+	assert.Equal(t, "transactions", task.Collection)
+	assert.Equal(t, "bulk_scope_1", task.ScopeID)
+}
+
 func TestQueueIndexData_UnserializablePayloadReturnsError(t *testing.T) {
 	indexQueue := uniqueQueueName("index")
 	conf := &config.Configuration{

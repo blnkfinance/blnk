@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/hibiken/asynq"
@@ -186,7 +187,7 @@ func TestIndexData(t *testing.T) {
 	})
 
 	t.Run("indexes a document into typesense", func(t *testing.T) {
-		payload, err := json.Marshal(indexData{
+		payload, err := json.Marshal(blnk.IndexTask{
 			Collection: "ledgers",
 			Payload: map[string]interface{}{
 				"ledger_id":  "ldg_worker_idx_test",

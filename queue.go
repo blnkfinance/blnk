@@ -225,6 +225,73 @@ func (q *Queue) queueIndexData(id string, collection string, data interface{}) e
 	return nil
 }
 
+// queueIndexRefresh enqueues a metadata reindex task that carries only the
+// document ID. The worker re-reads Postgres before upserting so concurrent
+// metadata updates cannot leave Typesense on an older snapshot.
+func (q *Queue) queueIndexRefresh(documentID, collection string) error {
+	if q.config.TypeSense.Dns == "" {
+		return nil
+	}
+
+	taskBody := IndexTask{
+		Collection: collection,
+		DocumentID: documentID,
+		Mode:       IndexModeRefresh,
+	}
+	IPayload, err := json.Marshal(taskBody)
+	if err != nil {
+		return err
+	}
+
+	taskOptions := []asynq.Option{
+		asynq.Queue(q.config.Queue.IndexQueue),
+		asynq.TaskID(fmt.Sprintf("index:refresh:%s:%s", collection, documentID)),
+	}
+	task := asynq.NewTask(q.config.Queue.IndexQueue, IPayload, taskOptions...)
+	if _, err := q.Client.Enqueue(task); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return nil
+		}
+		logrus.WithError(err).WithField("id", documentID).Error("failed to enqueue index refresh")
+		return err
+	}
+	logrus.WithFields(logrus.Fields{"id": documentID, "collection": collection}).Debug("successfully enqueued index refresh")
+	return nil
+}
+
+// queueIndexRefreshScope enqueues a metadata reindex for every transaction row
+// matched by UpdateTransactionMetadata (direct ID or parent_transaction).
+func (q *Queue) queueIndexRefreshScope(scopeID, collection string) error {
+	if q.config.TypeSense.Dns == "" {
+		return nil
+	}
+
+	taskBody := IndexTask{
+		Collection: collection,
+		ScopeID:    scopeID,
+		Mode:       IndexModeRefresh,
+	}
+	IPayload, err := json.Marshal(taskBody)
+	if err != nil {
+		return err
+	}
+
+	taskOptions := []asynq.Option{
+		asynq.Queue(q.config.Queue.IndexQueue),
+		asynq.TaskID(fmt.Sprintf("index:refresh:%s:scope:%s", collection, scopeID)),
+	}
+	task := asynq.NewTask(q.config.Queue.IndexQueue, IPayload, taskOptions...)
+	if _, err := q.Client.Enqueue(task); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return nil
+		}
+		logrus.WithError(err).WithField("scope_id", scopeID).Error("failed to enqueue index refresh scope")
+		return err
+	}
+	logrus.WithFields(logrus.Fields{"scope_id": scopeID, "collection": collection}).Debug("successfully enqueued index refresh scope")
+	return nil
+}
+
 // Enqueue enqueues a transaction to the Redis queue.
 //
 // Parameters:
