@@ -59,7 +59,9 @@ not re-read merged `meta_data`.
   but do not replace the API for critical workflows that require guaranteed
   notification. A transactional outbox is the upgrade path for lossless
   delivery.
-- **Search reindex** — transaction metadata updates reindex Typesense from a
-  full row read (including `effective_date` and flags restored from `meta_data`).
+- **Search reindex** — metadata updates enqueue an index refresh task (entity
+  ID or transaction scope only). The index worker re-reads Postgres before
+  upserting so queue ordering cannot leave Typesense on an older snapshot.
+  Rows include `effective_date` and flags restored from `meta_data`.
   `inflight_expiry_date` is not stored in Postgres today, so it cannot be
   restored on metadata-only reindex (same limitation as full DB reindex).

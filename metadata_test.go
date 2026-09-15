@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -251,6 +250,13 @@ func listQueuedTasks(t *testing.T, redisAddr, queueName string) []*asynq.TaskInf
 	return tasks
 }
 
+func decodeIndexTask(t *testing.T, task *asynq.TaskInfo) IndexTask {
+	t.Helper()
+	var idx IndexTask
+	require.NoError(t, json.Unmarshal(task.Payload, &idx))
+	return idx
+}
+
 func decodeMetadataWebhook(t *testing.T, task *asynq.TaskInfo) (event string, data map[string]interface{}) {
 	t.Helper()
 	var wh NewWebhook
@@ -457,34 +463,45 @@ func TestUpdateMetadata_TransactionIndexUsesFullDocumentNotPatch(t *testing.T) {
 	}
 	mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "txn_idx_1").Return(true, nil).Once()
 	mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_idx_1", newMetadata).Return(nil).Once()
-	// Index path lists rows in the metadata scope. Record completion via an
-	// atomic flag in Run — polling mock.Calls races with the async goroutine
-	// under -race because testify mutates Calls concurrently.
-	var indexFetchDone atomic.Bool
 	mockDS.On("ListTransactionsByMetadataScope", mock.Anything, "txn_idx_1", mock.Anything, mock.Anything).
-		Return([]*model.Transaction{fullTxn}, nil).
-		Run(func(mock.Arguments) { indexFetchDone.Store(true) }).
-		Once()
+		Return([]*model.Transaction{fullTxn}, nil).Once()
 
-	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
-	// Give this Blnk instance a queue so queueTransactionMetadataIndex is not
-	// skipped; NewBlnk already wires one from config, but assert it explicitly.
+	b, webhookQueue, indexQueue := setupMetadataQueuesBlnk(t, mockDS, "http://localhost:1/webhooks")
 	require.NotNil(t, b.queue)
 
 	_, err := b.UpdateMetadata(context.Background(), "txn_idx_1", newMetadata)
 	require.NoError(t, err)
 
-	// Webhook payload is still the patch, not the full document.
-	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, webhookQueue)
 	require.Len(t, tasks, 1)
 	_, data := decodeMetadataWebhook(t, tasks[0])
 	_, hasAmount := data["amount"]
 	assert.False(t, hasAmount, "webhook payload must remain the patch, not the full transaction")
 
+	var indexTask IndexTask
 	require.Eventually(t, func() bool {
-		return indexFetchDone.Load()
-	}, 2*time.Second, 10*time.Millisecond, "expected metadata scope listing to build the full index document")
+		indexTasks := listQueuedTasks(t, b.Config().Redis.Dns, indexQueue)
+		if len(indexTasks) != 1 {
+			return false
+		}
+		indexTask = decodeIndexTask(t, indexTasks[0])
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "expected a metadata refresh index task")
 
+	assert.Equal(t, IndexModeRefresh, indexTask.Mode)
+	assert.Equal(t, "transactions", indexTask.Collection)
+	assert.Equal(t, "txn_idx_1", indexTask.ScopeID)
+	assert.Nil(t, indexTask.Payload)
+
+	var indexed map[string]interface{}
+	require.NoError(t, b.ProcessIndexTask(context.Background(), indexTask, func(_ context.Context, collection string, document interface{}) error {
+		require.Equal(t, "transactions", collection)
+		doc, err := DocumentToIndexMap(document)
+		require.NoError(t, err)
+		indexed = doc
+		return nil
+	}))
+	assert.EqualValues(t, 100, indexed["amount"])
 	mockDS.AssertExpectations(t)
 }
 
@@ -537,23 +554,28 @@ func TestUpdateMetadata_BalanceIndexRereadsCurrentPosition(t *testing.T) {
 	assert.Equal(t, "bln_idx_1", data["balance_id"])
 	assert.EqualValues(t, 100, data["balance"], "the event reports the position this request committed against")
 
-	var indexed map[string]interface{}
+	var indexTask IndexTask
 	require.Eventually(t, func() bool {
 		indexTasks := listQueuedTasks(t, b.Config().Redis.Dns, indexQueue)
 		if len(indexTasks) != 1 {
 			return false
 		}
-		var payload struct {
-			Collection string                 `json:"collection"`
-			Payload    map[string]interface{} `json:"payload"`
-		}
-		require.NoError(t, json.Unmarshal(indexTasks[0].Payload, &payload))
-		assert.Equal(t, "balances", payload.Collection)
-		indexed = payload.Payload
+		indexTask = decodeIndexTask(t, indexTasks[0])
 		return true
-	}, 2*time.Second, 10*time.Millisecond, "expected the balance to be reindexed")
+	}, 2*time.Second, 10*time.Millisecond, "expected a metadata refresh index task")
 
-	assert.EqualValues(t, 500, indexed["balance"], "the index must carry the re-read position, not the pre-update snapshot")
+	assert.Equal(t, IndexModeRefresh, indexTask.Mode)
+	assert.Equal(t, "balances", indexTask.Collection)
+	assert.Equal(t, "bln_idx_1", indexTask.DocumentID)
+
+	var indexed map[string]interface{}
+	require.NoError(t, b.ProcessIndexTask(context.Background(), indexTask, func(_ context.Context, collection string, document interface{}) error {
+		doc, err := DocumentToIndexMap(document)
+		require.NoError(t, err)
+		indexed = doc
+		return nil
+	}))
+	assert.EqualValues(t, 500, indexed["balance"], "worker refresh must read the latest DB row, not an enqueued snapshot")
 	mockDS.AssertExpectations(t)
 }
 
@@ -698,26 +720,29 @@ func TestUpdateMetadata_BulkTransactionAppliesRawPatch(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "B-42", appliedPatch["settlement_batch"])
 
-	indexedIDs := map[string]struct{}{}
+	var indexTask IndexTask
 	require.Eventually(t, func() bool {
 		indexTasks := listQueuedTasks(t, b.Config().Redis.Dns, indexQueue)
-		for _, task := range indexTasks {
-			var payload struct {
-				Collection string                 `json:"collection"`
-				Payload    map[string]interface{} `json:"payload"`
-			}
-			if err := json.Unmarshal(task.Payload, &payload); err != nil {
-				continue
-			}
-			if payload.Collection != "transactions" {
-				continue
-			}
-			if id, _ := payload.Payload["transaction_id"].(string); id != "" {
-				indexedIDs[id] = struct{}{}
-			}
+		if len(indexTasks) != 1 {
+			return false
 		}
-		return len(indexedIDs) == 2
-	}, 2*time.Second, 10*time.Millisecond, "bulk reindex must enqueue every child row in the metadata scope")
+		indexTask = decodeIndexTask(t, indexTasks[0])
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "bulk metadata should enqueue one scope refresh task")
+
+	assert.Equal(t, IndexModeRefresh, indexTask.Mode)
+	assert.Equal(t, "bulk_meta_1", indexTask.ScopeID)
+
+	indexedIDs := map[string]struct{}{}
+	require.NoError(t, b.ProcessIndexTask(context.Background(), indexTask, func(_ context.Context, collection string, document interface{}) error {
+		require.Equal(t, "transactions", collection)
+		doc, err := DocumentToIndexMap(document)
+		require.NoError(t, err)
+		if id, _ := doc["transaction_id"].(string); id != "" {
+			indexedIDs[id] = struct{}{}
+		}
+		return nil
+	}))
 	assert.Contains(t, indexedIDs, "txn_bulk_child_1")
 	assert.Contains(t, indexedIDs, "txn_bulk_child_2")
 	mockDS.AssertExpectations(t)

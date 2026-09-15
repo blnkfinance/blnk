@@ -161,51 +161,28 @@ func (l *Blnk) enqueueMetadataUpdatedWebhook(entityType string, entitySnapshot i
 	}
 }
 
-// queueMetadataIndex reindexes a full resource snapshot asynchronously.
-// Indexing is best-effort and must not block the metadata API response.
-//
-// snapshot must be the full resource document with merged meta_data, and it is
-// only safe to index a request-time snapshot for entities whose non-metadata
-// fields do not move on their own: ledgers and identities. Balances and
-// transactions are reindexed from a re-read (queueBalanceMetadataIndex,
-// queueTransactionMetadataIndex) because indexing what this request happened to
-// read would republish amounts that concurrent transactions have since changed.
-//
-// The transaction webhook stub in particular carries only
-// {transaction_id, meta_data_patch} and would overwrite the Typesense document
-// with a near-empty record on upsert.
-func (l *Blnk) queueMetadataIndex(entityType, entityID string, snapshot interface{}) {
+// queueMetadataIndexRefresh enqueues a worker-side refresh for one entity.
+// The index worker re-reads Postgres before upserting so queue ordering cannot
+// publish an older metadata snapshot after a newer commit.
+func (l *Blnk) queueMetadataIndexRefresh(collection, entityID string) {
 	if l.queue == nil {
 		return
 	}
 	go func() {
-		if err := l.queue.queueIndexData(entityID, entityType, snapshot); err != nil {
+		if err := l.queue.queueIndexRefresh(entityID, collection); err != nil {
 			notification.NotifyError(err)
 		}
 	}()
 }
 
-// queueBalanceMetadataIndex reindexes the balance from a fresh read after a
-// metadata update, rather than from the snapshot this request loaded.
-//
-// A balance's amounts move whenever a transaction is applied to it, so the
-// snapshot read at the start of the request is already potentially stale by the
-// time indexing runs. Upserting it would rewrite the search document with older
-// figures, and nothing re-indexes that balance again until its next
-// transaction, so a quiet balance would stay wrong in /search indefinitely.
-// Best-effort: a fetch or index failure is reported via NotifyError and does
-// not affect the API response.
-func (l *Blnk) queueBalanceMetadataIndex(entityID string) {
+// queueTransactionMetadataIndexRefresh enqueues a worker-side refresh for every
+// transaction row touched by a metadata scope (txn_ or bulk_ ID).
+func (l *Blnk) queueTransactionMetadataIndexRefresh(scopeID string) {
 	if l.queue == nil {
 		return
 	}
 	go func() {
-		updatedBalance, err := l.GetBalanceByID(context.Background(), entityID, nil, false)
-		if err != nil {
-			notification.NotifyError(err)
-			return
-		}
-		if err := l.queue.queueIndexData(entityID, "balances", updatedBalance); err != nil {
+		if err := l.queue.queueIndexRefreshScope(scopeID, "transactions"); err != nil {
 			notification.NotifyError(err)
 		}
 	}()
@@ -220,43 +197,6 @@ func (l *Blnk) queueBalanceMetadataIndex(entityID string) {
 // reindex from GetAllTransactions).
 func prepareTransactionForSearchIndex(txn *model.Transaction) {
 	restoreTransactionFlagsFromMetadata(txn)
-}
-
-// queueTransactionMetadataIndex reindexes every transaction row touched by the
-// metadata update. UpdateTransactionMetadata matches transaction_id = scope OR
-// parent_transaction = scope, so a bulk_ ID can update many child rows while
-// GetTransaction(scope) finds none. Paginate the same scope the UPDATE used.
-// Best-effort: fetch or index failures are reported via NotifyError and do not
-// affect the API response.
-func (l *Blnk) queueTransactionMetadataIndex(entityID string) {
-	if l.queue == nil {
-		return
-	}
-	go func() {
-		const pageSize = 100
-		ctx := context.Background()
-		var offset int64
-		for {
-			txns, err := l.datasource.ListTransactionsByMetadataScope(ctx, entityID, pageSize, offset)
-			if err != nil {
-				notification.NotifyError(err)
-				return
-			}
-			if len(txns) == 0 {
-				return
-			}
-			for _, txn := range txns {
-				prepareTransactionForSearchIndex(txn)
-				if err := l.queue.queueIndexData(txn.TransactionID, "transactions", txn); err != nil {
-					notification.NotifyError(err)
-				}
-			}
-			if len(txns) < pageSize {
-				return
-			}
-			offset += int64(len(txns))
-		}
-	}()
 }
 
 // ledgerMetadataSnapshot copies ledger with the committed metadata for this update.
@@ -334,7 +274,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		snapshot := ledgerMetadataSnapshot(ledger, mergedMetadata)
-		l.queueMetadataIndex(entityType, entityID, snapshot)
+		l.queueMetadataIndexRefresh(entityType, entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return mergedMetadata, nil
 
@@ -354,7 +294,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		snapshot := transactionMetadataSnapshot(entityID, newMetadata)
-		l.queueTransactionMetadataIndex(entityID)
+		l.queueTransactionMetadataIndexRefresh(entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return newMetadata, nil
 
@@ -369,7 +309,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		snapshot := balanceMetadataSnapshot(balance, mergedMetadata)
-		l.queueBalanceMetadataIndex(entityID)
+		l.queueMetadataIndexRefresh(entityType, entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return mergedMetadata, nil
 
@@ -384,7 +324,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		}
 
 		snapshot := identityMetadataSnapshot(identity, mergedMetadata)
-		l.queueMetadataIndex(entityType, entityID, snapshot)
+		l.queueMetadataIndexRefresh(entityType, entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
 		return mergedMetadata, nil
 

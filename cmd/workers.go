@@ -48,13 +48,6 @@ import (
 	"github.com/hibiken/asynqmon"
 )
 
-// indexData represents the data structure used for indexing data in the system.
-// It includes the collection name and the payload which is the data to be indexed.
-type indexData struct {
-	Collection string                 `json:"collection"`
-	Payload    map[string]interface{} `json:"payload"`
-}
-
 // processTransaction processes a transaction received from the Redis queue.
 // If a transaction fails due to "insufficient funds", it is rejected, and a webhook is sent.
 // Otherwise, it retries the transaction in case of other failures.
@@ -212,18 +205,13 @@ func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	var data indexData
+	var task blnk.IndexTask
 
-	// Unmarshal the indexing data from the task payload.
-	if err := json.Unmarshal(t.Payload(), &data); err != nil {
+	if err := json.Unmarshal(t.Payload(), &task); err != nil {
 		logrus.Error(err)
 		return err
 	}
 
-	collection := data.Collection
-	payload := data.Payload
-
-	// Initialize a new TypeSense client and ensure collections exist.
 	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
 	err := newSearch.EnsureCollectionsExist(ctx)
 	if err != nil {
@@ -234,17 +222,25 @@ func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	// Handle the notification and send the payload to the collection for indexing.
-	err = newSearch.HandleNotification(ctx, collection, payload)
-	if err != nil {
-		err = markWorkerSearchBackpressure(ctx, err)
-		if !errors.Is(err, search.ErrMemoryBackpressure) {
-			logrus.Error("Error indexing data", err)
+	err = b.blnk.ProcessIndexTask(ctx, task, func(ctx context.Context, collection string, document interface{}) error {
+		payload, err := blnk.DocumentToIndexMap(document)
+		if err != nil {
+			return err
 		}
+		if err := newSearch.HandleNotification(ctx, collection, payload); err != nil {
+			err = markWorkerSearchBackpressure(ctx, err)
+			if !errors.Is(err, search.ErrMemoryBackpressure) {
+				logrus.Error("Error indexing data", err)
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
-	logrus.Infof(" [*] Data indexed: %s", collection)
+	logrus.Infof(" [*] Data indexed: %s", task.Collection)
 	return nil
 }
 
