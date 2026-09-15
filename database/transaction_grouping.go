@@ -49,7 +49,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 
 	// If not found in cache, fetch from the database
 	rows, err := d.Conn.QueryContext(ctx, `
-        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+        SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         ORDER BY created_at ASC
         LIMIT $1 OFFSET $2
@@ -87,6 +87,7 @@ func (d Datasource) GetTransactionsPaginated(ctx context.Context, _ string, batc
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.EffectiveDate,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -197,6 +198,7 @@ func (d Datasource) GroupTransactions(ctx context.Context, groupCriteria string,
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.EffectiveDate,
 		)
 		if err != nil {
 			span.RecordError(err)
@@ -241,7 +243,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT transaction_id::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE transaction_id::text IS NOT NULL AND transaction_id::text != ''
         ORDER BY transaction_id::text
@@ -251,7 +253,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT parent_transaction::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE parent_transaction::text IS NOT NULL AND parent_transaction::text != ''
         ORDER BY parent_transaction::text
@@ -261,7 +263,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT source::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE source::text IS NOT NULL AND source::text != ''
         ORDER BY source::text
@@ -271,7 +273,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT reference::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE reference::text IS NOT NULL AND reference::text != ''
         ORDER BY reference::text
@@ -281,7 +283,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT currency::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE currency::text IS NOT NULL AND currency::text != ''
         ORDER BY currency::text
@@ -291,7 +293,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT destination::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE destination::text IS NOT NULL AND destination::text != ''
         ORDER BY destination::text
@@ -301,7 +303,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT status::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE status::text IS NOT NULL AND status::text != ''
         ORDER BY status::text
@@ -311,7 +313,7 @@ func groupedTransactionsQuery(groupCriteria string) (string, bool) {
 		return `
         SELECT created_at::text AS group_key, transaction_id, parent_transaction, source, reference,
                amount, precise_amount, precision, currency, destination,
-               description, status, created_at, meta_data, scheduled_for, hash
+               description, status, created_at, meta_data, scheduled_for, hash, effective_date
         FROM blnk.transactions
         WHERE created_at::text IS NOT NULL AND created_at::text != ''
         ORDER BY created_at::text
@@ -342,14 +344,14 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 	rows, err := d.Conn.QueryContext(ctx, `
 		WITH inflight_transactions AS (
 			SELECT transaction_id, parent_transaction, source, reference, amount, precise_amount, precision,
-				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash
+				   currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date
 			FROM blnk.transactions
 			WHERE (transaction_id = $1 OR parent_transaction = $1 OR meta_data->>'QUEUED_PARENT_TRANSACTION' = $1)
 			AND status = 'INFLIGHT'
 		), 
 		queued_inflight_transactions AS (
 			SELECT t.transaction_id, t.parent_transaction, t.source, t.reference, t.amount, t.precise_amount, t.precision, 
-				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash
+				   t.currency, t.destination, t.description, t.status, t.created_at, t.meta_data, t.scheduled_for, t.hash, t.effective_date
 			FROM blnk.transactions t
 			WHERE (t.transaction_id = $1 OR t.parent_transaction = $1) 
 			AND t.status = 'QUEUED' AND t.meta_data->>'inflight' = 'true'
@@ -409,6 +411,7 @@ func (d Datasource) GetInflightTransactionsByParentID(ctx context.Context, paren
 			&metaDataJSON,
 			&transaction.ScheduledFor,
 			&transaction.Hash,
+			&transaction.EffectiveDate,
 		)
 		if err != nil {
 			span.RecordError(err)
