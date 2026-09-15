@@ -504,6 +504,16 @@ func TestBalanceMonitor_CheckCondition(t *testing.T) {
 	assert.False(t, result)
 }
 
+func TestBalanceMonitor_TriggerMode(t *testing.T) {
+	// An empty trigger is what a row written before the column existed, and a
+	// cache entry encoded before the field existed, both decode to. Both must
+	// behave as edge rather than silently keeping the old level behaviour.
+	assert.Equal(t, TriggerEdge, (&BalanceMonitor{}).TriggerMode())
+	assert.Equal(t, TriggerEdge, (&BalanceMonitor{Trigger: TriggerEdge}).TriggerMode())
+	assert.Equal(t, TriggerLevel, (&BalanceMonitor{Trigger: TriggerLevel}).TriggerMode())
+	assert.Equal(t, TriggerEdge, (&BalanceMonitor{Trigger: "nonsense"}).TriggerMode())
+}
+
 func TestExternalTransaction_ToInternalTransaction(t *testing.T) {
 	extTxn := &ExternalTransaction{
 		ID:          "ext123",
