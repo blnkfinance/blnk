@@ -27,10 +27,10 @@ type CreateBalance struct {
 }
 
 type CreateBalanceMonitor struct {
-	BalanceId   string                 `json:"balance_id"`
-	Condition   MonitorCondition       `json:"condition"`
-	CallBackURL string                 `json:"call_back_url"`
-	MetaData    map[string]interface{} `json:"meta_data"`
+	BalanceId   string           `json:"balance_id"`
+	Condition   MonitorCondition `json:"condition"`
+	CallBackURL string           `json:"call_back_url"`
+	Description string           `json:"description"`
 }
 
 type MonitorCondition struct {
