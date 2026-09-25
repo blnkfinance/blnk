@@ -135,8 +135,9 @@ func cloneMetadata(src map[string]interface{}) map[string]interface{} {
 //   - asynq redelivers this exact payload on worker retry, so retried
 //     deliveries carry the same event_id;
 //
-// No-ops when asynq is unset or no webhook URL is configured. Only called from
-// UpdateMetadata so internal metadata writers stay silent.
+// No-ops when asynq is unset or no webhook URL is configured. Called from
+// UpdateMetadata and from UpdateIdentity after a public meta_data replace.
+// Internal writers, including field tokenization, stay silent.
 func (l *Blnk) enqueueMetadataUpdatedWebhook(entityType string, entitySnapshot interface{}) {
 	if l.asynqClient == nil {
 		return

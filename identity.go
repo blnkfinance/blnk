@@ -27,6 +27,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/tokenization"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/sirupsen/logrus"
 )
 
 // postIdentityActions performs actions after an identity has been created.
@@ -118,6 +119,11 @@ func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters
 }
 
 // UpdateIdentity updates an existing identity in the database.
+// When the update writes meta_data, it reloads the stored identity and
+// enqueues identity.metadata.updated with that full record and the meta_data
+// this request committed. Field-only updates with no meta_data do not emit
+// that event. A failed reload or enqueue does not fail the update; the write
+// is already committed.
 //
 // Parameters:
 // - identity *model.Identity: A pointer to the Identity model to be updated.
@@ -125,7 +131,29 @@ func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters
 // Returns:
 // - error: An error if the identity could not be updated.
 func (l *Blnk) UpdateIdentity(identity *model.Identity) error {
-	return l.datasource.UpdateIdentity(identity)
+	if err := l.datasource.UpdateIdentity(identity); err != nil {
+		return err
+	}
+	if identity != nil && identity.MetaData != nil {
+		l.enqueueIdentityMetadataUpdated(identity)
+	}
+	return nil
+}
+
+// enqueueIdentityMetadataUpdated notifies after a committed identity meta_data
+// replace. Resource fields come from the stored row so omitted request fields
+// are not sent as empty strings. meta_data is the map this request wrote.
+func (l *Blnk) enqueueIdentityMetadataUpdated(identity *model.Identity) {
+	stored, err := l.GetIdentity(identity.IdentityID)
+	if err != nil || stored == nil {
+		if err == nil {
+			err = fmt.Errorf("identity %s not found after metadata update", identity.IdentityID)
+		}
+		logrus.WithError(err).WithField("identity_id", identity.IdentityID).Error("failed to load identity for metadata.updated webhook; metadata write is committed, event dropped")
+		notification.NotifyError(err)
+		return
+	}
+	l.enqueueMetadataUpdatedWebhook("identities", identityMetadataSnapshot(stored, identity.MetaData))
 }
 
 // DeleteIdentity deletes an identity by its ID.
@@ -200,8 +228,9 @@ func (l *Blnk) TokenizeIdentityField(identityID, fieldName string) error {
 	// as MarkFieldAsTokenized will handle the conversion internally
 	identity.MarkFieldAsTokenized(fieldName)
 
-	// Update the identity
-	return l.UpdateIdentity(identity)
+	// Persist the tokenized field without identity.metadata.updated.
+	// tokenized_fields is an internal metadata write, not a client metadata replace.
+	return l.datasource.UpdateIdentity(identity)
 }
 
 // DetokenizeIdentityField detokenizes a specific field in an identity.
