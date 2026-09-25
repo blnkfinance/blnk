@@ -27,6 +27,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/notification"
 	"github.com/blnkfinance/blnk/internal/tokenization"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/sirupsen/logrus"
 )
 
 // postIdentityActions performs actions after an identity has been created.
@@ -118,10 +119,11 @@ func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters
 }
 
 // UpdateIdentity updates an existing identity in the database.
-// When the update writes meta_data, it enqueues identity.metadata.updated on
-// the same webhook used by POST /:entity-id/metadata. Field-only updates with
-// no meta_data do not emit that event. Enqueue failure does not fail the
-// update; the write is already committed.
+// When the update writes meta_data, it reloads the stored identity and
+// enqueues identity.metadata.updated with that full record and the meta_data
+// this request committed. Field-only updates with no meta_data do not emit
+// that event. A failed reload or enqueue does not fail the update; the write
+// is already committed.
 //
 // Parameters:
 // - identity *model.Identity: A pointer to the Identity model to be updated.
@@ -133,9 +135,25 @@ func (l *Blnk) UpdateIdentity(identity *model.Identity) error {
 		return err
 	}
 	if identity != nil && identity.MetaData != nil {
-		l.enqueueMetadataUpdatedWebhook("identities", identityMetadataSnapshot(identity, identity.MetaData))
+		l.enqueueIdentityMetadataUpdated(identity)
 	}
 	return nil
+}
+
+// enqueueIdentityMetadataUpdated notifies after a committed identity meta_data
+// replace. Resource fields come from the stored row so omitted request fields
+// are not sent as empty strings. meta_data is the map this request wrote.
+func (l *Blnk) enqueueIdentityMetadataUpdated(identity *model.Identity) {
+	stored, err := l.GetIdentity(identity.IdentityID)
+	if err != nil || stored == nil {
+		if err == nil {
+			err = fmt.Errorf("identity %s not found after metadata update", identity.IdentityID)
+		}
+		logrus.WithError(err).WithField("identity_id", identity.IdentityID).Error("failed to load identity for metadata.updated webhook; metadata write is committed, event dropped")
+		notification.NotifyError(err)
+		return
+	}
+	l.enqueueMetadataUpdatedWebhook("identities", identityMetadataSnapshot(stored, identity.MetaData))
 }
 
 // DeleteIdentity deletes an identity by its ID.
