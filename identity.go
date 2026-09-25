@@ -118,6 +118,10 @@ func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters
 }
 
 // UpdateIdentity updates an existing identity in the database.
+// When the update writes meta_data, it enqueues identity.metadata.updated on
+// the same webhook used by POST /:entity-id/metadata. Field-only updates with
+// no meta_data do not emit that event. Enqueue failure does not fail the
+// update; the write is already committed.
 //
 // Parameters:
 // - identity *model.Identity: A pointer to the Identity model to be updated.
@@ -125,7 +129,13 @@ func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters
 // Returns:
 // - error: An error if the identity could not be updated.
 func (l *Blnk) UpdateIdentity(identity *model.Identity) error {
-	return l.datasource.UpdateIdentity(identity)
+	if err := l.datasource.UpdateIdentity(identity); err != nil {
+		return err
+	}
+	if identity != nil && identity.MetaData != nil {
+		l.enqueueMetadataUpdatedWebhook("identities", identityMetadataSnapshot(identity, identity.MetaData))
+	}
+	return nil
 }
 
 // DeleteIdentity deletes an identity by its ID.

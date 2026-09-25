@@ -416,6 +416,43 @@ func TestUpdateEntityMetadata_DoesNotEmitWebhook(t *testing.T) {
 	mockDS.AssertExpectations(t)
 }
 
+func TestUpdateIdentity_EmitsMetadataWebhook(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	identity := &model.Identity{
+		IdentityID: "idt_upd_1",
+		FirstName:  "Ada",
+		MetaData:   map[string]interface{}{"tier": "gold"},
+	}
+	mockDS.On("UpdateIdentity", identity).Return(nil).Once()
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	require.NoError(t, b.UpdateIdentity(identity))
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	require.Len(t, tasks, 1)
+	event, data := decodeMetadataWebhook(t, tasks[0])
+	assert.Equal(t, "identity.metadata.updated", event)
+	assert.Equal(t, "idt_upd_1", data["identity_id"])
+	assert.Equal(t, "Ada", data["first_name"])
+	meta, ok := data["meta_data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "gold", meta["tier"])
+	mockDS.AssertExpectations(t)
+}
+
+func TestUpdateIdentity_SkipsWebhookWithoutMetadata(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	identity := &model.Identity{IdentityID: "idt_upd_2", FirstName: "Ada"}
+	mockDS.On("UpdateIdentity", identity).Return(nil).Once()
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	require.NoError(t, b.UpdateIdentity(identity))
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	assert.Empty(t, tasks, "field-only identity updates must not enqueue metadata webhooks")
+	mockDS.AssertExpectations(t)
+}
+
 func TestUpdateMetadata_TransactionPatchPayloadWithoutRefetch(t *testing.T) {
 	mockDS := new(mocks.MockDataSource)
 	newMetadata := map[string]interface{}{"tag": "bulk"}

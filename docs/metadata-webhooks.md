@@ -1,8 +1,10 @@
 # Metadata update webhooks
 
 Public `POST /:entity-id/metadata` enqueues one webhook after the metadata merge
-commits. Internal writers (`updateEntityMetadata`, reconciliation, queue
-recovery) do not emit these events.
+commits. `PUT /identities/:id` enqueues `identity.metadata.updated` when the
+body includes `meta_data` (that write replaces metadata; it does not merge).
+Internal writers (`updateEntityMetadata`, reconciliation, queue recovery) do
+not emit these events.
 
 ## Events
 
