@@ -228,8 +228,9 @@ func (l *Blnk) TokenizeIdentityField(identityID, fieldName string) error {
 	// as MarkFieldAsTokenized will handle the conversion internally
 	identity.MarkFieldAsTokenized(fieldName)
 
-	// Update the identity
-	return l.UpdateIdentity(identity)
+	// Persist the tokenized field without identity.metadata.updated.
+	// tokenized_fields is an internal metadata write, not a client metadata replace.
+	return l.datasource.UpdateIdentity(identity)
 }
 
 // DetokenizeIdentityField detokenizes a specific field in an identity.

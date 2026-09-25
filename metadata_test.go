@@ -220,6 +220,7 @@ func setupMetadataQueuesBlnk(t *testing.T, mockDS *mocks.MockDataSource, webhook
 				Url: webhookURL,
 			},
 		},
+		TokenizationSecret: "0123456789abcdef0123456789abcdef",
 	}
 	config.ConfigStore.Store(cnf)
 
@@ -465,8 +466,14 @@ func TestUpdateIdentity_DropsWebhookWhenReloadFails(t *testing.T) {
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 	require.NoError(t, b.UpdateIdentity(requested))
 
+	// NotifyError may enqueue system.error on this same queue. That is not
+	// identity.metadata.updated.
+	time.Sleep(50 * time.Millisecond)
 	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
-	assert.Empty(t, tasks)
+	for _, task := range tasks {
+		event, _ := decodeMetadataWebhook(t, task)
+		assert.NotEqual(t, "identity.metadata.updated", event)
+	}
 	mockDS.AssertExpectations(t)
 }
 
@@ -480,6 +487,24 @@ func TestUpdateIdentity_SkipsWebhookWithoutMetadata(t *testing.T) {
 
 	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
 	assert.Empty(t, tasks, "field-only identity updates must not enqueue metadata webhooks")
+	mockDS.AssertExpectations(t)
+}
+
+func TestTokenizeIdentityField_DoesNotEmitMetadataWebhook(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	identity := &model.Identity{
+		IdentityID:   "idt_tok_1",
+		EmailAddress: "ada@example.com",
+		MetaData:     map[string]interface{}{"tier": "gold"},
+	}
+	mockDS.On("GetIdentityByID", "idt_tok_1").Return(identity, nil).Once()
+	mockDS.On("UpdateIdentity", mock.Anything).Return(nil).Once()
+
+	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	require.NoError(t, b.TokenizeIdentityField("idt_tok_1", "EmailAddress"))
+
+	tasks := listWebhookTasks(t, b.Config().Redis.Dns, queueName)
+	assert.Empty(t, tasks, "field tokenization must not enqueue metadata webhooks")
 	mockDS.AssertExpectations(t)
 }
 
