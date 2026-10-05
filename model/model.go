@@ -83,7 +83,10 @@ func compare(value *big.Int, condition string, compareTo *big.Int) bool {
 		return cmp <= 0
 	case "!=":
 		return cmp != 0
-	case "==":
+	// The table's check constraint stores equality as '=', so that is the
+	// spelling monitors actually carry; '==' is accepted as well because the
+	// API has always advertised it.
+	case "=", "==":
 		return cmp == 0
 	}
 	return false
