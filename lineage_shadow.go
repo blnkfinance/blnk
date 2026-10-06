@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
@@ -33,26 +34,51 @@ import (
 // positive amount is the part of the parent that was committed, and each shadow
 // is committed only for its share of it, so a partial commit does not mark the
 // whole allocation as spent.
-func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID string, amount *big.Int) error {
+//
+// It returns the committed total each shadow should reach for this commit (nil
+// for a full commit). A retry passes these targets to commitShadowsToTargets so
+// that shadows committed before a failure are not committed again.
+func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID string, amount *big.Int) (map[string]*big.Int, error) {
 	ctx, span := tracer.Start(ctx, "CommitShadowTransactions")
 	defer span.End()
 
 	shadowTxns, err := l.datasource.GetTransactionsByShadowFor(ctx, parentTransactionID)
 	if err != nil {
-		return fmt.Errorf("failed to get shadow transactions: %w", err)
+		return nil, fmt.Errorf("failed to get shadow transactions: %w", err)
 	}
 
-	commitAmounts, err := l.shadowCommitAmounts(ctx, shadowTxns, amount)
+	targets, err := l.shadowCommitTargets(ctx, shadowTxns, amount)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	return targets, l.commitShadowsToTargets(ctx, parentTransactionID, shadowTxns, targets)
+}
+
+// commitShadowsToTargets commits each shadow up to its target committed total,
+// committing only the difference from what it has already committed. Shadows
+// without a target are left alone. A nil targets map commits every shadow in
+// full.
+func (l *Blnk) commitShadowsToTargets(ctx context.Context, parentTransactionID string, shadowTxns []model.Transaction, targets map[string]*big.Int) error {
+	ctx, span := tracer.Start(ctx, "CommitShadowsToTargets")
+	defer span.End()
 
 	var failedShadows []string
-	for i, shadow := range shadowTxns {
+	for _, shadow := range shadowTxns {
 		shadowAmount := shadow.PreciseAmount
-		if commitAmounts != nil {
-			shadowAmount = commitAmounts[i]
-			if shadowAmount.Sign() == 0 {
+		if targets != nil {
+			target, ok := targets[shadow.TransactionID]
+			if !ok {
+				continue
+			}
+			committed, err := l.datasource.GetTotalCommittedTransactions(ctx, shadow.TransactionID)
+			if err != nil {
+				logrus.Errorf("failed to get committed amount for shadow transaction %s: %v", shadow.TransactionID, err)
+				failedShadows = append(failedShadows, shadow.TransactionID)
+				continue
+			}
+			shadowAmount = new(big.Int).Sub(target, committed)
+			if shadowAmount.Sign() <= 0 {
 				continue
 			}
 		}
@@ -82,35 +108,44 @@ func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID
 	return nil
 }
 
-// shadowCommitAmounts works out how much of each shadow transaction to commit
-// when the parent transaction was committed for amount. It returns nil when
-// every shadow should be committed in full: no amount was given, or a shadow has
-// no precise amount to split.
-func (l *Blnk) shadowCommitAmounts(ctx context.Context, shadows []model.Transaction, amount *big.Int) ([]*big.Int, error) {
+// shadowCommitTargets works out, for a parent transaction committed for amount,
+// the committed total each inflight shadow should reach: what it has already
+// committed plus its share of amount. Shadows that are no longer inflight, such
+// as the commit rows of earlier partial commits, take no share. It returns nil
+// when every shadow should be committed in full: no amount was given, or a
+// shadow has no precise amount to split.
+func (l *Blnk) shadowCommitTargets(ctx context.Context, shadows []model.Transaction, amount *big.Int) (map[string]*big.Int, error) {
 	if amount == nil || amount.Sign() <= 0 {
 		return nil, nil
 	}
 
-	remaining := make([]*big.Int, len(shadows))
-	for i, shadow := range shadows {
+	var inflight []model.Transaction
+	var committed, remaining []*big.Int
+	for _, shadow := range shadows {
 		if shadow.PreciseAmount == nil {
 			return nil, nil
 		}
 		if shadow.Status != "" && shadow.Status != StatusInflight {
-			remaining[i] = big.NewInt(0)
 			continue
 		}
-		committed, err := l.datasource.GetTotalCommittedTransactions(ctx, shadow.TransactionID)
+		done, err := l.datasource.GetTotalCommittedTransactions(ctx, shadow.TransactionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get committed amount for shadow transaction %s: %w", shadow.TransactionID, err)
 		}
-		remaining[i] = new(big.Int).Sub(shadow.PreciseAmount, committed)
-		if remaining[i].Sign() < 0 {
-			remaining[i] = big.NewInt(0)
+		left := new(big.Int).Sub(shadow.PreciseAmount, done)
+		if left.Sign() < 0 {
+			left.SetInt64(0)
 		}
+		inflight = append(inflight, shadow)
+		committed = append(committed, done)
+		remaining = append(remaining, left)
 	}
 
-	return splitShadowCommit(shadows, remaining, amount), nil
+	targets := make(map[string]*big.Int, len(inflight))
+	for i, take := range splitShadowCommit(inflight, remaining, amount) {
+		targets[inflight[i].TransactionID] = new(big.Int).Add(committed[i], take)
+	}
+	return targets, nil
 }
 
 // splitShadowCommit divides a commit of amount across the shadow transactions of
@@ -293,6 +328,16 @@ func (l *Blnk) inflightTransactionNeedsShadowWork(ctx context.Context, txn *mode
 	return src != nil && src.TrackFundLineage
 }
 
+// shadowWorkPayload is the outbox payload of a shadow commit or void retry.
+// Targets holds the committed total each shadow should reach, so a retry after a
+// partial failure only commits what is still missing. Amount is used when the
+// targets could not be worked out; with neither, every shadow commits in full.
+type shadowWorkPayload struct {
+	ParentTransactionID string            `json:"parent_transaction_id"`
+	Amount              string            `json:"amount,omitempty"`
+	Targets             map[string]string `json:"targets,omitempty"`
+}
+
 // queueShadowWork processes shadow commit or void work synchronously first, and queues
 // to outbox for retry only if there are failures. This provides both immediate processing
 // and guaranteed delivery for failed operations.
@@ -318,6 +363,7 @@ func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, 
 	defer span.End()
 
 	var processingErr error
+	var commitTargets map[string]*big.Int
 
 	// txn carries the amount that was just committed, which a partial commit
 	// must pass on to the shadows.
@@ -326,7 +372,7 @@ func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, 
 	// Try to process shadows synchronously first
 	switch lineageType {
 	case model.LineageTypeShadowCommit:
-		processingErr = l.commitShadowTransactions(ctx, parentTransactionID, commitAmount)
+		commitTargets, processingErr = l.commitShadowTransactions(ctx, parentTransactionID, commitAmount)
 	case model.LineageTypeShadowVoid:
 		processingErr = l.voidShadowTransactions(ctx, parentTransactionID)
 	}
@@ -346,14 +392,33 @@ func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, 
 	// Create outbox entry for shadow work retry
 	// Use a distinct ID to avoid conflict with regular lineage entries for same transaction
 	shadowWorkID := fmt.Sprintf("%s_%s", parentTransactionID, lineageType)
+	payload := shadowWorkPayload{ParentTransactionID: parentTransactionID}
+	if lineageType == model.LineageTypeShadowCommit {
+		// Each partial commit of a parent needs its own retry entry, keyed on the
+		// commit row that finalizeCommitment assigned to txn.
+		if txn.TransactionID != "" && txn.TransactionID != parentTransactionID {
+			shadowWorkID = fmt.Sprintf("%s_%s_%s", parentTransactionID, txn.TransactionID, lineageType)
+		}
+		if commitTargets != nil {
+			payload.Targets = make(map[string]string, len(commitTargets))
+			for id, target := range commitTargets {
+				payload.Targets[id] = target.String()
+			}
+		} else if commitAmount != nil {
+			payload.Amount = commitAmount.String()
+		}
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		span.RecordError(err)
+		logrus.Errorf("failed to marshal shadow work payload: %v", err)
+		return processingErr
+	}
 	outbox := &model.LineageOutbox{
 		TransactionID: shadowWorkID,
 		LineageType:   lineageType,
-		Payload:       fmt.Appendf(nil, `{"parent_transaction_id":"%s"}`, parentTransactionID),
+		Payload:       payloadBytes,
 		MaxAttempts:   5,
-	}
-	if lineageType == model.LineageTypeShadowCommit && commitAmount != nil {
-		outbox.Payload = fmt.Appendf(nil, `{"parent_transaction_id":"%s","amount":"%s"}`, parentTransactionID, commitAmount.String())
 	}
 
 	if err := l.datasource.InsertLineageOutbox(ctx, outbox); err != nil {
