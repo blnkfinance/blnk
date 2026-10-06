@@ -28,6 +28,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// commitShadowTransactions commits the inflight shadow transactions of a parent
+// transaction. A nil or non-positive amount commits every shadow in full. A
+// positive amount is the part of the parent that was committed, and each shadow
+// is committed only for its share of it, so a partial commit does not mark the
+// whole allocation as spent.
 func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID string, amount *big.Int) error {
 	ctx, span := tracer.Start(ctx, "CommitShadowTransactions")
 	defer span.End()
@@ -37,9 +42,21 @@ func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID
 		return fmt.Errorf("failed to get shadow transactions: %w", err)
 	}
 
+	commitAmounts, err := l.shadowCommitAmounts(ctx, shadowTxns, amount)
+	if err != nil {
+		return err
+	}
+
 	var failedShadows []string
-	for _, shadow := range shadowTxns {
-		_, err := l.CommitInflightTransaction(ctx, shadow.TransactionID, shadow.PreciseAmount)
+	for i, shadow := range shadowTxns {
+		shadowAmount := shadow.PreciseAmount
+		if commitAmounts != nil {
+			shadowAmount = commitAmounts[i]
+			if shadowAmount.Sign() == 0 {
+				continue
+			}
+		}
+		_, err := l.CommitInflightTransaction(ctx, shadow.TransactionID, shadowAmount)
 		if err != nil {
 			if strings.Contains(err.Error(), "already committed") ||
 				strings.Contains(err.Error(), "not in inflight status") {
@@ -63,6 +80,123 @@ func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID
 	}
 
 	return nil
+}
+
+// shadowCommitAmounts works out how much of each shadow transaction to commit
+// when the parent transaction was committed for amount. It returns nil when
+// every shadow should be committed in full: no amount was given, or a shadow has
+// no precise amount to split.
+func (l *Blnk) shadowCommitAmounts(ctx context.Context, shadows []model.Transaction, amount *big.Int) ([]*big.Int, error) {
+	if amount == nil || amount.Sign() <= 0 {
+		return nil, nil
+	}
+
+	remaining := make([]*big.Int, len(shadows))
+	for i, shadow := range shadows {
+		if shadow.PreciseAmount == nil {
+			return nil, nil
+		}
+		if shadow.Status != "" && shadow.Status != StatusInflight {
+			remaining[i] = big.NewInt(0)
+			continue
+		}
+		committed, err := l.datasource.GetTotalCommittedTransactions(ctx, shadow.TransactionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get committed amount for shadow transaction %s: %w", shadow.TransactionID, err)
+		}
+		remaining[i] = new(big.Int).Sub(shadow.PreciseAmount, committed)
+		if remaining[i].Sign() < 0 {
+			remaining[i] = big.NewInt(0)
+		}
+	}
+
+	return splitShadowCommit(shadows, remaining, amount), nil
+}
+
+// splitShadowCommit divides a commit of amount across the shadow transactions of
+// a parent transaction. remaining[i] is the uncommitted part of shadows[i].
+//
+// Release shadows follow the allocation strategy the debit used: FIFO and LIFO
+// fill the shadows in order, proportional splits the amount by each shadow's
+// remaining share. A receive shadow commits what its provider's release shadow
+// did; any other shadow commits up to the full amount.
+func splitShadowCommit(shadows []model.Transaction, remaining []*big.Int, amount *big.Int) []*big.Int {
+	commits := make([]*big.Int, len(shadows))
+	for i := range commits {
+		commits[i] = big.NewInt(0)
+	}
+
+	shadowMeta := func(shadow model.Transaction, key string) string {
+		value, _ := shadow.MetaData[key].(string)
+		return value
+	}
+
+	releaseTotal := big.NewInt(0)
+	proportional := false
+	for i, shadow := range shadows {
+		if shadowMeta(shadow, "_lineage_type") != "release" {
+			continue
+		}
+		releaseTotal.Add(releaseTotal, remaining[i])
+		if shadowMeta(shadow, "_allocation") == AllocationProp {
+			proportional = true
+		}
+	}
+
+	byProvider := make(map[string]*big.Int)
+	left := new(big.Int).Set(amount)
+	for i, shadow := range shadows {
+		if shadowMeta(shadow, "_lineage_type") != "release" {
+			continue
+		}
+		take := new(big.Int)
+		if proportional && releaseTotal.Sign() > 0 {
+			take.Mul(remaining[i], amount)
+			take.Quo(take, releaseTotal)
+		} else {
+			take.Set(left)
+		}
+		if take.Cmp(remaining[i]) > 0 {
+			take.Set(remaining[i])
+		}
+		left.Sub(left, take)
+		commits[i] = take
+		byProvider[shadowMeta(shadow, "_provider")] = take
+	}
+
+	// Rounding in the proportional split can leave a few units unassigned.
+	if proportional {
+		for i, shadow := range shadows {
+			if left.Sign() <= 0 {
+				break
+			}
+			if shadowMeta(shadow, "_lineage_type") != "release" {
+				continue
+			}
+			extra := new(big.Int).Sub(remaining[i], commits[i])
+			if extra.Cmp(left) > 0 {
+				extra.Set(left)
+			}
+			commits[i].Add(commits[i], extra)
+			left.Sub(left, extra)
+		}
+	}
+
+	for i, shadow := range shadows {
+		if shadowMeta(shadow, "_lineage_type") == "release" {
+			continue
+		}
+		take := new(big.Int).Set(amount)
+		if released, ok := byProvider[shadowMeta(shadow, "_provider")]; ok {
+			take.Set(released)
+		}
+		if take.Cmp(remaining[i]) > 0 {
+			take.Set(remaining[i])
+		}
+		commits[i] = take
+	}
+
+	return commits
 }
 
 // voidShadowTransactions voids all inflight shadow transactions for a parent transaction.
@@ -185,10 +319,14 @@ func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, 
 
 	var processingErr error
 
+	// txn carries the amount that was just committed, which a partial commit
+	// must pass on to the shadows.
+	commitAmount := txn.PreciseAmount
+
 	// Try to process shadows synchronously first
 	switch lineageType {
 	case model.LineageTypeShadowCommit:
-		processingErr = l.commitShadowTransactions(ctx, parentTransactionID, nil)
+		processingErr = l.commitShadowTransactions(ctx, parentTransactionID, commitAmount)
 	case model.LineageTypeShadowVoid:
 		processingErr = l.voidShadowTransactions(ctx, parentTransactionID)
 	}
@@ -213,6 +351,9 @@ func (l *Blnk) queueShadowWork(ctx context.Context, parentTransactionID string, 
 		LineageType:   lineageType,
 		Payload:       fmt.Appendf(nil, `{"parent_transaction_id":"%s"}`, parentTransactionID),
 		MaxAttempts:   5,
+	}
+	if lineageType == model.LineageTypeShadowCommit && commitAmount != nil {
+		outbox.Payload = fmt.Appendf(nil, `{"parent_transaction_id":"%s","amount":"%s"}`, parentTransactionID, commitAmount.String())
 	}
 
 	if err := l.datasource.InsertLineageOutbox(ctx, outbox); err != nil {

@@ -1727,3 +1727,150 @@ func TestLineageOutboxProcessor(t *testing.T) {
 		mockDS.AssertCalled(t, "MarkOutboxCompleted", mock.Anything, int64(1))
 	})
 }
+
+func shadowForSplit(id, lineageType, provider, strategy string) model.Transaction {
+	meta := map[string]interface{}{
+		"_lineage_type": lineageType,
+		"_provider":     provider,
+	}
+	if strategy != "" {
+		meta["_allocation"] = strategy
+	}
+	return model.Transaction{TransactionID: id, MetaData: meta}
+}
+
+func bigInts(values ...int64) []*big.Int {
+	out := make([]*big.Int, len(values))
+	for i, v := range values {
+		out[i] = big.NewInt(v)
+	}
+	return out
+}
+
+func assertBigInts(t *testing.T, want, got []*big.Int) {
+	t.Helper()
+	wantStrings := make([]string, len(want))
+	for i, w := range want {
+		wantStrings[i] = w.String()
+	}
+	gotStrings := make([]string, len(got))
+	for i, g := range got {
+		gotStrings[i] = g.String()
+	}
+	assert.Equal(t, wantStrings, gotStrings)
+}
+
+func TestSplitShadowCommit(t *testing.T) {
+	t.Run("FIFO partial commit stays within the first lot", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 20), big.NewInt(5))
+		assertBigInts(t, bigInts(5, 0), got)
+	})
+
+	t.Run("FIFO partial commit spills into the next lot", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 20), big.NewInt(25))
+		assertBigInts(t, bigInts(15, 10), got)
+	})
+
+	t.Run("committing the full amount commits every shadow in full", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 20), big.NewInt(35))
+		assertBigInts(t, bigInts(15, 20), got)
+	})
+
+	t.Run("receive shadow follows its provider's release", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rcv_a", "receive", "a", ""),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+			shadowForSplit("rcv_b", "receive", "b", ""),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 15, 20, 20), big.NewInt(5))
+		assertBigInts(t, bigInts(5, 5, 0, 0), got)
+	})
+
+	t.Run("proportional split rounds without losing units", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationProp),
+			shadowForSplit("rel_b", "release", "b", AllocationProp),
+			shadowForSplit("rel_c", "release", "c", AllocationProp),
+		}
+		got := splitShadowCommit(shadows, bigInts(10, 10, 10), big.NewInt(10))
+		total := new(big.Int)
+		for _, g := range got {
+			total.Add(total, g)
+		}
+		assert.Equal(t, int64(10), total.Int64())
+		assertBigInts(t, bigInts(4, 3, 3), got)
+	})
+
+	t.Run("credit shadow commits the committed amount", func(t *testing.T) {
+		shadows := []model.Transaction{shadowForSplit("credit", "credit", "a", "")}
+		got := splitShadowCommit(shadows, bigInts(20), big.NewInt(5))
+		assertBigInts(t, bigInts(5), got)
+	})
+}
+
+func TestShadowCommitAmounts(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no amount commits every shadow in full", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, []model.Transaction{{TransactionID: "s1", PreciseAmount: big.NewInt(20)}}, nil)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+		mockDS.AssertNotCalled(t, "GetTotalCommittedTransactions", mock.Anything, mock.Anything)
+	})
+
+	t.Run("subtracts what an earlier partial commit already took", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		shadows := []model.Transaction{
+			{TransactionID: "s1", Status: StatusInflight, PreciseAmount: big.NewInt(20), MetaData: map[string]interface{}{"_lineage_type": "release", "_provider": "a"}},
+		}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "s1").Return(big.NewInt(5), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, shadows, big.NewInt(30))
+		require.NoError(t, err)
+		assertBigInts(t, bigInts(15), got)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("shadows that are no longer inflight are skipped", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		shadows := []model.Transaction{
+			{TransactionID: "s1", Status: StatusCommit, PreciseAmount: big.NewInt(20), MetaData: map[string]interface{}{"_lineage_type": "release", "_provider": "a"}},
+		}
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, shadows, big.NewInt(5))
+		require.NoError(t, err)
+		assertBigInts(t, bigInts(0), got)
+		mockDS.AssertNotCalled(t, "GetTotalCommittedTransactions", mock.Anything, mock.Anything)
+	})
+
+	t.Run("returns an error when the committed amount lookup fails", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		shadows := []model.Transaction{{TransactionID: "s1", Status: StatusInflight, PreciseAmount: big.NewInt(20)}}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "s1").Return((*big.Int)(nil), fmt.Errorf("db down"))
+
+		_, err := blnkInstance.shadowCommitAmounts(ctx, shadows, big.NewInt(5))
+		require.Error(t, err)
+	})
+}

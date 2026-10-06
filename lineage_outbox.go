@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 
 	"github.com/blnkfinance/blnk/model"
 	"github.com/sirupsen/logrus"
@@ -132,9 +133,19 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 		// Extract parent transaction ID from payload
 		var payload struct {
 			ParentTransactionID string `json:"parent_transaction_id"`
+			Amount              string `json:"amount"`
 		}
 		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
 			return fmt.Errorf("failed to unmarshal shadow work payload: %w", err)
+		}
+		// Entries queued before partial commits were handled carry no amount and
+		// commit the shadows in full.
+		var commitAmount *big.Int
+		if payload.Amount != "" {
+			var ok bool
+			if commitAmount, ok = new(big.Int).SetString(payload.Amount, 10); !ok {
+				return fmt.Errorf("invalid amount %q in shadow work payload", payload.Amount)
+			}
 		}
 		parentTxnID := payload.ParentTransactionID
 		if parentTxnID == "" {
@@ -145,7 +156,7 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 			span.AddEvent("Processing shadow commit from outbox", trace.WithAttributes(
 				attribute.String("parent.transaction_id", parentTxnID),
 			))
-			if err := l.commitShadowTransactions(ctx, parentTxnID, nil); err != nil {
+			if err := l.commitShadowTransactions(ctx, parentTxnID, commitAmount); err != nil {
 				return fmt.Errorf("failed to commit shadow transactions: %w", err)
 			}
 			span.AddEvent("Shadow commit completed from outbox")
