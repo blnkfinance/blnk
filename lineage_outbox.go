@@ -135,8 +135,8 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
 			return fmt.Errorf("failed to unmarshal shadow work payload: %w", err)
 		}
-		// Entries queued before partial commits were handled carry neither targets
-		// nor an amount and commit the shadows in full.
+		// Entries queued before partial commits were handled carry neither
+		// per-shadow amounts nor an amount and commit the shadows in full.
 		var commitAmount *big.Int
 		if payload.Amount != "" {
 			var ok bool
@@ -144,15 +144,15 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 				return fmt.Errorf("invalid amount %q in shadow work payload", payload.Amount)
 			}
 		}
-		var commitTargets map[string]*big.Int
-		if len(payload.Targets) > 0 {
-			commitTargets = make(map[string]*big.Int, len(payload.Targets))
-			for id, value := range payload.Targets {
-				target, ok := new(big.Int).SetString(value, 10)
+		var commitAmounts map[string]*big.Int
+		if len(payload.Amounts) > 0 {
+			commitAmounts = make(map[string]*big.Int, len(payload.Amounts))
+			for id, value := range payload.Amounts {
+				shadowAmount, ok := new(big.Int).SetString(value, 10)
 				if !ok {
-					return fmt.Errorf("invalid target %q for shadow %s in shadow work payload", value, id)
+					return fmt.Errorf("invalid amount %q for shadow %s in shadow work payload", value, id)
 				}
-				commitTargets[id] = target
+				commitAmounts[id] = shadowAmount
 			}
 		}
 		parentTxnID := payload.ParentTransactionID
@@ -164,15 +164,15 @@ func (l *Blnk) ProcessLineageFromOutbox(ctx context.Context, entry model.Lineage
 			span.AddEvent("Processing shadow commit from outbox", trace.WithAttributes(
 				attribute.String("parent.transaction_id", parentTxnID),
 			))
-			if commitTargets != nil {
+			if commitAmounts != nil {
 				shadowTxns, err := l.datasource.GetTransactionsByShadowFor(ctx, parentTxnID)
 				if err != nil {
 					return fmt.Errorf("failed to get shadow transactions: %w", err)
 				}
-				if err := l.commitShadowsToTargets(ctx, parentTxnID, shadowTxns, commitTargets); err != nil {
+				if err := l.commitShadowAmounts(ctx, parentTxnID, payload.CommitID, shadowTxns, commitAmounts); err != nil {
 					return fmt.Errorf("failed to commit shadow transactions: %w", err)
 				}
-			} else if _, err := l.commitShadowTransactions(ctx, parentTxnID, commitAmount); err != nil {
+			} else if _, err := l.commitShadowTransactions(ctx, parentTxnID, payload.CommitID, commitAmount); err != nil {
 				return fmt.Errorf("failed to commit shadow transactions: %w", err)
 			}
 			span.AddEvent("Shadow commit completed from outbox")
