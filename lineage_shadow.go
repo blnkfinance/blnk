@@ -51,7 +51,7 @@ func (l *Blnk) commitShadowTransactions(ctx context.Context, parentTransactionID
 		return nil, fmt.Errorf("failed to get shadow transactions: %w", err)
 	}
 
-	amounts, err := l.shadowCommitAmounts(ctx, shadowTxns, amount)
+	amounts, err := l.shadowCommitAmounts(ctx, parentTransactionID, commitID, shadowTxns, amount)
 	if err != nil {
 		return nil, err
 	}
@@ -119,19 +119,30 @@ func (l *Blnk) commitShadowAmounts(ctx context.Context, parentTransactionID, com
 // shadowCommitAmounts works out, for a parent transaction committed for amount,
 // how much of each inflight shadow this commit should commit. Shadows that are
 // no longer inflight, such as the commit rows of earlier partial commits, take
-// no share. It returns nil when every shadow should be committed in full: no
-// amount was given, or a shadow has no precise amount to split.
-func (l *Blnk) shadowCommitAmounts(ctx context.Context, shadows []model.Transaction, amount *big.Int) (map[string]*big.Int, error) {
+// no share, and neither does the part of a shadow that an earlier commit of the
+// parent still owes from the outbox. commitID is this commit's own ID, whose
+// outbox entry is not counted against itself. It returns nil when every shadow
+// should be committed in full: no amount was given, or a shadow has no precise
+// amount to split.
+func (l *Blnk) shadowCommitAmounts(ctx context.Context, parentTransactionID, commitID string, shadows []model.Transaction, amount *big.Int) (map[string]*big.Int, error) {
 	if amount == nil || amount.Sign() <= 0 {
 		return nil, nil
+	}
+
+	for _, shadow := range shadows {
+		if shadow.PreciseAmount == nil {
+			return nil, nil
+		}
+	}
+
+	owed, err := l.owedShadowCommits(ctx, parentTransactionID, commitID)
+	if err != nil {
+		return nil, err
 	}
 
 	var inflight []model.Transaction
 	var remaining []*big.Int
 	for _, shadow := range shadows {
-		if shadow.PreciseAmount == nil {
-			return nil, nil
-		}
 		if shadow.Status != "" && shadow.Status != StatusInflight {
 			continue
 		}
@@ -140,6 +151,9 @@ func (l *Blnk) shadowCommitAmounts(ctx context.Context, shadows []model.Transact
 			return nil, fmt.Errorf("failed to get committed amount for shadow transaction %s: %w", shadow.TransactionID, err)
 		}
 		left := new(big.Int).Sub(shadow.PreciseAmount, done)
+		if claim, ok := owed[shadow.TransactionID]; ok {
+			left.Sub(left, claim)
+		}
 		if left.Sign() < 0 {
 			left.SetInt64(0)
 		}
@@ -152,6 +166,49 @@ func (l *Blnk) shadowCommitAmounts(ctx context.Context, shadows []model.Transact
 		amounts[inflight[i].TransactionID] = take
 	}
 	return amounts, nil
+}
+
+// owedShadowCommits sums, per shadow, what the queued shadow commits of a
+// parent transaction still owe. A commit whose shadow write failed keeps its
+// claim in the outbox until a retry lands, and a commit made in the meantime must
+// not take that part of the shadow. Claims whose commit reference already exists
+// have landed and show up in the committed total instead. The entry of commitID
+// itself is skipped, because its retry is the one spending that claim.
+func (l *Blnk) owedShadowCommits(ctx context.Context, parentTransactionID, commitID string) (map[string]*big.Int, error) {
+	entries, err := l.datasource.GetPendingShadowCommitOutbox(ctx, parentTransactionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get queued shadow commits for %s: %w", parentTransactionID, err)
+	}
+
+	owed := make(map[string]*big.Int)
+	for _, entry := range entries {
+		var payload shadowWorkPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil || len(payload.Amounts) == 0 {
+			continue
+		}
+		if payload.CommitID == "" || payload.CommitID == commitID {
+			continue
+		}
+		for shadowID, value := range payload.Amounts {
+			claim, ok := new(big.Int).SetString(value, 10)
+			if !ok || claim.Sign() <= 0 {
+				continue
+			}
+			landed, err := l.datasource.TransactionExistsByRef(ctx, shadowCommitReference(payload.CommitID, shadowID))
+			if err != nil {
+				return nil, fmt.Errorf("failed to check shadow commit %s for %s: %w", payload.CommitID, shadowID, err)
+			}
+			if landed {
+				continue
+			}
+			if total, ok := owed[shadowID]; ok {
+				total.Add(total, claim)
+			} else {
+				owed[shadowID] = claim
+			}
+		}
+	}
+	return owed, nil
 }
 
 // splitShadowCommit divides a commit of amount across the shadow transactions of
