@@ -18,13 +18,18 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database/mocks"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -1726,4 +1731,385 @@ func TestLineageOutboxProcessor(t *testing.T) {
 
 		mockDS.AssertCalled(t, "MarkOutboxCompleted", mock.Anything, int64(1))
 	})
+}
+
+func shadowForSplit(id, lineageType, provider, strategy string) model.Transaction {
+	meta := map[string]interface{}{
+		"_lineage_type": lineageType,
+		"_provider":     provider,
+	}
+	if strategy != "" {
+		meta["_allocation"] = strategy
+	}
+	return model.Transaction{TransactionID: id, MetaData: meta}
+}
+
+func bigInts(values ...int64) []*big.Int {
+	out := make([]*big.Int, len(values))
+	for i, v := range values {
+		out[i] = big.NewInt(v)
+	}
+	return out
+}
+
+func assertBigInts(t *testing.T, want, got []*big.Int) {
+	t.Helper()
+	wantStrings := make([]string, len(want))
+	for i, w := range want {
+		wantStrings[i] = w.String()
+	}
+	gotStrings := make([]string, len(got))
+	for i, g := range got {
+		gotStrings[i] = g.String()
+	}
+	assert.Equal(t, wantStrings, gotStrings)
+}
+
+func TestSplitShadowCommit(t *testing.T) {
+	t.Run("FIFO partial commit stays within the first lot", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 20), big.NewInt(5))
+		assertBigInts(t, bigInts(5, 0), got)
+	})
+
+	t.Run("FIFO partial commit spills into the next lot", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 20), big.NewInt(25))
+		assertBigInts(t, bigInts(15, 10), got)
+	})
+
+	t.Run("committing the full amount commits every shadow in full", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 20), big.NewInt(35))
+		assertBigInts(t, bigInts(15, 20), got)
+	})
+
+	t.Run("receive shadow follows its provider's release", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationFIFO),
+			shadowForSplit("rcv_a", "receive", "a", ""),
+			shadowForSplit("rel_b", "release", "b", AllocationFIFO),
+			shadowForSplit("rcv_b", "receive", "b", ""),
+		}
+		got := splitShadowCommit(shadows, bigInts(15, 15, 20, 20), big.NewInt(5))
+		assertBigInts(t, bigInts(5, 5, 0, 0), got)
+	})
+
+	t.Run("proportional split rounds without losing units", func(t *testing.T) {
+		shadows := []model.Transaction{
+			shadowForSplit("rel_a", "release", "a", AllocationProp),
+			shadowForSplit("rel_b", "release", "b", AllocationProp),
+			shadowForSplit("rel_c", "release", "c", AllocationProp),
+		}
+		got := splitShadowCommit(shadows, bigInts(10, 10, 10), big.NewInt(10))
+		total := new(big.Int)
+		for _, g := range got {
+			total.Add(total, g)
+		}
+		assert.Equal(t, int64(10), total.Int64())
+		assertBigInts(t, bigInts(4, 3, 3), got)
+	})
+
+	t.Run("credit shadow commits the committed amount", func(t *testing.T) {
+		shadows := []model.Transaction{shadowForSplit("credit", "credit", "a", "")}
+		got := splitShadowCommit(shadows, bigInts(20), big.NewInt(5))
+		assertBigInts(t, bigInts(5), got)
+	})
+}
+
+func shadowWithStatus(id, status, lineageType, provider string, amount int64) model.Transaction {
+	return model.Transaction{
+		TransactionID: id,
+		Status:        status,
+		PreciseAmount: big.NewInt(amount),
+		MetaData:      map[string]interface{}{"_lineage_type": lineageType, "_provider": provider},
+	}
+}
+
+func assertAmounts(t *testing.T, want map[string]int64, got map[string]*big.Int) {
+	t.Helper()
+	gotInts := make(map[string]int64, len(got))
+	for id, v := range got {
+		gotInts[id] = v.Int64()
+	}
+	assert.Equal(t, want, gotInts)
+}
+
+func TestShadowCommitAmounts(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no amount commits every shadow in full", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit", []model.Transaction{{TransactionID: "s1", PreciseAmount: big.NewInt(20)}}, nil)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+		mockDS.AssertNotCalled(t, "GetTotalCommittedTransactions", mock.Anything, mock.Anything)
+	})
+
+	t.Run("caps the share at what an earlier partial commit left", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(nil, nil)
+
+		shadows := []model.Transaction{shadowWithStatus("s1", StatusInflight, "release", "a", 20)}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "s1").Return(big.NewInt(5), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit", shadows, big.NewInt(30))
+		require.NoError(t, err)
+		assertAmounts(t, map[string]int64{"s1": 15}, got)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("FIFO commit across two pots commits only the committed amount", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(nil, nil)
+
+		shadows := []model.Transaction{
+			shadowWithStatus("pot15", StatusInflight, "release", "a", 15),
+			shadowWithStatus("pot20", StatusInflight, "release", "b", 20),
+		}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, mock.Anything).Return(big.NewInt(0), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit", shadows, big.NewInt(25))
+		require.NoError(t, err)
+		assertAmounts(t, map[string]int64{"pot15": 15, "pot20": 10}, got)
+	})
+
+	t.Run("commit rows of an earlier partial commit do not zero the receiver", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(nil, nil)
+
+		// Jack holds 20 to Alice, both tracking lineage, and 5 was already
+		// committed. The first commit left COMMIT rows tagged with the same
+		// parent; the second commit of 5 must still reach Alice's receive shadow.
+		shadows := []model.Transaction{
+			shadowWithStatus("jack_release", StatusInflight, "release", "a", 20),
+			shadowWithStatus("jack_release_commit", StatusCommit, "release", "a", 5),
+			shadowWithStatus("alice_receive", StatusInflight, "receive", "a", 20),
+			shadowWithStatus("alice_receive_commit", StatusCommit, "receive", "a", 5),
+		}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "jack_release").Return(big.NewInt(5), nil)
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "alice_receive").Return(big.NewInt(5), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit", shadows, big.NewInt(5))
+		require.NoError(t, err)
+		assertAmounts(t, map[string]int64{"jack_release": 5, "alice_receive": 5}, got)
+		mockDS.AssertNotCalled(t, "GetTotalCommittedTransactions", mock.Anything, "jack_release_commit")
+		mockDS.AssertNotCalled(t, "GetTotalCommittedTransactions", mock.Anything, "alice_receive_commit")
+	})
+
+	t.Run("full commit with a provider on the hold commits the whole credit shadow", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(nil, nil)
+
+		// Jack has stripe 15 and paypal 20 and holds 20 for Alice with
+		// BLNK_LINEAGE_PROVIDER: stripe, so Alice's credit shadow also carries
+		// stripe. It must commit all 20, not the stripe release share of 15.
+		shadows := []model.Transaction{
+			shadowWithStatus("alice_credit", StatusInflight, "credit", "stripe", 20),
+			shadowWithStatus("jack_release_stripe", StatusInflight, "release", "stripe", 15),
+			shadowWithStatus("jack_release_paypal", StatusInflight, "release", "paypal", 5),
+			shadowWithStatus("alice_receive_stripe", StatusInflight, "receive", "stripe", 15),
+			shadowWithStatus("alice_receive_paypal", StatusInflight, "receive", "paypal", 5),
+		}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, mock.Anything).Return(big.NewInt(0), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit", shadows, big.NewInt(20))
+		require.NoError(t, err)
+		assertAmounts(t, map[string]int64{
+			"alice_credit":         20,
+			"jack_release_stripe":  15,
+			"jack_release_paypal":  5,
+			"alice_receive_stripe": 15,
+			"alice_receive_paypal": 5,
+		}, got)
+	})
+
+	t.Run("a later commit takes what a failed shadow commit left", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(nil, nil)
+
+		// Jack holds 35 (stripe 15, paypal 20). A commit of 25 committed stripe 15
+		// but its paypal 10 failed and waits for a retry. The next commit of 10
+		// adds its own 10 to paypal; the retry then adds the first 10 under the
+		// first commit's reference, so paypal ends up fully spent.
+		shadows := []model.Transaction{
+			shadowWithStatus("rel_stripe", StatusCommit, "release", "stripe", 15),
+			shadowWithStatus("rel_paypal", StatusInflight, "release", "paypal", 20),
+		}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "rel_paypal").Return(big.NewInt(0), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit", shadows, big.NewInt(10))
+		require.NoError(t, err)
+		assertAmounts(t, map[string]int64{"rel_paypal": 10}, got)
+	})
+
+	t.Run("returns an error when the committed amount lookup fails", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(nil, nil)
+
+		shadows := []model.Transaction{{TransactionID: "s1", Status: StatusInflight, PreciseAmount: big.NewInt(20)}}
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "s1").Return((*big.Int)(nil), fmt.Errorf("db down"))
+
+		_, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit", shadows, big.NewInt(5))
+		require.Error(t, err)
+	})
+}
+
+func queuedShadowCommit(commitID string, amounts map[string]string) model.LineageOutbox {
+	payload, _ := json.Marshal(shadowWorkPayload{ParentTransactionID: "parent", CommitID: commitID, Amounts: amounts})
+	return model.LineageOutbox{
+		TransactionID: "parent_" + commitID + "_shadow_commit",
+		LineageType:   model.LineageTypeShadowCommit,
+		Status:        model.OutboxStatusPending,
+		Payload:       payload,
+	}
+}
+
+func TestShadowCommitAmounts_queuedCommits(t *testing.T) {
+	ctx := context.Background()
+
+	// Jack's stripe pot holds 15 and his paypal pot 20.
+	newShadows := func() []model.Transaction {
+		return []model.Transaction{
+			shadowWithStatus("stripe", StatusInflight, "release", "stripe", 15),
+			shadowWithStatus("paypal", StatusInflight, "release", "paypal", 20),
+		}
+	}
+
+	t.Run("a later commit leaves the part a failed commit still owes", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		// Confirming 25 owed stripe 15 and paypal 10. The stripe write failed and
+		// paypal's 10 landed, so only the stripe claim is still queued.
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(
+			[]model.LineageOutbox{queuedShadowCommit("commit1", map[string]string{"stripe": "15", "paypal": "10"})}, nil)
+		mockDS.On("TransactionExistsByRef", mock.Anything, "commit1_stripe").Return(false, nil)
+		mockDS.On("TransactionExistsByRef", mock.Anything, "commit1_paypal").Return(true, nil)
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "stripe").Return(big.NewInt(0), nil)
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, "paypal").Return(big.NewInt(10), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit2", newShadows(), big.NewInt(10))
+		require.NoError(t, err)
+		assertAmounts(t, map[string]int64{"stripe": 0, "paypal": 10}, got)
+	})
+
+	t.Run("the commit's own queued entry is not counted against it", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(
+			[]model.LineageOutbox{queuedShadowCommit("commit1", map[string]string{"stripe": "15"})}, nil)
+		mockDS.On("GetTotalCommittedTransactions", mock.Anything, mock.Anything).Return(big.NewInt(0), nil)
+
+		got, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit1", newShadows(), big.NewInt(15))
+		require.NoError(t, err)
+		assertAmounts(t, map[string]int64{"stripe": 15, "paypal": 0}, got)
+		mockDS.AssertNotCalled(t, "TransactionExistsByRef", mock.Anything, mock.Anything)
+	})
+
+	t.Run("a lookup failure is returned", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := &Blnk{datasource: mockDS}
+
+		mockDS.On("GetPendingShadowCommitOutbox", mock.Anything, "parent").Return(nil, fmt.Errorf("db down"))
+
+		_, err := blnkInstance.shadowCommitAmounts(ctx, "parent", "commit2", newShadows(), big.NewInt(10))
+		require.Error(t, err)
+	})
+}
+
+func TestShadowCommitReference(t *testing.T) {
+	assert.Equal(t, "txn_commit_shadow1", shadowCommitReference("txn_commit", "shadow1"))
+	assert.Equal(t, "", shadowCommitReference("", "shadow1"))
+}
+
+func TestCommitShadowAmounts(t *testing.T) {
+	ctx := context.Background()
+
+	newBlnk := func(t *testing.T, mockDS *mocks.MockDataSource) *Blnk {
+		mr, err := miniredis.Run()
+		require.NoError(t, err)
+		t.Cleanup(mr.Close)
+		return &Blnk{
+			datasource: mockDS,
+			redis:      redis.NewClient(&redis.Options{Addr: mr.Addr()}),
+			config: &config.Configuration{
+				Transaction: config.TransactionConfig{LockDuration: 5 * time.Second},
+			},
+		}
+	}
+
+	shadows := []model.Transaction{
+		shadowWithStatus("pot15", StatusInflight, "release", "a", 15),
+		shadowWithStatus("pot20", StatusInflight, "release", "b", 20),
+	}
+
+	t.Run("a shadow whose commit reference was already used counts as committed", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := newBlnk(t, mockDS)
+
+		// pot15 was committed by the first attempt, so committing it again under
+		// the same reference hits the unique index; pot20 still fails.
+		duplicate := &pq.Error{Code: "23505", Constraint: "transactions_reference_key"}
+		mockDS.On("GetTransaction", mock.Anything, "pot15").Return((*model.Transaction)(nil), duplicate)
+		mockDS.On("GetTransaction", mock.Anything, "pot20").Return((*model.Transaction)(nil), fmt.Errorf("db down"))
+
+		err := blnkInstance.commitShadowAmounts(ctx, "parent", "commit1", shadows,
+			map[string]*big.Int{"pot15": big.NewInt(15), "pot20": big.NewInt(10)})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "pot20")
+		assert.NotContains(t, err.Error(), "pot15")
+	})
+
+	t.Run("shadows without an amount are left alone", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnkInstance := newBlnk(t, mockDS)
+
+		err := blnkInstance.commitShadowAmounts(ctx, "parent", "commit1", shadows,
+			map[string]*big.Int{"pot20": big.NewInt(0)})
+		require.NoError(t, err)
+		mockDS.AssertNotCalled(t, "GetTransaction", mock.Anything, mock.Anything)
+	})
+}
+
+func TestProcessLineageFromOutbox_shadowCommitAmounts(t *testing.T) {
+	ctx := context.Background()
+	mockDS := new(mocks.MockDataSource)
+	blnkInstance := &Blnk{datasource: mockDS}
+
+	shadows := []model.Transaction{
+		shadowWithStatus("pot15", StatusInflight, "release", "a", 15),
+		shadowWithStatus("pot20", StatusInflight, "release", "b", 20),
+	}
+	mockDS.On("GetTransactionsByShadowFor", mock.Anything, "parent").Return(shadows, nil)
+
+	// The retry commits only the shadows listed in the payload, by the stored
+	// amount, without recomputing from the shadows' current committed totals.
+	entry := model.LineageOutbox{
+		TransactionID: "parent_commit1_shadow_commit",
+		LineageType:   model.LineageTypeShadowCommit,
+		Payload:       []byte(`{"parent_transaction_id":"parent","commit_id":"commit1","amounts":{"pot15":"0"}}`),
+	}
+
+	require.NoError(t, blnkInstance.ProcessLineageFromOutbox(ctx, entry))
+	mockDS.AssertNotCalled(t, "GetTotalCommittedTransactions", mock.Anything, mock.Anything)
+	mockDS.AssertNotCalled(t, "GetTransaction", mock.Anything, mock.Anything)
 }

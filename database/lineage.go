@@ -447,3 +447,43 @@ func (d Datasource) HasPendingCreditOutbox(ctx context.Context, balanceID string
 	}
 	return count > 0, nil
 }
+
+// GetPendingShadowCommitOutbox lists the shadow commit outbox entries of a parent
+// transaction that are still waiting to be processed. Their payloads hold the
+// amounts the failed commit still owes each shadow.
+func (d Datasource) GetPendingShadowCommitOutbox(ctx context.Context, parentTransactionID string) ([]model.LineageOutbox, error) {
+	rows, err := d.Conn.QueryContext(ctx, `
+		SELECT id, transaction_id, lineage_type, payload, status, attempts, max_attempts, created_at
+		FROM blnk.lineage_outbox
+		WHERE lineage_type = $1
+		  AND status IN ($2, $3)
+		  AND payload->>'parent_transaction_id' = $4
+		ORDER BY created_at ASC
+	`, model.LineageTypeShadowCommit, model.OutboxStatusPending, model.OutboxStatusProcessing, parentTransactionID)
+	if err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get pending shadow commit outbox entries", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var entries []model.LineageOutbox
+	for rows.Next() {
+		var entry model.LineageOutbox
+		if err := rows.Scan(
+			&entry.ID,
+			&entry.TransactionID,
+			&entry.LineageType,
+			&entry.Payload,
+			&entry.Status,
+			&entry.Attempts,
+			&entry.MaxAttempts,
+			&entry.CreatedAt,
+		); err != nil {
+			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan shadow commit outbox entry", err)
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to read shadow commit outbox entries", err)
+	}
+	return entries, nil
+}
