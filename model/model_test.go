@@ -506,8 +506,8 @@ func TestBalanceMonitor_CheckCondition(t *testing.T) {
 
 func TestBalanceMonitor_TriggerMode(t *testing.T) {
 	// An empty trigger is what a cache entry encoded before the field existed
-	// decodes to. Those monitors were level, and must stay level until the cache
-	// expires, or every one whose condition already holds fires once.
+	// decodes to. Those monitors are level, and reading them as edge would drop
+	// their repeat alerts until the cache expires.
 	assert.Equal(t, TriggerLevel, (&BalanceMonitor{}).TriggerMode())
 	assert.Equal(t, TriggerEdge, (&BalanceMonitor{Trigger: TriggerEdge}).TriggerMode())
 	assert.Equal(t, TriggerLevel, (&BalanceMonitor{Trigger: TriggerLevel}).TriggerMode())

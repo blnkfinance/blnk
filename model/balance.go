@@ -88,8 +88,8 @@ type BalanceMonitor struct {
 
 // TriggerMode is the read side of NormalizeTrigger. A monitor with no trigger
 // predates the field, in a cache entry written before the upgrade, and those
-// monitors have always behaved as level: reading them as edge would fire every
-// one whose condition already holds.
+// monitors are level: reading them as edge would drop their repeat alerts
+// until the entry expired.
 func (bm *BalanceMonitor) TriggerMode() string {
 	if bm.Trigger == TriggerEdge {
 		return TriggerEdge

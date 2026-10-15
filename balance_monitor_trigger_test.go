@@ -181,8 +181,7 @@ func TestCheckBalanceMonitors_LevelFiresEveryTime(t *testing.T) {
 func TestCheckBalanceMonitors_UnsetTriggerIsLevel(t *testing.T) {
 	h := newMonitorHarness(t)
 	// A cache entry written before the upgrade decodes with an empty trigger.
-	// Those monitors were level; treating them as edge fires every one whose
-	// condition already holds.
+	// Those monitors are level; treating them as edge drops their repeat alerts.
 	h.ds.On("GetBalanceMonitors", "bln_edge_test").Return([]model.BalanceMonitor{monitorFor("")}, nil)
 
 	before := h.enqueued(t)
