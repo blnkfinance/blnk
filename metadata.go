@@ -305,7 +305,10 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, ErrEntityNotFound
 		}
 		mergedMetadata := mergeMetadata(balance.MetaData, newMetadata)
-		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
+		// Only the requested keys are written; the database merges them in one
+		// statement. Writing the merged snapshot back would undo a concurrent
+		// update to any other key. The response is the merge as of the read.
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, newMetadata); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
