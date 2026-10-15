@@ -17,11 +17,12 @@
 -- that produced it, which lets a concurrent evaluation running on an older
 -- balance be discarded instead of flipping the state back.
 --
--- Existing monitors adopt 'edge' and start armed, so a monitor whose condition
--- already holds fires once on its balance's next transaction and then goes quiet.
+-- Existing monitors stay 'level', the behaviour they were created with; new
+-- monitors default to 'edge'. Moving an old monitor to edge is an explicit PUT.
 
 -- +migrate Up
-ALTER TABLE blnk.balance_monitors ADD COLUMN trigger_type TEXT NOT NULL DEFAULT 'edge';
+ALTER TABLE blnk.balance_monitors ADD COLUMN trigger_type TEXT NOT NULL DEFAULT 'level';
+ALTER TABLE blnk.balance_monitors ALTER COLUMN trigger_type SET DEFAULT 'edge';
 ALTER TABLE blnk.balance_monitors ADD CONSTRAINT balance_monitors_trigger_type_check CHECK (trigger_type IN ('edge', 'level'));
 ALTER TABLE blnk.balance_monitors ADD COLUMN condition_state BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE blnk.balance_monitors ADD COLUMN state_version BIGINT NOT NULL DEFAULT 0;

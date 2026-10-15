@@ -192,8 +192,10 @@ func (e *monitorE2E) monitorState(t *testing.T, monitorID string) bool {
 	t.Helper()
 	monitor, err := e.blnk.GetMonitorByID(context.Background(), monitorID)
 	require.NoError(t, err)
-	return monitor.ConditionState
+	return monitor.ConditionState != nil && *monitor.ConditionState
 }
+
+func conditionState(b bool) *bool { return &b }
 
 // TestBalanceMonitorEdge_EndToEnd walks a balance across its threshold twice
 // over six transactions and asserts the consumer is told twice, not five times.

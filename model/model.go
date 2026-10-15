@@ -445,6 +445,17 @@ func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 	return result
 }
 
+// MonitorPreciseValue converts a monitor threshold into the minor units the
+// ledger compares against, exactly as transaction amounts are converted:
+// int64(0.29 * 100) truncates to 28. A missing precision means 1, which is how
+// thresholds were compared before monitors had a precision at all.
+func MonitorPreciseValue(value, precision float64) *big.Int {
+	if precision == 0 {
+		precision = 1
+	}
+	return convertDecimalToPrecise(&Transaction{Amount: value, Precision: precision})
+}
+
 // ValidateAmount is the exported ingest check used by QueueTransaction so
 // zero/empty amounts never land on the queue.
 func (transaction *Transaction) ValidateAmount() error {

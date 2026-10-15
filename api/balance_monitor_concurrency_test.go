@@ -197,7 +197,7 @@ func TestBalanceMonitorEdge_WebhookPayload(t *testing.T) {
 	assert.Equal(t, monitor.MonitorID, payload.Data.MonitorID)
 	assert.Equal(t, wallet.BalanceID, payload.Data.BalanceID)
 	assert.Equal(t, model.TriggerEdge, payload.Data.Trigger)
-	assert.True(t, payload.Data.ConditionState, "the alert says the monitor is now triggered")
+	assert.Equal(t, conditionState(true), payload.Data.ConditionState, "the alert says the monitor is now triggered")
 	assert.Equal(t, "balance", payload.Data.Condition.Field)
 	assert.Equal(t, ">", payload.Data.Condition.Operator)
 }

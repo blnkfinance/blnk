@@ -178,20 +178,19 @@ func TestCheckBalanceMonitors_LevelFiresEveryTime(t *testing.T) {
 	h.ds.AssertNotCalled(t, "TransitionMonitorState", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
-func TestCheckBalanceMonitors_UnsetTriggerIsEdge(t *testing.T) {
+func TestCheckBalanceMonitors_UnsetTriggerIsLevel(t *testing.T) {
 	h := newMonitorHarness(t)
-	// A row or cache entry written before the column existed decodes with an
-	// empty trigger and must behave as edge, not fall back to level.
+	// A cache entry written before the upgrade decodes with an empty trigger.
+	// Those monitors were level; treating them as edge fires every one whose
+	// condition already holds.
 	h.ds.On("GetBalanceMonitors", "bln_edge_test").Return([]model.BalanceMonitor{monitorFor("")}, nil)
-	h.ds.On("TransitionMonitorState", mock.Anything, "mon_edge_test", "bln_edge_test", true, int64(2)).Return(true, nil).Once()
-	h.ds.On("TransitionMonitorState", mock.Anything, "mon_edge_test", "bln_edge_test", true, int64(3)).Return(false, nil).Once()
 
 	before := h.enqueued(t)
 	h.blnk.checkBalanceMonitors(context.Background(), balanceAt(90, 2))
 	h.blnk.checkBalanceMonitors(context.Background(), balanceAt(80, 3))
 
-	assert.Equal(t, 1, h.enqueued(t)-before)
-	h.ds.AssertExpectations(t)
+	assert.Equal(t, 2, h.enqueued(t)-before)
+	h.ds.AssertNotCalled(t, "TransitionMonitorState", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestCheckBalanceMonitors_EdgeReleasesWhenTheWebhookCannotBeQueued(t *testing.T) {
@@ -233,7 +232,7 @@ type preUpgradeMonitor struct {
 	Condition   model.AlertCondition `json:"condition"`
 }
 
-func TestMonitorCache_PreUpgradeEntryDecodesAsEdge(t *testing.T) {
+func TestMonitorCache_PreUpgradeEntryDecodesAsLevel(t *testing.T) {
 	h := newMonitorHarness(t)
 	redisCache := cache.NewCacheWithClient(h.blnk.redis)
 	ctx := context.Background()
@@ -250,7 +249,7 @@ func TestMonitorCache_PreUpgradeEntryDecodesAsEdge(t *testing.T) {
 	require.Len(t, decoded, 1)
 
 	assert.Empty(t, decoded[0].Trigger, "an entry written before the field existed has no trigger")
-	assert.Equal(t, model.TriggerEdge, decoded[0].TriggerMode(), "and must still be treated as edge")
+	assert.Equal(t, model.TriggerLevel, decoded[0].TriggerMode(), "and must keep the level behaviour it was cached with")
 	assert.Equal(t, "mon_old", decoded[0].MonitorID)
 }
 

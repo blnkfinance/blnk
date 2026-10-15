@@ -54,13 +54,13 @@ func TestGetMonitors_ToleratesNullPrecision_RealDB(t *testing.T) {
 	one, err := ds.GetMonitorByID(legacyID)
 	require.NoError(t, err, "a legacy row must still be readable")
 	assert.Equal(t, float64(0), one.Condition.Precision)
-	assert.Equal(t, big.NewInt(0), one.Condition.PreciseValue)
+	assert.Equal(t, big.NewInt(100), one.Condition.PreciseValue, "a missing precise_value is derived from value, not read as 0")
 
 	monitors, err := ds.GetBalanceMonitors(balance.BalanceID)
 	require.NoError(t, err, "one legacy row must not take down the balance's whole monitor list")
 	require.Len(t, monitors, 1)
 	assert.Equal(t, legacyID, monitors[0].MonitorID)
-	assert.NotNil(t, monitors[0].Condition.PreciseValue, "a nil threshold would panic the comparison")
+	assert.Equal(t, big.NewInt(100), monitors[0].Condition.PreciseValue)
 
 	all, err := ds.GetAllMonitors()
 	require.NoError(t, err)
@@ -121,6 +121,31 @@ func TestUpdateMonitor_PreservesCallbackURL_RealDB(t *testing.T) {
 	require.NoError(t, ds.Conn.QueryRow(
 		`SELECT call_back_url FROM blnk.balance_monitors WHERE monitor_id = $1`, created.MonitorID).Scan(&stored))
 	assert.Equal(t, "https://example.com/hook", stored, "an update that cannot carry a callback URL must not clear it")
+}
+
+// UpdateMonitor wrote value but not precision or precise_value, and the ledger
+// compares against precise_value, so an edited threshold never took effect.
+func TestUpdateMonitor_RewritesPreciseValue_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	balance := legacyTestBalance(t, ds)
+
+	created, err := ds.CreateMonitor(model.BalanceMonitor{
+		BalanceID: balance.BalanceID,
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 10, Precision: 100, PreciseValue: big.NewInt(1000)},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, ds.UpdateMonitor(&model.BalanceMonitor{
+		MonitorID: created.MonitorID,
+		BalanceID: balance.BalanceID,
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 0.29, Precision: 100},
+	}))
+
+	stored, err := ds.GetMonitorByID(created.MonitorID)
+	require.NoError(t, err)
+	assert.Equal(t, 0.29, stored.Condition.Value)
+	assert.Equal(t, float64(100), stored.Condition.Precision)
+	assert.Equal(t, big.NewInt(29), stored.Condition.PreciseValue)
 }
 
 // value is the human-readable half of the threshold and is a float64 in Go, but

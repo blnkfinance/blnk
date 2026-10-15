@@ -252,7 +252,7 @@ func TestBalanceMonitorEdge_CreatedWhileConditionAlreadyHolds(t *testing.T) {
 	e.settle()
 
 	m := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
-	assert.False(t, m.ConditionState, "a new monitor starts armed")
+	assert.Equal(t, conditionState(false), m.ConditionState, "a new monitor starts armed")
 	e.settle()
 	assert.Equal(t, 0, e.webhooks(), "creating a monitor does not evaluate it")
 
@@ -293,7 +293,7 @@ func TestBalanceMonitor_GetEndpointsReportTriggerAndState(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, model.TriggerEdge, one.Trigger)
-	assert.True(t, one.ConditionState, "the detail endpoint reports the monitor is triggered")
+	assert.Equal(t, conditionState(true), one.ConditionState, "the detail endpoint reports the monitor is triggered")
 
 	var byBalance []model.BalanceMonitor
 	resp, _ = SetUpTestRequest(TestRequest{
@@ -303,7 +303,7 @@ func TestBalanceMonitor_GetEndpointsReportTriggerAndState(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.Code)
 	require.Len(t, byBalance, 1)
 	assert.Equal(t, model.TriggerEdge, byBalance[0].Trigger)
-	assert.True(t, byBalance[0].ConditionState)
+	assert.Equal(t, conditionState(true), byBalance[0].ConditionState)
 
 	var all []model.BalanceMonitor
 	resp, _ = SetUpTestRequest(TestRequest{
@@ -314,7 +314,7 @@ func TestBalanceMonitor_GetEndpointsReportTriggerAndState(t *testing.T) {
 	for _, m := range all {
 		if m.MonitorID == created.MonitorID {
 			assert.Equal(t, model.TriggerEdge, m.Trigger)
-			assert.True(t, m.ConditionState)
+			assert.Equal(t, conditionState(true), m.ConditionState)
 			found = true
 		}
 	}

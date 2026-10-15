@@ -394,8 +394,8 @@ func TestGetAllMonitors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating Blnk instance: %s", err)
 	}
-	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "trigger_type", "condition_state", "precision", "precise_value"}).
-		AddRow("test-monitor", gofakeit.UUID(), "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now(), model.TriggerEdge, false, 100, 100000)
+	rows := sqlmock.NewRows([]string{"monitor_id", "balance_id", "field", "operator", "value", "description", "call_back_url", "created_at", "precision", "precise_value", "trigger_type", "condition_state"}).
+		AddRow("test-monitor", gofakeit.UUID(), "field", "operator", 100, "Test Monitor", gofakeit.URL(), time.Now(), 100, 100000, model.TriggerEdge, false)
 
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors").WillReturnRows(rows)
 
@@ -451,7 +451,7 @@ func TestUpdateMonitor(t *testing.T) {
 		AddRow(monitor.MonitorID, monitor.BalanceID, "balance", "<", 100, 100, 10000, "Test Monitor", gofakeit.URL(), time.Now(), model.TriggerEdge, false)
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitor.MonitorID).WillReturnRows(previous)
 
-	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, model.TriggerEdge).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, float64(100), "0", "").WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.UpdateMonitor(context.Background(), monitor)
 

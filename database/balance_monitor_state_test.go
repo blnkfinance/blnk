@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -257,7 +258,8 @@ func TestUpdateMonitor_RearmsState_RealDB(t *testing.T) {
 
 	monitor, err := ds.GetMonitorByID(monitorID)
 	require.NoError(t, err)
-	require.True(t, monitor.ConditionState, "GetMonitorByID must report the stored state")
+	require.NotNil(t, monitor.ConditionState)
+	require.True(t, *monitor.ConditionState, "GetMonitorByID must report the stored state")
 
 	monitor.Condition.Operator = ">"
 	monitor.Trigger = model.TriggerLevel
@@ -281,35 +283,92 @@ func TestCreateMonitor_DefaultsToEdge_RealDB(t *testing.T) {
 	monitor, err := ds.GetMonitorByID(monitorID)
 	require.NoError(t, err)
 	assert.Equal(t, model.TriggerEdge, monitor.Trigger)
-	assert.False(t, monitor.ConditionState)
+	require.NotNil(t, monitor.ConditionState)
+	assert.False(t, *monitor.ConditionState)
 }
 
-// TestMonitorTriggerColumnDefault_RealDB pins the promise the migration makes to
-// monitors that already exist: they adopt edge and start armed, so one whose
-// condition already holds alerts once on its balance's next transaction.
-func TestMonitorTriggerColumnDefault_RealDB(t *testing.T) {
+// TestMonitorTriggerMigration_KeepsExistingMonitorsLevel_RealDB runs the
+// migration's own Up statements against a table holding a monitor written
+// before it, since an insert made after the migration only sees the default.
+func TestMonitorTriggerMigration_KeepsExistingMonitorsLevel_RealDB(t *testing.T) {
 	ds := openRealTestDB(t)
-	_, balanceID := seedMonitor(t, ds)
 
-	// An insert that names none of the new columns, the way a row written before
-	// this migration looks once the migration has run.
-	legacyID := model.GenerateUUIDWithSuffix("mon")
-	_, err := ds.Conn.Exec(`
-		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, description, call_back_url, created_at)
-		VALUES ($1, $2, 'balance', '<', 100, 'legacy row', '', NOW())
-	`, legacyID, balanceID)
+	raw, err := os.ReadFile("../sql/1788542466.sql")
+	require.NoError(t, err)
+	up := strings.SplitN(strings.SplitN(string(raw), "-- +migrate Up", 2)[1], "-- +migrate Down", 2)[0]
+
+	table := "blnk.monitor_migration_" + strings.ReplaceAll(gofakeit.UUID(), "-", "")
+	_, err = ds.Conn.Exec(`CREATE TABLE ` + table + ` (monitor_id TEXT PRIMARY KEY)`)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = ds.Conn.Exec(`DROP TABLE IF EXISTS ` + table) })
+
+	_, err = ds.Conn.Exec(`INSERT INTO ` + table + ` (monitor_id) VALUES ('existing')`)
+	require.NoError(t, err)
+	_, err = ds.Conn.Exec(strings.ReplaceAll(up, "blnk.balance_monitors", table))
+	require.NoError(t, err)
+	_, err = ds.Conn.Exec(`INSERT INTO ` + table + ` (monitor_id) VALUES ('created_after')`)
 	require.NoError(t, err)
 
-	var trigger string
-	var state bool
-	var version int64
-	require.NoError(t, ds.Conn.QueryRow(
-		`SELECT trigger_type, condition_state, state_version FROM blnk.balance_monitors WHERE monitor_id = $1`, legacyID,
-	).Scan(&trigger, &state, &version))
+	triggerOf := func(id string) string {
+		var trigger string
+		require.NoError(t, ds.Conn.QueryRow(`SELECT trigger_type FROM `+table+` WHERE monitor_id = $1`, id).Scan(&trigger))
+		return trigger
+	}
+	assert.Equal(t, model.TriggerLevel, triggerOf("existing"), "an existing monitor keeps the behaviour it was created with")
+	assert.Equal(t, model.TriggerEdge, triggerOf("created_after"), "a new monitor defaults to edge")
+}
 
-	assert.Equal(t, model.TriggerEdge, trigger)
-	assert.False(t, state, "an existing monitor starts armed")
+// An update that does not change what the monitor watches must not re-arm it,
+// or editing a description re-sends an alert for a crossing already reported.
+// An omitted trigger must leave the stored mode alone.
+func TestUpdateMonitor_KeepsStateAndTriggerWhenOnlyTheDescriptionChanges_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	ctx := context.Background()
+	monitorID, balanceID := seedMonitor(t, ds)
+
+	owned, err := ds.TransitionMonitorState(ctx, monitorID, balanceID, true, 5)
+	require.NoError(t, err)
+	require.True(t, owned)
+
+	monitor, err := ds.GetMonitorByID(monitorID)
+	require.NoError(t, err)
+	monitor.Description = "renamed"
+	monitor.Trigger = ""
+	require.NoError(t, ds.UpdateMonitor(monitor))
+
+	state, version := readMonitorState(t, ds, monitorID)
+	assert.True(t, state, "a description edit must not re-arm the monitor")
+	assert.Equal(t, int64(5), version)
+
+	reread, err := ds.GetMonitorByID(monitorID)
+	require.NoError(t, err)
+	assert.Equal(t, model.TriggerEdge, reread.Trigger, "an omitted trigger keeps the stored one")
+	assert.Equal(t, "renamed", reread.Description)
+
+	reread.Condition.Value = 200
+	reread.Condition.PreciseValue = nil
+	reread.Trigger = ""
+	require.NoError(t, ds.UpdateMonitor(reread))
+
+	state, version = readMonitorState(t, ds, monitorID)
+	assert.False(t, state, "a new threshold re-arms it")
 	assert.Equal(t, int64(0), version)
+}
+
+// A level monitor never writes condition_state, so reporting it would show
+// false while the monitor fires.
+func TestGetMonitor_OmitsConditionStateForLevel_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	monitorID, _ := seedMonitor(t, ds)
+
+	monitor, err := ds.GetMonitorByID(monitorID)
+	require.NoError(t, err)
+	monitor.Trigger = model.TriggerLevel
+	require.NoError(t, ds.UpdateMonitor(monitor))
+
+	level, err := ds.GetMonitorByID(monitorID)
+	require.NoError(t, err)
+	assert.Nil(t, level.ConditionState)
 }
 
 // TestMonitorTriggerCheckConstraint_RealDB keeps the table as the last word on
@@ -365,7 +424,7 @@ func TestGetBalanceMonitors_CarriesTheTrigger_RealDB(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, monitors, 1)
 	assert.Equal(t, model.TriggerEdge, monitors[0].Trigger)
-	assert.True(t, monitors[0].ConditionState)
+	assert.Equal(t, true, *monitors[0].ConditionState)
 
 	all, err := ds.GetAllMonitors()
 	require.NoError(t, err)
@@ -373,7 +432,7 @@ func TestGetBalanceMonitors_CarriesTheTrigger_RealDB(t *testing.T) {
 	for _, m := range all {
 		if m.MonitorID == monitorID {
 			assert.Equal(t, model.TriggerEdge, m.Trigger)
-			assert.True(t, m.ConditionState)
+			assert.Equal(t, true, *m.ConditionState)
 			found = true
 		}
 	}

@@ -117,7 +117,8 @@ func (l *Blnk) checkBalanceMonitors(ctx context.Context, updatedBalance *model.B
 		}
 
 		span.AddEvent(fmt.Sprintf("Condition crossed for balance: %s", monitor.MonitorID))
-		monitor.ConditionState = true
+		crossed := true
+		monitor.ConditionState = &crossed
 		if err := l.sendMonitorWebhook(monitor); err != nil {
 			notification.NotifyError(err)
 			// An edge fires once, so a transition that could not be handed off
@@ -396,9 +397,7 @@ func (l *Blnk) CreateMonitor(ctx context.Context, monitor model.BalanceMonitor) 
 	_, span := balanceTracer.Start(ctx, "CreateMonitor")
 	defer span.End()
 
-	amount := int64(monitor.Condition.Value * monitor.Condition.Precision) // apply precision to value
-	amountBigInt := model.Int64ToBigInt(amount)
-	monitor.Condition.PreciseValue = amountBigInt
+	monitor.Condition.PreciseValue = model.MonitorPreciseValue(monitor.Condition.Value, monitor.Condition.Precision)
 	monitor, err := l.datasource.CreateMonitor(monitor)
 	if err != nil {
 		span.RecordError(err)
@@ -501,6 +500,13 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 		span.RecordError(err)
 		return err
 	}
+
+	// PUT binds the internal model without validation, so an omitted precision
+	// arrives as 0 and would silently rescale the threshold.
+	if monitor.Condition.Precision == 0 {
+		monitor.Condition.Precision = previous.Condition.Precision
+	}
+	monitor.Condition.PreciseValue = model.MonitorPreciseValue(monitor.Condition.Value, monitor.Condition.Precision)
 
 	if err := l.datasource.UpdateMonitor(monitor); err != nil {
 		span.RecordError(err)

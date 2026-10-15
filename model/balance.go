@@ -83,18 +83,18 @@ type BalanceMonitor struct {
 	// ConditionState is the last observed truth value of the condition. It is
 	// owned by the evaluation path and is never authoritative on a cached copy;
 	// read it from a TransitionMonitorState result, not from here.
-	ConditionState bool `json:"condition_state"`
+	ConditionState *bool `json:"condition_state,omitempty"`
 }
 
-// TriggerMode is the read side of NormalizeTrigger: it never fails, because a
-// stored row or a cache entry written before the field existed must still
-// resolve to something, and the default is the safe reading.
+// TriggerMode is the read side of NormalizeTrigger. A monitor with no trigger
+// predates the field, in a cache entry written before the upgrade, and those
+// monitors have always behaved as level: reading them as edge would fire every
+// one whose condition already holds.
 func (bm *BalanceMonitor) TriggerMode() string {
-	trigger, err := NormalizeTrigger(bm.Trigger)
-	if err != nil {
+	if bm.Trigger == TriggerEdge {
 		return TriggerEdge
 	}
-	return trigger
+	return TriggerLevel
 }
 
 type LineageMapping struct {

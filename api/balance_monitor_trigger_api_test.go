@@ -93,7 +93,11 @@ func TestCreateBalanceMonitor_Trigger(t *testing.T) {
 			assert.Equal(t, tt.expectedCode, resp.Code)
 			if tt.expectedCode == http.StatusCreated {
 				assert.Equal(t, tt.expectedTrigger, response.Trigger)
-				assert.False(t, response.ConditionState, "a new monitor starts armed")
+				if tt.expectedTrigger == model.TriggerEdge {
+					assert.Equal(t, conditionState(false), response.ConditionState, "a new edge monitor starts armed")
+				} else {
+					assert.Nil(t, response.ConditionState, "a level monitor keeps no state to report")
+				}
 			}
 		})
 	}
@@ -154,21 +158,36 @@ func TestUpdateBalanceMonitor_Trigger(t *testing.T) {
 		}
 	})
 
-	t.Run("Omitted trigger falls back to edge", func(t *testing.T) {
-		payloadBytes, _ := request.ToJsonReq(&model.BalanceMonitor{
-			BalanceID: balance.BalanceID,
-			Condition: model.AlertCondition{Field: "balance", Operator: "<", Value: 1000},
-		})
+	t.Run("Omitted trigger keeps the stored mode", func(t *testing.T) {
+		put := func(trigger string) {
+			t.Helper()
+			payloadBytes, _ := request.ToJsonReq(&model.BalanceMonitor{
+				BalanceID:   balance.BalanceID,
+				Trigger:     trigger,
+				Description: "edited",
+				Condition:   model.AlertCondition{Field: "balance", Operator: "<", Value: 1000},
+			})
+			resp, _ := SetUpTestRequest(TestRequest{
+				Payload: payloadBytes,
+				Method:  "PUT",
+				Route:   fmt.Sprintf("/balance-monitors/%s", monitor.MonitorID),
+				Router:  router,
+			})
+			require.Equal(t, http.StatusOK, resp.Code)
+		}
+
+		put(model.TriggerLevel)
+		put("")
+
+		var body map[string]interface{}
 		resp, _ := SetUpTestRequest(TestRequest{
-			Payload: payloadBytes,
-			Method:  "PUT",
-			Route:   fmt.Sprintf("/balance-monitors/%s", monitor.MonitorID),
-			Router:  router,
+			Response: &body,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/balance-monitors/%s", monitor.MonitorID),
+			Router:   router,
 		})
 		require.Equal(t, http.StatusOK, resp.Code)
-
-		stored, err := b.GetMonitorByID(context.Background(), monitor.MonitorID)
-		require.NoError(t, err)
-		assert.Equal(t, model.TriggerEdge, stored.Trigger)
+		assert.Equal(t, model.TriggerLevel, body["trigger"], "a PUT without a trigger must not change the mode")
+		assert.NotContains(t, body, "condition_state", "level monitors keep no state to report")
 	})
 }
