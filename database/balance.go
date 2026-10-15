@@ -1164,11 +1164,12 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 // - *model.BalanceMonitor: A pointer to the BalanceMonitor object if found.
 // - error: If the monitor is not found or if any errors occur during the query, an `APIError` is returned.
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
-	var preciseValue int64 // Temporary variable to hold the precise value as int64
+	var precision sql.NullFloat64
+	var preciseValue sql.NullInt64
 
 	// Query the database to get the monitor details by MonitorID
 	row := d.Conn.QueryRowContext(context.Background(), `
-		SELECT monitor_id, balance_id, field, operator, value, COALESCE(precision, 0), COALESCE(precise_value, 0), description, call_back_url, created_at
+		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
 
@@ -1178,7 +1179,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	condition := &model.AlertCondition{}
 
 	// Scan the result into the monitor and condition fields
-	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &condition.Precision, &preciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &precision, &preciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
 	if err != nil {
 		// Handle the case where the monitor with the specified ID is not found
 		if err == sql.ErrNoRows {
@@ -1188,9 +1189,8 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitor", err)
 	}
 
-	// Populate the PreciseValue field in the condition (convert from int64 to big.Int)
 	monitor.Condition = *condition
-	monitor.Condition.PreciseValue = big.NewInt(preciseValue)
+	resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 
 	// Return the populated BalanceMonitor object
 	return monitor, nil
@@ -1205,7 +1205,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	// Query the database for all balance monitors
 	rows, err := d.Conn.QueryContext(context.Background(), `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, COALESCE(precision, 0), COALESCE(precise_value, 0)
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
 		FROM blnk.balance_monitors
 	`)
 	if err != nil {
@@ -1219,12 +1219,13 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 
 	// Iterate through each row in the result set
 	for rows.Next() {
-		var preciseValue int64
+		var precision sql.NullFloat64
+		var preciseValue sql.NullInt64
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &condition.Precision, &preciseValue)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
@@ -1232,7 +1233,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 
 		// Assign the scanned AlertCondition to the monitor
 		monitor.Condition = condition
-		monitor.Condition.PreciseValue = big.NewInt(preciseValue)
+		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 
 		// Append the monitor to the slice
 		monitors = append(monitors, monitor)
@@ -1260,7 +1261,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	// Query the database for monitors associated with the given balance ID
 	rows, err := d.Conn.QueryContext(context.Background(), `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, COALESCE(precision, 0), COALESCE(precise_value, 0)
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`, balanceID)
 	if err != nil {
@@ -1274,12 +1275,13 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 
 	// Iterate through each row in the result set
 	for rows.Next() {
-		var preciseValue int64              // Temporary variable to hold the precise value as int64
+		var precision sql.NullFloat64
+		var preciseValue sql.NullInt64
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &condition.Precision, &preciseValue)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
@@ -1287,7 +1289,7 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 
 		// Assign the scanned AlertCondition to the monitor
 		monitor.Condition = condition
-		monitor.Condition.PreciseValue = big.NewInt(preciseValue)
+		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 
 		// Append the monitor to the slice
 		monitors = append(monitors, monitor)
@@ -1303,6 +1305,18 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 	return monitors, nil
 }
 
+// resolveMonitorThreshold fills a scanned condition's precision fields. Rows
+// written before the precision migration have NULL precise_value; reading that
+// as 0 turned "balance > 500" into "balance > 0", so it is derived from value.
+func resolveMonitorThreshold(condition *model.AlertCondition, precision sql.NullFloat64, preciseValue sql.NullInt64) {
+	condition.Precision = precision.Float64
+	if preciseValue.Valid {
+		condition.PreciseValue = big.NewInt(preciseValue.Int64)
+		return
+	}
+	condition.PreciseValue = model.MonitorPreciseValue(condition.Value, condition.Precision)
+}
+
 // UpdateMonitor updates an existing balance monitor in the database.
 //
 // call_back_url is deliberately not written: BalanceMonitor.CallBackURL is
@@ -1315,12 +1329,16 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 // Returns:
 // - error: If the update fails, an appropriate `APIError` is returned.
 func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
+	if monitor.Condition.PreciseValue == nil {
+		monitor.Condition.PreciseValue = model.MonitorPreciseValue(monitor.Condition.Value, monitor.Condition.Precision)
+	}
+
 	// Execute the SQL update statement, replacing the placeholder values with the monitor's data
 	result, err := d.Conn.ExecContext(context.Background(), `
 		UPDATE blnk.balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, precision = $7, precise_value = $8
 		WHERE monitor_id = $1
-	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description)
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.Condition.Precision, monitor.Condition.PreciseValue.String())
 	// If an error occurred during execution, return an internal server error
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update monitor", err)

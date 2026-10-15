@@ -64,6 +64,86 @@ func TestBalanceMonitor_LegacyRowDoesNotSilenceItsSiblings(t *testing.T) {
 	e.awaitWebhooks(t, 2)
 }
 
+// A legacy row has no precise_value. Reading that as 0 made "balance > 500"
+// fire on any positive balance, so both sides of the real line are checked.
+func TestBalanceMonitor_LegacyRowKeepsItsThreshold(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	execSQL(t, e.cnf, `
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, description, call_back_url, created_at)
+		VALUES ($1, $2, 'balance', '>', 500, 'legacy', '', NOW())
+	`, model.GenerateUUIDWithSuffix("mon"), wallet.BalanceID)
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks(), "20 is below the legacy monitor's line of 500")
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 600)
+	e.awaitWebhooks(t, 1)
+}
+
+// PUT rewrote value but not precise_value, so the ledger kept comparing
+// against the threshold the monitor was created with.
+func TestBalanceMonitor_UpdatedThresholdTakesEffect(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, wallet.BalanceID, "balance", ">", 10)
+
+	// Precision is omitted on purpose: the stored one must be kept.
+	payloadBytes, _ := request.ToJsonReq(&model.BalanceMonitor{
+		BalanceID: wallet.BalanceID,
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 30},
+	})
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Method: "PUT",
+		Route: fmt.Sprintf("/balance-monitors/%s", created.MonitorID), Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	var stored model.BalanceMonitor
+	resp, _ = SetUpTestRequest(TestRequest{
+		Response: &stored, Method: "GET",
+		Route: fmt.Sprintf("/balance-monitors/%s", created.MonitorID), Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, float64(1), stored.Condition.Precision)
+	assert.Equal(t, "30", stored.Condition.PreciseValue.String())
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks(), "20 is above the old line of 10 but below the new one of 30")
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 15)
+	e.awaitWebhooks(t, 1)
+}
+
+// int64(0.29 * 100) is 28, so a monitor on "above 0.29" fired at exactly 0.29.
+func TestBalanceMonitor_FractionalThresholdBoundary(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
+		BalanceId: wallet.BalanceID,
+		Condition: model2.MonitorCondition{Field: "balance", Operator: ">", Value: 0.29, Precision: 100},
+	})
+	var created model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Response: &created,
+		Method: "POST", Route: "/balance-monitors", Router: e.router,
+	})
+	require.Equal(t, http.StatusCreated, resp.Code, "body: %s", resp.Body.String())
+	assert.Equal(t, "29", created.Condition.PreciseValue.String())
+
+	e.transferPrecise(t, funding.BalanceID, wallet.BalanceID, 0.29, 100)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks(), "0.29 is not above 0.29")
+
+	e.transferPrecise(t, funding.BalanceID, wallet.BalanceID, 0.01, 100)
+	e.awaitWebhooks(t, 1)
+}
+
 // The monitor cache is keyed by balance, so a moved monitor kept firing on the
 // balance it left until that balance's cached list expired.
 func TestBalanceMonitor_MovedMonitorStopsAlertingOnTheOldBalance(t *testing.T) {

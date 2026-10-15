@@ -908,3 +908,24 @@ func TestCheckCondition_Extended(t *testing.T) {
 		assert.False(t, result)
 	})
 }
+
+func TestMonitorPreciseValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     float64
+		precision float64
+		want      int64
+	}{
+		{"float-hostile fraction is not truncated", 0.29, 100, 29},
+		{"exact fraction", 10.5, 100, 1050},
+		{"halfway between minor units rounds away from zero", 1.005, 100, 101},
+		{"zero threshold", 0, 100, 0},
+		{"negative threshold", -0.29, 100, -29},
+		{"missing precision means 1", 500, 0, 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, big.NewInt(tt.want), MonitorPreciseValue(tt.value, tt.precision))
+		})
+	}
+}
