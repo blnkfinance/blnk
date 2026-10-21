@@ -391,3 +391,78 @@ func TestGetTokenizedFields(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
+
+func TestUpdateIdentityMetadataKeepsTokenizedFields(t *testing.T) {
+	router, b := setupTokenizationRouter(t)
+
+	tokenizedFields := func(t *testing.T, identityID string) []interface{} {
+		t.Helper()
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "GET",
+			Route:    fmt.Sprintf("/identities/%s/tokenized-fields", identityID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		fields, _ := response["tokenized_fields"].([]interface{})
+		return fields
+	}
+
+	updateMetadata := func(t *testing.T, identityID, body string) {
+		t.Helper()
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  jsonReader(body),
+			Response: &response,
+			Method:   "PUT",
+			Route:    fmt.Sprintf("/identities/%s", identityID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+	}
+
+	tokenizeFirstName := func(t *testing.T, identityID string) {
+		t.Helper()
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Response: &response,
+			Method:   "POST",
+			Route:    fmt.Sprintf("/identities/%s/tokenize/firstName", identityID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+	}
+
+	t.Run("Metadata update keeps the tokenization record", func(t *testing.T) {
+		identity := createTestIdentity(t, b)
+		tokenizeFirstName(t, identity.IdentityID)
+
+		updateMetadata(t, identity.IdentityID, `{"meta_data": {"tier": "gold"}}`)
+
+		assert.ElementsMatch(t, []interface{}{"FirstName"}, tokenizedFields(t, identity.IdentityID))
+		stored, err := b.GetIdentity(identity.IdentityID)
+		if err != nil {
+			t.Fatalf("Failed to fetch identity: %v", err)
+		}
+		assert.Equal(t, "gold", stored.MetaData["tier"])
+	})
+
+	t.Run("Client cannot overwrite the tokenization record", func(t *testing.T) {
+		identity := createTestIdentity(t, b)
+		tokenizeFirstName(t, identity.IdentityID)
+
+		updateMetadata(t, identity.IdentityID, `{"meta_data": {"tokenized_fields": {"LastName": true}}}`)
+
+		assert.ElementsMatch(t, []interface{}{"FirstName"}, tokenizedFields(t, identity.IdentityID))
+	})
+}

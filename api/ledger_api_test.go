@@ -432,8 +432,45 @@ func TestFilterLedgers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
-	t.Run("Oversized limit coerced to default", func(t *testing.T) {
+	t.Run("Oversized limit rejected", func(t *testing.T) {
 		body := `{"filters": [], "limit": 500}`
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/ledgers/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Negative limit rejected", func(t *testing.T) {
+		body := `{"filters": [], "limit": -1}`
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  bytes.NewReader([]byte(body)),
+			Response: &response,
+			Method:   "POST",
+			Route:    "/ledgers/filter",
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("Zero limit uses default page size", func(t *testing.T) {
+		for i := 0; i < 21; i++ {
+			if _, err := b.CreateLedger(model.Ledger{Name: gofakeit.UUID()}); err != nil {
+				t.Fatalf("Failed to create ledger: %v", err)
+			}
+		}
+		body := `{"filters": [], "limit": 0}`
 		var response []model.Ledger
 		resp, err := SetUpTestRequest(TestRequest{
 			Payload:  bytes.NewReader([]byte(body)),
@@ -446,6 +483,6 @@ func TestFilterLedgers(t *testing.T) {
 			t.Fatal(err)
 		}
 		assert.Equal(t, http.StatusOK, resp.Code)
-		assert.LessOrEqual(t, len(response), 20)
+		assert.Equal(t, 20, len(response))
 	})
 }

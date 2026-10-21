@@ -199,7 +199,7 @@ func TestUpdateIdentity(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Update the SQL pattern to include meta_data field
-	mock.ExpectExec(`UPDATE blnk\.identity SET identity_type = \$1, first_name = \$2, last_name = \$3, other_names = \$4, gender = \$5, dob = \$6, email_address = \$7, phone_number = \$8, nationality = \$9, organization_name = \$10, category = \$11, street = \$12, country = \$13, state = \$14, post_code = \$15, city = \$16, meta_data = \$17 WHERE identity_id = \$18`).
+	mock.ExpectExec(`UPDATE blnk\.identity SET identity_type = \$1, first_name = \$2, last_name = \$3, other_names = \$4, gender = \$5, dob = \$6, email_address = \$7, phone_number = \$8, nationality = \$9, organization_name = \$10, category = \$11, street = \$12, country = \$13, state = \$14, post_code = \$15, city = \$16, meta_data = jsonb_strip_nulls\(jsonb_build_object\('tokenized_fields', meta_data->'tokenized_fields'\)\) \|\| \$17::jsonb WHERE identity_id = \$18`).
 		WithArgs(
 			identity.IdentityType,
 			identity.FirstName,

@@ -88,9 +88,11 @@ func ParseFiltersFromBody(c *gin.Context, table string) (*filter.QueryFilterSet,
 		return nil, nil, 0, 0, err
 	}
 
-	// Apply defaults
 	limit := req.Limit
-	if limit <= 0 || limit > 100 {
+	if limit < 0 || limit > 100 {
+		return nil, nil, 0, 0, fmt.Errorf("limit must be between 1 and 100")
+	}
+	if limit == 0 {
 		limit = 20
 	}
 
