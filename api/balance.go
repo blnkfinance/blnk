@@ -321,6 +321,17 @@ func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 		return
 	}
 
+	// This handler binds the internal model rather than a request struct, so the
+	// trigger is validated here or the update path becomes the one way to put an
+	// unvalidated value in front of the table's check constraint. Omitted means
+	// keep the stored mode, so it is not defaulted.
+	if monitor.Trigger != "" {
+		if _, err := model.NormalizeTrigger(monitor.Trigger); err != nil {
+			respondCode(c, apierror.ErrGenValidation, err.Error(), nil, withLegacyKey("errors"))
+			return
+		}
+	}
+
 	monitor.MonitorID = id
 	err := a.blnk.UpdateMonitor(c.Request.Context(), &monitor)
 	if err != nil {

@@ -504,6 +504,16 @@ func TestBalanceMonitor_CheckCondition(t *testing.T) {
 	assert.False(t, result)
 }
 
+func TestBalanceMonitor_TriggerMode(t *testing.T) {
+	// An empty trigger is what a cache entry encoded before the field existed
+	// decodes to. Those monitors are level, and reading them as edge would drop
+	// their repeat alerts until the cache expires.
+	assert.Equal(t, TriggerLevel, (&BalanceMonitor{}).TriggerMode())
+	assert.Equal(t, TriggerEdge, (&BalanceMonitor{Trigger: TriggerEdge}).TriggerMode())
+	assert.Equal(t, TriggerLevel, (&BalanceMonitor{Trigger: TriggerLevel}).TriggerMode())
+	assert.Equal(t, TriggerLevel, (&BalanceMonitor{Trigger: "nonsense"}).TriggerMode())
+}
+
 func TestExternalTransaction_ToInternalTransaction(t *testing.T) {
 	extTxn := &ExternalTransaction{
 		ID:          "ext123",
@@ -907,4 +917,25 @@ func TestCheckCondition_Extended(t *testing.T) {
 		result := monitor.CheckCondition(balance)
 		assert.False(t, result)
 	})
+}
+
+func TestMonitorPreciseValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     float64
+		precision float64
+		want      int64
+	}{
+		{"float-hostile fraction is not truncated", 0.29, 100, 29},
+		{"exact fraction", 10.5, 100, 1050},
+		{"halfway between minor units rounds away from zero", 1.005, 100, 101},
+		{"zero threshold", 0, 100, 0},
+		{"negative threshold", -0.29, 100, -29},
+		{"missing precision means 1", 500, 0, 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, big.NewInt(tt.want), MonitorPreciseValue(tt.value, tt.precision))
+		})
+	}
 }

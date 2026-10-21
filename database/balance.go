@@ -1125,11 +1125,17 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 		monitor.Condition.PreciseValue = big.NewInt(0)
 	}
 
+	trigger, err := model.NormalizeTrigger(monitor.Trigger)
+	if err != nil {
+		return model.BalanceMonitor{}, apierror.NewAPIError(apierror.ErrBadRequest, err.Error(), err)
+	}
+	monitor.Trigger = trigger
+
 	// Insert the monitor data into the balance_monitors table
-	_, err := d.Conn.ExecContext(context.Background(), `
-		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, monitor.CreatedAt)
+	_, err = d.Conn.ExecContext(context.Background(), `
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Description, monitor.CallBackURL, monitor.CreatedAt, monitor.Trigger)
 	// Handle database errors
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)
@@ -1150,6 +1156,8 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 		return model.BalanceMonitor{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to create monitor", err)
 	}
 
+	resolveMonitorState(&monitor, false)
+
 	// Return the successfully created BalanceMonitor object
 	return monitor, nil
 }
@@ -1164,11 +1172,13 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 // - *model.BalanceMonitor: A pointer to the BalanceMonitor object if found.
 // - error: If the monitor is not found or if any errors occur during the query, an `APIError` is returned.
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
-	var preciseValue int64 // Temporary variable to hold the precise value as int64
+	var precision sql.NullFloat64
+	var preciseValue sql.NullInt64
+	var conditionState bool
 
 	// Query the database to get the monitor details by MonitorID
 	row := d.Conn.QueryRowContext(context.Background(), `
-		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at
+		SELECT monitor_id, balance_id, field, operator, value, precision, precise_value, description, call_back_url, created_at, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE monitor_id = $1
 	`, id)
 
@@ -1178,7 +1188,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	condition := &model.AlertCondition{}
 
 	// Scan the result into the monitor and condition fields
-	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &condition.Precision, &preciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &precision, &preciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &monitor.Trigger, &conditionState)
 	if err != nil {
 		// Handle the case where the monitor with the specified ID is not found
 		if err == sql.ErrNoRows {
@@ -1188,9 +1198,9 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitor", err)
 	}
 
-	// Populate the PreciseValue field in the condition (convert from int64 to big.Int)
 	monitor.Condition = *condition
-	monitor.Condition.PreciseValue = big.NewInt(preciseValue)
+	resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
+	resolveMonitorState(monitor, conditionState)
 
 	// Return the populated BalanceMonitor object
 	return monitor, nil
@@ -1205,7 +1215,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	// Query the database for all balance monitors
 	rows, err := d.Conn.QueryContext(context.Background(), `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value, trigger_type, condition_state
 		FROM blnk.balance_monitors
 	`)
 	if err != nil {
@@ -1219,11 +1229,14 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 
 	// Iterate through each row in the result set
 	for rows.Next() {
+		var precision sql.NullFloat64
+		var preciseValue sql.NullInt64
+		var conditionState bool
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
@@ -1231,6 +1244,8 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 
 		// Assign the scanned AlertCondition to the monitor
 		monitor.Condition = condition
+		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
+		resolveMonitorState(&monitor, conditionState)
 
 		// Append the monitor to the slice
 		monitors = append(monitors, monitor)
@@ -1258,7 +1273,7 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor, error) {
 	// Query the database for monitors associated with the given balance ID
 	rows, err := d.Conn.QueryContext(context.Background(), `
-		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value
+		SELECT monitor_id, balance_id, field, operator, value, description, call_back_url, created_at, precision, precise_value, trigger_type, condition_state
 		FROM blnk.balance_monitors WHERE balance_id = $1
 	`, balanceID)
 	if err != nil {
@@ -1272,12 +1287,14 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 
 	// Iterate through each row in the result set
 	for rows.Next() {
-		var preciseValue int64              // Temporary variable to hold the precise value as int64
+		var precision sql.NullFloat64
+		var preciseValue sql.NullInt64
+		var conditionState bool
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &condition.Precision, &preciseValue)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
@@ -1285,7 +1302,8 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 
 		// Assign the scanned AlertCondition to the monitor
 		monitor.Condition = condition
-		monitor.Condition.PreciseValue = big.NewInt(preciseValue)
+		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
+		resolveMonitorState(&monitor, conditionState)
 
 		// Append the monitor to the slice
 		monitors = append(monitors, monitor)
@@ -1301,9 +1319,31 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 	return monitors, nil
 }
 
+// resolveMonitorThreshold fills a scanned condition's precision fields. Rows
+// written before the precision migration have NULL precise_value; reading that
+// as 0 turned "balance > 500" into "balance > 0", so it is derived from value.
+func resolveMonitorThreshold(condition *model.AlertCondition, precision sql.NullFloat64, preciseValue sql.NullInt64) {
+	condition.Precision = precision.Float64
+	if preciseValue.Valid {
+		condition.PreciseValue = big.NewInt(preciseValue.Int64)
+		return
+	}
+	condition.PreciseValue = model.MonitorPreciseValue(condition.Value, condition.Precision)
+}
+
+// resolveMonitorState reports condition_state for edge monitors only. Level
+// monitors never write it, so it would read false while they fire.
+func resolveMonitorState(monitor *model.BalanceMonitor, conditionState bool) {
+	if monitor.TriggerMode() == model.TriggerEdge {
+		monitor.ConditionState = &conditionState
+	}
+}
+
 // UpdateMonitor updates an existing balance monitor in the database.
-// It updates fields such as `balance_id`, `field`, `operator`, `value`, `description`, and `call_back_url`
-// for the monitor identified by `monitor_id`.
+//
+// call_back_url is deliberately not written: BalanceMonitor.CallBackURL is
+// tagged json:"-", so a request can never populate it, and writing it here only
+// ever cleared the URL the monitor was created with.
 //
 // Parameters:
 // - monitor: A pointer to the `BalanceMonitor` object containing the updated values.
@@ -1311,12 +1351,37 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 // Returns:
 // - error: If the update fails, an appropriate `APIError` is returned.
 func (d Datasource) UpdateMonitor(monitor *model.BalanceMonitor) error {
-	// Execute the SQL update statement, replacing the placeholder values with the monitor's data
+	if monitor.Trigger != "" {
+		trigger, err := model.NormalizeTrigger(monitor.Trigger)
+		if err != nil {
+			return apierror.NewAPIError(apierror.ErrBadRequest, err.Error(), err)
+		}
+		monitor.Trigger = trigger
+	}
+
+	if monitor.Condition.PreciseValue == nil {
+		monitor.Condition.PreciseValue = model.MonitorPreciseValue(monitor.Condition.Value, monitor.Condition.Precision)
+	}
+
+	// An omitted trigger keeps the stored mode. Edge state is re-armed only when
+	// what the monitor watches changes: re-arming on a description edit would
+	// re-send an alert for a crossing that was already reported.
 	result, err := d.Conn.ExecContext(context.Background(), `
-		UPDATE blnk.balance_monitors
-		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, call_back_url = $7
-		WHERE monitor_id = $1
-	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.CallBackURL)
+		UPDATE blnk.balance_monitors AS m
+		SET balance_id = $2, field = $3, operator = $4, value = $5, description = $6, precision = $7, precise_value = $8,
+		    trigger_type = n.trigger_type,
+		    condition_state = CASE WHEN n.rearm THEN FALSE ELSE m.condition_state END,
+		    state_version = CASE WHEN n.rearm THEN 0 ELSE m.state_version END,
+		    state_changed_at = CASE WHEN n.rearm THEN NULL ELSE m.state_changed_at END
+		FROM (
+			SELECT monitor_id,
+			       COALESCE(NULLIF($9, ''), trigger_type) AS trigger_type,
+			       (balance_id, field, operator, precise_value, trigger_type)
+			           IS DISTINCT FROM ($2, $3, $4, $8::BIGINT, COALESCE(NULLIF($9, ''), trigger_type)) AS rearm
+			FROM blnk.balance_monitors WHERE monitor_id = $1
+		) AS n
+		WHERE m.monitor_id = n.monitor_id
+	`, monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, monitor.Condition.Precision, monitor.Condition.PreciseValue.String(), monitor.Trigger)
 	// If an error occurred during execution, return an internal server error
 	if err != nil {
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update monitor", err)
@@ -1369,6 +1434,72 @@ func (d Datasource) DeleteMonitor(id string) error {
 	}
 
 	// Return nil if the deletion was successful
+	return nil
+}
+
+// TransitionMonitorState records the truth value an evaluation observed and
+// reports whether that evaluation is the one that moved the monitor, which is
+// what entitles an edge-triggered caller to send.
+//
+// Monitor checks run in detached goroutines after the balance lock is released,
+// so evaluations of the same monitor race and arrive out of order. Both guards
+// are load-bearing:
+//
+//   - condition_state IS DISTINCT FROM $2 makes the read and the write one
+//     statement, so concurrent evaluations serialise on the row and only one of
+//     them can observe the transition.
+//   - state_version < $3 discards an evaluation a later balance version has
+//     overtaken, which would otherwise alert on a balance that has since
+//     recovered and then swallow the next real crossing.
+//   - balance_id = $4 discards an evaluation for a balance this monitor no
+//     longer watches. Versions count per balance, so without it a stale
+//     evaluation left in another balance's monitor cache could pin
+//     state_version above anything the monitor's own balance will reach for
+//     thousands of transactions, silencing it.
+//
+// balanceVersion is model.Balance.Version: bumped only after a successful
+// persist, under the optimistic lock, so it is strictly increasing per balance.
+func (d Datasource) TransitionMonitorState(ctx context.Context, monitorID, balanceID string, conditionMet bool, balanceVersion int64) (bool, error) {
+	result, err := d.Conn.ExecContext(ctx, `
+		UPDATE blnk.balance_monitors
+		SET condition_state = $2, state_version = $3, state_changed_at = NOW()
+		WHERE monitor_id = $1
+		  AND balance_id = $4
+		  AND condition_state IS DISTINCT FROM $2
+		  AND state_version < $3
+	`, monitorID, conditionMet, balanceVersion, balanceID)
+	if err != nil {
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to transition monitor state", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get rows affected", err)
+	}
+
+	return rowsAffected == 1, nil
+}
+
+// ReleaseMonitorState puts a monitor back to armed after a transition this
+// process owned could not be delivered, so the next transaction gets another
+// chance at the same crossing.
+//
+// The version guard is equality, not "less than": this undoes our own write and
+// nobody else's, and correctly does nothing once a newer evaluation has moved
+// the monitor on.
+func (d Datasource) ReleaseMonitorState(ctx context.Context, monitorID, balanceID string, balanceVersion int64) error {
+	_, err := d.Conn.ExecContext(ctx, `
+		UPDATE blnk.balance_monitors
+		SET condition_state = FALSE, state_changed_at = NOW()
+		WHERE monitor_id = $1
+		  AND balance_id = $3
+		  AND state_version = $2
+		  AND condition_state = TRUE
+	`, monitorID, balanceVersion, balanceID)
+	if err != nil {
+		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to release monitor state", err)
+	}
+
 	return nil
 }
 

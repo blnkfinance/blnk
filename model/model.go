@@ -83,7 +83,10 @@ func compare(value *big.Int, condition string, compareTo *big.Int) bool {
 		return cmp <= 0
 	case "!=":
 		return cmp != 0
-	case "==":
+	// The table's check constraint stores equality as '=', so that is the
+	// spelling monitors actually carry; '==' is accepted as well because the
+	// API has always advertised it.
+	case "=", "==":
 		return cmp == 0
 	}
 	return false
@@ -440,6 +443,17 @@ func convertDecimalToPrecise(transaction *Transaction) *big.Int {
 	result.SetString(preciseAmount.String(), 10)
 
 	return result
+}
+
+// MonitorPreciseValue converts a monitor threshold into the minor units the
+// ledger compares against, exactly as transaction amounts are converted:
+// int64(0.29 * 100) truncates to 28. A missing precision means 1, which is how
+// thresholds were compared before monitors had a precision at all.
+func MonitorPreciseValue(value, precision float64) *big.Int {
+	if precision == 0 {
+		precision = 1
+	}
+	return convertDecimalToPrecise(&Transaction{Amount: value, Precision: precision})
 }
 
 // ValidateAmount is the exported ingest check used by QueueTransaction so
