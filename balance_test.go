@@ -451,7 +451,7 @@ func TestUpdateMonitor(t *testing.T) {
 		AddRow(monitor.MonitorID, monitor.BalanceID, "balance", "<", 100, 100, 10000, "Test Monitor", gofakeit.URL(), time.Now(), model.TriggerEdge, false)
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitor.MonitorID).WillReturnRows(previous)
 
-	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, float64(100), monitor.Description, float64(100), "10000", "").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, "balance", "<", float64(100), monitor.Description, float64(100), "10000", "").WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.UpdateMonitor(context.Background(), monitor)
 

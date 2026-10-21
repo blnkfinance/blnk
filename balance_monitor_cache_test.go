@@ -80,7 +80,11 @@ func TestUpdateMonitor_InvalidatesOnceWhenTheBalanceIsUnchanged(t *testing.T) {
 	recorder := &recordingCache{}
 	h.blnk.cache = recorder
 
-	stored := &model.BalanceMonitor{MonitorID: "mon_same", BalanceID: "bln_same"}
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_same",
+		BalanceID: "bln_same",
+		Condition: model.AlertCondition{Field: "balance", Operator: "<"},
+	}
 	h.ds.On("GetMonitorByID", "mon_same").Return(stored, nil).Once()
 	h.ds.On("UpdateMonitor", mock.Anything).Return(nil).Once()
 

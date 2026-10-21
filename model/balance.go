@@ -158,3 +158,20 @@ func (c *AlertCondition) UnmarshalJSON(data []byte) error {
 func (c AlertCondition) ValueSpecified() bool {
 	return c.valueSpecified
 }
+
+// Validate reports whether field and operator are ones the ledger can evaluate.
+// The table's check constraint stores the same set; rejecting here keeps a PUT
+// from turning a bad operator into a 500.
+func (c AlertCondition) Validate() error {
+	switch c.Field {
+	case "debit_balance", "credit_balance", "balance", "inflight_debit_balance", "inflight_credit_balance", "inflight_balance":
+	default:
+		return fmt.Errorf("field must be one of debit_balance, credit_balance, balance, inflight_debit_balance, inflight_credit_balance, inflight_balance")
+	}
+	switch c.Operator {
+	case ">", "<", ">=", "<=", "=", "!=":
+	default:
+		return fmt.Errorf("operator must be one of >, <, >=, <=, =, !=")
+	}
+	return nil
+}

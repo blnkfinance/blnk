@@ -942,6 +942,13 @@ func TestMonitorPreciseValue(t *testing.T) {
 	}
 }
 
+func TestAlertCondition_Validate(t *testing.T) {
+	assert.NoError(t, AlertCondition{Field: "balance", Operator: ">"}.Validate())
+	assert.NoError(t, AlertCondition{Field: "inflight_balance", Operator: "!="}.Validate())
+	assert.Error(t, AlertCondition{Field: "wallet", Operator: ">"}.Validate())
+	assert.Error(t, AlertCondition{Field: "balance", Operator: "=="}.Validate())
+}
+
 func TestAlertCondition_UnmarshalJSON_TracksWhetherValueWasSent(t *testing.T) {
 	var omitted AlertCondition
 	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">"}`), &omitted))

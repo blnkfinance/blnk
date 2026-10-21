@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -200,6 +201,102 @@ func TestBalanceMonitor_NullCallbackDoesNotSilenceSiblings(t *testing.T) {
 	e.awaitWebhooks(t, 1)
 	assert.True(t, e.monitorState(t, healthy.MonitorID),
 		"a leftover NULL callback must not stop a healthy monitor from working")
+}
+
+func putMonitor(t *testing.T, e *monitorE2E, monitorID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: bytes.NewBufferString(body),
+		Method:  "PUT",
+		Route:   fmt.Sprintf("/balance-monitors/%s", monitorID),
+		Router:  e.router,
+	})
+	return resp
+}
+
+func getMonitor(t *testing.T, e *monitorE2E, monitorID string) model.BalanceMonitor {
+	t.Helper()
+	var stored model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Response: &stored, Method: "GET",
+		Route: fmt.Sprintf("/balance-monitors/%s", monitorID), Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+	return stored
+}
+
+// PUT writes every column. A body that only sends the condition used to
+// blank the description the monitor was created with.
+func TestBalanceMonitor_OmittedDescriptionOnPutKeepsIt(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+
+	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
+		BalanceId:   wallet.BalanceID,
+		Description: "keep me",
+		Trigger:     model.TriggerEdge,
+		Condition:   model2.MonitorCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	})
+	var created model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Response: &created,
+		Method: "POST", Route: "/balance-monitors", Router: e.router,
+	})
+	require.Equal(t, http.StatusCreated, resp.Code)
+
+	resp = putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"condition":{"field":"balance","operator":">","value":500,"precision":1}}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, "keep me", getMonitor(t, e, created.MonitorID).Description)
+}
+
+// Empty field and operator fail the table check. Omit means keep, the same
+// as value and precision.
+func TestBalanceMonitor_OmittedFieldAndOperatorOnPutKeepTheStoredOnes(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"description":"still watching balance"}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusOK, resp.Code, "body: %s", resp.Body.String())
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, "balance", stored.Condition.Field)
+	assert.Equal(t, ">", stored.Condition.Operator)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, "still watching balance", stored.Description)
+}
+
+func TestBalanceMonitor_OmittedBalanceIDOnPutKeepsTheStoredOne(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID,
+		`{"description":"same wallet","condition":{"field":"balance","operator":">","value":500,"precision":1}}`,
+	)
+	require.Equal(t, http.StatusOK, resp.Code, "body: %s", resp.Body.String())
+	assert.Equal(t, wallet.BalanceID, getMonitor(t, e, created.MonitorID).BalanceID)
+}
+
+// Create already rejects "==". PUT used to forward it to the database and
+// return 500 with the check-constraint text.
+func TestBalanceMonitor_PutRejectsUnknownOperator(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"condition":{"field":"balance","operator":"==","value":500,"precision":1}}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusBadRequest, resp.Code, "body: %s", resp.Body.String())
+	assert.Equal(t, ">", getMonitor(t, e, created.MonitorID).Condition.Operator)
 }
 
 // int64(0.29 * 100) is 28, so a monitor on "above 0.29" fired at exactly 0.29.
