@@ -145,8 +145,8 @@ func TestCreateIdentity_CallerSuppliedID_BadUUID(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	cases := []string{
-		"idt_",                                       // empty suffix
-		"idt_not-a-uuid",                             // non-UUID suffix
+		"idt_",           // empty suffix
+		"idt_not-a-uuid", // non-UUID suffix
 		"idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2",    // truncated UUID
 		"idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2cZZ", // trailing garbage
 		"idt_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",   // non-hex chars

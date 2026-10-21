@@ -71,21 +71,21 @@ func GetValidFieldsForTable(table string) map[string]bool {
 	switch table {
 	case "transactions":
 		return map[string]bool{
-			"transaction_id":       true,
-			"parent_transaction":   true,
-			"amount":               true,
-			"currency":             true,
-			"source":               true,
-			"destination":          true,
-			"balance_id":           true,
-			"reference":            true,
-			"status":               true,
-			"created_at":           true,
-			"effective_date":       true,
-			"indicator":            true,
-			"description":          true,
-			"precision":            true,
-			"meta_data":            true,
+			"transaction_id":     true,
+			"parent_transaction": true,
+			"amount":             true,
+			"currency":           true,
+			"source":             true,
+			"destination":        true,
+			"balance_id":         true,
+			"reference":          true,
+			"status":             true,
+			"created_at":         true,
+			"effective_date":     true,
+			"indicator":          true,
+			"description":        true,
+			"precision":          true,
+			"meta_data":          true,
 		}
 	case "balances":
 		return map[string]bool{
