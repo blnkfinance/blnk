@@ -194,6 +194,7 @@ type lineage interface {
 	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error                                                     // Marks an outbox entry as failed
 	GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error)                        // Gets outbox entry by transaction ID
 	HasPendingCreditOutbox(ctx context.Context, balanceID string) (bool, error)                                              // Checks if there are pending credit outbox entries for a balance
+	GetPendingShadowCommitOutbox(ctx context.Context, parentTransactionID string) ([]model.LineageOutbox, error) // Lists unfinished shadow commit outbox entries of a parent transaction
 }
 
 // chain defines the hash-chain (tamper-evidence) operations.
