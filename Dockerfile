@@ -5,7 +5,7 @@ COPY . .
 
 RUN go build -o /blnk ./cmd/*.go
 
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Install pg_dump version 16
 RUN apt-get update && apt-get install -y wget gnupg2 lsb-release && \
