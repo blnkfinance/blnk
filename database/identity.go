@@ -255,13 +255,14 @@ func (d Datasource) UpdateIdentity(identity *model.Identity) error {
 	addField(identity.PostCode, "post_code")
 	addField(identity.City, "city")
 
-	// Always update metadata if it exists
+	// Always update metadata if it exists. The stored tokenized_fields record
+	// survives unless the new metadata carries its own.
 	if identity.MetaData != nil {
 		metaDataJSON, err := json.Marshal(identity.MetaData)
 		if err != nil {
 			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 		}
-		setFields = append(setFields, fmt.Sprintf("meta_data = $%d", argPosition))
+		setFields = append(setFields, fmt.Sprintf("meta_data = jsonb_strip_nulls(jsonb_build_object('tokenized_fields', meta_data->'tokenized_fields')) || $%d::jsonb", argPosition))
 		args = append(args, metaDataJSON)
 		argPosition++
 	}

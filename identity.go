@@ -131,6 +131,10 @@ func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters
 // Returns:
 // - error: An error if the identity could not be updated.
 func (l *Blnk) UpdateIdentity(identity *model.Identity) error {
+	// tokenized_fields is owned by tokenization; a client cannot set or clear it.
+	if identity != nil && identity.MetaData != nil {
+		delete(identity.MetaData, "tokenized_fields")
+	}
 	if err := l.datasource.UpdateIdentity(identity); err != nil {
 		return err
 	}
