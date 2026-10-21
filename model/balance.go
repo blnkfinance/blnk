@@ -16,6 +16,7 @@ limitations under the License.
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"sync"
@@ -129,4 +130,31 @@ type AlertCondition struct {
 	PreciseValue *big.Int `json:"precise_value"`
 	Field        string   `json:"field"`
 	Operator     string   `json:"operator"`
+	// valueSpecified is true when JSON included "value". Zero is a valid
+	// threshold, so an omitted value cannot be told from an explicit 0 by the
+	// number alone.
+	valueSpecified bool
+}
+
+// UnmarshalJSON records whether the caller sent "value", so an update can keep
+// the stored line when the key is missing and still accept an explicit 0.
+func (c *AlertCondition) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	type plain AlertCondition
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = AlertCondition(decoded)
+	_, c.valueSpecified = raw["value"]
+	return nil
+}
+
+// ValueSpecified reports whether JSON included "value". Go-constructed
+// conditions that never passed through UnmarshalJSON return false.
+func (c AlertCondition) ValueSpecified() bool {
+	return c.valueSpecified
 }

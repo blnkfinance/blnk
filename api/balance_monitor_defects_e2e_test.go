@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -123,6 +124,82 @@ func TestBalanceMonitor_UpdatedThresholdTakesEffect(t *testing.T) {
 
 	e.transfer(t, funding.BalanceID, wallet.BalanceID, 15)
 	e.awaitWebhooks(t, 1)
+}
+
+// PUT binds the internal model, so a missing value arrives as 0. Zero is a
+// valid line; treating it as "the caller sent 0" moved a 500 monitor to 0
+// and fired on a 20 credit.
+func TestBalanceMonitor_OmittedValueOnPutKeepsTheStoredLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: bytes.NewBufferString(fmt.Sprintf(
+			`{"balance_id":%q,"description":"rename only","condition":{"field":"balance","operator":">"}}`,
+			wallet.BalanceID,
+		)),
+		Method: "PUT",
+		Route:  fmt.Sprintf("/balance-monitors/%s", created.MonitorID),
+		Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	var stored model.BalanceMonitor
+	resp, _ = SetUpTestRequest(TestRequest{
+		Response: &stored, Method: "GET",
+		Route: fmt.Sprintf("/balance-monitors/%s", created.MonitorID), Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, "500", stored.Condition.PreciseValue.String())
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks(), "20 is not above the stored line of 500")
+}
+
+// An explicit 0 must still move the line. That is how a caller writes
+// "alert when this pot goes above zero" after creating the monitor at 500.
+func TestBalanceMonitor_ExplicitZeroOnPutMovesTheLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: bytes.NewBufferString(fmt.Sprintf(
+			`{"balance_id":%q,"condition":{"field":"balance","operator":">","value":0,"precision":1}}`,
+			wallet.BalanceID,
+		)),
+		Method: "PUT",
+		Route:  fmt.Sprintf("/balance-monitors/%s", created.MonitorID),
+		Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.awaitWebhooks(t, 1)
+}
+
+// A leftover row with NULL call_back_url used to fail the scan and mute
+// every other monitor on the same balance.
+func TestBalanceMonitor_NullCallbackDoesNotSilenceSiblings(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	healthy := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 1)
+
+	execSQL(t, e.cnf, `
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, created_at)
+		VALUES ($1, $2, 'balance', '>', 500, NOW())
+	`, model.GenerateUUIDWithSuffix("mon"), wallet.BalanceID)
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.awaitWebhooks(t, 1)
+	assert.True(t, e.monitorState(t, healthy.MonitorID),
+		"a leftover NULL callback must not stop a healthy monitor from working")
 }
 
 // int64(0.29 * 100) is 28, so a monitor on "above 0.29" fired at exactly 0.29.

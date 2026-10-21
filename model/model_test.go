@@ -3,12 +3,14 @@ package model
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGenerateUUIDWithSuffix(t *testing.T) {
@@ -938,4 +940,21 @@ func TestMonitorPreciseValue(t *testing.T) {
 			assert.Equal(t, big.NewInt(tt.want), MonitorPreciseValue(tt.value, tt.precision))
 		})
 	}
+}
+
+func TestAlertCondition_UnmarshalJSON_TracksWhetherValueWasSent(t *testing.T) {
+	var omitted AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">"}`), &omitted))
+	assert.False(t, omitted.ValueSpecified())
+	assert.Equal(t, float64(0), omitted.Value)
+
+	var explicitZero AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">","value":0}`), &explicitZero))
+	assert.True(t, explicitZero.ValueSpecified())
+	assert.Equal(t, float64(0), explicitZero.Value)
+
+	var set AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">","value":500}`), &set))
+	assert.True(t, set.ValueSpecified())
+	assert.Equal(t, float64(500), set.Value)
 }

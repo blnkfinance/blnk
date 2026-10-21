@@ -502,9 +502,14 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	}
 
 	// PUT binds the internal model without validation, so an omitted precision
-	// arrives as 0 and would silently rescale the threshold.
+	// arrives as 0 and would silently rescale the threshold. An omitted value
+	// also arrives as 0, but 0 is a real line, so only a missing JSON key
+	// (not an explicit 0) keeps the stored one.
 	if monitor.Condition.Precision == 0 {
 		monitor.Condition.Precision = previous.Condition.Precision
+	}
+	if !monitor.Condition.ValueSpecified() && monitor.Condition.Value == 0 {
+		monitor.Condition.Value = previous.Condition.Value
 	}
 	monitor.Condition.PreciseValue = model.MonitorPreciseValue(monitor.Condition.Value, monitor.Condition.Precision)
 
