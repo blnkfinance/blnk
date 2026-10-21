@@ -690,6 +690,129 @@ func TestAuthMiddleware_Authenticate(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_ReadScopedKeysCanPOSTQueryRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	service, err := setupBlnk()
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name          string
+		path          string
+		scopes        []string
+		expectedCode  int
+		expectedError string
+	}{
+		{
+			name:         "ledgers filter accepts ledgers:read",
+			path:         "/ledgers/filter",
+			scopes:       []string{"ledgers:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "balances filter accepts balances:read",
+			path:         "/balances/filter",
+			scopes:       []string{"balances:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "accounts filter accepts accounts:read",
+			path:         "/accounts/filter",
+			scopes:       []string{"accounts:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "identities filter accepts identities:read",
+			path:         "/identities/filter",
+			scopes:       []string{"identities:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "transactions filter accepts transactions:read",
+			path:         "/transactions/filter",
+			scopes:       []string{"transactions:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "search collection accepts search:read",
+			path:         "/search/transactions",
+			scopes:       []string{"search:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "multi-search accepts search:read",
+			path:         "/multi-search",
+			scopes:       []string{"search:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "ledgers filter still accepts ledgers:write",
+			path:         "/ledgers/filter",
+			scopes:       []string{"ledgers:write"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "transactions filter still accepts transactions:write",
+			path:         "/transactions/filter",
+			scopes:       []string{"transactions:write"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "search collection still accepts search:write",
+			path:         "/search/transactions",
+			scopes:       []string{"search:write"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:          "creating a transaction still requires transactions:write",
+			path:          "/transactions",
+			scopes:        []string{"transactions:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for transactions:write",
+		},
+		{
+			name:          "refund with id filter still requires transactions:write",
+			path:          "/refund-transaction/filter",
+			scopes:        []string{"transactions:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for transactions:write",
+		},
+		{
+			name:          "search reindex still requires search:write",
+			path:          "/search/reindex",
+			scopes:        []string{"search:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for search:write",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, err := service.CreateAPIKey(context.Background(), t.Name(), "test-owner", tt.scopes, time.Now().Add(time.Hour))
+			assert.NoError(t, err)
+
+			config.ConfigStore.Store(&config.Configuration{
+				Server: config.ServerConfig{Secure: true},
+			})
+
+			router := gin.New()
+			router.Any(tt.path, NewAuthMiddleware(service).Authenticate(), func(c *gin.Context) {
+				c.Status(http.StatusOK)
+			})
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			req.Header.Set(KeyHeader, key.Key)
+			router.ServeHTTP(recorder, req)
+
+			assert.Equal(t, tt.expectedCode, recorder.Code)
+			if tt.expectedError != "" {
+				assert.Contains(t, recorder.Body.String(), tt.expectedError)
+			}
+		})
+	}
+}
+
 func TestGetResourceFromPath(t *testing.T) {
 	tests := []struct {
 		name     string
