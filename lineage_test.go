@@ -2069,6 +2069,7 @@ func TestCommitShadowAmounts(t *testing.T) {
 		// pot15 was committed by the first attempt, so committing it again under
 		// the same reference hits the unique index; pot20 still fails.
 		duplicate := &pq.Error{Code: "23505", Constraint: "transactions_reference_key"}
+		mockDS.On("TransactionExistsByRef", mock.Anything, mock.Anything).Return(false, nil)
 		mockDS.On("GetTransaction", mock.Anything, "pot15").Return((*model.Transaction)(nil), duplicate)
 		mockDS.On("GetTransaction", mock.Anything, "pot20").Return((*model.Transaction)(nil), fmt.Errorf("db down"))
 
