@@ -21,6 +21,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/blnkfinance/blnk"
@@ -60,6 +61,24 @@ var pathToResource = map[string]Resource{
 	"reconciliation":   ResourceReconciliation,
 	"metadata":         ResourceMetadata,
 	"backup":           ResourceBackup,
+}
+
+// readQueryPaths are POST endpoints that only read data; they accept :read or :write scopes.
+var readQueryPaths = map[string]bool{
+	"/ledgers/filter":      true,
+	"/balances/filter":     true,
+	"/accounts/filter":     true,
+	"/identities/filter":   true,
+	"/transactions/filter": true,
+	"/multi-search":        true,
+}
+
+func isReadQueryPath(path string) bool {
+	if readQueryPaths[path] {
+		return true
+	}
+	collection, ok := strings.CutPrefix(path, "/search/")
+	return ok && collection != "" && collection != "reindex" && !strings.Contains(collection, "/")
 }
 
 // AuthMiddleware handles authentication and authorization for API routes.
@@ -264,9 +283,13 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 
 		// Check if API key has permission for this resource and method
-		if !HasPermission(apiKey.Scopes, resource, c.Request.Method) {
-			// Get the required action for this method
-			action := methodToAction[c.Request.Method]
+		action := methodToAction[c.Request.Method]
+		allowed := HasPermission(apiKey.Scopes, resource, c.Request.Method)
+		if c.Request.Method == http.MethodPost && isReadQueryPath(c.Request.URL.Path) {
+			action = ActionRead
+			allowed = allowed || HasPermission(apiKey.Scopes, resource, http.MethodGet)
+		}
+		if !allowed {
 			abortWithCode(c, apierror.ErrAuthInsufficientPermissions, "Insufficient permissions for "+string(resource)+":"+string(action))
 			return
 		}
