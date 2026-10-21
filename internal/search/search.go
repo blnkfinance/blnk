@@ -614,6 +614,7 @@ func getTransactionSchema() *api.CollectionSchema {
 			{Name: "inflight_expiry_date", Type: "int64", Facet: &facet},
 			{Name: "effective_date", Type: "int64", Facet: &facet},
 			{Name: "meta_data", Type: "object", Facet: &facet, Optional: &enableNested},
+			{Name: "meta_data.QUEUED_PARENT_TRANSACTION", Type: "string", Facet: &facet, Optional: &enableNested},
 		},
 		DefaultSortingField: &sortBy,
 		EnableNestedFields:  &enableNested,

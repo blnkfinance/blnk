@@ -46,6 +46,25 @@ func TestTransactionSchemaHasEffectiveDate(t *testing.T) {
 	assert.Equal(t, "int64", effectiveDateType, "effective_date should be int64 type for Unix timestamp")
 }
 
+func TestTransactionSchemaHasQueuedParentTransaction(t *testing.T) {
+	schema := getTransactionSchema()
+
+	var foundQueuedParent bool
+	var fieldType string
+
+	for i := range schema.Fields {
+		field := schema.Fields[i]
+		if field.Name == "meta_data.QUEUED_PARENT_TRANSACTION" {
+			foundQueuedParent = true
+			fieldType = field.Type
+			break
+		}
+	}
+
+	assert.True(t, foundQueuedParent, "Transaction schema should include meta_data.QUEUED_PARENT_TRANSACTION field")
+	assert.Equal(t, "string", fieldType, "meta_data.QUEUED_PARENT_TRANSACTION should be string type")
+}
+
 // TestTransactionCollectionConfigHasEffectiveDateInTimeFields verifies that
 // effective_date is included in the TimeFields for proper timestamp normalization
 func TestTransactionCollectionConfigHasEffectiveDateInTimeFields(t *testing.T) {
