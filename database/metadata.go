@@ -143,13 +143,15 @@ func (d *Datasource) ListTransactionsByMetadataScope(ctx context.Context, scopeI
 	return transactions, nil
 }
 
-// UpdateBalanceMetadata updates the metadata for a specific balance in the database.
-// It marshals the metadata map to JSON before storing it.
+// UpdateBalanceMetadata merges the provided metadata into the balance's existing
+// metadata inside the database, so two concurrent updates to different keys both
+// survive. The caller passes only the keys to change; keys it omits are left as
+// they are, and a key set to JSON null stays present with a null value.
 //
 // Parameters:
 // - ctx: The context for the database operation.
 // - id: The ID of the balance to update.
-// - metadata: The new metadata to store.
+// - metadata: The keys to set.
 //
 // Returns:
 // - error: An error if the update operation fails.
@@ -159,9 +161,11 @@ func (d *Datasource) UpdateBalanceMetadata(ctx context.Context, id string, metad
 		return err
 	}
 
+	// The left operand is coerced to an object first: jsonb concatenation of a
+	// non-object (a JSON null or a scalar) with an object yields an array.
 	_, err = d.Conn.ExecContext(ctx, `
-		UPDATE blnk.balances 
-		SET meta_data = $1
+		UPDATE blnk.balances
+		SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END) || $1::jsonb
 		WHERE balance_id = $2
 	`, metadataJSON, id)
 	return err

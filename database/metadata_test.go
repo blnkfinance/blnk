@@ -73,7 +73,9 @@ func TestUpdateBalanceMetadata(t *testing.T) {
 	}
 
 	metadataJSON, _ := json.Marshal(metadata)
-	mock.ExpectExec("UPDATE blnk.balances").
+	// The merge happens in the statement, so a concurrent update to another key
+	// cannot be lost to a read-modify-write.
+	mock.ExpectExec(`UPDATE blnk\.balances\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\) \|\| \$1::jsonb\s+WHERE balance_id = \$2`).
 		WithArgs(metadataJSON, "bal_123").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

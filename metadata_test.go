@@ -109,6 +109,23 @@ func TestUpdateMetadata(t *testing.T) {
 		mockDS.AssertExpectations(t)
 	})
 
+	t.Run("Update Balance Metadata writes only the requested keys", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
+		balance := &model.Balance{MetaData: map[string]interface{}{"existing": "value", "other": "stale"}}
+		newMetadata := map[string]interface{}{"new": "value"}
+
+		mockDS.On("GetBalanceByID", "bln_123", mock.Anything, false).Return(balance, nil)
+		mockDS.On("UpdateBalanceMetadata", mock.Anything, "bln_123", newMetadata).Return(nil)
+
+		result, err := blnk.UpdateMetadata(ctx, "bln_123", newMetadata)
+
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]interface{}{"existing": "value", "other": "stale", "new": "value"}, result)
+		mockDS.AssertExpectations(t)
+	})
+
 	t.Run("Update Identity Metadata", func(t *testing.T) {
 		mockDS := new(mocks.MockDataSource)
 		blnk := &Blnk{datasource: mockDS}
