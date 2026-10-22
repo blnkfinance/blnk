@@ -270,7 +270,10 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, ErrEntityNotFound
 		}
 		mergedMetadata := mergeMetadata(ledger.MetaData, newMetadata)
-		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
+		// Only the requested keys are written; the database merges them in one
+		// statement. Writing the merged snapshot back would undo a concurrent
+		// update to any other key. The response is the merge as of the read.
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, newMetadata); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
@@ -319,8 +322,15 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, ErrEntityNotFound
 		}
-		mergedMetadata := mergeMetadata(identity.MetaData, newMetadata)
-		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
+		// tokenized_fields is owned by field tokenization. A client metadata
+		// update must not replace or clear it.
+		patch := cloneMetadata(newMetadata)
+		delete(patch, "tokenized_fields")
+		mergedMetadata := mergeMetadata(identity.MetaData, patch)
+		// Only the requested keys are written; the database merges them in one
+		// statement. Writing the merged snapshot back would undo a concurrent
+		// update to any other key. The response is the merge as of the read.
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, patch); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 

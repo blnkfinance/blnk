@@ -10,12 +10,14 @@ import (
 	"github.com/blnkfinance/blnk/model"
 )
 
-// UpdateLedgerMetadata updates the metadata for a specific ledger in the database.
-// It marshals the metadata map to JSON before storing it.
+// UpdateLedgerMetadata merges the provided metadata into the ledger's existing
+// metadata inside the database, so two concurrent updates to different keys both
+// survive. The caller passes only the keys to change; keys it omits are left as
+// they are, and a key set to JSON null stays present with a null value.
 //
 // Parameters:
 // - id: The ID of the ledger to update.
-// - metadata: The new metadata to store.
+// - metadata: The keys to set.
 //
 // Returns:
 // - error: An error if the update operation fails.
@@ -25,9 +27,11 @@ func (d *Datasource) UpdateLedgerMetadata(id string, metadata map[string]interfa
 		return err
 	}
 
+	// The left operand is coerced to an object first: jsonb concatenation of a
+	// non-object (a JSON null or a scalar) with an object yields an array.
 	_, err = d.Conn.ExecContext(context.Background(), `
-		UPDATE blnk.ledgers 
-		SET meta_data = $1
+		UPDATE blnk.ledgers
+		SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END) || $1::jsonb
 		WHERE ledger_id = $2
 	`, metadataJSON, id)
 	return err
@@ -167,12 +171,15 @@ func (d *Datasource) UpdateBalanceMetadata(ctx context.Context, id string, metad
 	return err
 }
 
-// UpdateIdentityMetadata updates the metadata for a specific identity in the database.
-// It marshals the metadata map to JSON before storing it.
+// UpdateIdentityMetadata merges the provided metadata into the identity's existing
+// metadata inside the database, so two concurrent updates to different keys both
+// survive. The caller passes only the keys to change. tokenized_fields is owned
+// by field tokenization and is removed from the patch before the merge, so this
+// write cannot replace or clear that record.
 //
 // Parameters:
 // - id: The ID of the identity to update.
-// - metadata: The new metadata to store.
+// - metadata: The keys to set.
 //
 // Returns:
 // - error: An error if the update operation fails.
@@ -182,9 +189,11 @@ func (d *Datasource) UpdateIdentityMetadata(id string, metadata map[string]inter
 		return err
 	}
 
+	// The left operand is coerced to an object first: jsonb concatenation of a
+	// non-object (a JSON null or a scalar) with an object yields an array.
 	_, err = d.Conn.ExecContext(context.Background(), `
-		UPDATE blnk.identity 
-		SET meta_data = $1
+		UPDATE blnk.identity
+		SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END) || (($1::jsonb) - 'tokenized_fields')
 		WHERE identity_id = $2
 	`, metadataJSON, id)
 	return err

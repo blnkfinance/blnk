@@ -3,7 +3,9 @@ package database
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,7 +28,9 @@ func TestUpdateLedgerMetadata(t *testing.T) {
 	}
 
 	metadataJSON, _ := json.Marshal(metadata)
-	mock.ExpectExec("UPDATE blnk.ledgers").
+	// The merge happens in the statement, so a concurrent update to another key
+	// cannot be lost to a read-modify-write.
+	mock.ExpectExec(`UPDATE blnk\.ledgers\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\) \|\| \$1::jsonb\s+WHERE ledger_id = \$2`).
 		WithArgs(metadataJSON, "ldg_123").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -94,7 +98,9 @@ func TestUpdateIdentityMetadata(t *testing.T) {
 	}
 
 	metadataJSON, _ := json.Marshal(metadata)
-	mock.ExpectExec("UPDATE blnk.identity").
+	// The merge happens in the statement. tokenized_fields is stripped from the
+	// patch so this write cannot replace the tokenization record.
+	mock.ExpectExec(`UPDATE blnk\.identity\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\) \|\| \(\(\$1::jsonb\) - 'tokenized_fields'\)\s+WHERE identity_id = \$2`).
 		WithArgs(metadataJSON, "idt_123").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -334,4 +340,98 @@ func TestListTransactionsByMetadataScope_RootTransactionNullParent_RealDB(t *tes
 	assert.True(t, txns[0].ScheduledFor.IsZero())
 	assert.Equal(t, marker, txns[0].MetaData["marker"])
 	assert.Equal(t, "INV-1", txns[0].MetaData["invoice"])
+}
+
+// TestUpdateLedgerMetadata_ConcurrentKeys_RealDB starts many updates that each
+// set a different key on one ledger. A read-modify-write of the whole note
+// drops keys. The database merge must keep every key, including the one that
+// was already stored.
+func TestUpdateLedgerMetadata_ConcurrentKeys_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	const racers = 20
+
+	ledger, err := ds.CreateLedger(model.Ledger{
+		Name:     "concurrent-meta-" + gofakeit.UUID(),
+		MetaData: map[string]interface{}{"status": "open"},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, raceMetadataUpdates(racers, func(i int) error {
+		return ds.UpdateLedgerMetadata(ledger.LedgerID, map[string]interface{}{
+			fmt.Sprintf("k%02d", i): i,
+		})
+	}))
+
+	meta := readStoredMetaData(t, ds, `SELECT meta_data FROM blnk.ledgers WHERE ledger_id = $1`, ledger.LedgerID)
+	assert.Equal(t, "open", meta["status"])
+	for i := 0; i < racers; i++ {
+		assert.Contains(t, meta, fmt.Sprintf("k%02d", i))
+	}
+}
+
+// TestUpdateIdentityMetadata_ConcurrentKeys_RealDB is the identity form of the
+// ledger race. One update also tries to replace tokenized_fields. That record
+// is owned by field tokenization and must stay as it was stored.
+func TestUpdateIdentityMetadata_ConcurrentKeys_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	const racers = 20
+
+	identity, err := ds.CreateIdentity(model.Identity{
+		IdentityType: "individual",
+		FirstName:    "Ada",
+		LastName:     "Lovelace",
+		EmailAddress: "ada-" + gofakeit.UUID() + "@example.com",
+		MetaData: map[string]interface{}{
+			"status":           "open",
+			"tokenized_fields": map[string]interface{}{"email_address": true},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, raceMetadataUpdates(racers, func(i int) error {
+		patch := map[string]interface{}{fmt.Sprintf("k%02d", i): i}
+		if i == 0 {
+			patch["tokenized_fields"] = map[string]interface{}{"email_address": false}
+		}
+		return ds.UpdateIdentityMetadata(identity.IdentityID, patch)
+	}))
+
+	meta := readStoredMetaData(t, ds, `SELECT meta_data FROM blnk.identity WHERE identity_id = $1`, identity.IdentityID)
+	assert.Equal(t, "open", meta["status"])
+	assert.Equal(t, map[string]interface{}{"email_address": true}, meta["tokenized_fields"])
+	for i := 0; i < racers; i++ {
+		assert.Contains(t, meta, fmt.Sprintf("k%02d", i))
+	}
+}
+
+func raceMetadataUpdates(n int, update func(i int) error) error {
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs <- update(i)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readStoredMetaData(t *testing.T, ds Datasource, query, id string) map[string]interface{} {
+	t.Helper()
+	var raw []byte
+	require.NoError(t, ds.Conn.QueryRow(query, id).Scan(&raw))
+	var meta map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &meta))
+	return meta
 }

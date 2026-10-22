@@ -72,6 +72,23 @@ func TestUpdateMetadata(t *testing.T) {
 		mockDS.AssertExpectations(t)
 	})
 
+	t.Run("Update Ledger Metadata writes only the requested keys", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
+		ledger := &model.Ledger{MetaData: map[string]interface{}{"existing": "value", "other": "stale"}}
+		newMetadata := map[string]interface{}{"new": "value"}
+
+		mockDS.On("GetLedgerByID", "ldg_123").Return(ledger, nil)
+		mockDS.On("UpdateLedgerMetadata", "ldg_123", newMetadata).Return(nil)
+
+		result, err := blnk.UpdateMetadata(ctx, "ldg_123", newMetadata)
+
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]interface{}{"existing": "value", "other": "stale", "new": "value"}, result)
+		mockDS.AssertExpectations(t)
+	})
+
 	t.Run("Update Transaction Metadata", func(t *testing.T) {
 		mockDS := new(mocks.MockDataSource)
 		blnk := &Blnk{datasource: mockDS}
@@ -125,6 +142,31 @@ func TestUpdateMetadata(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, result, "existing")
 		assert.Contains(t, result, "new")
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("Update Identity Metadata writes only the requested keys", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
+		identity := &model.Identity{MetaData: map[string]interface{}{
+			"existing":         "value",
+			"tokenized_fields": map[string]interface{}{"email_address": true},
+		}}
+		newMetadata := map[string]interface{}{
+			"new":              "value",
+			"tokenized_fields": map[string]interface{}{"email_address": false},
+		}
+
+		mockDS.On("GetIdentityByID", "idt_123").Return(identity, nil)
+		mockDS.On("UpdateIdentityMetadata", "idt_123", map[string]interface{}{"new": "value"}).Return(nil)
+
+		result, err := blnk.UpdateMetadata(ctx, "idt_123", newMetadata)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "value", result["existing"])
+		assert.Equal(t, "value", result["new"])
+		assert.Equal(t, map[string]interface{}{"email_address": true}, result["tokenized_fields"])
 		mockDS.AssertExpectations(t)
 	})
 
