@@ -100,6 +100,12 @@ type InflightUpdate struct {
 	// through the inflight-commit queue (the default).
 	SkipQueue bool `json:"skip_queue"`
 
+	// Reference is an optional idempotency key for this commit or void.
+	// Repeating a request with the same reference returns the original result
+	// instead of applying it again; reusing it with a different amount is a
+	// conflict.
+	Reference string `json:"reference"`
+
 	// DryRun projects the commit or void and returns the resulting balances
 	// without settling anything: no settlement transaction is recorded and the
 	// hold stays in place.

@@ -469,7 +469,6 @@ func (a Api) FilterTransactions(c *gin.Context) {
 // - 400 Bad Request: If there's an error in updating the status or if the ID or status is missing or unsupported.
 // - 200 OK: If the inflight transaction status is successfully updated.
 func (a Api) UpdateInflightStatus(c *gin.Context) {
-	var resp *model.Transaction
 	id, passed := c.Params.Get("txID")
 	var req model2.InflightUpdate
 	if !passed {
@@ -532,7 +531,7 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 	// Default: route the action through the inflight-commit queue. The response
 	// is the still-inflight parent plus a queued marker; the worker applies it.
 	if !req.SkipQueue {
-		parent, err := a.blnk.QueueInflightAction(c.Request.Context(), id, amount, status)
+		txn, queued, err := a.blnk.QueueInflightAction(c.Request.Context(), id, amount, status, req.Reference)
 		if err != nil {
 			if errors.Is(err, blnk.ErrInflightActionQueued) {
 				respondCode(c, apierror.ErrGenConflict, "a commit or void is already queued for this transaction", nil)
@@ -541,36 +540,26 @@ func (a Api) UpdateInflightStatus(c *gin.Context) {
 			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
 			return
 		}
-		c.JSON(http.StatusOK, queuedInflightResponse{Transaction: transformTransaction(parent), Queued: true})
+		if !queued {
+			c.JSON(http.StatusOK, transformTransaction(txn))
+			return
+		}
+		c.JSON(http.StatusOK, queuedInflightResponse{Transaction: transformTransaction(txn), Queued: true})
 		return
 	}
 
 	// skip_queue: process synchronously (legacy behavior).
-	if status == blnk.InflightActionCommit {
-		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.CommitWorker)
-		if err != nil {
-			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
-			return
-		}
-		if len(transaction) == 0 {
-			respondCode(c, apierror.ErrTxnNotInflight, "no transaction to commit", nil)
-			return
-		}
-		resp = transformTransaction(transaction[0])
-	} else {
-		transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.VoidWorker)
-		if err != nil {
-			respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
-			return
-		}
-		if len(transaction) == 0 {
-			respondCode(c, apierror.ErrTxnNotInflight, "no transaction to void", nil)
-			return
-		}
-		resp = transformTransaction(transaction[0])
+	transaction, err := a.blnk.ProcessTransactionInBatches(c.Request.Context(), id, amount, 1, false, a.blnk.GetInflightTransactionsByParentID, a.blnk.InflightWorker(status, req.Reference))
+	if err != nil {
+		respondError(c, err, withUpgrade(apierror.ErrGenNotFound, apierror.ErrTxnNotFound), withDefault(apierror.ErrGenBadRequest))
+		return
+	}
+	if len(transaction) == 0 {
+		respondCode(c, apierror.ErrTxnNotInflight, "no transaction to "+status, nil)
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, transformTransaction(transaction[0]))
 }
 
 // queuedInflightResponse is the body returned when a commit/void is queued. The
@@ -894,7 +883,7 @@ func (a Api) BulkVoidInflight(c *gin.Context) {
 func (a Api) queueBulkInflight(ctx context.Context, action string, items []blnk.BulkInflightItem) model2.BulkInflightResponse {
 	resp := model2.BulkInflightResponse{Results: make([]model2.BulkInflightResult, 0, len(items))}
 	for _, it := range items {
-		_, err := a.blnk.QueueInflightAction(ctx, it.TransactionID, it.Amount, action)
+		_, _, err := a.blnk.QueueInflightAction(ctx, it.TransactionID, it.Amount, action, "")
 		switch {
 		case err == nil:
 			resp.Results = append(resp.Results, model2.BulkInflightResult{TransactionID: it.TransactionID, Status: "queued", Code: "QUEUED"})

@@ -104,26 +104,7 @@ func clearTerminalInflightMetadata(transaction *model.Transaction) {
 // - wg *sync.WaitGroup: A wait group to synchronize the completion of the worker.
 // - amount *big.Int: The amount to be processed in the transaction.
 func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
-	ctx, span := tracer.Start(ctx, "CommitWorker")
-	defer span.End()
-
-	defer wg.Done()
-	for originalTxn := range jobs {
-		if !IsInflightTransaction(originalTxn) {
-			err := fmt.Errorf("transaction is not in inflight status")
-			results <- BatchJobResult{Error: err}
-			span.RecordError(err)
-			continue
-		}
-		queuedCommitTxn, err := l.CommitInflightTransaction(ctx, originalTxn.TransactionID, amount)
-		if err != nil {
-			results <- BatchJobResult{Error: err}
-			span.RecordError(err)
-			continue
-		}
-		results <- BatchJobResult{Txn: queuedCommitTxn}
-		span.AddEvent("Commit processed", trace.WithAttributes(attribute.String("transaction.id", queuedCommitTxn.TransactionID)))
-	}
+	l.InflightWorker(InflightActionCommit, "")(ctx, jobs, results, wg, amount)
 }
 
 // VoidWorker processes void transactions from the jobs channel and sends the results to the results channel.
@@ -136,25 +117,38 @@ func (l *Blnk) CommitWorker(ctx context.Context, jobs <-chan *model.Transaction,
 // - wg *sync.WaitGroup: A wait group to synchronize the completion of the worker.
 // - amount *big.Int: The amount to be processed in the transaction.
 func (l *Blnk) VoidWorker(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
-	ctx, span := tracer.Start(ctx, "VoidWorker")
-	defer span.End()
+	l.InflightWorker(InflightActionVoid, "")(ctx, jobs, results, wg, amount)
+}
 
-	defer wg.Done()
-	for originalTxn := range jobs {
-		if !IsInflightTransaction(originalTxn) {
-			err := fmt.Errorf("transaction is not in inflight status")
-			results <- BatchJobResult{Error: err}
-			span.RecordError(err)
-			continue
+// InflightWorker returns a worker that commits or voids every inflight leg it
+// receives. A non-empty actionID gives each leg a deterministic reference, so
+// repeating the same action replays the original result instead of applying
+// it again.
+func (l *Blnk) InflightWorker(action, actionID string) transactionWorker {
+	return func(ctx context.Context, jobs <-chan *model.Transaction, results chan<- BatchJobResult, wg *sync.WaitGroup, amount *big.Int) {
+		ctx, span := tracer.Start(ctx, "InflightWorker")
+		defer span.End()
+
+		defer wg.Done()
+		for leg := range jobs {
+			if !IsInflightTransaction(leg) {
+				err := fmt.Errorf("transaction is not in inflight status")
+				results <- BatchJobResult{Error: err}
+				span.RecordError(err)
+				continue
+			}
+			txn, err := l.applyInflightActionToLeg(ctx, leg, action, amount, actionID)
+			if err != nil {
+				results <- BatchJobResult{Error: err}
+				span.RecordError(err)
+				continue
+			}
+			results <- BatchJobResult{Txn: txn}
+			span.AddEvent("Inflight action processed", trace.WithAttributes(
+				attribute.String("action", action),
+				attribute.String("transaction.id", txn.TransactionID),
+			))
 		}
-		queuedVoidTxn, err := l.VoidInflightTransaction(ctx, originalTxn.TransactionID)
-		if err != nil {
-			results <- BatchJobResult{Error: err}
-			span.RecordError(err)
-			continue
-		}
-		results <- BatchJobResult{Txn: queuedVoidTxn}
-		span.AddEvent("Void processed", trace.WithAttributes(attribute.String("transaction.id", queuedVoidTxn.TransactionID)))
 	}
 }
 
@@ -208,6 +202,10 @@ func (l *Blnk) CommitInflightTransactionWithRef(ctx context.Context, transaction
 		return nil, fmt.Errorf("failed to acquire lock for inflight commit: %w", err)
 	}
 	defer l.releaseSingleLock(ctx, locker)
+
+	if existing, err := l.findInflightActionByRef(ctx, transactionID, InflightActionCommit, amount, reference); err != nil || existing != nil {
+		return existing, err
+	}
 
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
 	if err != nil {
@@ -472,6 +470,10 @@ func (l *Blnk) VoidInflightTransactionWithRef(ctx context.Context, transactionID
 	}
 	defer l.releaseSingleLock(ctx, locker)
 
+	if existing, err := l.findInflightActionByRef(ctx, transactionID, InflightActionVoid, nil, reference); err != nil || existing != nil {
+		return existing, err
+	}
+
 	transaction, err := l.fetchAndValidateInflightTransaction(ctx, transactionID)
 	if err != nil {
 		span.RecordError(err)
@@ -681,17 +683,66 @@ func (l *Blnk) collectInflightLegs(ctx context.Context, parentTransactionID stri
 	}
 }
 
+// findInflightActionByRef returns the child that an earlier commit or void of
+// transactionID recorded under reference, or nil if the reference is unused.
+// Reusing the reference for another transaction, action or amount is a
+// duplicate-reference error. A zero or nil amount means "the full remaining
+// amount" and matches any earlier commit.
+func (l *Blnk) findInflightActionByRef(ctx context.Context, transactionID, action string, amount *big.Int, reference string) (*model.Transaction, error) {
+	if reference == "" {
+		return nil, nil
+	}
+	exists, err := l.datasource.TransactionExistsByRef(ctx, reference)
+	if err != nil || !exists {
+		return nil, err
+	}
+	byRef, err := l.datasource.GetTransactionByRef(ctx, reference)
+	if err != nil {
+		return nil, err
+	}
+
+	status := StatusApplied
+	if action == InflightActionVoid {
+		status = StatusVoid
+	}
+	sameAmount := action == InflightActionVoid || amount == nil || amount.Sign() == 0 || amount.Cmp(byRef.PreciseAmount) == 0
+	if byRef.ParentTransaction != transactionID || byRef.Status != status || !sameAmount {
+		return nil, fmt.Errorf("reference %s has already been used", reference)
+	}
+	return l.datasource.GetTransaction(ctx, byRef.TransactionID)
+}
+
 // applyInflightActionToLeg commits or voids a single inflight leg using the
-// deterministic reference (derived from actionID) that makes asynq retries
-// idempotent.
-func (l *Blnk) applyInflightActionToLeg(ctx context.Context, leg *model.Transaction, action string, amount *big.Int, actionID string) error {
+// deterministic reference derived from actionID, so repeating the same action
+// replays the leg's original child instead of applying it again.
+func (l *Blnk) applyInflightActionToLeg(ctx context.Context, leg *model.Transaction, action string, amount *big.Int, actionID string) (*model.Transaction, error) {
 	ref := inflightActionReference(leg.TransactionID, action, actionID)
 	if action == InflightActionVoid {
-		_, err := l.VoidInflightTransactionWithRef(ctx, leg.TransactionID, ref)
-		return err
+		return l.VoidInflightTransactionWithRef(ctx, leg.TransactionID, ref)
 	}
-	_, err := l.CommitInflightTransactionWithRef(ctx, leg.TransactionID, amount, ref)
-	return err
+	return l.CommitInflightTransactionWithRef(ctx, leg.TransactionID, amount, ref)
+}
+
+// replayInflightAction returns the first leg's child when an earlier action
+// with actionID already processed every leg under transactionID, and nil when
+// any leg is still pending.
+func (l *Blnk) replayInflightAction(ctx context.Context, transactionID, action string, amount *big.Int, actionID string) (*model.Transaction, error) {
+	legs, err := l.collectInflightLegs(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+	var first *model.Transaction
+	for _, leg := range legs {
+		ref := inflightActionReference(leg.TransactionID, action, actionID)
+		txn, err := l.findInflightActionByRef(ctx, leg.TransactionID, action, amount, ref)
+		if err != nil || txn == nil {
+			return nil, err
+		}
+		if first == nil {
+			first = txn
+		}
+	}
+	return first, nil
 }
 
 // RunInflightActionByParent commits or voids every inflight leg under a parent
@@ -719,7 +770,7 @@ func (l *Blnk) RunInflightActionByParent(ctx context.Context, parentTransactionI
 	var applied, skipped int
 	var lastTransientErr error
 	for _, leg := range legs {
-		switch err := l.applyInflightActionToLeg(ctx, leg, action, amount, actionID); {
+		switch _, err := l.applyInflightActionToLeg(ctx, leg, action, amount, actionID); {
 		case err == nil:
 			applied++
 		case l.isTerminalInflightError(err):
@@ -847,16 +898,32 @@ func (l *Blnk) validateInflightActionAmount(ctx context.Context, transaction *mo
 }
 
 // QueueInflightAction pre-validates a commit/void and enqueues it for the worker.
-// It returns the still-inflight parent transaction (for the API response) and
-// ErrInflightActionQueued if an action for the same transaction is already queued.
-func (l *Blnk) QueueInflightAction(ctx context.Context, transactionID string, amount *big.Int, action string) (*model.Transaction, error) {
+// It returns the still-inflight parent transaction (for the API response) with
+// queued set, and ErrInflightActionQueued if an action for the same transaction
+// is already queued.
+//
+// A non-empty reference is the action's idempotency key. When an earlier action
+// with that reference already processed every leg, nothing is queued and the
+// original child is returned with queued unset; reusing it for a different
+// action or amount is a duplicate-reference error.
+func (l *Blnk) QueueInflightAction(ctx context.Context, transactionID string, amount *big.Int, action, reference string) (txn *model.Transaction, queued bool, err error) {
 	ctx, span := tracer.Start(ctx, "QueueInflightAction")
 	defer span.End()
+
+	actionID := reference
+	if actionID != "" {
+		replayed, err := l.replayInflightAction(ctx, transactionID, action, amount, actionID)
+		if err != nil || replayed != nil {
+			return replayed, false, err
+		}
+	} else {
+		actionID = model.GenerateUUIDWithSuffix("act")
+	}
 
 	transaction, err := l.preValidateInflightAction(ctx, transactionID, action, amount)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, false, err
 	}
 
 	preciseAmount := "0"
@@ -868,14 +935,14 @@ func (l *Blnk) QueueInflightAction(ctx context.Context, transactionID string, am
 		TransactionID: transactionID,
 		Action:        action,
 		PreciseAmount: preciseAmount,
-		ActionID:      model.GenerateUUIDWithSuffix("act"),
+		ActionID:      actionID,
 	}
 	if err := l.queue.EnqueueInflightAction(ctx, payload); err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, false, err
 	}
 
-	return transaction, nil
+	return transaction, true, nil
 }
 
 // BulkInflightAction discriminates between the two operations supported by
