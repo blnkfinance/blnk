@@ -252,6 +252,33 @@ func TestBalanceMonitor_OmittedDescriptionOnPutKeepsIt(t *testing.T) {
 	assert.Equal(t, "keep me", getMonitor(t, e, created.MonitorID).Description)
 }
 
+// An explicit empty string is not an omit. Callers who send it mean to
+// drop the stored name.
+func TestBalanceMonitor_EmptyDescriptionOnPutClearsIt(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+
+	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
+		BalanceId:   wallet.BalanceID,
+		Description: "keep me",
+		Trigger:     model.TriggerEdge,
+		Condition:   model2.MonitorCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	})
+	var created model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Response: &created,
+		Method: "POST", Route: "/balance-monitors", Router: e.router,
+	})
+	require.Equal(t, http.StatusCreated, resp.Code)
+
+	resp = putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"description":"","condition":{"field":"balance","operator":">","value":500,"precision":1}}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, "", getMonitor(t, e, created.MonitorID).Description)
+}
+
 // Empty field and operator fail the table check. Omit means keep, the same
 // as value and precision.
 func TestBalanceMonitor_OmittedFieldAndOperatorOnPutKeepTheStoredOnes(t *testing.T) {

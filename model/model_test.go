@@ -965,3 +965,36 @@ func TestAlertCondition_UnmarshalJSON_TracksWhetherValueWasSent(t *testing.T) {
 	assert.True(t, set.ValueSpecified())
 	assert.Equal(t, float64(500), set.Value)
 }
+
+func TestAlertCondition_SetValueMarksZeroAsSpecified(t *testing.T) {
+	var c AlertCondition
+	assert.False(t, c.ValueSpecified())
+	c.SetValue(0)
+	assert.True(t, c.ValueSpecified())
+	assert.Equal(t, float64(0), c.Value)
+}
+
+func TestBalanceMonitor_UnmarshalJSON_TracksWhetherDescriptionWasSent(t *testing.T) {
+	var omitted BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"balance_id":"bln_1"}`), &omitted))
+	assert.False(t, omitted.DescriptionSpecified())
+	assert.Equal(t, "", omitted.Description)
+
+	var cleared BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"description":""}`), &cleared))
+	assert.True(t, cleared.DescriptionSpecified())
+	assert.Equal(t, "", cleared.Description)
+
+	var set BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"description":"keep me"}`), &set))
+	assert.True(t, set.DescriptionSpecified())
+	assert.Equal(t, "keep me", set.Description)
+}
+
+func TestBalanceMonitor_SetDescriptionMarksEmptyAsSpecified(t *testing.T) {
+	var bm BalanceMonitor
+	assert.False(t, bm.DescriptionSpecified())
+	bm.SetDescription("")
+	assert.True(t, bm.DescriptionSpecified())
+	assert.Equal(t, "", bm.Description)
+}

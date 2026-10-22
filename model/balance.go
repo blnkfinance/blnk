@@ -85,6 +85,38 @@ type BalanceMonitor struct {
 	// owned by the evaluation path and is never authoritative on a cached copy;
 	// read it from a TransitionMonitorState result, not from here.
 	ConditionState *bool `json:"condition_state,omitempty"`
+	// descriptionSpecified is true when JSON included "description", including
+	// an explicit empty string that means "clear the name".
+	descriptionSpecified bool
+}
+
+// UnmarshalJSON records whether the caller sent "description", so an update
+// can keep the stored name when the key is missing and still clear it when
+// the body sends "".
+func (bm *BalanceMonitor) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	type plain BalanceMonitor
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*bm = BalanceMonitor(decoded)
+	_, bm.descriptionSpecified = raw["description"]
+	return nil
+}
+
+// DescriptionSpecified reports whether JSON included "description".
+func (bm BalanceMonitor) DescriptionSpecified() bool {
+	return bm.descriptionSpecified
+}
+
+// SetDescription marks the name as intentionally set, including to empty.
+func (bm *BalanceMonitor) SetDescription(description string) {
+	bm.Description = description
+	bm.descriptionSpecified = true
 }
 
 // TriggerMode is the read side of NormalizeTrigger. A monitor with no trigger
@@ -153,10 +185,17 @@ func (c *AlertCondition) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ValueSpecified reports whether JSON included "value". Go-constructed
-// conditions that never passed through UnmarshalJSON return false.
+// ValueSpecified reports whether JSON included "value" or SetValue was used.
+// Go-constructed conditions that never marked the value return false.
 func (c AlertCondition) ValueSpecified() bool {
 	return c.valueSpecified
+}
+
+// SetValue marks the threshold as intentionally set, including to 0, so
+// UpdateMonitor does not treat a programmatic zero as an omitted field.
+func (c *AlertCondition) SetValue(value float64) {
+	c.Value = value
+	c.valueSpecified = true
 }
 
 // Validate reports whether field and operator are ones the ledger can evaluate.

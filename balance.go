@@ -501,15 +501,16 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 		return err
 	}
 
-	// PUT binds the internal model without validation. Empty strings and a
-	// missing precision arrive as zero values and would overwrite the stored
-	// row (or 500 on the table's check constraint). Keep the previous value
-	// for anything the request did not send. Value is the exception: 0 is a
-	// real line, so only a missing JSON key keeps the stored one.
+	// PUT is a partial update: omitted fields keep the stored row. Empty
+	// strings and a missing precision arrive as zero values and would
+	// overwrite the row (or 500 on the table's check constraint). Value and
+	// description are the exceptions: 0 and "" are real values, so only a
+	// missing JSON key (or a Go caller that never called SetValue /
+	// SetDescription) keeps the stored one.
 	if monitor.BalanceID == "" {
 		monitor.BalanceID = previous.BalanceID
 	}
-	if monitor.Description == "" {
+	if !monitor.DescriptionSpecified() && monitor.Description == "" {
 		monitor.Description = previous.Description
 	}
 	if monitor.Condition.Field == "" {
