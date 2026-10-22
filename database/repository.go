@@ -58,11 +58,11 @@ type transaction interface {
 	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)   // Retrieves inflight transactions by parent ID
 	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) // Retrieves refundable transactions by parent ID
 	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)              // Groups transactions based on specified criteria
-	UpdateLedgerMetadata(id string, metadata map[string]interface{}) error
+	UpdateLedgerMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error)
 	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	ListTransactionsByMetadataScope(ctx context.Context, scopeID string, limit int, offset int64) ([]*model.Transaction, error)
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
-	UpdateIdentityMetadata(id string, metadata map[string]interface{}) error
+	UpdateIdentityMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error)
 	TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error)
 	GetTransactionsByParent(ctx context.Context, parentID string, limit int, offset int64) ([]*model.Transaction, error) // Retrieves transactions by parent ID with pagination
 	IsTransactionRefunded(ctx context.Context, transaction *model.Transaction) (bool, error)                             // Checks if a transaction has already been refunded

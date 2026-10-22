@@ -119,11 +119,13 @@ func (l *Blnk) GetAllIdentitiesWithFilterAndOptions(ctx context.Context, filters
 }
 
 // UpdateIdentity updates an existing identity in the database.
-// When the update writes meta_data, it reloads the stored identity and
-// enqueues identity.metadata.updated with that full record and the meta_data
-// this request committed. Field-only updates with no meta_data do not emit
-// that event. A failed reload or enqueue does not fail the update; the write
-// is already committed.
+// When the update writes meta_data, those keys are merged into the stored
+// note. Keys the request omits stay, and tokenized_fields stays unless this
+// call is field tokenization. The update then reloads the stored identity and
+// enqueues identity.metadata.updated with that full record and the note this
+// statement saved. Field-only updates with no meta_data do not emit that
+// event. A failed reload or enqueue does not fail the update; the write is
+// already committed.
 //
 // Parameters:
 // - identity *model.Identity: A pointer to the Identity model to be updated.
@@ -145,8 +147,8 @@ func (l *Blnk) UpdateIdentity(identity *model.Identity) error {
 }
 
 // enqueueIdentityMetadataUpdated notifies after a committed identity meta_data
-// replace. Resource fields come from the stored row so omitted request fields
-// are not sent as empty strings. meta_data is the map this request wrote.
+// merge. Resource fields come from the stored row so omitted request fields
+// are not sent as empty strings. meta_data is the note this statement saved.
 func (l *Blnk) enqueueIdentityMetadataUpdated(identity *model.Identity) {
 	stored, err := l.GetIdentity(identity.IdentityID)
 	if err != nil || stored == nil {

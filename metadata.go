@@ -269,15 +269,19 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, ErrEntityNotFound
 		}
-		mergedMetadata := mergeMetadata(ledger.MetaData, newMetadata)
-		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
+		// Only the requested keys are written; the database merges them in one
+		// statement. Writing the merged snapshot back would undo a concurrent
+		// update to any other key. The reply and the webhook are the note this
+		// statement saved, so a key committed before this write is included.
+		committed, err := l.datasource.UpdateLedgerMetadata(entityID, newMetadata)
+		if err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		snapshot := ledgerMetadataSnapshot(ledger, mergedMetadata)
+		snapshot := ledgerMetadataSnapshot(ledger, committed)
 		l.queueMetadataIndexRefresh(entityType, entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
-		return mergedMetadata, nil
+		return committed, nil
 
 	case "transactions":
 		exists, err := l.datasource.TransactionExistsByIDOrParentID(ctx, entityID)
@@ -322,15 +326,23 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 		if err != nil {
 			return nil, ErrEntityNotFound
 		}
-		mergedMetadata := mergeMetadata(identity.MetaData, newMetadata)
-		if err := l.updateEntityMetadata(ctx, entityType, entityID, mergedMetadata); err != nil {
+		// tokenized_fields is owned by field tokenization. A client metadata
+		// update must not replace or clear it.
+		patch := cloneMetadata(newMetadata)
+		delete(patch, "tokenized_fields")
+		// Only the requested keys are written; the database merges them in one
+		// statement. Writing the merged snapshot back would undo a concurrent
+		// update to any other key. The reply and the webhook are the note this
+		// statement saved, so a key committed before this write is included.
+		committed, err := l.datasource.UpdateIdentityMetadata(entityID, patch)
+		if err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		snapshot := identityMetadataSnapshot(identity, mergedMetadata)
+		snapshot := identityMetadataSnapshot(identity, committed)
 		l.queueMetadataIndexRefresh(entityType, entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
-		return mergedMetadata, nil
+		return committed, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported entity type: %s", entityType)
@@ -364,7 +376,8 @@ func mergeMetadata(current, new map[string]interface{}) map[string]interface{} {
 func (l *Blnk) updateEntityMetadata(ctx context.Context, entityType, entityID string, metadata map[string]interface{}) error {
 	switch entityType {
 	case "ledgers":
-		return l.datasource.UpdateLedgerMetadata(entityID, metadata)
+		_, err := l.datasource.UpdateLedgerMetadata(entityID, metadata)
+		return err
 
 	case "transactions":
 		return l.datasource.UpdateTransactionMetadata(ctx, entityID, metadata)
@@ -373,7 +386,8 @@ func (l *Blnk) updateEntityMetadata(ctx context.Context, entityType, entityID st
 		return l.datasource.UpdateBalanceMetadata(ctx, entityID, metadata)
 
 	case "identities":
-		return l.datasource.UpdateIdentityMetadata(entityID, metadata)
+		_, err := l.datasource.UpdateIdentityMetadata(entityID, metadata)
+		return err
 
 	default:
 		return fmt.Errorf("unsupported entity type: %s", entityType)

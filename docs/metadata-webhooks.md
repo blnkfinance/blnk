@@ -1,8 +1,11 @@
 # Metadata update webhooks
 
 Public `POST /:entity-id/metadata` enqueues one webhook after the metadata merge
-commits. `PUT /identities/:id` enqueues `identity.metadata.updated` when the
-body includes `meta_data` (that write replaces metadata; it does not merge).
+commits. The HTTP body and the webhook for a ledger or identity are the note
+that statement saved. `PUT /identities/:id` enqueues `identity.metadata.updated`
+when the body includes `meta_data`. That write merges keys into the stored
+note. Keys the request omits stay. `tokenized_fields` stays unless the write
+is field tokenization.
 Internal writers (`updateEntityMetadata`, reconciliation, queue recovery,
 field tokenization) do not emit these events.
 
@@ -12,7 +15,7 @@ field tokenization) do not emit these events.
 | --- | --- |
 | `ledger.metadata.updated` | Ledger metadata merged |
 | `balance.metadata.updated` | Balance metadata merged |
-| `identity.metadata.updated` | Identity metadata merged by `POST /:entity-id/metadata`, or replaced by `PUT /identities/:id` |
+| `identity.metadata.updated` | Identity metadata merged by `POST /:entity-id/metadata` or `PUT /identities/:id` |
 | `transaction.metadata.updated` | Transaction metadata merged |
 
 Each payload includes `event_id` and `timestamp` at the top of `data` for
@@ -20,13 +23,15 @@ consumer deduplication.
 
 ## Payload shape
 
-**Ledger, balance** — full resource snapshot with merged `meta_data` for
-this write. Resource fields sit at the top of `data` (same shape as
-`* .created` events).
+**Ledger, balance** — full resource snapshot with `meta_data` as saved by
+this statement. For a ledger, that is the note returned by the update, so a
+key another update committed before this one is included. Resource fields sit
+at the top of `data` (same shape as `* .created` events).
 
-**Identity** — full stored resource, not the partial request body. `POST`
-sends merged `meta_data`. `PUT /identities/:id` sends the `meta_data` object
-from that request, which replaces what was stored.
+**Identity** — full stored resource, not the partial request body. `POST` and
+`PUT /identities/:id` both send the note that statement saved. A key omitted
+from the request stays. `tokenized_fields` stays unless the write is field
+tokenization.
 
 **Transaction** — patch only:
 

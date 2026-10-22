@@ -466,3 +466,92 @@ func TestUpdateIdentityMetadataKeepsTokenizedFields(t *testing.T) {
 		assert.ElementsMatch(t, []interface{}{"FirstName"}, tokenizedFields(t, identity.IdentityID))
 	})
 }
+
+// TestPutIdentityCannotChangeTokenizedFields is PUT /identities/:id. A client
+// may set or clear tokenized_fields in the body. The stored record stays, and
+// any other key in that body is still saved.
+func TestPutIdentityCannotChangeTokenizedFields(t *testing.T) {
+	router, b := setupTokenizationRouter(t)
+
+	putIdentity := func(t *testing.T, identityID, body string) {
+		t.Helper()
+		var response map[string]interface{}
+		resp, err := SetUpTestRequest(TestRequest{
+			Payload:  jsonReader(body),
+			Response: &response,
+			Method:   "PUT",
+			Route:    fmt.Sprintf("/identities/%s", identityID),
+			Router:   router,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, "Identity updated successfully", response["message"])
+	}
+
+	tokenizedNames := func(t *testing.T, identityID string) []string {
+		t.Helper()
+		stored, err := b.GetIdentity(identityID)
+		if err != nil {
+			t.Fatalf("Failed to fetch identity: %v", err)
+		}
+		raw := stored.MetaData["tokenized_fields"]
+		var names []string
+		switch fields := raw.(type) {
+		case map[string]bool:
+			for name, on := range fields {
+				if on {
+					names = append(names, name)
+				}
+			}
+		case map[string]interface{}:
+			for name, value := range fields {
+				on, ok := value.(bool)
+				if ok && on {
+					names = append(names, name)
+				}
+			}
+		default:
+			t.Fatalf("tokenized_fields has unexpected type %T", raw)
+		}
+		return names
+	}
+
+	identity := createTestIdentity(t, b)
+	var tokenizeResponse map[string]interface{}
+	resp, err := SetUpTestRequest(TestRequest{
+		Response: &tokenizeResponse,
+		Method:   "POST",
+		Route:    fmt.Sprintf("/identities/%s/tokenize/firstName", identity.IdentityID),
+		Router:   router,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.ElementsMatch(t, []string{"FirstName"}, tokenizedNames(t, identity.IdentityID))
+
+	t.Run("setting tokenized_fields leaves the stored record", func(t *testing.T) {
+		putIdentity(t, identity.IdentityID, `{"meta_data":{"tier":"gold","tokenized_fields":{"LastName":true}}}`)
+
+		assert.ElementsMatch(t, []string{"FirstName"}, tokenizedNames(t, identity.IdentityID))
+		stored, err := b.GetIdentity(identity.IdentityID)
+		if err != nil {
+			t.Fatalf("Failed to fetch identity: %v", err)
+		}
+		assert.Equal(t, "gold", stored.MetaData["tier"])
+	})
+
+	t.Run("clearing tokenized_fields leaves the stored record", func(t *testing.T) {
+		putIdentity(t, identity.IdentityID, `{"meta_data":{"region":"EU","tokenized_fields":null}}`)
+
+		assert.ElementsMatch(t, []string{"FirstName"}, tokenizedNames(t, identity.IdentityID))
+		stored, err := b.GetIdentity(identity.IdentityID)
+		if err != nil {
+			t.Fatalf("Failed to fetch identity: %v", err)
+		}
+		assert.Equal(t, "gold", stored.MetaData["tier"])
+		assert.Equal(t, "EU", stored.MetaData["region"])
+	})
+}

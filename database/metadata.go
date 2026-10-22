@@ -10,27 +10,46 @@ import (
 	"github.com/blnkfinance/blnk/model"
 )
 
-// UpdateLedgerMetadata updates the metadata for a specific ledger in the database.
-// It marshals the metadata map to JSON before storing it.
+// UpdateLedgerMetadata merges the provided metadata into the ledger's existing
+// metadata inside the database, so two concurrent updates to different keys both
+// survive. The caller passes only the keys to change; keys it omits are left as
+// they are, and a key set to JSON null stays present with a null value.
 //
 // Parameters:
 // - id: The ID of the ledger to update.
-// - metadata: The new metadata to store.
+// - metadata: The keys to set.
 //
 // Returns:
-// - error: An error if the update operation fails.
-func (d *Datasource) UpdateLedgerMetadata(id string, metadata map[string]interface{}) error {
+//   - map[string]interface{}: The note stored after this statement, including keys
+//     another update committed before this one.
+//   - error: An error if the update operation fails.
+func (d *Datasource) UpdateLedgerMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error) {
+	// A nil map marshals as JSON null. Concatenating that with an object yields
+	// an array, so a missing patch is an empty object instead.
+	if metadata == nil {
+		metadata = map[string]interface{}{}
+	}
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	_, err = d.Conn.ExecContext(context.Background(), `
-		UPDATE blnk.ledgers 
-		SET meta_data = $1
+	// Both sides are coerced to an object first: jsonb concatenation of a
+	// non-object (a JSON null or a scalar) with an object yields an array.
+	// A key whose value is JSON null is still an object, and that key stays.
+	// RETURNING is the note this statement saved, not the copy read beforehand.
+	var raw []byte
+	err = d.Conn.QueryRowContext(context.Background(), `
+		UPDATE blnk.ledgers
+		SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END)
+			|| (CASE WHEN jsonb_typeof($1::jsonb) = 'object' THEN $1::jsonb ELSE '{}'::jsonb END)
 		WHERE ledger_id = $2
-	`, metadataJSON, id)
-	return err
+		RETURNING meta_data
+	`, metadataJSON, id).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return decodeMetadataObject(raw)
 }
 
 // UpdateTransactionMetadata updates the metadata for a specific transaction in the database.
@@ -171,25 +190,61 @@ func (d *Datasource) UpdateBalanceMetadata(ctx context.Context, id string, metad
 	return err
 }
 
-// UpdateIdentityMetadata updates the metadata for a specific identity in the database.
-// It marshals the metadata map to JSON before storing it.
+// UpdateIdentityMetadata merges the provided metadata into the identity's existing
+// metadata inside the database, so two concurrent updates to different keys both
+// survive. The caller passes only the keys to change. tokenized_fields is owned
+// by field tokenization and is removed from the patch before the merge, so this
+// write cannot replace or clear that record.
 //
 // Parameters:
 // - id: The ID of the identity to update.
-// - metadata: The new metadata to store.
+// - metadata: The keys to set.
 //
 // Returns:
-// - error: An error if the update operation fails.
-func (d *Datasource) UpdateIdentityMetadata(id string, metadata map[string]interface{}) error {
+//   - map[string]interface{}: The note stored after this statement, including keys
+//     another update committed before this one.
+//   - error: An error if the update operation fails.
+func (d *Datasource) UpdateIdentityMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error) {
+	// A nil map marshals as JSON null. Removing a key from that null errors,
+	// and concatenating it with an object yields an array, so a missing patch
+	// is an empty object instead.
+	if metadata == nil {
+		metadata = map[string]interface{}{}
+	}
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	_, err = d.Conn.ExecContext(context.Background(), `
-		UPDATE blnk.identity 
-		SET meta_data = $1
+	// Both sides are coerced to an object first. tokenized_fields is removed
+	// from the patch only after that, so a null patch cannot fail the delete.
+	// RETURNING is the note this statement saved, not the copy read beforehand.
+	var raw []byte
+	err = d.Conn.QueryRowContext(context.Background(), `
+		UPDATE blnk.identity
+		SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END)
+			|| ((CASE WHEN jsonb_typeof($1::jsonb) = 'object' THEN $1::jsonb ELSE '{}'::jsonb END) - 'tokenized_fields')
 		WHERE identity_id = $2
-	`, metadataJSON, id)
-	return err
+		RETURNING meta_data
+	`, metadataJSON, id).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return decodeMetadataObject(raw)
+}
+
+// decodeMetadataObject reads a jsonb object returned by an update. A SQL null
+// or a JSON null becomes an empty object so callers can range over the result.
+func decodeMetadataObject(raw []byte) (map[string]interface{}, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return map[string]interface{}{}, nil
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		return map[string]interface{}{}, nil
+	}
+	return meta, nil
 }
