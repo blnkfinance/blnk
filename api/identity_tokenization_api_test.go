@@ -496,7 +496,7 @@ func TestPutIdentityCannotChangeTokenizedFields(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to fetch identity: %v", err)
 		}
-		raw, _ := stored.MetaData["tokenized_fields"]
+		raw := stored.MetaData["tokenized_fields"]
 		var names []string
 		switch fields := raw.(type) {
 		case map[string]bool:
