@@ -153,3 +153,23 @@ func TestUpdateMonitor_GoZeroValueWithoutSetValueKeepsTheStoredLine(t *testing.T
 	}))
 	h.ds.AssertExpectations(t)
 }
+
+func TestUpdateMonitor_PrecisionWithoutValueKeepsTheStoredLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_prec",
+		BalanceID: "bln_prec",
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_prec").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 500 && m.Condition.Precision == 1 &&
+			m.Condition.PreciseValue.Cmp(big.NewInt(500)) == 0
+	})).Return(nil).Once()
+
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &model.BalanceMonitor{
+		MonitorID: "mon_prec",
+		Condition: model.AlertCondition{Precision: 100},
+	}))
+	h.ds.AssertExpectations(t)
+}

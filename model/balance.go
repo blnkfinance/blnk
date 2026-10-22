@@ -16,12 +16,23 @@ limitations under the License.
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"sync"
 	"time"
 )
+
+// jsonFieldSpecified is true when the key is present and not JSON null.
+// Null is the same as omit: optional SDK fields often serialize as null.
+func jsonFieldSpecified(raw map[string]json.RawMessage, key string) bool {
+	v, ok := raw[key]
+	if !ok {
+		return false
+	}
+	return !bytes.Equal(bytes.TrimSpace(v), []byte("null"))
+}
 
 type Balance struct {
 	ID                    int64                  `json:"-"`
@@ -91,8 +102,8 @@ type BalanceMonitor struct {
 }
 
 // UnmarshalJSON records whether the caller sent "description", so an update
-// can keep the stored name when the key is missing and still clear it when
-// the body sends "".
+// can keep the stored name when the key is missing or null, and still clear
+// it when the body sends "".
 func (bm *BalanceMonitor) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -104,7 +115,7 @@ func (bm *BalanceMonitor) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*bm = BalanceMonitor(decoded)
-	_, bm.descriptionSpecified = raw["description"]
+	bm.descriptionSpecified = jsonFieldSpecified(raw, "description")
 	return nil
 }
 
@@ -169,7 +180,7 @@ type AlertCondition struct {
 }
 
 // UnmarshalJSON records whether the caller sent "value", so an update can keep
-// the stored line when the key is missing and still accept an explicit 0.
+// the stored line when the key is missing or null and still accept an explicit 0.
 func (c *AlertCondition) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -181,7 +192,7 @@ func (c *AlertCondition) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*c = AlertCondition(decoded)
-	_, c.valueSpecified = raw["value"]
+	c.valueSpecified = jsonFieldSpecified(raw, "value")
 	return nil
 }
 

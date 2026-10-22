@@ -506,7 +506,8 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	// overwrite the row (or 500 on the table's check constraint). Value and
 	// description are the exceptions: 0 and "" are real values, so only a
 	// missing JSON key (or a Go caller that never called SetValue /
-	// SetDescription) keeps the stored one.
+	// SetDescription) keeps the stored one. A lone precision change is
+	// ignored when value was omitted, or the stored line would move.
 	if monitor.BalanceID == "" {
 		monitor.BalanceID = previous.BalanceID
 	}
@@ -519,10 +520,11 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	if monitor.Condition.Operator == "" {
 		monitor.Condition.Operator = previous.Condition.Operator
 	}
-	if monitor.Condition.Precision == 0 {
+	valueOmitted := !monitor.Condition.ValueSpecified() && monitor.Condition.Value == 0
+	if monitor.Condition.Precision == 0 || valueOmitted {
 		monitor.Condition.Precision = previous.Condition.Precision
 	}
-	if !monitor.Condition.ValueSpecified() && monitor.Condition.Value == 0 {
+	if valueOmitted {
 		monitor.Condition.Value = previous.Condition.Value
 	}
 	if err := monitor.Condition.Validate(); err != nil {

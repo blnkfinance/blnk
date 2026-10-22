@@ -279,6 +279,73 @@ func TestBalanceMonitor_EmptyDescriptionOnPutClearsIt(t *testing.T) {
 	assert.Equal(t, "", getMonitor(t, e, created.MonitorID).Description)
 }
 
+// JSON null is an unset optional field, not a request to clear the name.
+func TestBalanceMonitor_NullDescriptionOnPutKeepsIt(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+
+	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
+		BalanceId:   wallet.BalanceID,
+		Description: "keep me",
+		Trigger:     model.TriggerEdge,
+		Condition:   model2.MonitorCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	})
+	var created model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Response: &created,
+		Method: "POST", Route: "/balance-monitors", Router: e.router,
+	})
+	require.Equal(t, http.StatusCreated, resp.Code)
+
+	resp = putMonitor(t, e, created.MonitorID, `{"description":null}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, "keep me", getMonitor(t, e, created.MonitorID).Description)
+}
+
+// A lone precision change used to rewrite precise_value from the kept
+// display value. Omit value means keep the stored line.
+func TestBalanceMonitor_PrecisionOnlyOnPutKeepsTheStoredLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"precision":100}}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, float64(1), stored.Condition.Precision)
+	assert.Equal(t, "500", stored.Condition.PreciseValue.String())
+}
+
+// Sending value and precision together is how a caller rescales the line.
+func TestBalanceMonitor_ValueAndPrecisionOnPutRescalesTheLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"value":500,"precision":100}}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, float64(100), stored.Condition.Precision)
+	assert.Equal(t, "50000", stored.Condition.PreciseValue.String())
+}
+
+func TestBalanceMonitor_NullValueOnPutKeepsTheStoredLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"value":null}}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, "500", stored.Condition.PreciseValue.String())
+}
+
 // Empty field and operator fail the table check. Omit means keep, the same
 // as value and precision.
 func TestBalanceMonitor_OmittedFieldAndOperatorOnPutKeepTheStoredOnes(t *testing.T) {

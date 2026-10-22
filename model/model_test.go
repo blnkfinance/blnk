@@ -964,6 +964,11 @@ func TestAlertCondition_UnmarshalJSON_TracksWhetherValueWasSent(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">","value":500}`), &set))
 	assert.True(t, set.ValueSpecified())
 	assert.Equal(t, float64(500), set.Value)
+
+	var asNull AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">","value":null}`), &asNull))
+	assert.False(t, asNull.ValueSpecified())
+	assert.Equal(t, float64(0), asNull.Value)
 }
 
 func TestAlertCondition_SetValueMarksZeroAsSpecified(t *testing.T) {
@@ -989,6 +994,11 @@ func TestBalanceMonitor_UnmarshalJSON_TracksWhetherDescriptionWasSent(t *testing
 	require.NoError(t, json.Unmarshal([]byte(`{"description":"keep me"}`), &set))
 	assert.True(t, set.DescriptionSpecified())
 	assert.Equal(t, "keep me", set.Description)
+
+	var asNull BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"description":null}`), &asNull))
+	assert.False(t, asNull.DescriptionSpecified())
+	assert.Equal(t, "", asNull.Description)
 }
 
 func TestBalanceMonitor_SetDescriptionMarksEmptyAsSpecified(t *testing.T) {
