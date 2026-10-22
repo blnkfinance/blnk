@@ -145,8 +145,8 @@ func TestCreateIdentity_CallerSuppliedID_BadUUID(t *testing.T) {
 	ds := Datasource{Conn: db}
 
 	cases := []string{
-		"idt_",                                       // empty suffix
-		"idt_not-a-uuid",                             // non-UUID suffix
+		"idt_",           // empty suffix
+		"idt_not-a-uuid", // non-UUID suffix
 		"idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2",    // truncated UUID
 		"idt_8c5a8e2f-3f1d-5a9b-9c3e-4d8f1e5a7b2cZZ", // trailing garbage
 		"idt_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",   // non-hex chars
@@ -355,9 +355,9 @@ func TestUpdateIdentity_Success(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Match the exact column names and include meta_data
-	mock.ExpectExec("UPDATE blnk\\.identity SET").
+	mock.ExpectQuery("UPDATE blnk\\.identity SET").
 		WithArgs(identity.FirstName, identity.LastName, identity.EmailAddress, metaDataJSON, identity.IdentityID).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"meta_data"}).AddRow(metaDataJSON))
 
 	err = ds.UpdateIdentity(identity)
 	assert.NoError(t, err)
@@ -400,9 +400,9 @@ func TestUpdateIdentity_PartialUpdate(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Use a more flexible pattern but account for meta_data
-	mock.ExpectExec("UPDATE blnk\\.identity SET").
+	mock.ExpectQuery("UPDATE blnk\\.identity SET").
 		WithArgs(identity.EmailAddress, identity.PhoneNumber, metaDataJSON, identity.IdentityID).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"meta_data"}).AddRow(metaDataJSON))
 
 	err = ds.UpdateIdentity(identity)
 	assert.NoError(t, err)
@@ -508,7 +508,7 @@ func TestUpdateIdentity_QueryError(t *testing.T) {
 
 	metaDataJSON, _ := json.Marshal(identity.MetaData)
 
-	mock.ExpectExec("UPDATE blnk\\.identity SET").
+	mock.ExpectQuery("UPDATE blnk\\.identity SET").
 		WithArgs(identity.FirstName, identity.EmailAddress, metaDataJSON, identity.IdentityID).
 		WillReturnError(fmt.Errorf("database error"))
 

@@ -61,7 +61,7 @@ func TestUpdateMetadata(t *testing.T) {
 		existingMetadata := map[string]interface{}{"existing": "value"}
 		ledger := &model.Ledger{MetaData: existingMetadata}
 		mockDS.On("GetLedgerByID", "ldg_123").Return(ledger, nil)
-		mockDS.On("UpdateLedgerMetadata", "ldg_123", mock.Anything).Return(nil)
+		mockDS.On("UpdateLedgerMetadata", "ldg_123", mock.Anything).Return(map[string]interface{}{"existing": "value", "new": "value"}, nil)
 
 		newMetadata := map[string]interface{}{"new": "value"}
 		result, err := blnk.UpdateMetadata(ctx, "ldg_123", newMetadata)
@@ -78,14 +78,17 @@ func TestUpdateMetadata(t *testing.T) {
 
 		ledger := &model.Ledger{MetaData: map[string]interface{}{"existing": "value", "other": "stale"}}
 		newMetadata := map[string]interface{}{"new": "value"}
+		// The saved note includes a key this request never read. The reply must
+		// be that note, not the merge of the earlier read.
+		saved := map[string]interface{}{"existing": "value", "other": "stale", "new": "value", "concurrent": "kept"}
 
 		mockDS.On("GetLedgerByID", "ldg_123").Return(ledger, nil)
-		mockDS.On("UpdateLedgerMetadata", "ldg_123", newMetadata).Return(nil)
+		mockDS.On("UpdateLedgerMetadata", "ldg_123", newMetadata).Return(saved, nil)
 
 		result, err := blnk.UpdateMetadata(ctx, "ldg_123", newMetadata)
 
 		assert.NoError(t, err)
-		assert.Equal(t, map[string]interface{}{"existing": "value", "other": "stale", "new": "value"}, result)
+		assert.Equal(t, saved, result)
 		mockDS.AssertExpectations(t)
 	})
 
@@ -134,7 +137,7 @@ func TestUpdateMetadata(t *testing.T) {
 		identity := &model.Identity{MetaData: existingMetadata}
 
 		mockDS.On("GetIdentityByID", "idt_123").Return(identity, nil)
-		mockDS.On("UpdateIdentityMetadata", "idt_123", mock.Anything).Return(nil)
+		mockDS.On("UpdateIdentityMetadata", "idt_123", mock.Anything).Return(map[string]interface{}{"existing": "value", "new": "value"}, nil)
 
 		newMetadata := map[string]interface{}{"new": "value"}
 		result, err := blnk.UpdateMetadata(ctx, "idt_123", newMetadata)
@@ -158,15 +161,19 @@ func TestUpdateMetadata(t *testing.T) {
 			"tokenized_fields": map[string]interface{}{"email_address": false},
 		}
 
+		saved := map[string]interface{}{
+			"existing":         "value",
+			"new":              "value",
+			"concurrent":       "kept",
+			"tokenized_fields": map[string]interface{}{"email_address": true},
+		}
 		mockDS.On("GetIdentityByID", "idt_123").Return(identity, nil)
-		mockDS.On("UpdateIdentityMetadata", "idt_123", map[string]interface{}{"new": "value"}).Return(nil)
+		mockDS.On("UpdateIdentityMetadata", "idt_123", map[string]interface{}{"new": "value"}).Return(saved, nil)
 
 		result, err := blnk.UpdateMetadata(ctx, "idt_123", newMetadata)
 
 		assert.NoError(t, err)
-		assert.Equal(t, "value", result["existing"])
-		assert.Equal(t, "value", result["new"])
-		assert.Equal(t, map[string]interface{}{"email_address": true}, result["tokenized_fields"])
+		assert.Equal(t, saved, result)
 		mockDS.AssertExpectations(t)
 	})
 
@@ -330,7 +337,7 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 					MetaData: map[string]interface{}{"existing": "value"},
 				}
 				mockDS.On("GetLedgerByID", "ldg_wh_1").Return(ledger, nil).Once()
-				mockDS.On("UpdateLedgerMetadata", "ldg_wh_1", mock.Anything).Return(nil).Once()
+				mockDS.On("UpdateLedgerMetadata", "ldg_wh_1", mock.Anything).Return(map[string]interface{}{"existing": "value", "new": "value"}, nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
 				require.NotEmpty(t, data["event_id"])
@@ -374,7 +381,7 @@ func TestUpdateMetadata_EmitsWebhookForEachEntity(t *testing.T) {
 					MetaData:   map[string]interface{}{"existing": "value"},
 				}
 				mockDS.On("GetIdentityByID", "idt_wh_1").Return(identity, nil).Once()
-				mockDS.On("UpdateIdentityMetadata", "idt_wh_1", mock.Anything).Return(nil).Once()
+				mockDS.On("UpdateIdentityMetadata", "idt_wh_1", mock.Anything).Return(map[string]interface{}{"existing": "value", "new": "value"}, nil).Once()
 			},
 			assertData: func(t *testing.T, data map[string]interface{}) {
 				assert.Equal(t, "idt_wh_1", data["identity_id"])
@@ -432,7 +439,7 @@ func TestUpdateMetadata_NoWebhookWhenURLNotConfigured(t *testing.T) {
 		MetaData: map[string]interface{}{},
 	}
 	mockDS.On("GetLedgerByID", "ldg_nowh").Return(ledger, nil).Once()
-	mockDS.On("UpdateLedgerMetadata", "ldg_nowh", mock.Anything).Return(nil).Once()
+	mockDS.On("UpdateLedgerMetadata", "ldg_nowh", mock.Anything).Return(map[string]interface{}{"k": "v"}, nil).Once()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "")
 	_, err := b.UpdateMetadata(context.Background(), "ldg_nowh", map[string]interface{}{"k": "v"})
@@ -448,7 +455,7 @@ func TestUpdateMetadata_NoWebhookWhenURLNotConfigured(t *testing.T) {
 // so they must not enqueue metadata webhooks.
 func TestUpdateEntityMetadata_DoesNotEmitWebhook(t *testing.T) {
 	mockDS := new(mocks.MockDataSource)
-	mockDS.On("UpdateLedgerMetadata", "ldg_internal", mock.Anything).Return(nil)
+	mockDS.On("UpdateLedgerMetadata", "ldg_internal", mock.Anything).Return(nil, nil)
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 	err := b.updateEntityMetadata(context.Background(), "ledgers", "ldg_internal", map[string]interface{}{"internal": true})
@@ -474,7 +481,12 @@ func TestUpdateIdentity_EmitsMetadataWebhook(t *testing.T) {
 		EmailAddress: "ada@example.com",
 		MetaData:     map[string]interface{}{"tier": "silver", "region": "eu"},
 	}
-	mockDS.On("UpdateIdentity", requested).Return(nil).Once()
+	mockDS.On("UpdateIdentity", requested).Run(func(args mock.Arguments) {
+		// The database writes the saved note, including a key this request
+		// omitted, back onto the identity before the webhook is built.
+		got := args.Get(0).(*model.Identity)
+		got.MetaData = map[string]interface{}{"tier": "gold", "region": "eu"}
+	}).Return(nil).Once()
 	mockDS.On("GetIdentityByID", "idt_upd_1").Return(stored, nil).Once()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
@@ -491,8 +503,7 @@ func TestUpdateIdentity_EmitsMetadataWebhook(t *testing.T) {
 	meta, ok := data["meta_data"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "gold", meta["tier"])
-	_, keptPrevious := meta["region"]
-	assert.False(t, keptPrevious)
+	assert.Equal(t, "eu", meta["region"])
 	mockDS.AssertExpectations(t)
 }
 
@@ -722,7 +733,11 @@ func TestUpdateMetadata_SequentialUpdatesPreserveEachCommit(t *testing.T) {
 	}
 	// Each UpdateMetadata loads then writes once. Sequence the two calls.
 	mockDS.On("GetLedgerByID", "ldg_race").Return(ledger, nil).Twice()
-	mockDS.On("UpdateLedgerMetadata", "ldg_race", mock.Anything).Return(nil).Twice()
+	mockDS.On("UpdateLedgerMetadata", "ldg_race", mock.Anything).Return(
+		func(_ string, patch map[string]interface{}) (map[string]interface{}, error) {
+			return mergeMetadata(map[string]interface{}{"base": "1"}, patch), nil
+		},
+	).Twice()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 
@@ -772,7 +787,7 @@ func TestUpdateMetadata_EnqueueFailureStillReportsCommittedWrite(t *testing.T) {
 		MetaData: map[string]interface{}{"existing": "value"},
 	}
 	mockDS.On("GetLedgerByID", "ldg_enq_fail").Return(ledger, nil).Once()
-	mockDS.On("UpdateLedgerMetadata", "ldg_enq_fail", mock.Anything).Return(nil).Once()
+	mockDS.On("UpdateLedgerMetadata", "ldg_enq_fail", mock.Anything).Return(map[string]interface{}{"existing": "value", "k": "v"}, nil).Once()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 	// Closing the client breaks the enqueue while leaving the persist mocked
@@ -802,7 +817,7 @@ func TestUpdateMetadata_PersistFailureEmitsNoEvent(t *testing.T) {
 	}
 	mockDS.On("GetLedgerByID", "ldg_persist_fail").Return(ledger, nil).Once()
 	mockDS.On("UpdateLedgerMetadata", "ldg_persist_fail", mock.Anything).
-		Return(errors.New("write conflict")).Once()
+		Return(nil, errors.New("write conflict")).Once()
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 
@@ -900,7 +915,11 @@ func TestUpdateMetadata_ConcurrentUpdatesEachCarryOwnCommit(t *testing.T) {
 		MetaData: map[string]interface{}{"base": "1"},
 	}
 	mockDS.On("GetLedgerByID", "ldg_concurrent").Return(ledger, nil).Times(updates)
-	mockDS.On("UpdateLedgerMetadata", "ldg_concurrent", mock.Anything).Return(nil).Times(updates)
+	mockDS.On("UpdateLedgerMetadata", "ldg_concurrent", mock.Anything).Return(
+		func(_ string, patch map[string]interface{}) (map[string]interface{}, error) {
+			return mergeMetadata(map[string]interface{}{"base": "1"}, patch), nil
+		},
+	).Times(updates)
 
 	b, queueName := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
 

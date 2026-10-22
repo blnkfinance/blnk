@@ -58,11 +58,11 @@ type transaction interface {
 	GetInflightTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error)   // Retrieves inflight transactions by parent ID
 	GetRefundableTransactionsByParentID(ctx context.Context, parentTransactionID string, batchSize int, offset int64) ([]*model.Transaction, error) // Retrieves refundable transactions by parent ID
 	GroupTransactions(ctx context.Context, groupCriteria string, batchSize int, offset int64) (map[string][]*model.Transaction, error)              // Groups transactions based on specified criteria
-	UpdateLedgerMetadata(id string, metadata map[string]interface{}) error
+	UpdateLedgerMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error)
 	UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	ListTransactionsByMetadataScope(ctx context.Context, scopeID string, limit int, offset int64) ([]*model.Transaction, error)
 	UpdateBalanceMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
-	UpdateIdentityMetadata(id string, metadata map[string]interface{}) error
+	UpdateIdentityMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error)
 	TransactionExistsByIDOrParentID(ctx context.Context, id string) (bool, error)
 	GetTransactionsByParent(ctx context.Context, parentID string, limit int, offset int64) ([]*model.Transaction, error) // Retrieves transactions by parent ID with pagination
 	IsTransactionRefunded(ctx context.Context, transaction *model.Transaction) (bool, error)                             // Checks if a transaction has already been refunded
@@ -200,13 +200,13 @@ type lineage interface {
 	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error                                                     // Marks an outbox entry as failed
 	GetOutboxByTransactionID(ctx context.Context, transactionID string) (*model.LineageOutbox, error)                        // Gets outbox entry by transaction ID
 	HasPendingCreditOutbox(ctx context.Context, balanceID string) (bool, error)                                              // Checks if there are pending credit outbox entries for a balance
-	GetPendingShadowCommitOutbox(ctx context.Context, parentTransactionID string) ([]model.LineageOutbox, error) // Lists unfinished shadow commit outbox entries of a parent transaction
+	GetPendingShadowCommitOutbox(ctx context.Context, parentTransactionID string) ([]model.LineageOutbox, error)             // Lists unfinished shadow commit outbox entries of a parent transaction
 }
 
 // chain defines the hash-chain (tamper-evidence) operations.
 type chain interface {
-	ChainPendingTransactions(ctx context.Context, cutoff time.Time, batchSize int) (int, error)           // Seals the next batch of unchained transactions
-	GetChainState(ctx context.Context) (*model.ChainState, error)                                         // Returns the global chain bookmark
+	ChainPendingTransactions(ctx context.Context, cutoff time.Time, batchSize int) (int, error)                     // Seals the next batch of unchained transactions
+	GetChainState(ctx context.Context) (*model.ChainState, error)                                                   // Returns the global chain bookmark
 	GetChainedTransactionsAfter(ctx context.Context, afterSeq int64, limit int) ([]model.ChainedTransaction, error) // Pages chained transactions in chain order
-	CountUnchainedTransactions(ctx context.Context, cutoff time.Time) (int64, error)                      // Counts the chainer backlog
+	CountUnchainedTransactions(ctx context.Context, cutoff time.Time) (int64, error)                                // Counts the chainer backlog
 }

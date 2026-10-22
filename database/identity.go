@@ -202,8 +202,22 @@ func (d Datasource) GetAllIdentities() ([]model.Identity, error) {
 	return identities, nil
 }
 
+// identityMetadataMergeSQL merges one metadata object into the stored note.
+// argPosition is the placeholder for the marshaled patch. A key omitted from
+// the patch stays. tokenized_fields is taken from the patch only when the
+// patch contains that key; otherwise the stored record is kept.
+func identityMetadataMergeSQL(argPosition int) string {
+	p := fmt.Sprintf("$%d::jsonb", argPosition)
+	return fmt.Sprintf(
+		`meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END) || ((CASE WHEN jsonb_typeof(%s) = 'object' THEN %s ELSE '{}'::jsonb END) - 'tokenized_fields') || jsonb_strip_nulls(jsonb_build_object('tokenized_fields', CASE WHEN jsonb_typeof(%s) = 'object' THEN CASE WHEN jsonb_exists(%s, 'tokenized_fields') THEN %s -> 'tokenized_fields' ELSE meta_data -> 'tokenized_fields' END ELSE meta_data -> 'tokenized_fields' END))`,
+		p, p, p, p, p,
+	)
+}
+
 // UpdateIdentity updates a specific identity record in the database.
 // It marshals the identity metadata, constructs an SQL update query, and checks the result.
+// When meta_data is included, the statement merges those keys into the stored
+// note and writes the saved note back onto identity.MetaData.
 // Parameters:
 // - identity: A pointer to the Identity object containing the updated details.
 // Returns:
@@ -255,14 +269,17 @@ func (d Datasource) UpdateIdentity(identity *model.Identity) error {
 	addField(identity.PostCode, "post_code")
 	addField(identity.City, "city")
 
-	// Always update metadata if it exists. The stored tokenized_fields record
-	// survives unless the new metadata carries its own.
+	// Merge metadata when the caller sent a note. Keys omitted from this request
+	// stay. tokenized_fields on the stored row stays unless this patch carries
+	// its own, which is how field tokenization updates that record.
+	var metaDataJSON []byte
 	if identity.MetaData != nil {
-		metaDataJSON, err := json.Marshal(identity.MetaData)
+		var err error
+		metaDataJSON, err = json.Marshal(identity.MetaData)
 		if err != nil {
 			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to marshal metadata", err)
 		}
-		setFields = append(setFields, fmt.Sprintf("meta_data = jsonb_strip_nulls(jsonb_build_object('tokenized_fields', meta_data->'tokenized_fields')) || $%d::jsonb", argPosition))
+		setFields = append(setFields, identityMetadataMergeSQL(argPosition))
 		args = append(args, metaDataJSON)
 		argPosition++
 	}
@@ -272,15 +289,37 @@ func (d Datasource) UpdateIdentity(identity *model.Identity) error {
 		return apierror.NewAPIError(apierror.ErrBadRequest, "No fields provided for update", nil)
 	}
 
-	// Build the SQL query
+	// Build the SQL query. A metadata write returns the saved note so the caller
+	// can report the row after this statement, including keys committed first.
+	returning := ""
+	if identity.MetaData != nil {
+		returning = "\n\t\tRETURNING meta_data"
+	}
 	query := fmt.Sprintf(`
 		UPDATE blnk.identity
 		SET %s
-		WHERE identity_id = $%d
-	`, strings.Join(setFields, ", "), argPosition)
+		WHERE identity_id = $%d%s
+	`, strings.Join(setFields, ", "), argPosition, returning)
 
 	// Add identity ID as the last argument
 	args = append(args, identity.IdentityID)
+
+	if identity.MetaData != nil {
+		var raw []byte
+		err := d.Conn.QueryRowContext(context.Background(), query, args...).Scan(&raw)
+		if err == sql.ErrNoRows {
+			return apierror.NewAPIError(apierror.ErrNotFound, fmt.Sprintf("Identity with ID '%s' not found", identity.IdentityID), err)
+		}
+		if err != nil {
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update identity", err)
+		}
+		saved, err := decodeMetadataObject(raw)
+		if err != nil {
+			return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to read saved metadata", err)
+		}
+		identity.MetaData = saved
+		return nil
+	}
 
 	// Execute the update query
 	result, err := d.Conn.ExecContext(context.Background(), query, args...)

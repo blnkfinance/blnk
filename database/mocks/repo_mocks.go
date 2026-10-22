@@ -238,9 +238,15 @@ func (m *MockDataSource) UpdateLedger(id, name string) (*model.Ledger, error) {
 }
 
 // Metadata update methods
-func (m *MockDataSource) UpdateLedgerMetadata(id string, metadata map[string]interface{}) error {
+func (m *MockDataSource) UpdateLedgerMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error) {
 	args := m.Called(id, metadata)
-	return args.Error(0)
+	if fn, ok := args.Get(0).(func(string, map[string]interface{}) (map[string]interface{}, error)); ok {
+		return fn(id, metadata)
+	}
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
 func (m *MockDataSource) UpdateTransactionMetadata(ctx context.Context, id string, metadata map[string]interface{}) error {
@@ -261,9 +267,15 @@ func (m *MockDataSource) UpdateBalanceMetadata(ctx context.Context, id string, m
 	return args.Error(0)
 }
 
-func (m *MockDataSource) UpdateIdentityMetadata(id string, metadata map[string]interface{}) error {
+func (m *MockDataSource) UpdateIdentityMetadata(id string, metadata map[string]interface{}) (map[string]interface{}, error) {
 	args := m.Called(id, metadata)
-	return args.Error(0)
+	if fn, ok := args.Get(0).(func(string, map[string]interface{}) (map[string]interface{}, error)); ok {
+		return fn(id, metadata)
+	}
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
 // Balance methods

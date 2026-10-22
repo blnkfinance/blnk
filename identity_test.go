@@ -199,7 +199,7 @@ func TestUpdateIdentity(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Update the SQL pattern to include meta_data field
-	mock.ExpectExec(`UPDATE blnk\.identity SET identity_type = \$1, first_name = \$2, last_name = \$3, other_names = \$4, gender = \$5, dob = \$6, email_address = \$7, phone_number = \$8, nationality = \$9, organization_name = \$10, category = \$11, street = \$12, country = \$13, state = \$14, post_code = \$15, city = \$16, meta_data = jsonb_strip_nulls\(jsonb_build_object\('tokenized_fields', meta_data->'tokenized_fields'\)\) \|\| \$17::jsonb WHERE identity_id = \$18`).
+	mock.ExpectQuery(`UPDATE blnk\.identity\s+SET identity_type = \$1, first_name = \$2, last_name = \$3, other_names = \$4, gender = \$5, dob = \$6, email_address = \$7, phone_number = \$8, nationality = \$9, organization_name = \$10, category = \$11, street = \$12, country = \$13, state = \$14, post_code = \$15, city = \$16, meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\) \|\| \(\(CASE WHEN jsonb_typeof\(\$17::jsonb\) = 'object' THEN \$17::jsonb ELSE '\{\}'::jsonb END\) - 'tokenized_fields'\) \|\| jsonb_strip_nulls\(jsonb_build_object\('tokenized_fields', CASE WHEN jsonb_typeof\(\$17::jsonb\) = 'object' THEN CASE WHEN jsonb_exists\(\$17::jsonb, 'tokenized_fields'\) THEN \$17::jsonb -> 'tokenized_fields' ELSE meta_data -> 'tokenized_fields' END ELSE meta_data -> 'tokenized_fields' END\)\) WHERE identity_id = \$18 RETURNING meta_data`).
 		WithArgs(
 			identity.IdentityType,
 			identity.FirstName,
@@ -220,7 +220,7 @@ func TestUpdateIdentity(t *testing.T) {
 			metaDataJSON,        // Add the meta_data parameter
 			identity.IdentityID, // Update parameter index to $18
 		).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"meta_data"}).AddRow(metaDataJSON))
 
 	err = d.UpdateIdentity(identity)
 	assert.NoError(t, err)
@@ -300,9 +300,9 @@ func TestTokenizeIdentityField_Success(t *testing.T) {
 		WillReturnRows(row)
 	mock.ExpectCommit()
 
-	mock.ExpectExec("UPDATE blnk.identity SET").
+	mock.ExpectQuery("UPDATE blnk.identity SET").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), testID).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"meta_data"}).AddRow([]byte(`{}`)))
 
 	err = d.TokenizeIdentityField(testID, "EmailAddress")
 	assert.NoError(t, err)
@@ -373,9 +373,9 @@ func TestTokenizeIdentity_Success(t *testing.T) {
 		WillReturnRows(row1)
 	mock.ExpectCommit()
 
-	mock.ExpectExec("UPDATE blnk.identity SET").
+	mock.ExpectQuery("UPDATE blnk.identity SET").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), testID).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"meta_data"}).AddRow([]byte(`{}`)))
 
 	err = d.TokenizeIdentity(testID, []string{"EmailAddress"})
 	assert.NoError(t, err)
@@ -484,9 +484,9 @@ func TestTokenizeAllPII(t *testing.T) {
 			WillReturnRows(row)
 		mock.ExpectCommit()
 
-		mock.ExpectExec("UPDATE blnk.identity SET").
+		mock.ExpectQuery("UPDATE blnk.identity SET").
 			WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), testID).
-			WillReturnResult(sqlmock.NewResult(1, 1))
+			WillReturnRows(sqlmock.NewRows([]string{"meta_data"}).AddRow([]byte(`{}`)))
 	}
 
 	err = d.TokenizeAllPII(testID)
