@@ -17,9 +17,11 @@ limitations under the License.
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,6 +125,272 @@ func TestBalanceMonitor_UpdatedThresholdTakesEffect(t *testing.T) {
 
 	e.transfer(t, funding.BalanceID, wallet.BalanceID, 15)
 	e.awaitWebhooks(t, 1)
+}
+
+// PUT binds the internal model, so a missing value arrives as 0. Zero is a
+// valid line; treating it as "the caller sent 0" moved a 500 monitor to 0
+// and fired on a 20 credit.
+func TestBalanceMonitor_OmittedValueOnPutKeepsTheStoredLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: bytes.NewBufferString(fmt.Sprintf(
+			`{"balance_id":%q,"description":"rename only","condition":{"field":"balance","operator":">"}}`,
+			wallet.BalanceID,
+		)),
+		Method: "PUT",
+		Route:  fmt.Sprintf("/balance-monitors/%s", created.MonitorID),
+		Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	var stored model.BalanceMonitor
+	resp, _ = SetUpTestRequest(TestRequest{
+		Response: &stored, Method: "GET",
+		Route: fmt.Sprintf("/balance-monitors/%s", created.MonitorID), Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, "500", stored.Condition.PreciseValue.String())
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks(), "20 is not above the stored line of 500")
+}
+
+// An explicit 0 must still move the line. That is how a caller writes
+// "alert when this pot goes above zero" after creating the monitor at 500.
+func TestBalanceMonitor_ExplicitZeroOnPutMovesTheLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: bytes.NewBufferString(fmt.Sprintf(
+			`{"balance_id":%q,"condition":{"field":"balance","operator":">","value":0,"precision":1}}`,
+			wallet.BalanceID,
+		)),
+		Method: "PUT",
+		Route:  fmt.Sprintf("/balance-monitors/%s", created.MonitorID),
+		Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.awaitWebhooks(t, 1)
+}
+
+// A leftover row with NULL call_back_url used to fail the scan and mute
+// every other monitor on the same balance.
+func TestBalanceMonitor_NullCallbackDoesNotSilenceSiblings(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	healthy := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 1)
+
+	execSQL(t, e.cnf, `
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, created_at)
+		VALUES ($1, $2, 'balance', '>', 500, NOW())
+	`, model.GenerateUUIDWithSuffix("mon"), wallet.BalanceID)
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.awaitWebhooks(t, 1)
+	assert.True(t, e.monitorState(t, healthy.MonitorID),
+		"a leftover NULL callback must not stop a healthy monitor from working")
+}
+
+func putMonitor(t *testing.T, e *monitorE2E, monitorID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: bytes.NewBufferString(body),
+		Method:  "PUT",
+		Route:   fmt.Sprintf("/balance-monitors/%s", monitorID),
+		Router:  e.router,
+	})
+	return resp
+}
+
+func getMonitor(t *testing.T, e *monitorE2E, monitorID string) model.BalanceMonitor {
+	t.Helper()
+	var stored model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Response: &stored, Method: "GET",
+		Route: fmt.Sprintf("/balance-monitors/%s", monitorID), Router: e.router,
+	})
+	require.Equal(t, http.StatusOK, resp.Code)
+	return stored
+}
+
+// PUT writes every column. A body that only sends the condition used to
+// blank the description the monitor was created with.
+func TestBalanceMonitor_OmittedDescriptionOnPutKeepsIt(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+
+	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
+		BalanceId:   wallet.BalanceID,
+		Description: "keep me",
+		Trigger:     model.TriggerEdge,
+		Condition:   model2.MonitorCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	})
+	var created model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Response: &created,
+		Method: "POST", Route: "/balance-monitors", Router: e.router,
+	})
+	require.Equal(t, http.StatusCreated, resp.Code)
+
+	resp = putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"condition":{"field":"balance","operator":">","value":500,"precision":1}}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, "keep me", getMonitor(t, e, created.MonitorID).Description)
+}
+
+// An explicit empty string is not an omit. Callers who send it mean to
+// drop the stored name.
+func TestBalanceMonitor_EmptyDescriptionOnPutClearsIt(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+
+	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
+		BalanceId:   wallet.BalanceID,
+		Description: "keep me",
+		Trigger:     model.TriggerEdge,
+		Condition:   model2.MonitorCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	})
+	var created model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Response: &created,
+		Method: "POST", Route: "/balance-monitors", Router: e.router,
+	})
+	require.Equal(t, http.StatusCreated, resp.Code)
+
+	resp = putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"description":"","condition":{"field":"balance","operator":">","value":500,"precision":1}}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, "", getMonitor(t, e, created.MonitorID).Description)
+}
+
+// JSON null is an unset optional field, not a request to clear the name.
+func TestBalanceMonitor_NullDescriptionOnPutKeepsIt(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+
+	payloadBytes, _ := request.ToJsonReq(&model2.CreateBalanceMonitor{
+		BalanceId:   wallet.BalanceID,
+		Description: "keep me",
+		Trigger:     model.TriggerEdge,
+		Condition:   model2.MonitorCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	})
+	var created model.BalanceMonitor
+	resp, _ := SetUpTestRequest(TestRequest{
+		Payload: payloadBytes, Response: &created,
+		Method: "POST", Route: "/balance-monitors", Router: e.router,
+	})
+	require.Equal(t, http.StatusCreated, resp.Code)
+
+	resp = putMonitor(t, e, created.MonitorID, `{"description":null}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, "keep me", getMonitor(t, e, created.MonitorID).Description)
+}
+
+// A lone precision change used to rewrite precise_value from the kept
+// display value. Omit value means keep the stored line.
+func TestBalanceMonitor_PrecisionOnlyOnPutKeepsTheStoredLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"precision":100}}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, float64(1), stored.Condition.Precision)
+	assert.Equal(t, "500", stored.Condition.PreciseValue.String())
+}
+
+// Sending value and precision together is how a caller rescales the line.
+func TestBalanceMonitor_ValueAndPrecisionOnPutRescalesTheLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"value":500,"precision":100}}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, float64(100), stored.Condition.Precision)
+	assert.Equal(t, "50000", stored.Condition.PreciseValue.String())
+}
+
+func TestBalanceMonitor_NullValueOnPutKeepsTheStoredLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"value":null}}`)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, "500", stored.Condition.PreciseValue.String())
+}
+
+// Empty field and operator fail the table check. Omit means keep, the same
+// as value and precision.
+func TestBalanceMonitor_OmittedFieldAndOperatorOnPutKeepTheStoredOnes(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"description":"still watching balance"}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusOK, resp.Code, "body: %s", resp.Body.String())
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, "balance", stored.Condition.Field)
+	assert.Equal(t, ">", stored.Condition.Operator)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, "still watching balance", stored.Description)
+}
+
+func TestBalanceMonitor_OmittedBalanceIDOnPutKeepsTheStoredOne(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID,
+		`{"description":"same wallet","condition":{"field":"balance","operator":">","value":500,"precision":1}}`,
+	)
+	require.Equal(t, http.StatusOK, resp.Code, "body: %s", resp.Body.String())
+	assert.Equal(t, wallet.BalanceID, getMonitor(t, e, created.MonitorID).BalanceID)
+}
+
+// Create already rejects "==". PUT used to forward it to the database and
+// return 500 with the check-constraint text.
+func TestBalanceMonitor_PutRejectsUnknownOperator(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, fmt.Sprintf(
+		`{"balance_id":%q,"condition":{"field":"balance","operator":"==","value":500,"precision":1}}`,
+		wallet.BalanceID,
+	))
+	require.Equal(t, http.StatusBadRequest, resp.Code, "body: %s", resp.Body.String())
+	assert.Equal(t, ">", getMonitor(t, e, created.MonitorID).Condition.Operator)
 }
 
 // int64(0.29 * 100) is 28, so a monitor on "above 0.29" fired at exactly 0.29.

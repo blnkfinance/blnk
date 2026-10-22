@@ -3,12 +3,14 @@ package model
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGenerateUUIDWithSuffix(t *testing.T) {
@@ -938,4 +940,71 @@ func TestMonitorPreciseValue(t *testing.T) {
 			assert.Equal(t, big.NewInt(tt.want), MonitorPreciseValue(tt.value, tt.precision))
 		})
 	}
+}
+
+func TestAlertCondition_Validate(t *testing.T) {
+	assert.NoError(t, AlertCondition{Field: "balance", Operator: ">"}.Validate())
+	assert.NoError(t, AlertCondition{Field: "inflight_balance", Operator: "!="}.Validate())
+	assert.Error(t, AlertCondition{Field: "wallet", Operator: ">"}.Validate())
+	assert.Error(t, AlertCondition{Field: "balance", Operator: "=="}.Validate())
+}
+
+func TestAlertCondition_UnmarshalJSON_TracksWhetherValueWasSent(t *testing.T) {
+	var omitted AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">"}`), &omitted))
+	assert.False(t, omitted.ValueSpecified())
+	assert.Equal(t, float64(0), omitted.Value)
+
+	var explicitZero AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">","value":0}`), &explicitZero))
+	assert.True(t, explicitZero.ValueSpecified())
+	assert.Equal(t, float64(0), explicitZero.Value)
+
+	var set AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">","value":500}`), &set))
+	assert.True(t, set.ValueSpecified())
+	assert.Equal(t, float64(500), set.Value)
+
+	var asNull AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"balance","operator":">","value":null}`), &asNull))
+	assert.False(t, asNull.ValueSpecified())
+	assert.Equal(t, float64(0), asNull.Value)
+}
+
+func TestAlertCondition_SetValueMarksZeroAsSpecified(t *testing.T) {
+	var c AlertCondition
+	assert.False(t, c.ValueSpecified())
+	c.SetValue(0)
+	assert.True(t, c.ValueSpecified())
+	assert.Equal(t, float64(0), c.Value)
+}
+
+func TestBalanceMonitor_UnmarshalJSON_TracksWhetherDescriptionWasSent(t *testing.T) {
+	var omitted BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"balance_id":"bln_1"}`), &omitted))
+	assert.False(t, omitted.DescriptionSpecified())
+	assert.Equal(t, "", omitted.Description)
+
+	var cleared BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"description":""}`), &cleared))
+	assert.True(t, cleared.DescriptionSpecified())
+	assert.Equal(t, "", cleared.Description)
+
+	var set BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"description":"keep me"}`), &set))
+	assert.True(t, set.DescriptionSpecified())
+	assert.Equal(t, "keep me", set.Description)
+
+	var asNull BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"description":null}`), &asNull))
+	assert.False(t, asNull.DescriptionSpecified())
+	assert.Equal(t, "", asNull.Description)
+}
+
+func TestBalanceMonitor_SetDescriptionMarksEmptyAsSpecified(t *testing.T) {
+	var bm BalanceMonitor
+	assert.False(t, bm.DescriptionSpecified())
+	bm.SetDescription("")
+	assert.True(t, bm.DescriptionSpecified())
+	assert.Equal(t, "", bm.Description)
 }

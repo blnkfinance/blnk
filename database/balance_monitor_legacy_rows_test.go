@@ -67,6 +67,39 @@ func TestGetMonitors_ToleratesNullPrecision_RealDB(t *testing.T) {
 	assert.NotEmpty(t, all)
 }
 
+// call_back_url and description are nullable TEXT. Scanning either into a
+// string failed the whole read the same way a NULL precision used to, and
+// silenced every other monitor on that balance.
+func TestGetMonitors_ToleratesNullCallbackAndDescription_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	balance := legacyTestBalance(t, ds)
+
+	legacyID := model.GenerateUUIDWithSuffix("mon")
+	_, err := ds.Conn.Exec(`
+		INSERT INTO blnk.balance_monitors (monitor_id, balance_id, field, operator, value, created_at)
+		VALUES ($1, $2, 'balance', '>', 500, NOW())
+	`, legacyID, balance.BalanceID)
+	require.NoError(t, err)
+
+	sibling, err := ds.CreateMonitor(model.BalanceMonitor{
+		BalanceID: balance.BalanceID,
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 1, Precision: 1, PreciseValue: big.NewInt(1)},
+	})
+	require.NoError(t, err)
+
+	one, err := ds.GetMonitorByID(legacyID)
+	require.NoError(t, err, "a leftover row with NULL callback and description must still be readable")
+	assert.Empty(t, one.CallBackURL)
+	assert.Empty(t, one.Description)
+
+	monitors, err := ds.GetBalanceMonitors(balance.BalanceID)
+	require.NoError(t, err, "that leftover row must not take down the balance's whole monitor list")
+	require.Len(t, monitors, 2)
+	ids := []string{monitors[0].MonitorID, monitors[1].MonitorID}
+	assert.Contains(t, ids, legacyID)
+	assert.Contains(t, ids, sibling.MonitorID)
+}
+
 // GetAllMonitors omitted precision and precise_value, so the list endpoint
 // reported a different threshold from the single-monitor endpoint.
 func TestGetAllMonitors_CarriesPrecision_RealDB(t *testing.T) {
