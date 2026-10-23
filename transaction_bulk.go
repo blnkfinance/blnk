@@ -189,6 +189,12 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 	batchID := model.GenerateUUIDWithSuffix("bulk")
 	span.SetAttributes(attribute.String("batch.id", batchID))
 
+	if req.Atomic && !req.SkipQueue {
+		for _, txn := range req.Transactions {
+			txn.Atomic = true
+		}
+	}
+
 	// Check if this should be run asynchronously
 	if req.RunAsync {
 		if !asyncBulkSemaphore.TryAcquire(1) {

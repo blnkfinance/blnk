@@ -20,12 +20,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/brianvoe/gofakeit/v6"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -113,6 +116,75 @@ func TestProcessTransaction_DuplicateReferenceAcks(t *testing.T) {
 	dstAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(dst.BalanceID)
 	require.NoError(t, err)
 	assert.Equal(t, "5000", dstAfter.Balance.String(), "destination must not be credited twice")
+}
+
+// An atomic bulk request in the default queued mode: when the worker rejects
+// one item, the items it already applied must be rolled back.
+func TestProcessTransaction_AtomicBulkRejectionRollsBackQueuedItems(t *testing.T) {
+	cfg := realInfraConfig(t)
+	cfg.Queue.TransactionQueue = "transaction_queue_cmd_test_bulk_" + strings.ToLower(gofakeit.LetterN(8))
+	cfg.Queue.InsufficientFundRetries = false
+	newBlnk, err := setupBlnk(cfg)
+	require.NoError(t, err, "Postgres and Redis must be running for the cmd test suite")
+	b := &blnkInstance{blnk: newBlnk, cnf: cfg}
+	ctx := context.Background()
+
+	queue := cfg.Queue.TransactionQueue + "_1"
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: cfg.Redis.Dns})
+	t.Cleanup(func() {
+		_ = inspector.DeleteQueue(queue, true)
+		_ = inspector.Close()
+	})
+	// runQueued hands every pending task in the queue to the worker handler,
+	// bulk items in request order, until the queue stays empty.
+	runQueued := func() {
+		for idle := time.Now(); time.Since(idle) < time.Second; {
+			tasks, _ := inspector.ListPendingTasks(queue)
+			if len(tasks) == 0 {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			sequence := func(i int) float64 {
+				var txn model.Transaction
+				_ = json.Unmarshal(tasks[i].Payload, &txn)
+				n, _ := txn.MetaData["sequence"].(float64)
+				return n
+			}
+			sort.SliceStable(tasks, func(i, j int) bool { return sequence(i) < sequence(j) })
+			for _, info := range tasks {
+				require.NoError(t, b.processTransaction(ctx, asynq.NewTask(info.Type, info.Payload)))
+				require.NoError(t, inspector.DeleteTask(queue, info.ID))
+			}
+			idle = time.Now()
+		}
+	}
+
+	funding, src := createBalancePair(t, b)
+	dst1, dst2 := createBalancePair(t, b)
+	funded := queuedTransaction(funding.BalanceID, src.BalanceID, 100, true)
+	funded.SkipQueue = true
+	_, err = b.blnk.QueueTransaction(ctx, funded)
+	require.NoError(t, err)
+
+	_, err = b.blnk.CreateBulkTransactions(ctx, &model.BulkTransactionRequest{
+		Atomic: true,
+		Transactions: []*model.Transaction{
+			{Reference: "ref_" + gofakeit.UUID(), Source: src.BalanceID, Destination: dst1.BalanceID, Amount: 50, Precision: 100, Currency: "USD"},
+			{Reference: "ref_" + gofakeit.UUID(), Source: src.BalanceID, Destination: dst2.BalanceID, Amount: 500, Precision: 100, Currency: "USD"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Item 1 applies, item 2 is rejected for insufficient funds, and the
+	// rollback of item 1 goes through the queue as well.
+	runQueued()
+
+	srcAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	dst1After, err := b.blnk.GetDataSource().GetBalanceByIDLite(dst1.BalanceID)
+	require.NoError(t, err)
+	assert.Equal(t, "10000", srcAfter.Balance.String(), "source must be back to 100")
+	assert.Equal(t, "0", dst1After.Balance.String(), "the applied item must be rolled back")
 }
 
 func TestProcessInflightCommitAndExpiry(t *testing.T) {
