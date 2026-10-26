@@ -184,6 +184,31 @@ func TestBalanceMonitor_ExplicitZeroOnPutMovesTheLine(t *testing.T) {
 	e.awaitWebhooks(t, 1)
 }
 
+// The official Go SDK always marshals unset numbers as 0 and unset strings
+// as "". A rename therefore looks like an explicit zero and used to move a
+// 500 line to 0, then fire on a 20 credit.
+func TestBalanceMonitor_SDKRenameOnPutKeepsTheStoredLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "credit_balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID,
+		`{"description":"from sdk","balance_id":"","condition":{"field":"","operator":"","value":0,"precision":0}}`)
+	require.Equal(t, http.StatusOK, resp.Code, "body: %s", resp.Body.String())
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, "from sdk", stored.Description)
+	assert.Equal(t, float64(500), stored.Condition.Value)
+	assert.Equal(t, "500", stored.Condition.PreciseValue.String())
+	assert.Equal(t, "credit_balance", stored.Condition.Field)
+	assert.Equal(t, ">", stored.Condition.Operator)
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.settle()
+	assert.Equal(t, 0, e.webhooks(), "20 is not above the stored line of 500")
+}
+
 // A leftover row with NULL call_back_url used to fail the scan and mute
 // every other monitor on the same balance.
 func TestBalanceMonitor_NullCallbackDoesNotSilenceSiblings(t *testing.T) {

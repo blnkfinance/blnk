@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"sync"
 	"testing"
@@ -151,6 +152,29 @@ func TestUpdateMonitor_GoZeroValueWithoutSetValueKeepsTheStoredLine(t *testing.T
 		MonitorID: "mon_keep",
 		Condition: model.AlertCondition{Value: 0},
 	}))
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_SDKRenameJSONKeepsTheStoredLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID:   "mon_sdk",
+		BalanceID:   "bln_sdk",
+		Description: "keep me",
+		Condition:   model.AlertCondition{Field: "credit_balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_sdk").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Description == "from sdk" && m.Condition.Value == 500 &&
+			m.Condition.Field == "credit_balance" && m.Condition.Operator == ">"
+	})).Return(nil).Once()
+
+	var update model.BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(
+		`{"description":"from sdk","balance_id":"","condition":{"field":"","operator":"","value":0,"precision":0}}`,
+	), &update))
+	update.MonitorID = "mon_sdk"
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &update))
 	h.ds.AssertExpectations(t)
 }
 

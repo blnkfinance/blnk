@@ -506,21 +506,30 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	// overwrite the row (or 500 on the table's check constraint). Value and
 	// description are the exceptions: 0 and "" are real values, so only a
 	// missing JSON key (or a Go caller that never called SetValue /
-	// SetDescription) keeps the stored one. A lone precision change is
-	// ignored when value was omitted, or the stored line would move.
+	// SetDescription) keeps the stored one. A JSON 0 with empty field and
+	// operator is the official SDK rename shape and is treated as omitted
+	// too. A lone precision change is ignored when value was omitted, or
+	// the stored line would move.
 	if monitor.BalanceID == "" {
 		monitor.BalanceID = previous.BalanceID
 	}
 	if !monitor.DescriptionSpecified() && monitor.Description == "" {
 		monitor.Description = previous.Description
 	}
-	if monitor.Condition.Field == "" {
+	incomingField := monitor.Condition.Field
+	incomingOperator := monitor.Condition.Operator
+	if incomingField == "" {
 		monitor.Condition.Field = previous.Condition.Field
 	}
-	if monitor.Condition.Operator == "" {
+	if incomingOperator == "" {
 		monitor.Condition.Operator = previous.Condition.Operator
 	}
-	valueOmitted := !monitor.Condition.ValueSpecified() && monitor.Condition.Value == 0
+	// Official Go clients always send value:0 with empty field and operator
+	// on a rename. That is not an explicit zero. SetValue(0) still is.
+	sdkZero := !monitor.Condition.ValueForced() &&
+		monitor.Condition.Value == 0 &&
+		incomingField == "" && incomingOperator == ""
+	valueOmitted := (!monitor.Condition.ValueSpecified() && monitor.Condition.Value == 0) || sdkZero
 	if monitor.Condition.Precision == 0 || valueOmitted {
 		monitor.Condition.Precision = previous.Condition.Precision
 	}

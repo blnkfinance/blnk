@@ -177,6 +177,10 @@ type AlertCondition struct {
 	// threshold, so an omitted value cannot be told from an explicit 0 by the
 	// number alone.
 	valueSpecified bool
+	// valueForced is true only after SetValue. Official Go clients marshal an
+	// unset number as 0, which sets valueSpecified without meaning "move the
+	// line to zero."
+	valueForced bool
 }
 
 // UnmarshalJSON records whether the caller sent "value", so an update can keep
@@ -202,11 +206,19 @@ func (c AlertCondition) ValueSpecified() bool {
 	return c.valueSpecified
 }
 
+// ValueForced reports whether SetValue marked this threshold. A JSON 0 with
+// empty field and operator is specified but not forced: that is the official
+// SDK rename payload, not a request to lower the line.
+func (c AlertCondition) ValueForced() bool {
+	return c.valueForced
+}
+
 // SetValue marks the threshold as intentionally set, including to 0, so
 // UpdateMonitor does not treat a programmatic zero as an omitted field.
 func (c *AlertCondition) SetValue(value float64) {
 	c.Value = value
 	c.valueSpecified = true
+	c.valueForced = true
 }
 
 // Validate reports whether field and operator are ones the ledger can evaluate.

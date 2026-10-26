@@ -974,8 +974,18 @@ func TestAlertCondition_UnmarshalJSON_TracksWhetherValueWasSent(t *testing.T) {
 func TestAlertCondition_SetValueMarksZeroAsSpecified(t *testing.T) {
 	var c AlertCondition
 	assert.False(t, c.ValueSpecified())
+	assert.False(t, c.ValueForced())
 	c.SetValue(0)
 	assert.True(t, c.ValueSpecified())
+	assert.True(t, c.ValueForced())
+	assert.Equal(t, float64(0), c.Value)
+}
+
+func TestAlertCondition_SDKRenameJSONIsSpecifiedButNotForced(t *testing.T) {
+	var c AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"field":"","operator":"","value":0,"precision":0}`), &c))
+	assert.True(t, c.ValueSpecified())
+	assert.False(t, c.ValueForced())
 	assert.Equal(t, float64(0), c.Value)
 }
 
