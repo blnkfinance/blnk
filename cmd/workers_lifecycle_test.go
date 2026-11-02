@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"sort"
 	"strings"
@@ -560,9 +561,19 @@ func TestProcessInflightCommitAndExpiry(t *testing.T) {
 		task := asynq.NewTask("inflight_expiry_cmd_test", payload)
 		require.NoError(t, b.processInflightExpiry(ctx, task))
 
-		// Voiding again must fail: it has already been voided.
+		expired, err := b.blnk.GetTransaction(ctx, txnID)
+		require.NoError(t, err)
+		afterVoid, err := b.blnk.GetDataSource().GetBalanceByIDLite(expired.Source)
+		require.NoError(t, err)
+		assert.Equal(t, "0", afterVoid.InflightDebitBalance.String(), "expiry must release the inflight hold")
+
+		// Voiding again is idempotent: the leg is already voided, so the worker
+		// acks instead of releasing the amount a second time.
 		err = b.processInflightExpiry(ctx, task)
-		require.Error(t, err, "double void must surface an error")
+		require.NoError(t, err, "a replayed expiry must be acked, not errored")
+		afterReplay, err := b.blnk.GetDataSource().GetBalanceByIDLite(expired.Source)
+		require.NoError(t, err)
+		assert.Equal(t, "0", afterReplay.InflightDebitBalance.String(), "a replayed expiry must not move inflight again")
 	})
 
 	t.Run("malformed payload", func(t *testing.T) {
@@ -570,6 +581,102 @@ func TestProcessInflightCommitAndExpiry(t *testing.T) {
 		require.Error(t, b.processInflightCommit(ctx, task))
 		require.Error(t, b.processInflightExpiry(ctx, task))
 	})
+}
+
+// TestProcessInflightExpiry_CommittedQueuedHoldLeavesOtherHold is the regression
+// for https://github.com/blnkfinance/blnk/issues/416.
+//
+// A queued inflight is two rows: the QUEUED placeholder returned to the caller,
+// and the INFLIGHT "_q" row the worker applies. The expiry job is scheduled with
+// the placeholder id. After the "_q" row has been committed, running that job
+// must leave the source's inflight debit untouched, including an unrelated hold
+// on the same balance.
+func TestProcessInflightExpiry_CommittedQueuedHoldLeavesOtherHold(t *testing.T) {
+	b := newCmdTestInstance(t)
+	ctx := context.Background()
+	stopWorker := startCmdTransactionWorker(t, b)
+	defer stopWorker()
+
+	src, dst := createBalancePair(t, b)
+
+	other := queuedTransaction(src.BalanceID, dst.BalanceID, 200, true)
+	other.Inflight = true
+	other.SkipQueue = true
+	otherRecorded, err := b.blnk.QueueTransaction(ctx, other)
+	require.NoError(t, err)
+	require.Equal(t, "INFLIGHT", otherRecorded.Status)
+
+	expiring := queuedTransaction(src.BalanceID, dst.BalanceID, 100, true)
+	expiring.Inflight = true
+	expiring.InflightExpiryDate = time.Now().Add(30 * time.Minute)
+	placeholder, err := b.blnk.QueueTransaction(ctx, expiring)
+	require.NoError(t, err)
+	require.Equal(t, "QUEUED", placeholder.Status)
+
+	var holdID string
+	require.Eventually(t, func() bool {
+		hold, err := b.blnk.GetTransactionByRef(ctx, expiring.Reference+"_q")
+		if err != nil || hold.Status != "INFLIGHT" {
+			return false
+		}
+		holdID = hold.TransactionID
+		return true
+	}, 15*time.Second, 100*time.Millisecond, "worker must apply the queued inflight as the _q row")
+
+	committed, err := b.blnk.CommitInflightTransaction(ctx, holdID, big.NewInt(0))
+	require.NoError(t, err)
+	require.Equal(t, "APPLIED", committed.Status)
+
+	afterCommit, err := b.blnk.GetDataSource().GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	require.Equal(t, "20000", afterCommit.InflightDebitBalance.String(), "only the unrelated 200.00 hold remains inflight after the commit")
+	require.Equal(t, "10000", afterCommit.DebitBalance.String())
+
+	connOpt, err := workerRedisConnOpt(b.cnf)
+	require.NoError(t, err)
+	inspector := asynq.NewInspector(connOpt)
+	t.Cleanup(func() { _ = inspector.Close() })
+
+	info, err := inspector.GetTaskInfo(b.cnf.Queue.InflightExpiryQueue, placeholder.TransactionID)
+	require.NoError(t, err)
+	var scheduledID string
+	require.NoError(t, json.Unmarshal(info.Payload, &scheduledID))
+	require.Equal(t, placeholder.TransactionID, scheduledID, "expiry must be scheduled with the placeholder id")
+
+	err = b.processInflightExpiry(ctx, asynq.NewTask(info.Type, info.Payload))
+	require.NoError(t, err)
+
+	afterExpiry, err := b.blnk.GetDataSource().GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	require.Equal(t, "20000", afterExpiry.InflightDebitBalance.String(), "expiry must not take the committed amount from the other hold")
+	require.Equal(t, "10000", afterExpiry.DebitBalance.String(), "the committed debit must stay applied")
+
+	voided, err := b.blnk.GetDataSource().IsParentTransactionVoid(ctx, placeholder.TransactionID)
+	require.NoError(t, err)
+	require.False(t, voided, "expiry must not void the placeholder once its _q hold is committed")
+}
+
+// startCmdTransactionWorker runs the transaction queue handler until the test ends.
+func startCmdTransactionWorker(t *testing.T, b *blnkInstance) func() {
+	t.Helper()
+	connOpt, err := workerRedisConnOpt(b.cnf)
+	require.NoError(t, err)
+
+	queueName := fmt.Sprintf("%s_%d", b.cnf.Queue.TransactionQueue, 1)
+	srv := asynq.NewServer(connOpt, asynq.Config{
+		Concurrency: 1,
+		Queues:      map[string]int{queueName: 1},
+	})
+	mux := asynq.NewServeMux()
+	mux.HandleFunc(queueName, b.processTransaction)
+
+	go func() {
+		if err := srv.Run(mux); err != nil {
+			t.Logf("transaction worker stopped: %v", err)
+		}
+	}()
+
+	return func() { srv.Shutdown() }
 }
 
 func TestIndexData(t *testing.T) {

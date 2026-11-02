@@ -448,6 +448,28 @@ func TestCalculateDistributionsPrecise_AdversarialInputs(t *testing.T) {
 		assert.Equal(t, "0", got["b"].String())
 	})
 
+	// A negative share is added back to "left": 100 split as [-50, "left"]
+	// gave "left" 150. ["150%", "-50%"] sums to 100% and slipped past the
+	// total check the same way.
+	for _, tc := range []struct {
+		name string
+		dist Distribution
+	}{
+		{"negative fixed amount rejected", Distribution{Identifier: "a", Distribution: "-50"}},
+		{"negative precise amount rejected", Distribution{Identifier: "a", PreciseDistribution: "-5000"}},
+		{"negative percentage rejected", Distribution{Identifier: "a", Distribution: "-50%"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := CalculateDistributionsPrecise(ctx, big.NewInt(10000), []Distribution{
+				{Identifier: "b", Distribution: "150%"},
+				tc.dist,
+				{Identifier: "c", Distribution: "left"},
+			}, 100)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cannot be negative")
+		})
+	}
+
 	t.Run("invalid percentage format rejected", func(t *testing.T) {
 		_, err := CalculateDistributionsPrecise(ctx, big.NewInt(10000), []Distribution{
 			{Identifier: "a", Distribution: "abc%"},

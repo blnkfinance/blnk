@@ -149,6 +149,11 @@ func processFixedDistributions(distributions []Distribution, state *distribution
 		if err != nil {
 			return err
 		}
+		// A negative share is added back to the "left" share, which then
+		// moves more than the transaction amount.
+		if fixedAmountDec.IsNegative() {
+			return errors.New("distribution cannot be negative")
+		}
 		if fixedAmountDec.IsZero() {
 			continue
 		}
@@ -202,6 +207,11 @@ func processPercentageDistributions(distributions []Distribution, state *distrib
 		}
 
 		percentageDec := decimal.NewFromFloat(percentage)
+		// Otherwise ["150%", "-50%"] sums to 100% and passes
+		// validateDistributions.
+		if percentageDec.IsNegative() {
+			return errors.New("distribution cannot be negative")
+		}
 		state.totalPercentage = state.totalPercentage.Add(percentageDec)
 
 		rawAmountDec := state.totalAmountDec.Mul(percentageDec).Div(hundredDec)
