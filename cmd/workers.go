@@ -159,14 +159,19 @@ func (b *blnkInstance) recordQueuedTransaction(ctx context.Context, span oteltra
 }
 
 func handleTransactionRejection(ctx context.Context, b *blnkInstance, txn *model.Transaction, err error) error {
-	_, rejectErr := b.blnk.RejectTransaction(ctx, txn, err.Error())
+	rejected, rejectErr := b.blnk.RejectTransaction(ctx, txn, err.Error())
 	if rejectErr != nil {
 		return rejectErr
+	}
+	// An item of a failed atomic batch that was applied before the batch
+	// failed is rolled back, not rejected.
+	if rejected.Status != blnk.StatusRejected {
+		return nil
 	}
 
 	webhookErr := b.blnk.SendWebhook(blnk.NewWebhook{
 		Event:   "transaction.rejected",
-		Payload: *txn,
+		Payload: *rejected,
 	})
 	return webhookErr
 }

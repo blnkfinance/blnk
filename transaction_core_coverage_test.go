@@ -18,8 +18,12 @@ package blnk
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/big"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +31,7 @@ import (
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/brianvoe/gofakeit/v6"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -399,32 +404,41 @@ func TestRollbackBatch_RefundsNonInflightBatch(t *testing.T) {
 	}
 	require.NoError(t, b.processBulkTransactions(context.Background(), txns, batchID, false, true))
 
-	action, err := b.rollbackBatchTransactions(context.Background(), batchID, false)
+	action, count, err := b.rollbackBatchTransactions(context.Background(), batchID, false)
 	require.NoError(t, err)
 	assert.Equal(t, "refunded", action)
+	assert.Equal(t, 2, count, "both batch transactions must be counted as refunded")
 
-	// Batch refunds are enqueued (SkipQueue is not persisted, so the worker
-	// path settles them). Every original transaction must gain a queued
-	// refund child with source/destination swapped; the queued row is
-	// persisted asynchronously, so poll briefly.
+	// Batch refunds are applied before the rollback returns, so the caller
+	// is never told about a refund that has not happened yet. Every original
+	// transaction must already have one applied refund child with
+	// source/destination swapped.
 	for _, original := range txns {
-		var children []*model.Transaction
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			var err error
-			children, err = ds.GetTransactionsByParent(context.Background(), original.TransactionID, 10, 0)
-			require.NoError(t, err)
-			if len(children) > 0 || time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
+		children, err := ds.GetTransactionsByParent(context.Background(), original.TransactionID, 10, 0)
+		require.NoError(t, err)
 		require.Len(t, children, 1, "each batch transaction must get exactly one refund child")
 		refund := children[0]
-		assert.Equal(t, StatusQueued, refund.Status, "rollback refunds are queued for the worker")
+		assert.Equal(t, StatusApplied, refund.Status, "rollback refunds are applied before the rollback returns")
+		assert.Equal(t, model.RefundReference(original.TransactionID), refund.Reference)
 		assert.Equal(t, original.Destination, refund.Source, "refund must swap source and destination")
 		assert.Equal(t, original.Source, refund.Destination, "refund must swap source and destination")
 	}
+
+	srcAfter, err := ds.GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	dstAfter, err := ds.GetBalanceByIDLite(dst.BalanceID)
+	require.NoError(t, err)
+	assert.Equal(t, "0", srcAfter.Balance.String(), "the source must be back where it started")
+	assert.Equal(t, "0", dstAfter.Balance.String(), "the destination must be back where it started")
+
+	// A second pass finds both transactions refunded and refunds nothing,
+	// the refunds included.
+	_, count, err = b.rollbackBatchTransactions(context.Background(), batchID, false)
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	srcAfter, err = ds.GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	assert.Equal(t, "0", srcAfter.Balance.String(), "a second rollback pass must not move money")
 }
 
 func TestRollbackBatch_VoidsInflightBatch(t *testing.T) {
@@ -438,14 +452,176 @@ func TestRollbackBatch_VoidsInflightBatch(t *testing.T) {
 	}
 	require.NoError(t, b.processBulkTransactions(context.Background(), txns, batchID, true, true))
 
-	action, err := b.rollbackBatchTransactions(context.Background(), batchID, true)
+	action, count, err := b.rollbackBatchTransactions(context.Background(), batchID, true)
 	require.NoError(t, err)
 	assert.Equal(t, "voided", action)
+	assert.Equal(t, 2, count, "both inflight transactions must be counted as voided")
 
 	srcAfter, err := ds.GetBalanceByIDLite(src.BalanceID)
 	require.NoError(t, err)
 	assert.Equal(t, "0", srcAfter.InflightDebitBalance.String(), "all inflight debits must be released by the void rollback")
 	assert.Equal(t, "0", srcAfter.Balance.String(), "committed balance must be untouched by an inflight batch rollback")
+}
+
+// An atomic skip_queue batch that fails must report its refunds only once they
+// are applied: when CreateBulkTransactions returns, the balances are back and
+// the message says how many transactions were refunded, or that nothing had
+// been applied.
+func TestCreateBulkTransactions_SkipQueueAtomicReportsAppliedRefunds(t *testing.T) {
+	b, ds := newCoreTestBlnk(t)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		amounts []float64
+		want    string
+		applied int
+	}{
+		{name: "50 then 500", amounts: []float64{50, 500}, want: "1 applied transaction(s) from this batch have been refunded", applied: 1},
+		{name: "500 then 50", amounts: []float64{500, 50}, want: "Nothing from this batch had been applied, so nothing was refunded", applied: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			funding, src := newBalancePair(t, ds)
+			recordAppliedTxn(t, b, funding.BalanceID, src.BalanceID, 100)
+
+			var items []*model.Transaction
+			var dsts []string
+			for _, amount := range tc.amounts {
+				dst, err := ds.CreateBalance(model.Balance{Currency: "USD", LedgerID: "general_ledger_id"})
+				require.NoError(t, err)
+				dsts = append(dsts, dst.BalanceID)
+				items = append(items, &model.Transaction{Reference: "ref_" + gofakeit.UUID(), Source: src.BalanceID, Destination: dst.BalanceID, Amount: amount, Precision: 100, Currency: "USD"})
+			}
+
+			result, err := b.CreateBulkTransactions(ctx, &model.BulkTransactionRequest{Atomic: true, SkipQueue: true, Transactions: items})
+			require.Error(t, err)
+			assert.Equal(t, "failed", result.Status)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Contains(t, result.Error, tc.want)
+
+			// No waiting: the refund has been applied by the time the caller
+			// is told about it.
+			srcAfter, err := ds.GetBalanceByIDLite(src.BalanceID)
+			require.NoError(t, err)
+			assert.Equal(t, "10000", srcAfter.Balance.String(), "the source must be back at 100 when the call returns")
+			for i, dst := range dsts {
+				dstAfter, err := ds.GetBalanceByIDLite(dst)
+				require.NoError(t, err)
+				assert.Equal(t, "0", dstAfter.Balance.String(), "item %d must not stay applied", i)
+			}
+
+			applied, err := ds.GetTransactionsByParent(ctx, result.BatchID, 10, 0)
+			require.NoError(t, err)
+			require.Len(t, applied, tc.applied)
+			for _, item := range applied {
+				refunds, err := ds.GetTransactionsByParent(ctx, item.TransactionID, 10, 0)
+				require.NoError(t, err)
+				require.Len(t, refunds, 1, "the applied item must have one refund")
+				assert.Equal(t, StatusApplied, refunds[0].Status, "the refund must be applied, not queued")
+				assert.Equal(t, model.RefundReference(item.TransactionID), refunds[0].Reference)
+			}
+		})
+	}
+}
+
+// failingMarkHook makes the Redis write of the failed-batch mark fail while it
+// is on.
+type failingMarkHook struct{ on atomic.Bool }
+
+func (h *failingMarkHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *failingMarkHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		args := cmd.Args()
+		if h.on.Load() && len(args) > 1 && strings.HasPrefix(fmt.Sprint(args[1]), "atomic-batch-failed:") && cmd.Name() == "set" {
+			err := errors.New("injected: redis unavailable")
+			cmd.SetErr(err)
+			return err
+		}
+		return next(ctx, cmd)
+	}
+}
+
+func (h *failingMarkHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+// When the mark that fails a queued atomic batch cannot be saved, the refused
+// item must not be recorded and nothing may be rolled back yet: the worker
+// retries the item, and the retry fails the batch properly.
+func TestRejectTransaction_AtomicBatchItemWaitsForTheMark(t *testing.T) {
+	b, ds := newCoreTestBlnk(t)
+	ctx := context.Background()
+
+	funding, src := newBalancePair(t, ds)
+	recordAppliedTxn(t, b, funding.BalanceID, src.BalanceID, 100)
+	dst, refusedDst := newBalancePair(t, ds)
+	batchID := model.GenerateUUIDWithSuffix("bulk")
+	balanceOf := func(id string) string {
+		balance, err := ds.GetBalanceByIDLite(id)
+		require.NoError(t, err)
+		return balance.Balance.String()
+	}
+
+	// The batch's 50, as the worker applied it.
+	paid := &model.Transaction{
+		TransactionID: model.GenerateUUIDWithSuffix("txn"),
+		Reference:     "ref_" + gofakeit.UUID() + "_q",
+		Source:        src.BalanceID,
+		Destination:   dst.BalanceID,
+		Amount:        50,
+		Precision:     100,
+		Currency:      "USD",
+		SkipQueue:     true,
+		Status:        StatusApplied,
+		MetaData:      map[string]interface{}{"QUEUED_PARENT_TRANSACTION": batchID, "atomic": true},
+	}
+	model.ApplyPrecision(paid)
+	_, err := b.RecordTransaction(ctx, paid)
+	require.NoError(t, err)
+	require.Equal(t, "5000", balanceOf(src.BalanceID), "the 50 must have left the source")
+
+	// The batch's 500, as the worker hands it over after the refusal. Each
+	// attempt gets a fresh copy, the way each retry unmarshals the task.
+	refusedID, refusedRef := model.GenerateUUIDWithSuffix("txn"), "ref_"+gofakeit.UUID()+"_q"
+	refused := func() *model.Transaction {
+		txn := &model.Transaction{
+			TransactionID: refusedID,
+			Reference:     refusedRef,
+			Source:        src.BalanceID,
+			Destination:   refusedDst.BalanceID,
+			Amount:        500,
+			Precision:     100,
+			Currency:      "USD",
+			Atomic:        true,
+			Status:        StatusQueued,
+			CreatedAt:     time.Now(),
+			MetaData:      map[string]interface{}{"QUEUED_PARENT_TRANSACTION": batchID, "atomic": true},
+		}
+		model.ApplyPrecision(txn)
+		return txn
+	}
+
+	hook := &failingMarkHook{}
+	hook.on.Store(true)
+	b.redis.AddHook(hook)
+	t.Cleanup(func() { hook.on.Store(false) })
+
+	_, err = b.RejectTransaction(ctx, refused(), "insufficient funds")
+	require.Error(t, err, "the item must not be rejected while its batch cannot be marked as failed")
+	recorded, err := ds.TransactionExistsByRef(ctx, refusedRef)
+	require.NoError(t, err)
+	assert.False(t, recorded, "nothing may be recorded for the item, so the worker can retry it")
+	assert.Equal(t, "5000", balanceOf(src.BalanceID), "nothing may be rolled back before the batch is marked")
+
+	// Redis is back; the retry marks the batch and rolls it back.
+	hook.on.Store(false)
+	rejected, err := b.RejectTransaction(ctx, refused(), "insufficient funds")
+	require.NoError(t, err)
+	assert.Equal(t, StatusRejected, rejected.Status)
+	assert.Equal(t, "10000", balanceOf(src.BalanceID), "the source must be back at 100")
+	assert.Equal(t, "0", balanceOf(dst.BalanceID), "the 50 must be refunded")
+	assert.Equal(t, "0", balanceOf(refusedDst.BalanceID))
 }
 
 // --- queued execution path -----------------------------------------------------
