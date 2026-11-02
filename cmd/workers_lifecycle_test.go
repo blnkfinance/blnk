@@ -232,7 +232,7 @@ func TestProcessInflightExpiry_CommittedQueuedHoldLeavesOtherHold(t *testing.T) 
 	connOpt, err := workerRedisConnOpt(b.cnf)
 	require.NoError(t, err)
 	inspector := asynq.NewInspector(connOpt)
-	defer inspector.Close()
+	t.Cleanup(func() { _ = inspector.Close() })
 
 	info, err := inspector.GetTaskInfo(b.cnf.Queue.InflightExpiryQueue, placeholder.TransactionID)
 	require.NoError(t, err)
