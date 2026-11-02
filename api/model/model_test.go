@@ -491,6 +491,87 @@ func TestValidateRecordTransaction(t *testing.T) {
 	}
 }
 
+// A negative split entry is added back to the "left" entry, so 100 split as
+// [-50, "left"] moved 150 to "left". It must be rejected before anything is
+// queued.
+func TestValidateRecordTransaction_NegativeDistribution(t *testing.T) {
+	split := func(sources, destinations []model.Distribution) RecordTransaction {
+		tx := RecordTransaction{
+			Amount:       100,
+			Precision:    100,
+			Currency:     "USD",
+			Reference:    "ref_split",
+			Description:  "split",
+			Sources:      sources,
+			Destinations: destinations,
+		}
+		if len(sources) == 0 {
+			tx.Source = "bln_src"
+		} else {
+			tx.Destination = "bln_dst"
+		}
+		return tx
+	}
+
+	tests := []struct {
+		name    string
+		tx      RecordTransaction
+		wantErr string
+	}{
+		{
+			name: "negative fixed destination",
+			tx: split(nil, []model.Distribution{
+				{Identifier: "bln_b", Distribution: "left"},
+				{Identifier: "bln_a", Distribution: "-50"},
+			}),
+			wantErr: "destinations: distribution at index 1 cannot be negative",
+		},
+		{
+			name: "negative percentage source",
+			tx: split([]model.Distribution{
+				{Identifier: "bln_a", Distribution: "150%"},
+				{Identifier: "bln_b", Distribution: "-50%"},
+			}, nil),
+			wantErr: "sources: distribution at index 1 cannot be negative",
+		},
+		{
+			name: "negative precise_distribution",
+			tx: split(nil, []model.Distribution{
+				{Identifier: "bln_a", PreciseDistribution: "-5000"},
+				{Identifier: "bln_b", Distribution: "left"},
+			}),
+			wantErr: "destinations: precise_distribution at index 0 cannot be negative",
+		},
+		{
+			name: "positive fixed, percentage and left stay valid",
+			tx: split(nil, []model.Distribution{
+				{Identifier: "bln_a", Distribution: "20"},
+				{Identifier: "bln_b", Distribution: "30%"},
+				{Identifier: "bln_c", PreciseDistribution: "1000"},
+				{Identifier: "bln_d", Distribution: "left"},
+			}),
+		},
+		{
+			name: "zero distribution stays valid",
+			tx: split(nil, []model.Distribution{
+				{Identifier: "bln_a", Distribution: "0"},
+				{Identifier: "bln_b", Distribution: "left"},
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.tx.ValidateRecordTransaction()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
 func TestToLedger(t *testing.T) {
 	createLedger := CreateLedger{
 		Name:     "Test Ledger",
