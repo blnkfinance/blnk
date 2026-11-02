@@ -190,6 +190,11 @@ type AlertCondition struct {
 	// threshold, so an omitted value cannot be told from an explicit 0 by the
 	// number alone.
 	valueSpecified bool
+	// fieldSpecified and operatorSpecified are true when those keys were sent.
+	// The official Go client sends them as empty strings on a rename. A body
+	// that leaves them out and sends value 0 is asking to move the line.
+	fieldSpecified    bool
+	operatorSpecified bool
 	// valueForced is true only after SetValue. Official Go clients marshal an
 	// unset number as 0, which sets valueSpecified without meaning "move the
 	// line to zero."
@@ -210,6 +215,8 @@ func (c *AlertCondition) UnmarshalJSON(data []byte) error {
 	}
 	*c = AlertCondition(decoded)
 	c.valueSpecified = jsonFieldSpecified(raw, "value")
+	c.fieldSpecified = jsonFieldSpecified(raw, "field")
+	c.operatorSpecified = jsonFieldSpecified(raw, "operator")
 	return nil
 }
 
@@ -219,9 +226,21 @@ func (c AlertCondition) ValueSpecified() bool {
 	return c.valueSpecified
 }
 
-// ValueForced reports whether SetValue marked this threshold. A JSON 0 with
-// empty field and operator is specified but not forced: that is the official
-// SDK rename payload, not a request to lower the line.
+// FieldSpecified reports whether JSON included "field". An empty string that
+// was sent is specified. A missing key is not.
+func (c AlertCondition) FieldSpecified() bool {
+	return c.fieldSpecified
+}
+
+// OperatorSpecified reports whether JSON included "operator". An empty string
+// that was sent is specified. A missing key is not.
+func (c AlertCondition) OperatorSpecified() bool {
+	return c.operatorSpecified
+}
+
+// ValueForced reports whether SetValue marked this threshold. A JSON 0 whose
+// field and operator keys were sent empty is specified but not forced: that
+// is the official SDK rename payload, not a request to lower the line.
 func (c AlertCondition) ValueForced() bool {
 	return c.valueForced
 }

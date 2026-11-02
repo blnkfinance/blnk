@@ -184,6 +184,58 @@ func TestBalanceMonitor_ExplicitZeroOnPutMovesTheLine(t *testing.T) {
 	e.awaitWebhooks(t, 1)
 }
 
+// Sending only value 0 leaves field and operator out. That is an explicit
+// zero, unlike the Go SDK rename which also sends those keys as empty strings.
+func TestBalanceMonitor_ValueZeroWithoutFieldOnPutMovesTheLine(t *testing.T) {
+	e := setupMonitorE2E(t)
+	funding, wallet := e.newBalance(t), e.newBalance(t)
+
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"value":0}}`)
+	require.Equal(t, http.StatusOK, resp.Code, "body: %s", resp.Body.String())
+	assert.NotContains(t, resp.Body.String(), "precision_unchanged")
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(0), stored.Condition.Value)
+	assert.Equal(t, "balance", stored.Condition.Field)
+	assert.Equal(t, ">", stored.Condition.Operator)
+	assert.Equal(t, "0", stored.Condition.PreciseValue.String())
+
+	e.transfer(t, funding.BalanceID, wallet.BalanceID, 20)
+	e.awaitWebhooks(t, 1)
+}
+
+// Value 0 sent with a new scale writes both. It is not a scale sent alone.
+func TestBalanceMonitor_ValueZeroWithPrecisionOnPutWritesBoth(t *testing.T) {
+	e := setupMonitorE2E(t)
+	wallet := e.newBalance(t)
+	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
+
+	var updated struct {
+		Message            string `json:"message"`
+		PrecisionUnchanged *bool  `json:"precision_unchanged"`
+	}
+	resp, err := SetUpTestRequest(TestRequest{
+		Payload:  bytes.NewBufferString(`{"condition":{"value":0,"precision":100}}`),
+		Response: &updated,
+		Method:   "PUT",
+		Route:    fmt.Sprintf("/balance-monitors/%s", created.MonitorID),
+		Router:   e.router,
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.Code, "body: %s", resp.Body.String())
+	assert.Nil(t, updated.PrecisionUnchanged)
+	assert.Equal(t, "BalanceMonitor updated successfully", updated.Message)
+
+	stored := getMonitor(t, e, created.MonitorID)
+	assert.Equal(t, float64(0), stored.Condition.Value)
+	assert.Equal(t, float64(100), stored.Condition.Precision)
+	assert.Equal(t, "0", stored.Condition.PreciseValue.String())
+	assert.Equal(t, "balance", stored.Condition.Field)
+	assert.Equal(t, ">", stored.Condition.Operator)
+}
+
 // The official Go SDK always marshals unset numbers as 0 and unset strings
 // as "". A rename therefore looks like an explicit zero and used to move a
 // 500 line to 0, then fire on a 20 credit.

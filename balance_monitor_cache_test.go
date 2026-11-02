@@ -179,6 +179,50 @@ func TestUpdateMonitor_SDKRenameJSONKeepsTheStoredLine(t *testing.T) {
 	h.ds.AssertExpectations(t)
 }
 
+func TestUpdateMonitor_JSONValueZeroWithoutFieldMovesTheLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_zero",
+		BalanceID: "bln_zero",
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_zero").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 0 && m.Condition.Field == "balance" &&
+			m.Condition.Operator == ">" && m.Condition.Precision == 1 &&
+			m.Condition.PreciseValue.Cmp(big.NewInt(0)) == 0
+	})).Return(nil).Once()
+
+	var update model.BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"condition":{"value":0}}`), &update))
+	update.MonitorID = "mon_zero"
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &update))
+	assert.False(t, update.PrecisionUnchanged())
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_JSONValueZeroWithPrecisionWritesBoth(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_zero_prec",
+		BalanceID: "bln_zero_prec",
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_zero_prec").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 0 && m.Condition.Precision == 100 &&
+			m.Condition.Field == "balance" && m.Condition.Operator == ">" &&
+			m.Condition.PreciseValue.Cmp(big.NewInt(0)) == 0
+	})).Return(nil).Once()
+
+	var update model.BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"condition":{"value":0,"precision":100}}`), &update))
+	update.MonitorID = "mon_zero_prec"
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &update))
+	assert.False(t, update.PrecisionUnchanged())
+	h.ds.AssertExpectations(t)
+}
+
 func TestUpdateMonitor_PrecisionWithoutValueKeepsTheStoredLine(t *testing.T) {
 	h := newMonitorHarness(t)
 	stored := &model.BalanceMonitor{

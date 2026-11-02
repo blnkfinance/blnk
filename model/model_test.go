@@ -985,6 +985,18 @@ func TestAlertCondition_SDKRenameJSONIsSpecifiedButNotForced(t *testing.T) {
 	var c AlertCondition
 	require.NoError(t, json.Unmarshal([]byte(`{"field":"","operator":"","value":0,"precision":0}`), &c))
 	assert.True(t, c.ValueSpecified())
+	assert.True(t, c.FieldSpecified())
+	assert.True(t, c.OperatorSpecified())
+	assert.False(t, c.ValueForced())
+	assert.Equal(t, float64(0), c.Value)
+}
+
+func TestAlertCondition_ValueZeroWithoutFieldLeavesFieldUnspecified(t *testing.T) {
+	var c AlertCondition
+	require.NoError(t, json.Unmarshal([]byte(`{"value":0}`), &c))
+	assert.True(t, c.ValueSpecified())
+	assert.False(t, c.FieldSpecified())
+	assert.False(t, c.OperatorSpecified())
 	assert.False(t, c.ValueForced())
 	assert.Equal(t, float64(0), c.Value)
 }

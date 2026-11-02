@@ -506,10 +506,12 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	// overwrite the row (or 500 on the table's check constraint). Value and
 	// description are the exceptions: 0 and "" are real values, so only a
 	// missing JSON key (or a Go caller that never called SetValue /
-	// SetDescription) keeps the stored one. A JSON 0 with empty field and
-	// operator is the official SDK rename shape and is treated as omitted
-	// too. A lone precision change is ignored when value was omitted, or
-	// the stored line would move. The caller is told when that happens.
+	// SetDescription) keeps the stored one. The official SDK rename sends
+	// value 0 with the field and operator keys present and empty; that shape
+	// keeps the stored line. A body that sends value 0 and leaves those keys
+	// out moves the line to zero. A lone precision change is ignored when
+	// value was omitted, or the stored line would move. The caller is told
+	// when that happens.
 	if monitor.BalanceID == "" {
 		monitor.BalanceID = previous.BalanceID
 	}
@@ -524,11 +526,14 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	if incomingOperator == "" {
 		monitor.Condition.Operator = previous.Condition.Operator
 	}
-	// Official Go clients always send value:0 with empty field and operator
-	// on a rename. That is not an explicit zero. SetValue(0) still is.
+	// Official Go clients always send value:0 with the field and operator
+	// keys present and empty on a rename. That is not an explicit zero.
+	// {"condition":{"value":0}} leaves those keys out and is. SetValue(0) is too.
 	sdkZero := !monitor.Condition.ValueForced() &&
+		monitor.Condition.ValueSpecified() &&
 		monitor.Condition.Value == 0 &&
-		incomingField == "" && incomingOperator == ""
+		monitor.Condition.FieldSpecified() && incomingField == "" &&
+		monitor.Condition.OperatorSpecified() && incomingOperator == ""
 	valueOmitted := (!monitor.Condition.ValueSpecified() && monitor.Condition.Value == 0) || sdkZero
 	incomingPrecision := monitor.Condition.Precision
 	if incomingPrecision == 0 || valueOmitted {
