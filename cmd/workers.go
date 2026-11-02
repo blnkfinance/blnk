@@ -63,20 +63,9 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		return err
 	}
 
-	handled, err := b.blnk.TryRecordQueuedTransactionBatch(ctx, &txn)
-	if b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName {
-		handled, err = b.blnk.TryRecordQueuedTransactionBatchForHotLane(ctx, &txn)
-	}
-	if err != nil {
-		logrus.WithError(err).Warnf("coalesced processing attempt failed for transaction %s", txn.TransactionID)
-	}
-	if handled {
-		metrics.QueueProcessingDuration.Record(ctx, time.Since(startTime).Seconds(),
-			otelmetric.WithAttributes(attribute.String("result", "success")),
-		)
-		return nil
-	}
-	_, err = b.blnk.ProcessQueuedTransaction(ctx, &txn, b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName)
+	// ProcessQueuedTransaction tries the coalesced batch first and falls back to the
+	// single-transaction path itself, so the batch is attempted only once per task.
+	_, err := b.blnk.ProcessQueuedTransaction(ctx, &txn, b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName)
 	if err != nil {
 		// Handle reference already used error
 		if blnk.IsDuplicateReferenceError(err) {

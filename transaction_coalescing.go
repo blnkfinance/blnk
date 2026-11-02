@@ -63,6 +63,30 @@ func (l *Blnk) tryRecordQueuedTransactionBatch(ctx context.Context, transaction 
 		return false, nil
 	}
 
+	// An earlier batch may already have applied this transaction as one of its siblings, while
+	// its own queue task was still pending. Its work is done, so acknowledge it rather than
+	// building, locking and validating a batch around it that is bound to fail open.
+	applied, err := l.datasource.QueuedTransactionHasChild(ctx, transaction.ParentTransaction)
+	if err != nil {
+		span.RecordError(err)
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"transaction_id": transaction.TransactionID,
+			"parent":         transaction.ParentTransaction,
+			"reason":         "applied_check_failed",
+		}).Warn("Skipping transaction coalescing")
+		return false, nil
+	}
+	if applied {
+		logrus.WithFields(logrus.Fields{
+			"transaction_id": transaction.TransactionID,
+			"parent":         transaction.ParentTransaction,
+		}).Info("Queued transaction already applied; skipping coalescing")
+		metrics.TransactionBatchTotal.Add(ctx, 1,
+			otelmetric.WithAttributes(attribute.String("result", "skipped")),
+		)
+		return true, nil
+	}
+
 	batch, scope, err := l.buildQueuedCoalescingBatch(ctx, transaction, batchSize)
 	if err != nil {
 		span.RecordError(err)
