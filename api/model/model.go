@@ -17,6 +17,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"regexp"
 	"strconv"
@@ -99,6 +100,36 @@ func validateAmountNotNegative(t *RecordTransaction) validation.RuleFunc {
 		}
 		return nil
 	}
+}
+
+// validateDistributionsNotNegative rejects a split entry whose distribution
+// or precise_distribution is negative.
+//
+// The "left" entry receives what the other entries leave, so a negative
+// entry is added back to it: 100 split as [-50, "left"] gives "left" 150.
+// The negative leg can never apply, so the request moves a different amount
+// than it records. Values that do not parse are left to the format checks
+// in model.CalculateDistributionsPrecise.
+func validateDistributionsNotNegative(value interface{}) error {
+	distributions, ok := value.([]model.Distribution)
+	if !ok {
+		return errors.New("invalid distributions type")
+	}
+
+	for i, d := range distributions {
+		if isNegativeNumber(strings.TrimSuffix(d.Distribution, "%")) {
+			return fmt.Errorf("distribution at index %d cannot be negative", i)
+		}
+		if isNegativeNumber(d.PreciseDistribution) {
+			return fmt.Errorf("precise_distribution at index %d cannot be negative", i)
+		}
+	}
+	return nil
+}
+
+func isNegativeNumber(s string) bool {
+	n, err := strconv.ParseFloat(s, 64)
+	return err == nil && n < 0
 }
 
 func sourceOrSourcesValidation(t *RecordTransaction) validation.RuleFunc {
@@ -319,6 +350,8 @@ func (t *RecordTransaction) ValidateRecordTransaction() error {
 		validation.Field(&t.Description, validation.Required),
 		validation.Field(&t.Source, validation.By(sourceOrSourcesValidation(t)), validation.By(splitOnOneSideValidation(t))),
 		validation.Field(&t.Destination, validation.By(destinationOrDestinationsValidation(t)), validation.By(sameBalanceValidation(t))),
+		validation.Field(&t.Sources, validation.By(validateDistributionsNotNegative)),
+		validation.Field(&t.Destinations, validation.By(validateDistributionsNotNegative)),
 		validation.Field(&t.ScheduledFor, validation.When(t.ScheduledFor != "", validation.By(func(value interface{}) error {
 			dateStr, ok := value.(string)
 			if !ok {
