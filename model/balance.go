@@ -99,6 +99,9 @@ type BalanceMonitor struct {
 	// descriptionSpecified is true when JSON included "description", including
 	// an explicit empty string that means "clear the name".
 	descriptionSpecified bool
+	// precisionUnchanged is set by an update that was sent a scale and left
+	// the stored scale in place because the number was not sent with it.
+	precisionUnchanged bool
 }
 
 // UnmarshalJSON records whether the caller sent "description", so an update
@@ -128,6 +131,16 @@ func (bm BalanceMonitor) DescriptionSpecified() bool {
 func (bm *BalanceMonitor) SetDescription(description string) {
 	bm.Description = description
 	bm.descriptionSpecified = true
+}
+
+// MarkPrecisionUnchanged records that a sent scale was left as stored.
+func (bm *BalanceMonitor) MarkPrecisionUnchanged() {
+	bm.precisionUnchanged = true
+}
+
+// PrecisionUnchanged reports whether a sent scale was left as stored.
+func (bm BalanceMonitor) PrecisionUnchanged() bool {
+	return bm.precisionUnchanged
 }
 
 // TriggerMode is the read side of NormalizeTrigger. A monitor with no trigger

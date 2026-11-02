@@ -306,8 +306,9 @@ func (a Api) GetBalanceMonitorsByBalanceID(c *gin.Context) {
 // - c: The Gin context containing the request and response.
 //
 // Responses:
-// - 400 Bad Request: If there's an error in binding JSON, validating the balance monitor, or updating the record.
-// - 200 OK: If the balance monitor is successfully updated.
+//   - 400 Bad Request: If there's an error in binding JSON, validating the balance monitor, or updating the record.
+//   - 200 OK: If the balance monitor is successfully updated. precision_unchanged is
+//     set when a sent scale was left as stored because value was not sent with it.
 func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 	var monitor model.BalanceMonitor
 	id, passed := c.Params.Get("id")
@@ -339,7 +340,13 @@ func (a Api) UpdateBalanceMonitor(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "BalanceMonitor updated successfully"})
+	message := "BalanceMonitor updated successfully"
+	body := gin.H{"message": message}
+	if monitor.PrecisionUnchanged() {
+		body["precision_unchanged"] = true
+		body["message"] = message + ". precision was left unchanged because value was not sent with it."
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 // DeleteBalanceMonitor deletes an existing balance monitor record by its ID.

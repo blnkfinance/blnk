@@ -334,8 +334,22 @@ func TestBalanceMonitor_PrecisionOnlyOnPutKeepsTheStoredLine(t *testing.T) {
 	wallet := e.newBalance(t)
 	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
 
-	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"precision":100}}`)
+	var updated struct {
+		Message            string `json:"message"`
+		PrecisionUnchanged *bool  `json:"precision_unchanged"`
+	}
+	resp, err := SetUpTestRequest(TestRequest{
+		Payload:  bytes.NewBufferString(`{"condition":{"precision":100}}`),
+		Response: &updated,
+		Method:   "PUT",
+		Route:    fmt.Sprintf("/balance-monitors/%s", created.MonitorID),
+		Router:   e.router,
+	})
+	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.Code)
+	require.NotNil(t, updated.PrecisionUnchanged)
+	assert.True(t, *updated.PrecisionUnchanged)
+	assert.Contains(t, updated.Message, "precision was left unchanged")
 
 	stored := getMonitor(t, e, created.MonitorID)
 	assert.Equal(t, float64(500), stored.Condition.Value)
@@ -349,8 +363,21 @@ func TestBalanceMonitor_ValueAndPrecisionOnPutRescalesTheLine(t *testing.T) {
 	wallet := e.newBalance(t)
 	created := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", ">", 500)
 
-	resp := putMonitor(t, e, created.MonitorID, `{"condition":{"value":500,"precision":100}}`)
+	var updated struct {
+		Message            string `json:"message"`
+		PrecisionUnchanged *bool  `json:"precision_unchanged"`
+	}
+	resp, err := SetUpTestRequest(TestRequest{
+		Payload:  bytes.NewBufferString(`{"condition":{"value":500,"precision":100}}`),
+		Response: &updated,
+		Method:   "PUT",
+		Route:    fmt.Sprintf("/balance-monitors/%s", created.MonitorID),
+		Router:   e.router,
+	})
+	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Nil(t, updated.PrecisionUnchanged)
+	assert.Equal(t, "BalanceMonitor updated successfully", updated.Message)
 
 	stored := getMonitor(t, e, created.MonitorID)
 	assert.Equal(t, float64(500), stored.Condition.Value)

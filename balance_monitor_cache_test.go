@@ -175,6 +175,7 @@ func TestUpdateMonitor_SDKRenameJSONKeepsTheStoredLine(t *testing.T) {
 	), &update))
 	update.MonitorID = "mon_sdk"
 	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &update))
+	assert.False(t, update.PrecisionUnchanged())
 	h.ds.AssertExpectations(t)
 }
 
@@ -191,9 +192,11 @@ func TestUpdateMonitor_PrecisionWithoutValueKeepsTheStoredLine(t *testing.T) {
 			m.Condition.PreciseValue.Cmp(big.NewInt(500)) == 0
 	})).Return(nil).Once()
 
-	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &model.BalanceMonitor{
+	update := &model.BalanceMonitor{
 		MonitorID: "mon_prec",
 		Condition: model.AlertCondition{Precision: 100},
-	}))
+	}
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), update))
+	assert.True(t, update.PrecisionUnchanged())
 	h.ds.AssertExpectations(t)
 }

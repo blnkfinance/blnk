@@ -509,7 +509,7 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 	// SetDescription) keeps the stored one. A JSON 0 with empty field and
 	// operator is the official SDK rename shape and is treated as omitted
 	// too. A lone precision change is ignored when value was omitted, or
-	// the stored line would move.
+	// the stored line would move. The caller is told when that happens.
 	if monitor.BalanceID == "" {
 		monitor.BalanceID = previous.BalanceID
 	}
@@ -530,8 +530,12 @@ func (l *Blnk) UpdateMonitor(ctx context.Context, monitor *model.BalanceMonitor)
 		monitor.Condition.Value == 0 &&
 		incomingField == "" && incomingOperator == ""
 	valueOmitted := (!monitor.Condition.ValueSpecified() && monitor.Condition.Value == 0) || sdkZero
-	if monitor.Condition.Precision == 0 || valueOmitted {
+	incomingPrecision := monitor.Condition.Precision
+	if incomingPrecision == 0 || valueOmitted {
 		monitor.Condition.Precision = previous.Condition.Precision
+	}
+	if valueOmitted && incomingPrecision != 0 && incomingPrecision != previous.Condition.Precision {
+		monitor.MarkPrecisionUnchanged()
 	}
 	if valueOmitted {
 		monitor.Condition.Value = previous.Condition.Value
