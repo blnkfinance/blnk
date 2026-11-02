@@ -176,6 +176,10 @@ func processTransactionAsync(ctx context.Context, l *Blnk, transaction *model.Tr
 		}
 
 		if !asyncTxn.SkipQueue {
+			if err := l.registerQueuedAtomicBatchItem(ctx, asyncTxn, queueTransactions); err != nil {
+				span.RecordError(err)
+				logrus.WithError(err).Error("failed to register queued atomic batch item")
+			}
 			if err := enqueueTransactions(ctx, l.queue, asyncTxn, queueTransactions); err != nil {
 				span.RecordError(err)
 			}

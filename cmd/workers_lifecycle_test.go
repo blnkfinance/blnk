@@ -123,10 +123,11 @@ func TestProcessTransaction_DuplicateReferenceAcks(t *testing.T) {
 	assert.Equal(t, "5000", dstAfter.Balance.String(), "destination must not be credited twice")
 }
 
-// An atomic bulk request in the default queued mode, run by the real worker,
-// which takes the items in whatever order asynq hands them out. When one item
-// is rejected, nothing from the batch may stay applied, and
-// bulk_transaction.failed must report the rollback it actually made.
+// An atomic bulk request in the default queued mode, with and without
+// run_async, run by the real worker, which takes the items in whatever order
+// asynq hands them out. When one item is rejected, nothing from the batch may
+// stay applied, and bulk_transaction.failed must report the rollback it
+// actually made, as the only report of the batch.
 func TestWorker_AtomicBulkRejectionRollsBackQueuedBatch(t *testing.T) {
 	cfg := realInfraConfig(t)
 	suffix := strings.ToLower(gofakeit.LetterN(8))
@@ -195,27 +196,29 @@ func TestWorker_AtomicBulkRejectionRollsBackQueuedBatch(t *testing.T) {
 		dsts     []*model.Balance
 	}
 	var batches []*batch
-	for _, inflight := range []bool{false, true} {
-		for _, amounts := range [][]float64{{50, 500}, {50, 500, 10}} {
-			for run := 0; run < 5; run++ {
-				bt := &batch{name: fmt.Sprintf("inflight=%v %v run %d", inflight, amounts, run), inflight: inflight, amounts: amounts}
-				funding := newBalance()
-				bt.src = newBalance()
-				funded := queuedTransaction(funding.BalanceID, bt.src.BalanceID, 100, true)
-				funded.SkipQueue = true
-				_, err := b.blnk.QueueTransaction(ctx, funded)
-				require.NoError(t, err)
+	for _, runAsync := range []bool{false, true} {
+		for _, inflight := range []bool{false, true} {
+			for _, amounts := range [][]float64{{50, 500}, {50, 500, 10}} {
+				for run := 0; run < 5; run++ {
+					bt := &batch{name: fmt.Sprintf("run_async=%v inflight=%v %v run %d", runAsync, inflight, amounts, run), inflight: inflight, amounts: amounts}
+					funding := newBalance()
+					bt.src = newBalance()
+					funded := queuedTransaction(funding.BalanceID, bt.src.BalanceID, 100, true)
+					funded.SkipQueue = true
+					_, err := b.blnk.QueueTransaction(ctx, funded)
+					require.NoError(t, err)
 
-				var items []*model.Transaction
-				for _, amount := range amounts {
-					dst := newBalance()
-					bt.dsts = append(bt.dsts, dst)
-					items = append(items, &model.Transaction{Reference: "ref_" + gofakeit.UUID(), Source: bt.src.BalanceID, Destination: dst.BalanceID, Amount: amount, Precision: 100, Currency: "USD"})
+					var items []*model.Transaction
+					for _, amount := range amounts {
+						dst := newBalance()
+						bt.dsts = append(bt.dsts, dst)
+						items = append(items, &model.Transaction{Reference: "ref_" + gofakeit.UUID(), Source: bt.src.BalanceID, Destination: dst.BalanceID, Amount: amount, Precision: 100, Currency: "USD"})
+					}
+					result, err := b.blnk.CreateBulkTransactions(ctx, &model.BulkTransactionRequest{Atomic: true, Inflight: inflight, RunAsync: runAsync, Transactions: items})
+					require.NoError(t, err)
+					bt.id = result.BatchID
+					batches = append(batches, bt)
 				}
-				result, err := b.blnk.CreateBulkTransactions(ctx, &model.BulkTransactionRequest{Atomic: true, Inflight: inflight, Transactions: items})
-				require.NoError(t, err)
-				bt.id = result.BatchID
-				batches = append(batches, bt)
 			}
 		}
 	}
@@ -243,6 +246,7 @@ func TestWorker_AtomicBulkRejectionRollsBackQueuedBatch(t *testing.T) {
 			AND reference NOT LIKE '%_refund'`, bt.id, status).Scan(&held))
 		messages := failedWebhooks(bt.id)
 		require.Len(t, messages, 1, "%s: one bulk_transaction.failed per batch", bt.name)
+		assert.Len(t, bulkWebhooks(t, inspector, cfg.Queue.WebhookQueue, bt.id), 1, "%s: the batch is reported failed and nothing else", bt.name)
 		if held == 0 {
 			assert.Contains(t, messages[0], "Nothing from this batch", "%s", bt.name)
 		} else {
@@ -273,26 +277,42 @@ func TestWorker_AtomicBulkRejectionRollsBackQueuedBatch(t *testing.T) {
 // webhook waiting in queue for batchID.
 func bulkFailedWebhooks(t *testing.T, inspector *asynq.Inspector, queue, batchID string) []string {
 	t.Helper()
+	var messages []string
+	for _, hook := range bulkWebhooks(t, inspector, queue, batchID) {
+		if hook.Event == "bulk_transaction.failed" {
+			messages = append(messages, hook.Data.Error)
+		}
+	}
+	return messages
+}
+
+type bulkWebhook struct {
+	Event string `json:"event"`
+	Data  struct {
+		BatchID          string `json:"batch_id"`
+		Error            string `json:"error"`
+		TransactionCount int    `json:"transaction_count"`
+	} `json:"data"`
+}
+
+// bulkWebhooks returns every bulk_transaction webhook waiting in queue for
+// batchID.
+func bulkWebhooks(t *testing.T, inspector *asynq.Inspector, queue, batchID string) []bulkWebhook {
+	t.Helper()
 	tasks, err := inspector.ListPendingTasks(queue, asynq.PageSize(1000))
 	if errors.Is(err, asynq.ErrQueueNotFound) {
 		return nil // nothing has been sent yet
 	}
 	require.NoError(t, err)
-	var messages []string
+	var hooks []bulkWebhook
 	for _, task := range tasks {
-		var hook struct {
-			Event string `json:"event"`
-			Data  struct {
-				BatchID string `json:"batch_id"`
-				Error   string `json:"error"`
-			} `json:"data"`
-		}
+		var hook bulkWebhook
 		require.NoError(t, json.Unmarshal(task.Payload, &hook))
-		if hook.Event == "bulk_transaction.failed" && hook.Data.BatchID == batchID {
-			messages = append(messages, hook.Data.Error)
+		if strings.HasPrefix(hook.Event, "bulk_transaction.") && hook.Data.BatchID == batchID {
+			hooks = append(hooks, hook)
 		}
 	}
-	return messages
+	return hooks
 }
 
 // queuedAtomicBatch is an atomic bulk request whose items wait in the queue
@@ -312,6 +332,12 @@ type queuedAtomicBatch struct {
 // queueAtomicBatch funds a source with 100 and queues an atomic bulk request
 // that pays amounts from it, each to a new balance.
 func queueAtomicBatch(t *testing.T, inflight bool, amounts ...float64) *queuedAtomicBatch {
+	t.Helper()
+	return queueBulkRequest(t, model.BulkTransactionRequest{Atomic: true, Inflight: inflight}, amounts...)
+}
+
+// queueBulkRequest is queueAtomicBatch for a request with other options.
+func queueBulkRequest(t *testing.T, req model.BulkTransactionRequest, amounts ...float64) *queuedAtomicBatch {
 	t.Helper()
 	cfg := realInfraConfig(t)
 	suffix := strings.ToLower(gofakeit.LetterN(8))
@@ -355,7 +381,8 @@ func queueAtomicBatch(t *testing.T, inflight bool, amounts ...float64) *queuedAt
 		bt.dsts = append(bt.dsts, &dst)
 		items = append(items, &model.Transaction{Reference: "ref_" + gofakeit.UUID(), Source: src.BalanceID, Destination: dst.BalanceID, Amount: amount, Precision: 100, Currency: "USD"})
 	}
-	result, err := b.blnk.CreateBulkTransactions(ctx, &model.BulkTransactionRequest{Atomic: true, Inflight: inflight, Transactions: items})
+	req.Transactions = items
+	result, err := b.blnk.CreateBulkTransactions(ctx, &req)
 	require.NoError(t, err)
 	bt.id = result.BatchID
 
@@ -516,6 +543,72 @@ func TestWorker_AtomicBulkRollbackFinishesOnRetry(t *testing.T) {
 			require.NoError(t, bt.b.processTransaction(ctx, bt.tasks[1]))
 			bt.assertRolledBack(t, "after another delivery")
 			assert.Len(t, webhooks(), 1)
+		})
+	}
+}
+
+// With run_async, a queued atomic batch is reported by the worker, not by the
+// request that queued it. A batch the worker fails gets bulk_transaction.failed
+// once its rollback is complete, and nothing that says it was applied.
+func TestWorker_AsyncAtomicBulkReportsOnlyTheFailure(t *testing.T) {
+	for _, inflight := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inflight=%v", inflight), func(t *testing.T) {
+			bt := queueBulkRequest(t, model.BulkTransactionRequest{Atomic: true, Inflight: inflight, RunAsync: true}, 50, 500)
+			ctx := context.Background()
+			webhooks := func() []bulkWebhook {
+				return bulkWebhooks(t, bt.inspector, bt.b.cnf.Queue.WebhookQueue, bt.id)
+			}
+
+			assert.Empty(t, webhooks(), "nothing is reported while the items are queued")
+			require.NoError(t, bt.b.processTransaction(ctx, bt.tasks[0]), "the 50 is paid")
+			assert.Empty(t, webhooks(), "nothing is reported while an item is still queued")
+
+			require.NoError(t, bt.b.processTransaction(ctx, bt.tasks[1]), "the 500 is refused, which fails the batch")
+			bt.assertRolledBack(t, "after the rollback")
+			hooks := webhooks()
+			require.Len(t, hooks, 1, "the batch is reported once")
+			assert.Equal(t, "bulk_transaction.failed", hooks[0].Event)
+			kind, action := "applied", "refunded"
+			if inflight {
+				kind, action = "inflight", "voided"
+			}
+			assert.Contains(t, hooks[0].Data.Error, fmt.Sprintf("1 %s transaction(s) from this batch have been %s", kind, action))
+
+			require.NoError(t, bt.b.processTransaction(ctx, bt.tasks[1]))
+			assert.Len(t, webhooks(), 1, "another delivery reports nothing new")
+		})
+	}
+}
+
+// With run_async, a queued atomic batch whose items all land is reported
+// applied (or inflight) once, by the worker, when the last item has landed.
+func TestWorker_AsyncAtomicBulkReportsAppliedWhenItemsLand(t *testing.T) {
+	for _, inflight := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inflight=%v", inflight), func(t *testing.T) {
+			bt := queueBulkRequest(t, model.BulkTransactionRequest{Atomic: true, Inflight: inflight, RunAsync: true}, 50, 10)
+			ctx := context.Background()
+			webhooks := func() []bulkWebhook {
+				return bulkWebhooks(t, bt.inspector, bt.b.cnf.Queue.WebhookQueue, bt.id)
+			}
+			event, landed := "bulk_transaction.applied", `status = 'APPLIED'`
+			if inflight {
+				event, landed = "bulk_transaction.inflight", `status = 'INFLIGHT'`
+			}
+
+			assert.Empty(t, webhooks(), "nothing is reported while the items are queued")
+			require.NoError(t, bt.b.processTransaction(ctx, bt.tasks[0]))
+			assert.Equal(t, 1, bt.underBatch(t, landed))
+			assert.Empty(t, webhooks(), "nothing is reported while an item is still queued")
+
+			require.NoError(t, bt.b.processTransaction(ctx, bt.tasks[1]))
+			assert.Equal(t, 2, bt.underBatch(t, landed))
+			hooks := webhooks()
+			require.Len(t, hooks, 1, "the batch is reported once its items have landed")
+			assert.Equal(t, event, hooks[0].Event)
+			assert.Equal(t, 2, hooks[0].Data.TransactionCount)
+
+			require.NoError(t, bt.b.processTransaction(ctx, bt.tasks[1]))
+			assert.Len(t, webhooks(), 1, "another delivery reports nothing new")
 		})
 	}
 }

@@ -243,6 +243,8 @@ const atomicBatchMarkTTL = 7 * 24 * time.Hour
 func atomicBatchLockKey(batchID string) string     { return "atomic-batch:" + batchID }
 func atomicBatchFailedKey(batchID string) string   { return "atomic-batch-failed:" + batchID }
 func atomicBatchReportedKey(batchID string) string { return "atomic-batch-reported:" + batchID }
+func atomicBatchProgressKey(batchID string) string { return "atomic-batch-progress:" + batchID }
+func atomicBatchPendingKey(batchID string) string  { return "atomic-batch-pending:" + batchID }
 
 // queuedAtomicBatchID returns the batch id of txn when it is a queued item of
 // an atomic bulk request. A refund of such an item copies its metadata, but
@@ -263,7 +265,9 @@ func queuedAtomicBatchID(txn *model.Transaction) (string, bool) {
 // request while holding the batch lock, and tells it whether the batch has
 // already failed. The items of one batch are thus applied one at a time: when
 // one is rejected, the rollback sees every item applied before it, and no item
-// is applied after it. Any other transaction runs process directly.
+// is applied after it. When the item has landed, it reports the batch if that
+// was the last item an async request was waiting for. Any other transaction
+// runs process directly.
 func (l *Blnk) WithQueuedAtomicBatch(ctx context.Context, txn *model.Transaction, process func(batchFailed bool) error) error {
 	batchID, ok := queuedAtomicBatchID(txn)
 	if !ok {
@@ -287,7 +291,125 @@ func (l *Blnk) WithQueuedAtomicBatch(ctx context.Context, txn *model.Transaction
 	if err != nil {
 		return fmt.Errorf("failed to check atomic batch %s: %w", batchID, err)
 	}
-	return process(failed > 0)
+	if err := process(failed > 0); err != nil || failed > 0 {
+		return err
+	}
+	return l.reportLandedQueuedAtomicBatch(ctx, batchID, txn)
+}
+
+// trackQueuedAtomicBatch records the size of an async atomic batch before its
+// items are queued. The worker reports such a batch itself, once all of its
+// items have landed.
+func (l *Blnk) trackQueuedAtomicBatch(ctx context.Context, batchID string, size int) error {
+	key := atomicBatchProgressKey(batchID)
+	pipe := l.redis.TxPipeline()
+	pipe.HSet(ctx, key, "size", size)
+	pipe.Expire(ctx, key, atomicBatchMarkTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to track atomic batch %s: %w", batchID, err)
+	}
+	return nil
+}
+
+// registerQueuedAtomicBatchItem records the tasks an item of a tracked batch
+// is about to enqueue: the item itself, or one per split leg. It runs before
+// they are enqueued, so no task lands before the batch knows of it, and it
+// adds the tasks before it counts the item as queued.
+func (l *Blnk) registerQueuedAtomicBatchItem(ctx context.Context, item *model.Transaction, tasks []*model.Transaction) error {
+	batchID, ok := queuedAtomicBatchID(item)
+	if !ok {
+		return nil
+	}
+	progressKey := atomicBatchProgressKey(batchID)
+	tracked, err := l.redis.Exists(ctx, progressKey).Result()
+	if err != nil {
+		return fmt.Errorf("failed to check atomic batch %s: %w", batchID, err)
+	}
+	if tracked == 0 {
+		return nil
+	}
+
+	if len(tasks) == 0 {
+		tasks = []*model.Transaction{item}
+	}
+	refs := make([]interface{}, len(tasks))
+	for i, task := range tasks {
+		refs[i] = task.Reference
+	}
+	pendingKey := atomicBatchPendingKey(batchID)
+	pipe := l.redis.TxPipeline()
+	pipe.SAdd(ctx, pendingKey, refs...)
+	pipe.Expire(ctx, pendingKey, atomicBatchMarkTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to register item of atomic batch %s: %w", batchID, err)
+	}
+	if err := l.redis.HIncrBy(ctx, progressKey, "queued", 1).Err(); err != nil {
+		return fmt.Errorf("failed to register item of atomic batch %s: %w", batchID, err)
+	}
+	return nil
+}
+
+// reportLandedQueuedAtomicBatch counts txn as landed and, when every item of
+// a tracked batch has been queued and every task of it has landed, reports
+// the batch with bulk_transaction.applied (or inflight). It reads the queued
+// count before the pending tasks, so the tasks of every counted item are in
+// the set it reads. An item rejected in process failed the batch instead,
+// and the rollback reports that. Both reports take the same mark, so a batch
+// gets one of them, once.
+func (l *Blnk) reportLandedQueuedAtomicBatch(ctx context.Context, batchID string, txn *model.Transaction) error {
+	failed, err := l.redis.Exists(ctx, atomicBatchFailedKey(batchID)).Result()
+	if err != nil {
+		return fmt.Errorf("failed to check atomic batch %s: %w", batchID, err)
+	}
+	if failed > 0 {
+		return nil
+	}
+
+	var progress struct {
+		Size   int `redis:"size"`
+		Queued int `redis:"queued"`
+	}
+	if err := l.redis.HMGet(ctx, atomicBatchProgressKey(batchID), "size", "queued").Scan(&progress); err != nil {
+		return fmt.Errorf("failed to check atomic batch %s: %w", batchID, err)
+	}
+	if progress.Size == 0 {
+		return nil
+	}
+	pendingKey := atomicBatchPendingKey(batchID)
+	if err := l.redis.SRem(ctx, pendingKey, txn.Reference).Err(); err != nil {
+		return fmt.Errorf("failed to update atomic batch %s: %w", batchID, err)
+	}
+	if progress.Queued < progress.Size {
+		return nil
+	}
+	pending, err := l.redis.SCard(ctx, pendingKey).Result()
+	if err != nil {
+		return fmt.Errorf("failed to check atomic batch %s: %w", batchID, err)
+	}
+	if pending > 0 {
+		return nil
+	}
+
+	reportedKey := atomicBatchReportedKey(batchID)
+	first, err := l.redis.SetNX(ctx, reportedKey, time.Now().UTC().Format(time.RFC3339), atomicBatchMarkTTL).Result()
+	if err != nil {
+		return fmt.Errorf("failed to mark atomic batch %s as reported: %w", batchID, err)
+	}
+	if !first {
+		return nil
+	}
+	status := "applied"
+	if txn.Inflight {
+		status = "inflight"
+	}
+	if err := l.SendWebhook(bulkTransactionWebhook(batchID, status, "", progress.Size)); err != nil {
+		if delErr := l.redis.Del(ctx, reportedKey).Err(); delErr != nil {
+			logrus.WithError(delErr).WithField("batch_id", batchID).Error("failed to clear the report mark of atomic batch")
+		}
+		return fmt.Errorf("failed to report atomic batch %s: %w", batchID, err)
+	}
+	logrus.Infof("Completed async bulk transaction batch %s successfully", batchID)
+	return nil
 }
 
 // markQueuedAtomicBatchFailed marks a queued atomic batch as failed, so the
@@ -420,12 +542,24 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 			logrus.Infof("Starting async bulk transaction batch %s with %d transactions (atomic: %v, inflight: %v)",
 				batchID, len(asyncTxns), req.Atomic, req.Inflight)
 
+			// The items of a queued atomic batch are still queued when this
+			// returns; the worker reports the batch once they have landed.
+			queuedAtomic := req.Atomic && !req.SkipQueue
+			if queuedAtomic {
+				if err := l.trackQueuedAtomicBatch(bgCtx, batchID, len(asyncTxns)); err != nil {
+					l.handleAsyncBulkTransactionFailure(bgCtx, err, batchID, req.Atomic, req.Inflight)
+					return
+				}
+			}
+
 			// Process transactions in batch
 			err := l.processBulkTransactions(bgCtx, asyncTxns, batchID, req.Inflight, req.SkipQueue)
 
 			if err != nil {
 				// Handle failure (rollback if atomic, send webhook)
 				l.handleAsyncBulkTransactionFailure(bgCtx, err, batchID, req.Atomic, req.Inflight)
+			} else if queuedAtomic {
+				logrus.Infof("Queued async bulk transaction batch %s", batchID)
 			} else {
 				// Send webhook notification for success
 				status := "inflight"
