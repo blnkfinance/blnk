@@ -323,22 +323,27 @@ func (b *blnkInstance) processInflightCommit(ctx context.Context, t *asynq.Task)
 }
 
 // processInflightExpiry handles the expiry of inflight transactions.
-// It voids the transaction by its ID and logs the action.
-func (b *blnkInstance) processInflightExpiry(cxt context.Context, t *asynq.Task) error {
+// The scheduled id is the one returned at enqueue time. For a queued hold that
+// is the QUEUED placeholder, not the INFLIGHT "_q" row that reserved the money.
+// Resolve it to those legs, the same way a commit does, and void the legs. A
+// leg that is already committed or voided is terminal: ack it, and do not
+// release inflight balance a second time.
+func (b *blnkInstance) processInflightExpiry(ctx context.Context, t *asynq.Task) error {
 	var txnID string
-	// Unmarshal the transaction ID from the task payload.
 	if err := json.Unmarshal(t.Payload(), &txnID); err != nil {
 		logrus.Error(err)
 		return err
 	}
 
-	// Void the inflight transaction by its ID.
-	_, err := b.blnk.VoidInflightTransaction(cxt, txnID)
-	if err != nil {
+	// txnID is the action id so a retry of this task replays the void it
+	// already wrote instead of releasing the amount again.
+	retryable, err := b.blnk.RunInflightActionByParent(ctx, txnID, blnk.InflightActionVoid, big.NewInt(0), txnID)
+	if err != nil && retryable {
 		return err
 	}
-
-	logrus.Printf(" [*] Inflight Transaction Expired %s", txnID)
+	if err != nil {
+		logrus.WithError(err).WithField("transaction_id", txnID).Error("inflight expiry failed permanently; acking task")
+	}
 	return nil
 }
 
