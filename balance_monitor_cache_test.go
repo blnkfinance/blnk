@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"sync"
 	"testing"
@@ -80,7 +81,11 @@ func TestUpdateMonitor_InvalidatesOnceWhenTheBalanceIsUnchanged(t *testing.T) {
 	recorder := &recordingCache{}
 	h.blnk.cache = recorder
 
-	stored := &model.BalanceMonitor{MonitorID: "mon_same", BalanceID: "bln_same"}
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_same",
+		BalanceID: "bln_same",
+		Condition: model.AlertCondition{Field: "balance", Operator: "<"},
+	}
 	h.ds.On("GetMonitorByID", "mon_same").Return(stored, nil).Once()
 	h.ds.On("UpdateMonitor", mock.Anything).Return(nil).Once()
 
@@ -89,4 +94,153 @@ func TestUpdateMonitor_InvalidatesOnceWhenTheBalanceIsUnchanged(t *testing.T) {
 	}))
 
 	assert.Equal(t, []string{"monitors:bln_same"}, recorder.deleted)
+}
+
+// A Go caller that builds AlertCondition{Value: 0} looks the same as an
+// omitted JSON value. SetValue marks the zero as intentional.
+func TestUpdateMonitor_SetValueZeroLowersTheStoredLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID:   "mon_zero",
+		BalanceID:   "bln_zero",
+		Description: "named",
+		Condition:   model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_zero").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 0 && m.Description == "named"
+	})).Return(nil).Once()
+
+	update := &model.BalanceMonitor{MonitorID: "mon_zero"}
+	update.Condition.SetValue(0)
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), update))
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_SetDescriptionEmptyClearsTheName(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID:   "mon_name",
+		BalanceID:   "bln_name",
+		Description: "named",
+		Condition:   model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_name").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Description == "" && m.Condition.Value == 500
+	})).Return(nil).Once()
+
+	update := &model.BalanceMonitor{MonitorID: "mon_name"}
+	update.SetDescription("")
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), update))
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_GoZeroValueWithoutSetValueKeepsTheStoredLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_keep",
+		BalanceID: "bln_keep",
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_keep").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 500
+	})).Return(nil).Once()
+
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &model.BalanceMonitor{
+		MonitorID: "mon_keep",
+		Condition: model.AlertCondition{Value: 0},
+	}))
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_SDKRenameJSONKeepsTheStoredLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID:   "mon_sdk",
+		BalanceID:   "bln_sdk",
+		Description: "keep me",
+		Condition:   model.AlertCondition{Field: "credit_balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_sdk").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Description == "from sdk" && m.Condition.Value == 500 &&
+			m.Condition.Field == "credit_balance" && m.Condition.Operator == ">"
+	})).Return(nil).Once()
+
+	var update model.BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(
+		`{"description":"from sdk","balance_id":"","condition":{"field":"","operator":"","value":0,"precision":0}}`,
+	), &update))
+	update.MonitorID = "mon_sdk"
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &update))
+	assert.False(t, update.PrecisionUnchanged())
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_JSONValueZeroWithoutFieldMovesTheLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_zero",
+		BalanceID: "bln_zero",
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_zero").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 0 && m.Condition.Field == "balance" &&
+			m.Condition.Operator == ">" && m.Condition.Precision == 1 &&
+			m.Condition.PreciseValue.Cmp(big.NewInt(0)) == 0
+	})).Return(nil).Once()
+
+	var update model.BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"condition":{"value":0}}`), &update))
+	update.MonitorID = "mon_zero"
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &update))
+	assert.False(t, update.PrecisionUnchanged())
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_JSONValueZeroWithPrecisionWritesBoth(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_zero_prec",
+		BalanceID: "bln_zero_prec",
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_zero_prec").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 0 && m.Condition.Precision == 100 &&
+			m.Condition.Field == "balance" && m.Condition.Operator == ">" &&
+			m.Condition.PreciseValue.Cmp(big.NewInt(0)) == 0
+	})).Return(nil).Once()
+
+	var update model.BalanceMonitor
+	require.NoError(t, json.Unmarshal([]byte(`{"condition":{"value":0,"precision":100}}`), &update))
+	update.MonitorID = "mon_zero_prec"
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), &update))
+	assert.False(t, update.PrecisionUnchanged())
+	h.ds.AssertExpectations(t)
+}
+
+func TestUpdateMonitor_PrecisionWithoutValueKeepsTheStoredLine(t *testing.T) {
+	h := newMonitorHarness(t)
+	stored := &model.BalanceMonitor{
+		MonitorID: "mon_prec",
+		BalanceID: "bln_prec",
+		Condition: model.AlertCondition{Field: "balance", Operator: ">", Value: 500, Precision: 1},
+	}
+	h.ds.On("GetMonitorByID", "mon_prec").Return(stored, nil).Once()
+	h.ds.On("UpdateMonitor", mock.MatchedBy(func(m *model.BalanceMonitor) bool {
+		return m.Condition.Value == 500 && m.Condition.Precision == 1 &&
+			m.Condition.PreciseValue.Cmp(big.NewInt(500)) == 0
+	})).Return(nil).Once()
+
+	update := &model.BalanceMonitor{
+		MonitorID: "mon_prec",
+		Condition: model.AlertCondition{Precision: 100},
+	}
+	require.NoError(t, h.blnk.UpdateMonitor(context.Background(), update))
+	assert.True(t, update.PrecisionUnchanged())
+	h.ds.AssertExpectations(t)
 }

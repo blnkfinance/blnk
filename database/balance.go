@@ -1174,6 +1174,7 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	var precision sql.NullFloat64
 	var preciseValue sql.NullInt64
+	var description, callBackURL sql.NullString
 	var conditionState bool
 
 	// Query the database to get the monitor details by MonitorID
@@ -1188,7 +1189,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	condition := &model.AlertCondition{}
 
 	// Scan the result into the monitor and condition fields
-	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &precision, &preciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &monitor.Trigger, &conditionState)
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &precision, &preciseValue, &description, &callBackURL, &monitor.CreatedAt, &monitor.Trigger, &conditionState)
 	if err != nil {
 		// Handle the case where the monitor with the specified ID is not found
 		if err == sql.ErrNoRows {
@@ -1198,6 +1199,8 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitor", err)
 	}
 
+	monitor.Description = nullableString(description)
+	monitor.CallBackURL = nullableString(callBackURL)
 	monitor.Condition = *condition
 	resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 	resolveMonitorState(monitor, conditionState)
@@ -1231,18 +1234,21 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	for rows.Next() {
 		var precision sql.NullFloat64
 		var preciseValue sql.NullInt64
+		var description, callBackURL sql.NullString
 		var conditionState bool
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &description, &callBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
 		}
 
 		// Assign the scanned AlertCondition to the monitor
+		monitor.Description = nullableString(description)
+		monitor.CallBackURL = nullableString(callBackURL)
 		monitor.Condition = condition
 		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 		resolveMonitorState(&monitor, conditionState)
@@ -1289,18 +1295,21 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 	for rows.Next() {
 		var precision sql.NullFloat64
 		var preciseValue sql.NullInt64
+		var description, callBackURL sql.NullString
 		var conditionState bool
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &description, &callBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
 		}
 
 		// Assign the scanned AlertCondition to the monitor
+		monitor.Description = nullableString(description)
+		monitor.CallBackURL = nullableString(callBackURL)
 		monitor.Condition = condition
 		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 		resolveMonitorState(&monitor, conditionState)
