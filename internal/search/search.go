@@ -89,6 +89,8 @@ func init() {
 // TypesenseClient wraps the Typesense client and provides methods to interact with it.
 type TypesenseClient struct {
 	Client *typesense.Client
+	apiKey string
+	hosts  []string
 }
 
 // NotificationPayload represents the payload structure for notifications, containing the table and data.
@@ -157,17 +159,35 @@ func (b *IndexBatch) Deduplicate() {
 	b.Dependencies = unique
 }
 
+const defaultRequestTimeout = 5 * time.Second
+
 // NewTypesenseClient initializes and returns a new Typesense client instance.
 func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
+	return newTypesenseClient(apiKey, hosts, defaultRequestTimeout)
+}
+
+func newTypesenseClient(apiKey string, hosts []string, requestTimeout time.Duration) *TypesenseClient {
 	client := typesense.NewClient(
 		typesense.WithServer(hosts[0]),
 		typesense.WithAPIKey(apiKey),
-		typesense.WithConnectionTimeout(5*time.Second),
+		// typesense-go applies this as http.Client.Timeout, so it bounds the
+		// whole request including server-side indexing, not just the dial.
+		typesense.WithConnectionTimeout(requestTimeout),
 		typesense.WithCircuitBreakerMaxRequests(50),
 		typesense.WithCircuitBreakerInterval(2*time.Minute),
 		typesense.WithCircuitBreakerTimeout(1*time.Minute),
 	)
-	return &TypesenseClient{Client: client}
+	return &TypesenseClient{Client: client, apiKey: apiKey, hosts: hosts}
+}
+
+// withRequestTimeout returns a client for the same server with its own
+// circuit breaker and request timeout. A nil client or one built without
+// connection details is returned unchanged.
+func (t *TypesenseClient) withRequestTimeout(requestTimeout time.Duration) *TypesenseClient {
+	if t == nil || len(t.hosts) == 0 {
+		return t
+	}
+	return newTypesenseClient(t.apiKey, t.hosts, requestTimeout)
 }
 
 // EnsureCollectionsExist ensures that all the necessary collections exist in the Typesense schema.

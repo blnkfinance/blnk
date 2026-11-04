@@ -18,6 +18,7 @@ package search
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -31,9 +32,18 @@ import (
 // FAIL (not skip) when it is unreachable. Start it with `docker compose up -d
 // typesense` (port 8108 published, API key "blnk-api-key").
 const (
-	testTypesenseHost = "http://localhost:8108"
-	testTypesenseKey  = "blnk-api-key"
+	defaultTestTypesenseHost = "http://localhost:8108"
+	testTypesenseKey         = "blnk-api-key"
 )
+
+// testTypesenseHost is overridable so the suite can run on a machine where
+// 8108 is already taken by another Typesense.
+var testTypesenseHost = func() string {
+	if host := os.Getenv("BLNK_TEST_TYPESENSE_HOST"); host != "" {
+		return host
+	}
+	return defaultTestTypesenseHost
+}()
 
 func newTestTypesenseClient(t *testing.T) *TypesenseClient {
 	t.Helper()
