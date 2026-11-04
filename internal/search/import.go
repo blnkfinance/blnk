@@ -23,25 +23,25 @@ import (
 	"github.com/typesense/typesense-go/typesense/api"
 )
 
-// ImportFailure is one document Typesense rejected inside an otherwise
+// importFailure is one document Typesense rejected inside an otherwise
 // successful import request.
-type ImportFailure struct {
+type importFailure struct {
 	Index int
 	Error string
 }
 
-// ImportDocuments upserts a page of documents with one import request.
+// importDocuments upserts a page of documents with one import request.
 // Typesense replicates each HTTP write as a single Raft log entry, so this
 // costs one commit (one fsync) per page instead of one per document.
 // Documents are normalized the same way HandleNotification normalizes them,
 // so the two paths produce identical documents.
 //
 // A document that cannot be normalized or that Typesense rejects (schema or
-// validation) is returned as an ImportFailure, indexed by position in docs;
+// validation) is returned as an importFailure, indexed by position in docs;
 // the rest of the page is still indexed. A request-level failure, including
 // Typesense's OUT_OF_MEMORY rejection, is returned as an error with nothing
 // indexed.
-func (t *TypesenseClient) ImportDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]ImportFailure, error) {
+func (t *TypesenseClient) importDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]importFailure, error) {
 	config, ok := collectionConfigs[table]
 	if !ok {
 		return nil, fmt.Errorf("unknown collection: %s", table)
@@ -50,12 +50,12 @@ func (t *TypesenseClient) ImportDocuments(ctx context.Context, table string, doc
 		return nil, nil
 	}
 
-	var failures []ImportFailure
+	var failures []importFailure
 	payload := make([]interface{}, 0, len(docs))
 	positions := make([]int, 0, len(docs))
 	for i, data := range docs {
 		if err := t.processMetadata(data); err != nil {
-			failures = append(failures, ImportFailure{Index: i, Error: err.Error()})
+			failures = append(failures, importFailure{Index: i, Error: err.Error()})
 			continue
 		}
 		t.convertLargeNumbers(config, data)
@@ -87,7 +87,7 @@ func (t *TypesenseClient) ImportDocuments(ctx context.Context, table string, doc
 		if result == nil || result.Success {
 			continue
 		}
-		failures = append(failures, ImportFailure{Index: positions[i], Error: result.Error})
+		failures = append(failures, importFailure{Index: positions[i], Error: result.Error})
 	}
 	return failures, nil
 }

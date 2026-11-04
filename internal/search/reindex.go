@@ -32,8 +32,8 @@ import (
 
 const (
 	defaultBackpressureRetryInterval = 5 * time.Second
-	defaultImportChunkSize           = 5000
-	defaultImportTimeout             = 2 * time.Minute
+	importChunkSize                  = 5000
+	importTimeout                    = 2 * time.Minute
 )
 
 // ReindexProgress tracks the progress of a reindex operation.
@@ -54,8 +54,6 @@ type ReindexProgress struct {
 type ReindexConfig struct {
 	BatchSize                 int
 	BackpressureRetryInterval time.Duration
-	ImportChunkSize           int
-	ImportTimeout             time.Duration
 }
 
 // ReindexService handles reindexing operations.
@@ -76,15 +74,9 @@ func NewReindexService(client *TypesenseClient, datasource database.IDataSource,
 	if config.BackpressureRetryInterval <= 0 {
 		config.BackpressureRetryInterval = defaultBackpressureRetryInterval
 	}
-	if config.ImportChunkSize <= 0 {
-		config.ImportChunkSize = defaultImportChunkSize
-	}
-	if config.ImportTimeout <= 0 {
-		config.ImportTimeout = defaultImportTimeout
-	}
 	return &ReindexService{
 		client:       client,
-		importClient: client.withRequestTimeout(config.ImportTimeout),
+		importClient: client.withRequestTimeout(importTimeout),
 		datasource:   datasource,
 		config:       config,
 		progress: &ReindexProgress{
@@ -341,7 +333,7 @@ func (r *ReindexService) indexCollection(ctx context.Context, phase, collection,
 		}
 
 		pageNum++
-		if pageNum%10 == 0 {
+		if pageNum%100 == 0 {
 			logrus.WithFields(logrus.Fields{
 				"collection": collection,
 				"page":       pageNum,
@@ -363,14 +355,14 @@ func (r *ReindexService) indexCollection(ctx context.Context, phase, collection,
 // before that.
 func (r *ReindexService) importPage(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
-	for start := 0; start < len(docs); start += r.config.ImportChunkSize {
-		end := min(start+r.config.ImportChunkSize, len(docs))
+	for start := 0; start < len(docs); start += importChunkSize {
+		end := min(start+importChunkSize, len(docs))
 		chunk := docs[start:end]
 
-		var failures []ImportFailure
+		var failures []importFailure
 		err := r.retryWithMemoryBackpressure(ctx, func() error {
 			var importErr error
-			failures, importErr = r.importClient.ImportDocuments(ctx, collection, chunk)
+			failures, importErr = r.importClient.importDocuments(ctx, collection, chunk)
 			return importErr
 		})
 		if err != nil {
@@ -404,10 +396,10 @@ func (r *ReindexService) importPage(ctx context.Context, collection, label strin
 func (r *ReindexService) importIndividually(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
 	for i := range docs {
-		var failures []ImportFailure
+		var failures []importFailure
 		err := r.retryWithMemoryBackpressure(ctx, func() error {
 			var importErr error
-			failures, importErr = r.importClient.ImportDocuments(ctx, collection, docs[i:i+1])
+			failures, importErr = r.importClient.importDocuments(ctx, collection, docs[i:i+1])
 			return importErr
 		})
 		if err != nil {
