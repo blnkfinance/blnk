@@ -58,12 +58,11 @@ type ReindexConfig struct {
 
 // ReindexService handles reindexing operations.
 type ReindexService struct {
-	client       *TypesenseClient
-	importClient *TypesenseClient
-	datasource   database.IDataSource
-	config       ReindexConfig
-	progress     *ReindexProgress
-	mu           sync.RWMutex
+	client     *TypesenseClient
+	datasource database.IDataSource
+	config     ReindexConfig
+	progress   *ReindexProgress
+	mu         sync.RWMutex
 }
 
 // NewReindexService creates a new ReindexService instance.
@@ -75,10 +74,9 @@ func NewReindexService(client *TypesenseClient, datasource database.IDataSource,
 		config.BackpressureRetryInterval = defaultBackpressureRetryInterval
 	}
 	return &ReindexService{
-		client:       client,
-		importClient: client.withRequestTimeout(importTimeout),
-		datasource:   datasource,
-		config:       config,
+		client:     client.withRequestTimeout(importTimeout),
+		datasource: datasource,
+		config:     config,
 		progress: &ReindexProgress{
 			Status: "pending",
 		},
@@ -284,67 +282,6 @@ func (r *ReindexService) setMemoryBackpressurePaused(paused bool) {
 	logrus.WithField("phase", phase).Info("Reindex resumed after Typesense memory backpressure")
 }
 
-// pageFetcher returns a page of rows and their ids in the same order, so an
-// import failure can be attributed to a row.
-type pageFetcher func(ctx context.Context, limit, offset int) (ids []string, rows []interface{}, err error)
-
-func (r *ReindexService) indexCollection(ctx context.Context, phase, collection, label string, fetch pageFetcher) error {
-	r.mu.Lock()
-	r.progress.Phase = phase
-	r.mu.Unlock()
-	logrus.Infof("Starting to index %s", collection)
-
-	var offset int
-	var totalIndexed int64
-	pageNum := 0
-
-	for {
-		ids, rows, err := fetch(ctx, r.config.BatchSize, offset)
-		if err != nil {
-			return err
-		}
-		if len(rows) == 0 {
-			break
-		}
-
-		docIDs := make([]string, 0, len(rows))
-		docs := make([]map[string]interface{}, 0, len(rows))
-		for i, row := range rows {
-			data, err := toMap(row)
-			if err != nil {
-				r.addError(label + " " + ids[i] + ": " + err.Error())
-				continue
-			}
-			docIDs = append(docIDs, ids[i])
-			docs = append(docs, data)
-		}
-
-		indexed, err := r.importPage(ctx, collection, label, docIDs, docs)
-		totalIndexed += indexed
-		r.mu.Lock()
-		r.progress.ProcessedRecords += indexed
-		r.progress.TotalRecords = r.progress.ProcessedRecords
-		r.mu.Unlock()
-		if err != nil {
-			return err
-		}
-
-		pageNum++
-		if pageNum%100 == 0 {
-			logrus.WithFields(logrus.Fields{
-				"collection": collection,
-				"page":       pageNum,
-				"indexed":    totalIndexed,
-			}).Info("Indexing progress")
-		}
-
-		offset += len(rows)
-	}
-
-	logrus.WithFields(logrus.Fields{"collection": collection, "total": totalIndexed}).Info("Indexing completed")
-	return nil
-}
-
 // importPage returns an error only when Typesense itself is unavailable; the
 // count is what was accepted before that.
 func (r *ReindexService) importPage(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
@@ -356,7 +293,7 @@ func (r *ReindexService) importPage(ctx context.Context, collection, label strin
 		var failures []importFailure
 		err := r.retryWithMemoryBackpressure(ctx, func() error {
 			var importErr error
-			failures, importErr = r.importClient.importDocuments(ctx, collection, chunk)
+			failures, importErr = r.client.importDocuments(ctx, collection, chunk)
 			return importErr
 		})
 		if err != nil {
@@ -392,7 +329,7 @@ func (r *ReindexService) importIndividually(ctx context.Context, collection, lab
 		var failures []importFailure
 		err := r.retryWithMemoryBackpressure(ctx, func() error {
 			var importErr error
-			failures, importErr = r.importClient.importDocuments(ctx, collection, docs[i:i+1])
+			failures, importErr = r.client.importDocuments(ctx, collection, docs[i:i+1])
 			return importErr
 		})
 		if err != nil {
@@ -408,67 +345,228 @@ func (r *ReindexService) importIndividually(ctx context.Context, collection, lab
 }
 
 func (r *ReindexService) indexLedgers(ctx context.Context) error {
-	return r.indexCollection(ctx, "indexing_ledgers", CollectionLedgers, "ledger",
-		func(_ context.Context, limit, offset int) ([]string, []interface{}, error) {
-			ledgers, err := r.datasource.GetAllLedgers(limit, offset)
+	r.updateProgress("indexing_ledgers", 0, 0)
+	logrus.Info("Starting to index ledgers")
+
+	var offset int
+	var totalIndexed int64
+	batchNum := 0
+
+	for {
+		ledgers, err := r.datasource.GetAllLedgers(r.config.BatchSize, offset)
+		if err != nil {
+			return err
+		}
+
+		if len(ledgers) == 0 {
+			break
+		}
+
+		batchCount := len(ledgers)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
+		for _, ledger := range ledgers {
+			data, err := toMap(ledger)
 			if err != nil {
-				return nil, nil, err
+				r.addError("ledger " + ledger.LedgerID + ": " + err.Error())
+				continue
 			}
-			ids := make([]string, len(ledgers))
-			rows := make([]interface{}, len(ledgers))
-			for i, l := range ledgers {
-				ids[i], rows[i] = l.LedgerID, l
-			}
-			return ids, rows, nil
-		})
+			ids = append(ids, ledger.LedgerID)
+			docs = append(docs, data)
+		}
+
+		indexed, err := r.importPage(ctx, CollectionLedgers, "ledger", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
+		}
+
+		r.updateProgress("indexing_ledgers", totalIndexed, totalIndexed)
+
+		batchNum++
+		if batchNum%100 == 0 {
+			logrus.WithFields(logrus.Fields{
+				"batch":   batchNum,
+				"indexed": totalIndexed,
+			}).Info("Ledger indexing progress")
+		}
+
+		offset += batchCount
+	}
+
+	logrus.WithField("total", totalIndexed).Info("Ledger indexing completed")
+	return nil
 }
 
 func (r *ReindexService) indexIdentities(ctx context.Context) error {
-	return r.indexCollection(ctx, "indexing_identities", CollectionIdentities, "identity",
-		func(_ context.Context, limit, offset int) ([]string, []interface{}, error) {
-			identities, err := r.datasource.GetAllIdentitiesPaginated(limit, offset)
+	r.updateProgress("indexing_identities", r.progress.ProcessedRecords, r.progress.TotalRecords)
+	logrus.Info("Starting to index identities")
+
+	var offset int
+	var totalIndexed int64
+	batchNum := 0
+
+	for {
+		identities, err := r.datasource.GetAllIdentitiesPaginated(r.config.BatchSize, offset)
+		if err != nil {
+			return err
+		}
+
+		if len(identities) == 0 {
+			break
+		}
+
+		batchCount := len(identities)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
+		for _, identity := range identities {
+			data, err := toMap(identity)
 			if err != nil {
-				return nil, nil, err
+				r.addError("identity " + identity.IdentityID + ": " + err.Error())
+				continue
 			}
-			ids := make([]string, len(identities))
-			rows := make([]interface{}, len(identities))
-			for i, id := range identities {
-				ids[i], rows[i] = id.IdentityID, id
-			}
-			return ids, rows, nil
-		})
+			ids = append(ids, identity.IdentityID)
+			docs = append(docs, data)
+		}
+
+		indexed, err := r.importPage(ctx, CollectionIdentities, "identity", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
+		}
+
+		r.mu.Lock()
+		r.progress.ProcessedRecords += indexed
+		r.progress.TotalRecords = r.progress.ProcessedRecords
+		r.mu.Unlock()
+
+		batchNum++
+		if batchNum%100 == 0 {
+			logrus.WithFields(logrus.Fields{
+				"batch":   batchNum,
+				"indexed": totalIndexed,
+			}).Info("Identity indexing progress")
+		}
+
+		offset += batchCount
+	}
+
+	logrus.WithField("total", totalIndexed).Info("Identity indexing completed")
+	return nil
 }
 
 func (r *ReindexService) indexBalances(ctx context.Context) error {
-	return r.indexCollection(ctx, "indexing_balances", CollectionBalances, "balance",
-		func(_ context.Context, limit, offset int) ([]string, []interface{}, error) {
-			balances, err := r.datasource.GetAllBalances(limit, offset)
+	r.updateProgress("indexing_balances", r.progress.ProcessedRecords, r.progress.TotalRecords)
+	logrus.Info("Starting to index balances")
+
+	var offset int
+	var totalIndexed int64
+	batchNum := 0
+
+	for {
+		balances, err := r.datasource.GetAllBalances(r.config.BatchSize, offset)
+		if err != nil {
+			return err
+		}
+
+		if len(balances) == 0 {
+			break
+		}
+
+		batchCount := len(balances)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
+		for _, balance := range balances {
+			data, err := toMap(balance)
 			if err != nil {
-				return nil, nil, err
+				r.addError("balance " + balance.BalanceID + ": " + err.Error())
+				continue
 			}
-			ids := make([]string, len(balances))
-			rows := make([]interface{}, len(balances))
-			for i, b := range balances {
-				ids[i], rows[i] = b.BalanceID, b
-			}
-			return ids, rows, nil
-		})
+			ids = append(ids, balance.BalanceID)
+			docs = append(docs, data)
+		}
+
+		indexed, err := r.importPage(ctx, CollectionBalances, "balance", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
+		}
+
+		r.mu.Lock()
+		r.progress.ProcessedRecords += indexed
+		r.progress.TotalRecords = r.progress.ProcessedRecords
+		r.mu.Unlock()
+
+		batchNum++
+		if batchNum%100 == 0 {
+			logrus.WithFields(logrus.Fields{
+				"batch":   batchNum,
+				"indexed": totalIndexed,
+			}).Info("Balance indexing progress")
+		}
+
+		offset += batchCount
+	}
+
+	logrus.WithField("total", totalIndexed).Info("Balance indexing completed")
+	return nil
 }
 
 func (r *ReindexService) indexTransactions(ctx context.Context) error {
-	return r.indexCollection(ctx, "indexing_transactions", CollectionTransactions, "transaction",
-		func(ctx context.Context, limit, offset int) ([]string, []interface{}, error) {
-			transactions, err := r.datasource.GetAllTransactions(ctx, limit, offset)
+	r.updateProgress("indexing_transactions", r.progress.ProcessedRecords, r.progress.TotalRecords)
+	logrus.Info("Starting to index transactions")
+
+	var offset int
+	var totalIndexed int64
+	batchNum := 0
+
+	for {
+		transactions, err := r.datasource.GetAllTransactions(ctx, r.config.BatchSize, offset)
+		if err != nil {
+			return err
+		}
+
+		if len(transactions) == 0 {
+			break
+		}
+
+		batchCount := len(transactions)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
+		for _, transaction := range transactions {
+			data, err := toMap(transaction)
 			if err != nil {
-				return nil, nil, err
+				r.addError("transaction " + transaction.TransactionID + ": " + err.Error())
+				continue
 			}
-			ids := make([]string, len(transactions))
-			rows := make([]interface{}, len(transactions))
-			for i, t := range transactions {
-				ids[i], rows[i] = t.TransactionID, t
-			}
-			return ids, rows, nil
-		})
+			ids = append(ids, transaction.TransactionID)
+			docs = append(docs, data)
+		}
+
+		indexed, err := r.importPage(ctx, CollectionTransactions, "transaction", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
+		}
+
+		r.mu.Lock()
+		r.progress.ProcessedRecords += indexed
+		r.progress.TotalRecords = r.progress.ProcessedRecords
+		r.mu.Unlock()
+
+		batchNum++
+		if batchNum%100 == 0 {
+			logrus.WithFields(logrus.Fields{
+				"batch":   batchNum,
+				"indexed": totalIndexed,
+			}).Info("Transaction indexing progress")
+		}
+
+		offset += batchCount
+	}
+
+	logrus.WithField("total", totalIndexed).Info("Transaction indexing completed")
+	return nil
 }
 
 // DropCollection deletes a collection from Typesense. A missing collection is
