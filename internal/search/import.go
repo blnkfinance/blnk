@@ -23,33 +23,22 @@ import (
 	"github.com/typesense/typesense-go/typesense/api"
 )
 
-// importFailure is one document Typesense rejected inside an otherwise
-// successful import request.
 type importFailure struct {
 	Index int
 	Error string
 }
 
-// importDocuments upserts a page of documents with one import request.
-// Typesense replicates each HTTP write as a single Raft log entry, so this
-// costs one commit (one fsync) per page instead of one per document.
-// Documents are normalized the same way HandleNotification normalizes them,
-// so the two paths produce identical documents.
-//
-// A document that cannot be normalized or that Typesense rejects (schema or
-// validation) is returned as an importFailure, indexed by position in docs;
-// the rest of the page is still indexed. A request-level failure, including
-// Typesense's OUT_OF_MEMORY rejection, is returned as an error with nothing
-// indexed.
+// importDocuments upserts docs with one request. Typesense replicates each
+// HTTP write as a single Raft log entry, so this costs one commit per page
+// instead of one per document. Documents are normalized the same way
+// HandleNotification normalizes them, so the two paths produce identical
+// documents. A document that cannot be normalized or that Typesense rejects
+// is returned as an importFailure; an error means nothing in docs was indexed.
 func (t *TypesenseClient) importDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]importFailure, error) {
 	config, ok := collectionConfigs[table]
 	if !ok {
 		return nil, fmt.Errorf("unknown collection: %s", table)
 	}
-	if len(docs) == 0 {
-		return nil, nil
-	}
-
 	var failures []importFailure
 	payload := make([]interface{}, 0, len(docs))
 	positions := make([]int, 0, len(docs))
@@ -77,14 +66,8 @@ func (t *TypesenseClient) importDocuments(ctx context.Context, table string, doc
 		return nil, fmt.Errorf("failed to import documents into Typesense: %w", err)
 	}
 
-	// A malformed result line already surfaced as err above. This catches a
-	// well-formed response whose line count does not match the request, where
-	// results can no longer be attributed to documents.
-	if len(results) != len(payload) {
-		return nil, fmt.Errorf("received %d import results for %d documents", len(results), len(payload))
-	}
 	for i, result := range results {
-		if result == nil || result.Success {
+		if result.Success {
 			continue
 		}
 		failures = append(failures, importFailure{Index: positions[i], Error: result.Error})

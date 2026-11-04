@@ -284,13 +284,10 @@ func (r *ReindexService) setMemoryBackpressurePaused(paused bool) {
 	logrus.WithField("phase", phase).Info("Reindex resumed after Typesense memory backpressure")
 }
 
-// pageFetcher returns one page of rows for a collection, with the id of each
-// row in the same order, so import failures can be attributed.
+// pageFetcher returns a page of rows and their ids in the same order, so an
+// import failure can be attributed to a row.
 type pageFetcher func(ctx context.Context, limit, offset int) (ids []string, rows []interface{}, err error)
 
-// indexCollection records rows that cannot be mapped and documents Typesense
-// rejects in progress.Errors and skips them; a datasource error or an
-// unreachable Typesense aborts the phase.
 func (r *ReindexService) indexCollection(ctx context.Context, phase, collection, label string, fetch pageFetcher) error {
 	r.mu.Lock()
 	r.progress.Phase = phase
@@ -348,11 +345,8 @@ func (r *ReindexService) indexCollection(ctx context.Context, phase, collection,
 	return nil
 }
 
-// importPage records per-document rejections and leaves them out of the
-// count. A chunk whose bulk import fails as a whole is retried one document
-// at a time so only the documents at fault are lost; an error returned here
-// means Typesense itself is unavailable, and the count is what was accepted
-// before that.
+// importPage returns an error only when Typesense itself is unavailable; the
+// count is what was accepted before that.
 func (r *ReindexService) importPage(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
 	for start := 0; start < len(docs); start += importChunkSize {
@@ -391,8 +385,7 @@ func (r *ReindexService) importPage(ctx context.Context, collection, label strin
 
 // importIndividually relies on Typesense reporting a bad document as a
 // per-line result, never as a failed request, so a single-document import
-// that fails as a whole means the server is unavailable. Continuing would
-// only record every remaining row as an error, so the phase aborts.
+// that fails as a whole means the server is unavailable and the phase aborts.
 func (r *ReindexService) importIndividually(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
 	for i := range docs {

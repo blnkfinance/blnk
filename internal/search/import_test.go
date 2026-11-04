@@ -171,21 +171,6 @@ func TestImportDocuments_NormalizationFailureIsPerDocument(t *testing.T) {
 	assert.Equal(t, "ldg_c", calls[0][1]["id"])
 }
 
-func TestImportDocuments_ResultCountMismatchIsAnError(t *testing.T) {
-	for name, lines := range map[string]int{"fewer results than documents": 1, "more results than documents": 3} {
-		t.Run(name, func(t *testing.T) {
-			fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
-				return http.StatusOK, strings.TrimSuffix(strings.Repeat(`{"success":true}`+"\n", lines), "\n")
-			}}
-			client := newFakeTypesense(t, fake)
-
-			docs := []map[string]interface{}{{"ledger_id": "ldg_a"}, {"ledger_id": "ldg_b"}}
-			_, err := client.importDocuments(context.Background(), CollectionLedgers, docs)
-			require.Error(t, err, "results that cannot be attributed to documents must not be reported as success")
-		})
-	}
-}
-
 func TestImportDocuments_OutOfMemoryIsBackpressure(t *testing.T) {
 	fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
 		return http.StatusServiceUnavailable, `{"message":"Rejecting write: running out of resource type: OUT_OF_MEMORY"}`

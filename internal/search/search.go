@@ -159,11 +159,9 @@ func (b *IndexBatch) Deduplicate() {
 	b.Dependencies = unique
 }
 
-const defaultRequestTimeout = 5 * time.Second
-
 // NewTypesenseClient initializes and returns a new Typesense client instance.
 func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
-	return newTypesenseClient(apiKey, hosts, defaultRequestTimeout)
+	return newTypesenseClient(apiKey, hosts, 5*time.Second)
 }
 
 func newTypesenseClient(apiKey string, hosts []string, requestTimeout time.Duration) *TypesenseClient {
@@ -181,10 +179,9 @@ func newTypesenseClient(apiKey string, hosts []string, requestTimeout time.Durat
 }
 
 // withRequestTimeout returns a client for the same server with its own
-// circuit breaker and request timeout. A nil client or one built without
-// connection details is returned unchanged.
+// request timeout and circuit breaker.
 func (t *TypesenseClient) withRequestTimeout(requestTimeout time.Duration) *TypesenseClient {
-	if t == nil || len(t.hosts) == 0 {
+	if t == nil {
 		return t
 	}
 	return newTypesenseClient(t.apiKey, t.hosts, requestTimeout)
