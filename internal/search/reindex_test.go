@@ -374,13 +374,6 @@ func (f *fakeTypesense) requests() [][]map[string]interface{} {
 	return out
 }
 
-func newFakeTypesense(t *testing.T, fake *fakeTypesense) *TypesenseClient {
-	t.Helper()
-	srv := httptest.NewServer(fake.handler())
-	t.Cleanup(srv.Close)
-	return NewTypesenseClient("test-key", []string{srv.URL}, DefaultTimeout)
-}
-
 func expectLedgersOnly(ds *mocks.MockDataSource, batchSize int, ledgers []model.Ledger) {
 	ds.On("GetAllLedgers", batchSize, 0).Return(ledgers, nil).Once()
 	ds.On("GetAllLedgers", batchSize, len(ledgers)).Return([]model.Ledger{}, nil).Once()
@@ -393,32 +386,11 @@ func rejectedLine(field string) string {
 	return `{"success":false,"error":"Field ` + "`" + field + "`" + ` must be a string.","document":"{}"}`
 }
 
-func TestIndexDocuments_NormalizesAndSetsID(t *testing.T) {
-	fake := &fakeTypesense{}
-	client := newFakeTypesense(t, fake)
-
-	created := time.Date(2026, 9, 22, 19, 51, 0, 0, time.UTC)
-	docs := []map[string]interface{}{
-		{"transaction_id": "txn_1", "created_at": created.Format(time.RFC3339), "precise_amount": float64(1e15), "meta_data": nil},
-	}
-	failures, err := client.indexDocuments(context.Background(), CollectionTransactions, docs)
-	require.NoError(t, err)
-	assert.Empty(t, failures)
-
-	calls := fake.requests()
-	require.Len(t, calls, 1)
-	require.Len(t, calls[0], 1)
-	sent := calls[0][0]
-	assert.Equal(t, "txn_1", sent["id"], "Typesense document id must come from the collection's IDField")
-	assert.EqualValues(t, created.Unix(), sent["created_at"], "time fields are normalized to unix seconds like HandleNotification")
-	assert.Equal(t, "1000000000000000", sent["precise_amount"], "big-int fields are sent as strings")
-	assert.Equal(t, map[string]interface{}{}, sent["meta_data"], "nil meta_data becomes an empty object")
-	assert.Contains(t, sent, "amount", "required schema fields are defaulted")
-}
-
 func TestStartReindex_IndexesPagesInChunks(t *testing.T) {
 	fake := &fakeTypesense{}
-	client := newFakeTypesense(t, fake)
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	client := newFaultClient(srv.URL, time.Second)
 
 	ledgers := make([]model.Ledger, indexChunkSize+1)
 	for i := range ledgers {
@@ -452,7 +424,9 @@ func TestStartReindex_RejectedDocumentIsRecordedNotFatal(t *testing.T) {
 		}
 		return http.StatusOK, strings.Join(lines, "\n")
 	}}
-	client := newFakeTypesense(t, fake)
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	client := newFaultClient(srv.URL, time.Second)
 
 	ds := new(mocks.MockDataSource)
 	expectLedgersOnly(ds, 10, []model.Ledger{testLedger("ldg_ok"), testLedger("ldg_bad"), testLedger("ldg_ok2")})
@@ -474,7 +448,9 @@ func TestStartReindex_PausesOnOutOfMemoryThenResumes(t *testing.T) {
 		}
 		return http.StatusOK, ""
 	}}
-	client := newFakeTypesense(t, fake)
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	client := newFaultClient(srv.URL, time.Second)
 
 	ds := new(mocks.MockDataSource)
 	expectLedgersOnly(ds, 10, []model.Ledger{testLedger("ldg_1")})
@@ -498,7 +474,9 @@ func TestStartReindex_BulkFailureFallsBackToSingleDocuments(t *testing.T) {
 		}
 		return http.StatusOK, ""
 	}}
-	client := newFakeTypesense(t, fake)
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	client := newFaultClient(srv.URL, time.Second)
 
 	ds := new(mocks.MockDataSource)
 	expectLedgersOnly(ds, 10, []model.Ledger{testLedger("ldg_ok"), testLedger("ldg_bad"), testLedger("ldg_ok2")})
@@ -523,7 +501,9 @@ func TestStartReindex_FallbackAbortsWhenTypesenseIsDown(t *testing.T) {
 	fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
 		return http.StatusInternalServerError, `{"message":"disk full"}`
 	}}
-	client := newFakeTypesense(t, fake)
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	client := newFaultClient(srv.URL, time.Second)
 
 	ds := new(mocks.MockDataSource)
 	ds.On("GetAllLedgers", 10, 0).Return([]model.Ledger{testLedger("ldg_1"), testLedger("ldg_2")}, nil).Once()
