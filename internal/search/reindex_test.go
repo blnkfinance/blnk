@@ -314,13 +314,13 @@ func TestTryReindexIfNeeded_NilArgsAreSafe(t *testing.T) {
 	ds.AssertNotCalled(t, "GetAllLedgers")
 }
 
-// fakeTypesense answers the import endpoint; collection create returns 201 and
+// fakeTypesense answers the bulk indexing endpoint; collection create returns 201 and
 // everything else an empty 200, which is enough for DropAllCollections and
 // EnsureCollectionsExist to pass through.
 type fakeTypesense struct {
-	mu      sync.Mutex
-	imports [][]map[string]interface{} // documents received per import request
-	respond func(call int, docs []map[string]interface{}) (status int, body string)
+	mu       sync.Mutex
+	received [][]map[string]interface{} // documents received per bulk request
+	respond  func(call int, docs []map[string]interface{}) (status int, body string)
 }
 
 func (f *fakeTypesense) handler() http.Handler {
@@ -346,8 +346,8 @@ func (f *fakeTypesense) handler() http.Handler {
 			}
 		}
 		f.mu.Lock()
-		call := len(f.imports)
-		f.imports = append(f.imports, docs)
+		call := len(f.received)
+		f.received = append(f.received, docs)
 		f.mu.Unlock()
 
 		status, body := http.StatusOK, ""
@@ -366,11 +366,11 @@ func (f *fakeTypesense) handler() http.Handler {
 	})
 }
 
-func (f *fakeTypesense) importCalls() [][]map[string]interface{} {
+func (f *fakeTypesense) requests() [][]map[string]interface{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make([][]map[string]interface{}, len(f.imports))
-	copy(out, f.imports)
+	out := make([][]map[string]interface{}, len(f.received))
+	copy(out, f.received)
 	return out
 }
 
@@ -393,7 +393,7 @@ func rejectedLine(field string) string {
 	return `{"success":false,"error":"Field ` + "`" + field + "`" + ` must be a string.","document":"{}"}`
 }
 
-func TestImportDocuments_NormalizesAndSetsID(t *testing.T) {
+func TestIndexDocuments_NormalizesAndSetsID(t *testing.T) {
 	fake := &fakeTypesense{}
 	client := newFakeTypesense(t, fake)
 
@@ -401,11 +401,11 @@ func TestImportDocuments_NormalizesAndSetsID(t *testing.T) {
 	docs := []map[string]interface{}{
 		{"transaction_id": "txn_1", "created_at": created.Format(time.RFC3339), "precise_amount": float64(1e15), "meta_data": nil},
 	}
-	failures, err := client.importDocuments(context.Background(), CollectionTransactions, docs)
+	failures, err := client.indexDocuments(context.Background(), CollectionTransactions, docs)
 	require.NoError(t, err)
 	assert.Empty(t, failures)
 
-	calls := fake.importCalls()
+	calls := fake.requests()
 	require.Len(t, calls, 1)
 	require.Len(t, calls[0], 1)
 	sent := calls[0][0]
@@ -416,11 +416,11 @@ func TestImportDocuments_NormalizesAndSetsID(t *testing.T) {
 	assert.Contains(t, sent, "amount", "required schema fields are defaulted")
 }
 
-func TestStartReindex_ImportsPagesInChunks(t *testing.T) {
+func TestStartReindex_IndexesPagesInChunks(t *testing.T) {
 	fake := &fakeTypesense{}
 	client := newFakeTypesense(t, fake)
 
-	ledgers := make([]model.Ledger, importChunkSize+1)
+	ledgers := make([]model.Ledger, indexChunkSize+1)
 	for i := range ledgers {
 		ledgers[i] = testLedger(fmt.Sprintf("ldg_%d", i))
 	}
@@ -434,9 +434,9 @@ func TestStartReindex_ImportsPagesInChunks(t *testing.T) {
 	assert.EqualValues(t, len(ledgers), progress.ProcessedRecords)
 	assert.Empty(t, progress.Errors)
 
-	calls := fake.importCalls()
+	calls := fake.requests()
 	require.Len(t, calls, 2, "a page larger than the chunk size is split across requests")
-	assert.Len(t, calls[0], importChunkSize)
+	assert.Len(t, calls[0], indexChunkSize)
 	assert.Len(t, calls[1], 1)
 	ds.AssertExpectations(t)
 }
@@ -485,7 +485,7 @@ func TestStartReindex_PausesOnOutOfMemoryThenResumes(t *testing.T) {
 	assert.Equal(t, "completed", progress.Status)
 	assert.False(t, progress.Paused)
 	assert.EqualValues(t, 1, progress.ProcessedRecords)
-	assert.Len(t, fake.importCalls(), 2, "the rejected chunk is re-sent after the backpressure wait")
+	assert.Len(t, fake.requests(), 2, "the rejected chunk is re-sent after the backpressure wait")
 }
 
 func TestStartReindex_BulkFailureFallsBackToSingleDocuments(t *testing.T) {
@@ -511,7 +511,7 @@ func TestStartReindex_BulkFailureFallsBackToSingleDocuments(t *testing.T) {
 	require.Len(t, progress.Errors, 1)
 	assert.Contains(t, progress.Errors[0], "ledger ldg_bad")
 
-	calls := fake.importCalls()
+	calls := fake.requests()
 	require.Len(t, calls, 4, "one failed bulk request, then one request per document")
 	assert.Len(t, calls[0], 3)
 	assert.Equal(t, "ldg_ok", calls[1][0]["id"])
@@ -533,6 +533,6 @@ func TestStartReindex_FallbackAbortsWhenTypesenseIsDown(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "failed", progress.Status)
 	assert.Equal(t, "indexing_ledgers", progress.Phase)
-	assert.Len(t, fake.importCalls(), 2, "the failed bulk request and the first single-document request stop the phase")
+	assert.Len(t, fake.requests(), 2, "the failed bulk request and the first single-document request stop the phase")
 	ds.AssertNotCalled(t, "GetAllIdentitiesPaginated")
 }

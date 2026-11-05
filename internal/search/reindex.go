@@ -33,7 +33,7 @@ import (
 
 const (
 	defaultBackpressureRetryInterval = 5 * time.Second
-	importChunkSize                  = 5000
+	indexChunkSize                   = 5000
 )
 
 // ReindexProgress tracks the progress of a reindex operation.
@@ -282,18 +282,18 @@ func (r *ReindexService) setMemoryBackpressurePaused(paused bool) {
 	logrus.WithField("phase", phase).Info("Reindex resumed after Typesense memory backpressure")
 }
 
-type importFailure struct {
+type indexFailure struct {
 	Index int
 	Error string
 }
 
-// importDocuments upserts docs with one request. Typesense replicates each
+// indexDocuments upserts docs with one request. Typesense replicates each
 // HTTP write as a single Raft log entry, so this costs one commit per page
 // instead of one per document. Documents are normalized the same way
 // HandleNotification normalizes them, so the two paths produce identical
-// documents. A document Typesense rejects is returned as an importFailure; an
+// documents. A document Typesense rejects is returned as an indexFailure; an
 // error means nothing in docs was indexed.
-func (t *TypesenseClient) importDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]importFailure, error) {
+func (t *TypesenseClient) indexDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]indexFailure, error) {
 	config, ok := collectionConfigs[table]
 	if !ok {
 		return nil, fmt.Errorf("unknown collection: %s", table)
@@ -315,31 +315,31 @@ func (t *TypesenseClient) importDocuments(ctx context.Context, table string, doc
 	action := "upsert"
 	results, err := t.Client.Collection(table).Documents().Import(ctx, payload, &api.ImportDocumentsParams{Action: &action})
 	if err != nil {
-		return nil, fmt.Errorf("failed to import documents into Typesense: %w", err)
+		return nil, fmt.Errorf("failed to index documents in Typesense: %w", err)
 	}
 
-	var failures []importFailure
+	var failures []indexFailure
 	for i, result := range results {
 		if !result.Success {
-			failures = append(failures, importFailure{Index: i, Error: result.Error})
+			failures = append(failures, indexFailure{Index: i, Error: result.Error})
 		}
 	}
 	return failures, nil
 }
 
-// importPage returns an error only when Typesense itself is unavailable; the
+// indexPage returns an error only when Typesense itself is unavailable; the
 // count is what was accepted before that.
-func (r *ReindexService) importPage(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
+func (r *ReindexService) indexPage(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
-	for start := 0; start < len(docs); start += importChunkSize {
-		end := min(start+importChunkSize, len(docs))
+	for start := 0; start < len(docs); start += indexChunkSize {
+		end := min(start+indexChunkSize, len(docs))
 		chunk := docs[start:end]
 
-		var failures []importFailure
+		var failures []indexFailure
 		err := r.retryWithMemoryBackpressure(ctx, func() error {
-			var importErr error
-			failures, importErr = r.client.importDocuments(ctx, collection, chunk)
-			return importErr
+			var indexErr error
+			failures, indexErr = r.client.indexDocuments(ctx, collection, chunk)
+			return indexErr
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -348,8 +348,8 @@ func (r *ReindexService) importPage(ctx context.Context, collection, label strin
 			logrus.WithError(err).WithFields(logrus.Fields{
 				"collection": collection,
 				"documents":  len(chunk),
-			}).Warn("Bulk import failed; indexing the chunk one document at a time")
-			indexed, err := r.importIndividually(ctx, collection, label, ids[start:end], chunk)
+			}).Warn("Bulk indexing failed; indexing the chunk one document at a time")
+			indexed, err := r.indexIndividually(ctx, collection, label, ids[start:end], chunk)
 			accepted += indexed
 			if err != nil {
 				return accepted, err
@@ -365,17 +365,17 @@ func (r *ReindexService) importPage(ctx context.Context, collection, label strin
 	return accepted, nil
 }
 
-// importIndividually relies on Typesense reporting a bad document as a
-// per-line result, never as a failed request, so a single-document import
+// indexIndividually relies on Typesense reporting a bad document as a
+// per-line result, never as a failed request, so a single-document request
 // that fails as a whole means the server is unavailable and the phase aborts.
-func (r *ReindexService) importIndividually(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
+func (r *ReindexService) indexIndividually(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
 	for i := range docs {
-		var failures []importFailure
+		var failures []indexFailure
 		err := r.retryWithMemoryBackpressure(ctx, func() error {
-			var importErr error
-			failures, importErr = r.client.importDocuments(ctx, collection, docs[i:i+1])
-			return importErr
+			var indexErr error
+			failures, indexErr = r.client.indexDocuments(ctx, collection, docs[i:i+1])
+			return indexErr
 		})
 		if err != nil {
 			return accepted, fmt.Errorf("failed to index %s %s: %w", label, ids[i], err)
@@ -420,7 +420,7 @@ func (r *ReindexService) indexLedgers(ctx context.Context) error {
 			docs = append(docs, data)
 		}
 
-		indexed, err := r.importPage(ctx, CollectionLedgers, "ledger", ids, docs)
+		indexed, err := r.indexPage(ctx, CollectionLedgers, "ledger", ids, docs)
 		totalIndexed += indexed
 		if err != nil {
 			return err
@@ -474,7 +474,7 @@ func (r *ReindexService) indexIdentities(ctx context.Context) error {
 			docs = append(docs, data)
 		}
 
-		indexed, err := r.importPage(ctx, CollectionIdentities, "identity", ids, docs)
+		indexed, err := r.indexPage(ctx, CollectionIdentities, "identity", ids, docs)
 		totalIndexed += indexed
 		if err != nil {
 			return err
@@ -531,7 +531,7 @@ func (r *ReindexService) indexBalances(ctx context.Context) error {
 			docs = append(docs, data)
 		}
 
-		indexed, err := r.importPage(ctx, CollectionBalances, "balance", ids, docs)
+		indexed, err := r.indexPage(ctx, CollectionBalances, "balance", ids, docs)
 		totalIndexed += indexed
 		if err != nil {
 			return err
@@ -588,7 +588,7 @@ func (r *ReindexService) indexTransactions(ctx context.Context) error {
 			docs = append(docs, data)
 		}
 
-		indexed, err := r.importPage(ctx, CollectionTransactions, "transaction", ids, docs)
+		indexed, err := r.indexPage(ctx, CollectionTransactions, "transaction", ids, docs)
 		totalIndexed += indexed
 		if err != nil {
 			return err
