@@ -29,7 +29,7 @@ services:
     restart: on-failure
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "blnk migrate up && blnk start"
+      - "blnk migrate up && exec blnk start"
     environment:
       TZ: ${TZ:-Etc/UTC}
     ports:

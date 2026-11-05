@@ -405,20 +405,10 @@ func TestRollbackBatch_RefundsNonInflightBatch(t *testing.T) {
 
 	// Batch refunds are enqueued (SkipQueue is not persisted, so the worker
 	// path settles them). Every original transaction must gain a queued
-	// refund child with source/destination swapped; the queued row is
-	// persisted asynchronously, so poll briefly.
+	// refund child with source/destination swapped.
 	for _, original := range txns {
-		var children []*model.Transaction
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			var err error
-			children, err = ds.GetTransactionsByParent(context.Background(), original.TransactionID, 10, 0)
-			require.NoError(t, err)
-			if len(children) > 0 || time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
+		children, err := ds.GetTransactionsByParent(context.Background(), original.TransactionID, 10, 0)
+		require.NoError(t, err)
 		require.Len(t, children, 1, "each batch transaction must get exactly one refund child")
 		refund := children[0]
 		assert.Equal(t, StatusQueued, refund.Status, "rollback refunds are queued for the worker")

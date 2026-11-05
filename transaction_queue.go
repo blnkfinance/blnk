@@ -126,8 +126,10 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		if strings.Contains(transaction.ParentTransaction, "bulk") {
 			transaction.MetaData["QUEUED_PARENT_TRANSACTION"] = transaction.ParentTransaction
 		}
-		// For normal queue mode, process asynchronously
-		processTransactionAsync(context.Background(), l, transaction, originalRef, originalTxnID, transactions)
+		if err := l.persistAndEnqueue(ctx, transaction, transactions, originalTxnID, originalRef); err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
 	}
 
 	span.AddEvent("Transaction successfully queued", trace.WithAttributes(
@@ -154,39 +156,48 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 	return transaction, nil
 }
 
-func processTransactionAsync(ctx context.Context, l *Blnk, transaction *model.Transaction, originalRef string, originalTxnID string, transactions []*model.Transaction) {
-	// The background worker mutates the transaction (metadata, timestamps,
-	// precise amount) while the caller still holds the pointer returned from
-	// QueueTransaction. Snapshot it so the worker never races a caller that
-	// inspects the returned transaction.
-	asyncTxn := cloneTransactionForAsync(transaction)
-	go func() {
-		if err := asyncTxnSemaphore.Acquire(ctx, 1); err != nil {
-			logrus.WithError(err).Error("failed to acquire async txn semaphore")
-			return
-		}
-		defer asyncTxnSemaphore.Release(1)
+// persistAndEnqueue saves a queued transaction (or its split legs) as QUEUED,
+// then enqueues it. It returns only after the save, so if the process dies or
+// the enqueue fails, queue recovery still finds the row.
+func (l *Blnk) persistAndEnqueue(ctx context.Context, transaction *model.Transaction, splitTxns []*model.Transaction, originalTxnID, originalRef string) error {
+	ctx, span := tracer.Start(ctx, "PersistAndEnqueueTransaction")
+	defer span.End()
 
-		ctx, span := tracer.Start(ctx, "ProcessTransactionAsync")
-		defer span.End()
+	if err := l.queue.assertEnqueueAllowed(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
 
-		queueTransactions, err := l.processTxns(ctx, asyncTxn, transactions, originalTxnID, originalRef)
-		if err != nil {
-			span.RecordError(err)
-		}
+	if err := queuedSaveSemaphore.Acquire(ctx, 1); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	defer queuedSaveSemaphore.Release(1)
 
-		if !asyncTxn.SkipQueue {
-			if err := enqueueTransactions(ctx, l.queue, asyncTxn, queueTransactions); err != nil {
-				span.RecordError(err)
-			}
-		}
-	}()
+	// A client disconnect must not cancel the enqueue once the row is saved.
+	ctx = context.WithoutCancel(ctx)
+
+	// Preparing the transaction resolves balance indicators and adds queue
+	// metadata; work on a copy so the caller's transaction is answered as sent.
+	queued := cloneTransaction(transaction)
+	queueTransactions, err := l.processTxns(ctx, queued, splitTxns, originalTxnID, originalRef)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	if err := enqueueTransactions(ctx, l.queue, queued, queueTransactions); err != nil {
+		span.RecordError(err)
+		logrus.WithError(err).WithField("transaction_id", queued.TransactionID).
+			Warn("transaction saved as QUEUED but not enqueued; queue recovery will pick it up")
+	}
+	return nil
 }
 
-// cloneTransactionForAsync returns a copy of the transaction safe to hand to the
-// async worker: the MetaData map and EffectiveDate pointer are duplicated so the
-// worker's mutations never touch the object the caller still holds.
-func cloneTransactionForAsync(t *model.Transaction) *model.Transaction {
+// cloneTransaction returns a copy of the transaction whose MetaData map and
+// EffectiveDate pointer are duplicated, so mutating the copy never touches the
+// object the caller still holds.
+func cloneTransaction(t *model.Transaction) *model.Transaction {
 	clone := *t
 	if t.MetaData != nil {
 		md := make(map[string]interface{}, len(t.MetaData))
@@ -202,12 +213,12 @@ func cloneTransactionForAsync(t *model.Transaction) *model.Transaction {
 	return &clone
 }
 
-// cloneTransactionsForAsync clones each transaction so a background worker can
-// mutate them without touching the slice the caller still holds.
-func cloneTransactionsForAsync(txns []*model.Transaction) []*model.Transaction {
+// cloneTransactions clones each transaction so a background worker can mutate
+// them without touching the slice the caller still holds.
+func cloneTransactions(txns []*model.Transaction) []*model.Transaction {
 	clones := make([]*model.Transaction, len(txns))
 	for i, t := range txns {
-		clones[i] = cloneTransactionForAsync(t)
+		clones[i] = cloneTransaction(t)
 	}
 	return clones
 }
