@@ -35,6 +35,7 @@ const (
 	CollectionTransactions    = "transactions"
 	CollectionReconciliations = "reconciliations"
 	CollectionIdentities      = "identities"
+	DefaultTimeout            = 5 * time.Second
 )
 
 // CollectionConfig holds configuration for a specific collection.
@@ -89,8 +90,6 @@ func init() {
 // TypesenseClient wraps the Typesense client and provides methods to interact with it.
 type TypesenseClient struct {
 	Client *typesense.Client
-	apiKey string
-	hosts  []string
 }
 
 // NotificationPayload represents the payload structure for notifications, containing the table and data.
@@ -160,31 +159,20 @@ func (b *IndexBatch) Deduplicate() {
 }
 
 // NewTypesenseClient initializes and returns a new Typesense client instance.
-func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
-	return newTypesenseClient(apiKey, hosts, 5*time.Second)
+func NewTypesenseClient(apiKey string, hosts []string, requestTimeout time.Duration) *TypesenseClient {
+	return newTypesenseClient(apiKey, hosts, requestTimeout)
 }
 
 func newTypesenseClient(apiKey string, hosts []string, requestTimeout time.Duration) *TypesenseClient {
 	client := typesense.NewClient(
 		typesense.WithServer(hosts[0]),
 		typesense.WithAPIKey(apiKey),
-		// typesense-go applies this as http.Client.Timeout, so it bounds the
-		// whole request including server-side indexing, not just the dial.
 		typesense.WithConnectionTimeout(requestTimeout),
 		typesense.WithCircuitBreakerMaxRequests(50),
 		typesense.WithCircuitBreakerInterval(2*time.Minute),
 		typesense.WithCircuitBreakerTimeout(1*time.Minute),
 	)
-	return &TypesenseClient{Client: client, apiKey: apiKey, hosts: hosts}
-}
-
-// withRequestTimeout returns a client for the same server with its own
-// request timeout and circuit breaker.
-func (t *TypesenseClient) withRequestTimeout(requestTimeout time.Duration) *TypesenseClient {
-	if t == nil {
-		return t
-	}
-	return newTypesenseClient(t.apiKey, t.hosts, requestTimeout)
+	return &TypesenseClient{Client: client}
 }
 
 // EnsureCollectionsExist ensures that all the necessary collections exist in the Typesense schema.

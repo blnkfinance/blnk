@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/internal/search"
@@ -72,13 +73,14 @@ func (a Api) StartReindex(c *gin.Context) {
 		}
 	}
 
+	cfg := a.blnk.Config()
 	config := search.ReindexConfig{
 		BatchSize:                 req.BatchSize,
-		BackpressureRetryInterval: a.blnk.Config().TypeSense.BackpressureRetryInterval,
+		BackpressureRetryInterval: cfg.TypeSense.BackpressureRetryInterval,
 	}
 
 	reindexService := search.NewReindexService(
-		a.blnk.GetSearchClient(),
+		search.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns}, 2*time.Minute),
 		a.blnk.GetDataSource(),
 		config,
 	)

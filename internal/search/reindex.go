@@ -33,7 +33,6 @@ import (
 const (
 	defaultBackpressureRetryInterval = 5 * time.Second
 	importChunkSize                  = 5000
-	importTimeout                    = 2 * time.Minute
 )
 
 // ReindexProgress tracks the progress of a reindex operation.
@@ -74,7 +73,7 @@ func NewReindexService(client *TypesenseClient, datasource database.IDataSource,
 		config.BackpressureRetryInterval = defaultBackpressureRetryInterval
 	}
 	return &ReindexService{
-		client:     client.withRequestTimeout(importTimeout),
+		client:     client,
 		datasource: datasource,
 		config:     config,
 		progress: &ReindexProgress{

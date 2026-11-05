@@ -212,7 +212,7 @@ func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
+	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns}, search.DefaultTimeout)
 	err := newSearch.EnsureCollectionsExist(ctx)
 	if err != nil {
 		err = markWorkerSearchBackpressure(ctx, err)
@@ -261,7 +261,7 @@ func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error 
 	}
 
 	// Initialize a new TypeSense client and ensure collections exist.
-	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns})
+	newSearch := search.NewTypesenseClient(b.cnf.TypeSenseKey, []string{b.cnf.TypeSense.Dns}, search.DefaultTimeout)
 	err := newSearch.EnsureCollectionsExist(ctx)
 	if err != nil {
 		err = markWorkerSearchBackpressure(ctx, err)
