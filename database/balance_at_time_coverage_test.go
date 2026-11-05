@@ -30,15 +30,19 @@ import (
 )
 
 // insertSnapshot writes a balance snapshot row directly so the snapshot branch
-// of GetBalanceAtTime can be exercised deterministically.
+// of GetBalanceAtTime can be exercised deterministically. It holds the APPLIED
+// transactions created up to snapshotTime.
 func insertSnapshot(t *testing.T, ds Datasource, balanceID, ledgerID string, balance, credit, debit int64, snapshotTime time.Time) {
 	t.Helper()
 	_, err := ds.Conn.Exec(`
 		INSERT INTO blnk.balance_snapshots
 			(balance_id, ledger_id, balance, credit_balance, debit_balance,
 			 inflight_balance, inflight_credit_balance, inflight_debit_balance,
-			 currency, snapshot_time, created_at)
-		VALUES ($1, $2, $3, $4, $5, 0, 0, 0, 'USD', $6, $7)
+			 currency, snapshot_time, created_at, last_tx_seq)
+		VALUES ($1, $2, $3, $4, $5, 0, 0, 0, 'USD', $6, $7, (
+			SELECT COALESCE(MAX(id), 0) FROM blnk.transactions
+			WHERE (source = $1 OR destination = $1) AND status = 'APPLIED' AND created_at <= $7
+		))
 	`, balanceID, ledgerID, balance, credit, debit, snapshotTime.UTC(), snapshotTime.UTC())
 	require.NoError(t, err)
 }
