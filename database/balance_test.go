@@ -1869,17 +1869,19 @@ func TestGetMostRecentSnapshot_Found(t *testing.T) {
 			balance,
 			credit_balance,
 			debit_balance,
-			snapshot_time
+			snapshot_time,
+			last_tx_seq
 		FROM blnk.balance_snapshots
 		WHERE balance_id = $1
 		AND snapshot_time <= $2
+		AND last_tx_seq IS NOT NULL
 		ORDER BY snapshot_time DESC
 		LIMIT 1`)).
 		WithArgs(balanceID, targetTime).
-		WillReturnRows(sqlmock.NewRows([]string{"balance", "credit_balance", "debit_balance", "snapshot_time"}).
-			AddRow("1000", "500", "500", snapshotTime))
+		WillReturnRows(sqlmock.NewRows([]string{"balance", "credit_balance", "debit_balance", "snapshot_time", "last_tx_seq"}).
+			AddRow("1000", "500", "500", snapshotTime, int64(42)))
 
-	creditBalance, debitBalance, resultTime, err := ds.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
+	creditBalance, debitBalance, resultTime, lastTxSeq, err := ds.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
 	assert.NoError(t, err)
 	assert.NotNil(t, creditBalance)
 	assert.NotNil(t, debitBalance)
@@ -1891,6 +1893,7 @@ func TestGetMostRecentSnapshot_Found(t *testing.T) {
 	assert.True(t, snapshotTime.Equal(resultTime),
 		"expected the same instant as %s, got %s", snapshotTime, resultTime)
 	assert.Equal(t, time.UTC, resultTime.Location())
+	assert.Equal(t, int64(42), lastTxSeq)
 }
 
 func TestGetMostRecentSnapshot_NotFound(t *testing.T) {
@@ -1912,20 +1915,23 @@ func TestGetMostRecentSnapshot_NotFound(t *testing.T) {
 			balance,
 			credit_balance,
 			debit_balance,
-			snapshot_time
+			snapshot_time,
+			last_tx_seq
 		FROM blnk.balance_snapshots
 		WHERE balance_id = $1
 		AND snapshot_time <= $2
+		AND last_tx_seq IS NOT NULL
 		ORDER BY snapshot_time DESC
 		LIMIT 1`)).
 		WithArgs(balanceID, targetTime).
 		WillReturnError(sql.ErrNoRows)
 
-	creditBalance, debitBalance, resultTime, err := ds.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
+	creditBalance, debitBalance, resultTime, lastTxSeq, err := ds.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), creditBalance.Int64())
 	assert.Equal(t, int64(0), debitBalance.Int64())
 	assert.True(t, resultTime.IsZero())
+	assert.Equal(t, genesisTxSeq, lastTxSeq)
 }
 
 func TestGetMostRecentSnapshot_Error(t *testing.T) {
@@ -1947,16 +1953,18 @@ func TestGetMostRecentSnapshot_Error(t *testing.T) {
 			balance,
 			credit_balance,
 			debit_balance,
-			snapshot_time
+			snapshot_time,
+			last_tx_seq
 		FROM blnk.balance_snapshots
 		WHERE balance_id = $1
 		AND snapshot_time <= $2
+		AND last_tx_seq IS NOT NULL
 		ORDER BY snapshot_time DESC
 		LIMIT 1`)).
 		WithArgs(balanceID, targetTime).
 		WillReturnError(sql.ErrConnDone)
 
-	_, _, _, err = ds.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
+	_, _, _, _, err = ds.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
 	assert.Error(t, err)
 	apiErr, ok := err.(apierror.APIError)
 	assert.True(t, ok)
@@ -1970,26 +1978,18 @@ func TestFetchTransactions_Success(t *testing.T) {
 
 	ctx := context.Background()
 	balanceID := "bln_test123"
-	startTime := time.Now().Add(-24 * time.Hour)
 	targetTime := time.Now()
 
 	mock.ExpectBegin()
 	tx, err := db.Begin()
 	assert.NoError(t, err)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT precise_amount, source, destination, created_at, 
-               COALESCE(effective_date, created_at) as effective_date
-        FROM blnk.transactions
-        WHERE (source = $1 OR destination = $1)
-        AND COALESCE(effective_date, created_at) > $2
-        AND COALESCE(effective_date, created_at) <= $3
-        AND status = 'APPLIED'
-        ORDER BY COALESCE(effective_date, created_at) ASC`)).
-		WithArgs(balanceID, startTime, targetTime).
-		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination", "created_at", "effective_date"}).
-			AddRow("1000", balanceID, "dest123", time.Now(), time.Now()))
+	mock.ExpectQuery(`(?s)SELECT precise_amount, source, destination, created_at,.*id <= \$2 as in_snapshot.*FROM blnk\.transactions`).
+		WithArgs(balanceID, int64(7), targetTime).
+		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination", "created_at", "effective_date", "in_snapshot"}).
+			AddRow("1000", balanceID, "dest123", time.Now(), time.Now(), false))
 
-	rows, err := fetchTransactions(ctx, tx, balanceID, startTime, targetTime)
+	rows, err := fetchTransactions(ctx, tx, balanceID, int64(7), targetTime)
 	assert.NoError(t, err)
 	assert.NotNil(t, rows)
 	_ = rows.Close()
@@ -2002,25 +2002,17 @@ func TestFetchTransactions_Error(t *testing.T) {
 
 	ctx := context.Background()
 	balanceID := "bln_test123"
-	startTime := time.Now().Add(-24 * time.Hour)
 	targetTime := time.Now()
 
 	mock.ExpectBegin()
 	tx, err := db.Begin()
 	assert.NoError(t, err)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT precise_amount, source, destination, created_at, 
-               COALESCE(effective_date, created_at) as effective_date
-        FROM blnk.transactions
-        WHERE (source = $1 OR destination = $1)
-        AND COALESCE(effective_date, created_at) > $2
-        AND COALESCE(effective_date, created_at) <= $3
-        AND status = 'APPLIED'
-        ORDER BY COALESCE(effective_date, created_at) ASC`)).
-		WithArgs(balanceID, startTime, targetTime).
+	mock.ExpectQuery(`(?s)SELECT precise_amount, source, destination, created_at,.*id <= \$2 as in_snapshot.*FROM blnk\.transactions`).
+		WithArgs(balanceID, int64(7), targetTime).
 		WillReturnError(sql.ErrConnDone)
 
-	rows, err := fetchTransactions(ctx, tx, balanceID, startTime, targetTime)
+	rows, err := fetchTransactions(ctx, tx, balanceID, int64(7), targetTime)
 	assert.Error(t, err)
 	assert.Nil(t, rows)
 	apiErr, ok := err.(apierror.APIError)
@@ -2033,13 +2025,7 @@ func TestApplyTransaction_Debit(t *testing.T) {
 	creditBalance := big.NewInt(1000)
 	debitBalance := big.NewInt(500)
 
-	txn := struct {
-		PreciseAmount string
-		Source        string
-		Destination   string
-		CreatedAt     time.Time
-		EffectiveDate time.Time
-	}{
+	txn := replayTransaction{
 		PreciseAmount: "100",
 		Source:        balanceID,
 		Destination:   "other_balance",
@@ -2058,13 +2044,7 @@ func TestApplyTransaction_Credit(t *testing.T) {
 	creditBalance := big.NewInt(1000)
 	debitBalance := big.NewInt(500)
 
-	txn := struct {
-		PreciseAmount string
-		Source        string
-		Destination   string
-		CreatedAt     time.Time
-		EffectiveDate time.Time
-	}{
+	txn := replayTransaction{
 		PreciseAmount: "200",
 		Source:        "other_balance",
 		Destination:   balanceID,
@@ -2078,18 +2058,29 @@ func TestApplyTransaction_Credit(t *testing.T) {
 	assert.Equal(t, int64(500), newDebit.Int64())
 }
 
+func TestApplyTransaction_InSnapshotIsReversed(t *testing.T) {
+	balanceID := "bln_test123"
+
+	debit, credit := replayTransaction{PreciseAmount: "100", Source: balanceID, Destination: "other_balance", InSnapshot: true},
+		replayTransaction{PreciseAmount: "200", Source: "other_balance", Destination: balanceID, InSnapshot: true}
+
+	newCredit, newDebit, err := applyTransaction(debit, balanceID, big.NewInt(1000), big.NewInt(500))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), newCredit.Int64())
+	assert.Equal(t, int64(400), newDebit.Int64())
+
+	newCredit, newDebit, err = applyTransaction(credit, balanceID, big.NewInt(1000), big.NewInt(500))
+	require.NoError(t, err)
+	assert.Equal(t, int64(800), newCredit.Int64())
+	assert.Equal(t, int64(500), newDebit.Int64())
+}
+
 func TestApplyTransaction_InvalidAmount(t *testing.T) {
 	balanceID := "bln_test123"
 	creditBalance := big.NewInt(1000)
 	debitBalance := big.NewInt(500)
 
-	txn := struct {
-		PreciseAmount string
-		Source        string
-		Destination   string
-		CreatedAt     time.Time
-		EffectiveDate time.Time
-	}{
+	txn := replayTransaction{
 		PreciseAmount: "invalid_amount",
 		Source:        balanceID,
 		Destination:   "other_balance",
@@ -2112,7 +2103,6 @@ func TestCalculateBalanceFromTransactions_Success(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
 	balanceID := "bln_test123"
-	startTime := time.Now().Add(-24 * time.Hour)
 	targetTime := time.Now()
 	initialCredit := big.NewInt(1000)
 	initialDebit := big.NewInt(500)
@@ -2121,22 +2111,16 @@ func TestCalculateBalanceFromTransactions_Success(t *testing.T) {
 	tx, err := db.Begin()
 	assert.NoError(t, err)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT precise_amount, source, destination, created_at, 
-               COALESCE(effective_date, created_at) as effective_date
-        FROM blnk.transactions
-        WHERE (source = $1 OR destination = $1)
-        AND COALESCE(effective_date, created_at) > $2
-        AND COALESCE(effective_date, created_at) <= $3
-        AND status = 'APPLIED'
-        ORDER BY COALESCE(effective_date, created_at) ASC`)).
-		WithArgs(balanceID, startTime, targetTime).
-		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination", "created_at", "effective_date"}).
-			AddRow("100", balanceID, "dest123", time.Now(), time.Now()).
-			AddRow("200", "src123", balanceID, time.Now(), time.Now()))
+	mock.ExpectQuery(`(?s)SELECT precise_amount, source, destination, created_at,.*id <= \$2 as in_snapshot.*FROM blnk\.transactions`).
+		WithArgs(balanceID, int64(7), targetTime).
+		WillReturnRows(sqlmock.NewRows([]string{"precise_amount", "source", "destination", "created_at", "effective_date", "in_snapshot"}).
+			AddRow("100", balanceID, "dest123", time.Now(), time.Now(), false).
+			AddRow("200", "src123", balanceID, time.Now(), time.Now(), false).
+			AddRow("50", "src123", balanceID, time.Now(), time.Now(), true))
 
-	creditBalance, debitBalance, err := ds.calculateBalanceFromTransactions(ctx, tx, balanceID, startTime, targetTime, initialCredit, initialDebit)
+	creditBalance, debitBalance, err := ds.calculateBalanceFromTransactions(ctx, tx, balanceID, int64(7), targetTime, initialCredit, initialDebit)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1200), creditBalance.Int64())
+	assert.Equal(t, int64(1150), creditBalance.Int64())
 	assert.Equal(t, int64(600), debitBalance.Int64())
 }
 
@@ -2148,7 +2132,6 @@ func TestCalculateBalanceFromTransactions_QueryError(t *testing.T) {
 	ds := Datasource{Conn: db}
 	ctx := context.Background()
 	balanceID := "bln_test123"
-	startTime := time.Now().Add(-24 * time.Hour)
 	targetTime := time.Now()
 	initialCredit := big.NewInt(1000)
 	initialDebit := big.NewInt(500)
@@ -2157,18 +2140,11 @@ func TestCalculateBalanceFromTransactions_QueryError(t *testing.T) {
 	tx, err := db.Begin()
 	assert.NoError(t, err)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT precise_amount, source, destination, created_at, 
-               COALESCE(effective_date, created_at) as effective_date
-        FROM blnk.transactions
-        WHERE (source = $1 OR destination = $1)
-        AND COALESCE(effective_date, created_at) > $2
-        AND COALESCE(effective_date, created_at) <= $3
-        AND status = 'APPLIED'
-        ORDER BY COALESCE(effective_date, created_at) ASC`)).
-		WithArgs(balanceID, startTime, targetTime).
+	mock.ExpectQuery(`(?s)SELECT precise_amount, source, destination, created_at,.*id <= \$2 as in_snapshot.*FROM blnk\.transactions`).
+		WithArgs(balanceID, int64(7), targetTime).
 		WillReturnError(sql.ErrConnDone)
 
-	_, _, err = ds.calculateBalanceFromTransactions(ctx, tx, balanceID, startTime, targetTime, initialCredit, initialDebit)
+	_, _, err = ds.calculateBalanceFromTransactions(ctx, tx, balanceID, int64(7), targetTime, initialCredit, initialDebit)
 	assert.Error(t, err)
 }
 
