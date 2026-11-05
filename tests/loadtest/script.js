@@ -10,7 +10,7 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.4/index.js";
 const URL = __ENV.URL || "https://YOUR_DOMAIN/transactions";
 const API_KEY = __ENV.API_KEY || __ENV.BLNK_API_KEY;
 const SUMMARY_OUT = __ENV.SUMMARY_OUT || "tests/loadtest/summary.json";
-// baseline | ramp | contention | hot_source | hot_destination | soak | spike
+// baseline | ramp | contention | shared_pool | hot_source | hot_destination | soak | spike
 const SCENARIO = __ENV.SCENARIO || "baseline";
 const HOT_DEST = __ENV.HOT_DEST || "@hot-balance-0001";
 const HOT_SOURCE = __ENV.HOT_SOURCE || "@hot-source-0001";
@@ -19,6 +19,7 @@ const RANDOM_RPS = Number(__ENV.RANDOM_RPS || 132); // ~30%
 const RATE = Number(__ENV.RATE || 300);
 const SOURCE_BUCKETS = Number(__ENV.SOURCE_BUCKETS || 1);
 const DESTINATION_BUCKETS = Number(__ENV.DESTINATION_BUCKETS || 1);
+const POOL = Number(__ENV.POOL || 20);
 
 function envBool(name, defaultVal) {
   var v = __ENV[name];
@@ -183,6 +184,24 @@ function buildOptions() {
     };
   }
 
+  if (SCENARIO === "shared_pool") {
+    return {
+      scenarios: {
+        shared_pool: {
+          executor: "constant-arrival-rate",
+          rate: RATE,
+          timeUnit: "1s",
+          duration: __ENV.DURATION || "1m",
+          preAllocatedVUs: Number(__ENV.VUS || 100),
+          maxVUs: Number(__ENV.MAX_VUS || 800),
+          tags: { scenario: "shared_pool" },
+          exec: "sharedPoolTraffic",
+        },
+      },
+      thresholds: dth("shared_pool"),
+    };
+  }
+
   if (SCENARIO === "hot_source") {
     return {
       scenarios: {
@@ -276,6 +295,15 @@ export function hotTraffic() {
 export function randomTraffic() {
   var destination = "@" + uuidv4();
   postTxn(destination + "-source", destination);
+}
+
+export function sharedPoolTraffic() {
+  var i = Math.floor(Math.random() * POOL);
+  var j = Math.floor(Math.random() * (POOL - 1));
+  if (j >= i) {
+    j++;
+  }
+  postTxn("@pool-" + i, "@pool-" + j);
 }
 
 export function hotSourceTraffic() {
