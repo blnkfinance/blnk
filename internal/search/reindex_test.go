@@ -17,9 +17,16 @@ limitations under the License.
 package search
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -240,7 +247,7 @@ func TestStartReindex_DataSourceFailureMarksFailed(t *testing.T) {
 func TestStartReindex_TypesenseDownFails(t *testing.T) {
 	// A dead Typesense must fail the run at the first phase, not hang or
 	// report in_progress forever.
-	client := NewTypesenseClient("any-key", []string{"http://localhost:1"})
+	client := NewTypesenseClient("any-key", []string{"http://localhost:1"}, DefaultTimeout)
 	ds := new(mocks.MockDataSource)
 
 	svc := NewReindexService(client, ds, ReindexConfig{BatchSize: 10})
@@ -305,4 +312,273 @@ func TestTryReindexIfNeeded_NilArgsAreSafe(t *testing.T) {
 	ds := new(mocks.MockDataSource)
 	TryReindexIfNeeded(context.Background(), nil, ds)
 	ds.AssertNotCalled(t, "GetAllLedgers")
+}
+
+// fakeTypesense answers the import endpoint; collection create returns 201 and
+// everything else an empty 200, which is enough for DropAllCollections and
+// EnsureCollectionsExist to pass through.
+type fakeTypesense struct {
+	mu      sync.Mutex
+	imports [][]map[string]interface{} // documents received per import request
+	respond func(call int, docs []map[string]interface{}) (status int, body string)
+}
+
+func (f *fakeTypesense) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/documents/import") {
+			w.Header().Set("Content-Type", "application/json")
+			// typesense-go treats anything but 201 as a failed create/upsert.
+			if r.Method == http.MethodPost && (r.URL.Path == "/collections" || strings.HasSuffix(r.URL.Path, "/documents")) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"name":"fake","fields":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		var docs []map[string]interface{}
+		scanner := bufio.NewScanner(r.Body)
+		scanner.Buffer(make([]byte, 1<<20), 1<<20)
+		for scanner.Scan() {
+			var doc map[string]interface{}
+			if err := json.Unmarshal(scanner.Bytes(), &doc); err == nil {
+				docs = append(docs, doc)
+			}
+		}
+		f.mu.Lock()
+		call := len(f.imports)
+		f.imports = append(f.imports, docs)
+		f.mu.Unlock()
+
+		status, body := http.StatusOK, ""
+		if f.respond != nil {
+			status, body = f.respond(call, docs)
+		}
+		if body == "" {
+			lines := make([]string, len(docs))
+			for i := range lines {
+				lines[i] = `{"success":true}`
+			}
+			body = strings.Join(lines, "\n")
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	})
+}
+
+func (f *fakeTypesense) importCalls() [][]map[string]interface{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]map[string]interface{}, len(f.imports))
+	copy(out, f.imports)
+	return out
+}
+
+func newFakeTypesense(t *testing.T, fake *fakeTypesense) *TypesenseClient {
+	t.Helper()
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	return NewTypesenseClient("test-key", []string{srv.URL}, DefaultTimeout)
+}
+
+func expectLedgersOnly(ds *mocks.MockDataSource, batchSize int, ledgers []model.Ledger) {
+	ds.On("GetAllLedgers", batchSize, 0).Return(ledgers, nil).Once()
+	ds.On("GetAllLedgers", batchSize, len(ledgers)).Return([]model.Ledger{}, nil).Once()
+	ds.On("GetAllIdentitiesPaginated", batchSize, 0).Return([]model.Identity{}, nil).Once()
+	ds.On("GetAllBalances", batchSize, 0).Return([]model.Balance{}, nil).Once()
+	ds.On("GetAllTransactions", batchSize, 0).Return([]model.Transaction{}, nil).Once()
+}
+
+func rejectedLine(field string) string {
+	return `{"success":false,"error":"Field ` + "`" + field + "`" + ` must be a string.","document":"{}"}`
+}
+
+func TestImportDocuments_NormalizesAndSetsID(t *testing.T) {
+	fake := &fakeTypesense{}
+	client := newFakeTypesense(t, fake)
+
+	created := time.Date(2026, 9, 22, 19, 51, 0, 0, time.UTC)
+	docs := []map[string]interface{}{
+		{"transaction_id": "txn_1", "created_at": created.Format(time.RFC3339), "precise_amount": float64(1e15), "meta_data": nil},
+	}
+	failures, err := client.importDocuments(context.Background(), CollectionTransactions, docs)
+	require.NoError(t, err)
+	assert.Empty(t, failures)
+
+	calls := fake.importCalls()
+	require.Len(t, calls, 1)
+	require.Len(t, calls[0], 1)
+	sent := calls[0][0]
+	assert.Equal(t, "txn_1", sent["id"], "Typesense document id must come from the collection's IDField")
+	assert.EqualValues(t, created.Unix(), sent["created_at"], "time fields are normalized to unix seconds like HandleNotification")
+	assert.Equal(t, "1000000000000000", sent["precise_amount"], "big-int fields are sent as strings")
+	assert.Equal(t, map[string]interface{}{}, sent["meta_data"], "nil meta_data becomes an empty object")
+	assert.Contains(t, sent, "amount", "required schema fields are defaulted")
+}
+
+func TestImportDocuments_ReportsPerDocumentRejections(t *testing.T) {
+	fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
+		return http.StatusOK, strings.Join([]string{`{"success":true}`, rejectedLine("name"), `{"success":true}`}, "\n")
+	}}
+	client := newFakeTypesense(t, fake)
+
+	docs := []map[string]interface{}{{"ledger_id": "ldg_a"}, {"ledger_id": "ldg_b"}, {"ledger_id": "ldg_c"}}
+	failures, err := client.importDocuments(context.Background(), CollectionLedgers, docs)
+	require.NoError(t, err)
+	require.Len(t, failures, 1)
+	assert.Equal(t, 1, failures[0].Index)
+	assert.Contains(t, failures[0].Error, "must be a string")
+}
+
+func TestImportDocuments_NormalizationFailureIsPerDocument(t *testing.T) {
+	fake := &fakeTypesense{}
+	client := newFakeTypesense(t, fake)
+
+	docs := []map[string]interface{}{
+		{"ledger_id": "ldg_a"},
+		{"ledger_id": "ldg_b", "meta_data": make(chan int)},
+		{"ledger_id": "ldg_c"},
+	}
+	failures, err := client.importDocuments(context.Background(), CollectionLedgers, docs)
+	require.NoError(t, err)
+	require.Len(t, failures, 1)
+	assert.Equal(t, 1, failures[0].Index)
+
+	calls := fake.importCalls()
+	require.Len(t, calls, 1)
+	require.Len(t, calls[0], 2, "the document that could not be normalized is left out of the request")
+	assert.Equal(t, "ldg_a", calls[0][0]["id"])
+	assert.Equal(t, "ldg_c", calls[0][1]["id"])
+}
+
+func TestImportDocuments_OutOfMemoryIsBackpressure(t *testing.T) {
+	fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
+		return http.StatusServiceUnavailable, `{"message":"Rejecting write: running out of resource type: OUT_OF_MEMORY"}`
+	}}
+	client := newFakeTypesense(t, fake)
+
+	_, err := client.importDocuments(context.Background(), CollectionLedgers, []map[string]interface{}{{"ledger_id": "ldg_a"}})
+	require.Error(t, err)
+	assert.True(t, IsMemoryBackpressure(err), "a request-level OUT_OF_MEMORY must drive the reindex pause/retry loop")
+}
+
+func TestStartReindex_ImportsPagesInChunks(t *testing.T) {
+	fake := &fakeTypesense{}
+	client := newFakeTypesense(t, fake)
+
+	ledgers := make([]model.Ledger, importChunkSize+1)
+	for i := range ledgers {
+		ledgers[i] = testLedger(fmt.Sprintf("ldg_%d", i))
+	}
+	ds := new(mocks.MockDataSource)
+	expectLedgersOnly(ds, len(ledgers), ledgers)
+
+	svc := NewReindexService(client, ds, ReindexConfig{BatchSize: len(ledgers)})
+	progress, err := svc.StartReindex(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "completed", progress.Status)
+	assert.EqualValues(t, len(ledgers), progress.ProcessedRecords)
+	assert.Empty(t, progress.Errors)
+
+	calls := fake.importCalls()
+	require.Len(t, calls, 2, "a page larger than the chunk size is split across requests")
+	assert.Len(t, calls[0], importChunkSize)
+	assert.Len(t, calls[1], 1)
+	ds.AssertExpectations(t)
+}
+
+func TestStartReindex_RejectedDocumentIsRecordedNotFatal(t *testing.T) {
+	fake := &fakeTypesense{respond: func(_ int, docs []map[string]interface{}) (int, string) {
+		lines := make([]string, len(docs))
+		for i, d := range docs {
+			lines[i] = `{"success":true}`
+			if d["id"] == "ldg_bad" {
+				lines[i] = rejectedLine("name")
+			}
+		}
+		return http.StatusOK, strings.Join(lines, "\n")
+	}}
+	client := newFakeTypesense(t, fake)
+
+	ds := new(mocks.MockDataSource)
+	expectLedgersOnly(ds, 10, []model.Ledger{testLedger("ldg_ok"), testLedger("ldg_bad"), testLedger("ldg_ok2")})
+
+	svc := NewReindexService(client, ds, ReindexConfig{BatchSize: 10})
+	progress, err := svc.StartReindex(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "completed", progress.Status)
+	assert.EqualValues(t, 2, progress.ProcessedRecords, "the rejected document is not counted as indexed")
+	require.Len(t, progress.Errors, 1)
+	assert.Contains(t, progress.Errors[0], "ledger ldg_bad")
+	assert.Contains(t, progress.Errors[0], "must be a string")
+}
+
+func TestStartReindex_PausesOnOutOfMemoryThenResumes(t *testing.T) {
+	fake := &fakeTypesense{respond: func(call int, _ []map[string]interface{}) (int, string) {
+		if call == 0 {
+			return http.StatusServiceUnavailable, `{"message":"Rejecting write: running out of resource type: OUT_OF_MEMORY"}`
+		}
+		return http.StatusOK, ""
+	}}
+	client := newFakeTypesense(t, fake)
+
+	ds := new(mocks.MockDataSource)
+	expectLedgersOnly(ds, 10, []model.Ledger{testLedger("ldg_1")})
+
+	svc := NewReindexService(client, ds, ReindexConfig{BatchSize: 10, BackpressureRetryInterval: 10 * time.Millisecond})
+	progress, err := svc.StartReindex(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "completed", progress.Status)
+	assert.False(t, progress.Paused)
+	assert.EqualValues(t, 1, progress.ProcessedRecords)
+	assert.Len(t, fake.importCalls(), 2, "the rejected chunk is re-sent after the backpressure wait")
+}
+
+func TestStartReindex_BulkFailureFallsBackToSingleDocuments(t *testing.T) {
+	fake := &fakeTypesense{respond: func(_ int, docs []map[string]interface{}) (int, string) {
+		if len(docs) > 1 {
+			return http.StatusBadRequest, `{"message":"malformed"}`
+		}
+		if docs[0]["id"] == "ldg_bad" {
+			return http.StatusOK, rejectedLine("name")
+		}
+		return http.StatusOK, ""
+	}}
+	client := newFakeTypesense(t, fake)
+
+	ds := new(mocks.MockDataSource)
+	expectLedgersOnly(ds, 10, []model.Ledger{testLedger("ldg_ok"), testLedger("ldg_bad"), testLedger("ldg_ok2")})
+
+	svc := NewReindexService(client, ds, ReindexConfig{BatchSize: 10})
+	progress, err := svc.StartReindex(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "completed", progress.Status)
+	assert.EqualValues(t, 2, progress.ProcessedRecords, "only the rejected document is skipped")
+	require.Len(t, progress.Errors, 1)
+	assert.Contains(t, progress.Errors[0], "ledger ldg_bad")
+
+	calls := fake.importCalls()
+	require.Len(t, calls, 4, "one failed bulk request, then one request per document")
+	assert.Len(t, calls[0], 3)
+	assert.Equal(t, "ldg_ok", calls[1][0]["id"])
+	assert.Equal(t, "ldg_bad", calls[2][0]["id"])
+	assert.Equal(t, "ldg_ok2", calls[3][0]["id"])
+}
+
+func TestStartReindex_FallbackAbortsWhenTypesenseIsDown(t *testing.T) {
+	fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
+		return http.StatusInternalServerError, `{"message":"disk full"}`
+	}}
+	client := newFakeTypesense(t, fake)
+
+	ds := new(mocks.MockDataSource)
+	ds.On("GetAllLedgers", 10, 0).Return([]model.Ledger{testLedger("ldg_1"), testLedger("ldg_2")}, nil).Once()
+
+	svc := NewReindexService(client, ds, ReindexConfig{BatchSize: 10})
+	progress, err := svc.StartReindex(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, "failed", progress.Status)
+	assert.Equal(t, "indexing_ledgers", progress.Phase)
+	assert.Len(t, fake.importCalls(), 2, "the failed bulk request and the first single-document request stop the phase")
+	ds.AssertNotCalled(t, "GetAllIdentitiesPaginated")
 }

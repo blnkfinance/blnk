@@ -160,10 +160,6 @@ func (b *IndexBatch) Deduplicate() {
 
 // NewTypesenseClient initializes and returns a new Typesense client instance.
 func NewTypesenseClient(apiKey string, hosts []string, requestTimeout time.Duration) *TypesenseClient {
-	return newTypesenseClient(apiKey, hosts, requestTimeout)
-}
-
-func newTypesenseClient(apiKey string, hosts []string, requestTimeout time.Duration) *TypesenseClient {
 	client := typesense.NewClient(
 		typesense.WithServer(hosts[0]),
 		typesense.WithAPIKey(apiKey),

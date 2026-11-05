@@ -26,6 +26,7 @@ import (
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/sirupsen/logrus"
+	"github.com/typesense/typesense-go/typesense/api"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 )
@@ -279,6 +280,58 @@ func (r *ReindexService) setMemoryBackpressurePaused(paused bool) {
 		return
 	}
 	logrus.WithField("phase", phase).Info("Reindex resumed after Typesense memory backpressure")
+}
+
+type importFailure struct {
+	Index int
+	Error string
+}
+
+// importDocuments upserts docs with one request. Typesense replicates each
+// HTTP write as a single Raft log entry, so this costs one commit per page
+// instead of one per document. Documents are normalized the same way
+// HandleNotification normalizes them, so the two paths produce identical
+// documents. A document that cannot be normalized or that Typesense rejects
+// is returned as an importFailure; an error means nothing in docs was indexed.
+func (t *TypesenseClient) importDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]importFailure, error) {
+	config, ok := collectionConfigs[table]
+	if !ok {
+		return nil, fmt.Errorf("unknown collection: %s", table)
+	}
+	var failures []importFailure
+	payload := make([]interface{}, 0, len(docs))
+	positions := make([]int, 0, len(docs))
+	for i, data := range docs {
+		if err := t.processMetadata(data); err != nil {
+			failures = append(failures, importFailure{Index: i, Error: err.Error()})
+			continue
+		}
+		t.convertLargeNumbers(config, data)
+		t.ensureSchemaFields(config, data)
+		t.normalizeTimeFields(config, data)
+		if id, ok := data[config.IDField].(string); ok && id != "" {
+			data["id"] = id
+		}
+		payload = append(payload, data)
+		positions = append(positions, i)
+	}
+	if len(payload) == 0 {
+		return failures, nil
+	}
+
+	action := "upsert"
+	results, err := t.Client.Collection(table).Documents().Import(ctx, payload, &api.ImportDocumentsParams{Action: &action})
+	if err != nil {
+		return nil, fmt.Errorf("failed to import documents into Typesense: %w", err)
+	}
+
+	for i, result := range results {
+		if result.Success {
+			continue
+		}
+		failures = append(failures, importFailure{Index: positions[i], Error: result.Error})
+	}
+	return failures, nil
 }
 
 // importPage returns an error only when Typesense itself is unavailable; the
