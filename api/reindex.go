@@ -73,14 +73,14 @@ func (a Api) StartReindex(c *gin.Context) {
 		}
 	}
 
-	cfg := a.blnk.Config()
+	blnkConfig := a.blnk.Config()
 	config := search.ReindexConfig{
 		BatchSize:                 req.BatchSize,
-		BackpressureRetryInterval: cfg.TypeSense.BackpressureRetryInterval,
+		BackpressureRetryInterval: blnkConfig.TypeSense.BackpressureRetryInterval,
 	}
 
 	reindexService := search.NewReindexService(
-		search.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns}, 2*time.Minute),
+		search.NewTypesenseClient(blnkConfig.TypeSenseKey, []string{blnkConfig.TypeSense.Dns}, 2*time.Minute),
 		a.blnk.GetDataSource(),
 		config,
 	)
