@@ -395,10 +395,10 @@ func TestRecoverQueuedTransactions(t *testing.T) {
 		}
 		require.Equal(t, http.StatusCreated, resp.Code)
 
-		// The QUEUED row is persisted asynchronously under the original reference;
-		// with no Asynq worker running it stays QUEUED.
-		queuedTxn, err := pollForTransactionStatus(context.Background(), b.GetDataSource(), reference, blnk.StatusQueued, 200*time.Millisecond, 10*time.Second)
-		require.NoError(t, err, "queued transaction row never appeared")
+		// With no Asynq worker running the row stays QUEUED.
+		queuedTxn, err := b.GetDataSource().GetTransactionByRef(context.Background(), reference)
+		require.NoError(t, err, "queued transaction row was not saved")
+		require.Equal(t, blnk.StatusQueued, queuedTxn.Status)
 
 		backdateTransaction(t, cnf, queuedTxn.TransactionID, 10*time.Minute)
 
