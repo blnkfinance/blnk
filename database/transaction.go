@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
@@ -84,6 +85,9 @@ func (d Datasource) RecordTransaction(ctx context.Context, txn *model.Transactio
 	// Handle errors that may occur during the execution of the query
 	if err != nil {
 		span.RecordError(err)
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code.Name() == "unique_violation" && strings.Contains(pqErr.Constraint, "reference") {
+			return nil, apierror.NewAPIError(apierror.ErrTxnDuplicateReference, fmt.Sprintf("reference %s has already been used", txn.Reference), err)
+		}
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to record transaction", err)
 	}
 

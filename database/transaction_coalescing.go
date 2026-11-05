@@ -31,6 +31,28 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// QueuedTransactionHasChild reports whether a transaction has already been created with the
+// given queued transaction as its parent, using the same rule the sibling queries use to skip
+// queued transactions whose work is already done.
+func (d Datasource) QueuedTransactionHasChild(ctx context.Context, transactionID string) (bool, error) {
+	ctx, span := otel.Tracer("transaction.database").Start(ctx, "QueuedTransactionHasChild")
+	defer span.End()
+
+	var exists bool
+	err := d.Conn.QueryRowContext(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM blnk.transactions child
+		    WHERE child.parent_transaction = $1
+		)
+	`, transactionID).Scan(&exists)
+	if err != nil {
+		span.RecordError(err)
+		return false, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to check queued transaction for an existing child", err)
+	}
+
+	return exists, nil
+}
+
 func (d Datasource) GetQueuedTransactionsForCoalescing(ctx context.Context, source, destination, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
 	ctx, span := otel.Tracer("transaction.database").Start(ctx, "GetQueuedTransactionsForCoalescing")
 	defer span.End()

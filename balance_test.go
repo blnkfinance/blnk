@@ -314,12 +314,12 @@ func TestUpdateBalances(t *testing.T) {
 
 	// Expect the first update (for sourceBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		sourceBalance.BalanceID, sourceBalance.Balance.String(), sourceBalance.CreditBalance.String(), sourceBalance.DebitBalance.String(), sourceBalance.InflightBalance.String(), sourceBalance.InflightCreditBalance.String(), sourceBalance.InflightDebitBalance.String(), sourceBalance.Currency, sourceBalance.LedgerID, sourceBalance.CreatedAt, sourceBalance.Version,
+		sourceBalance.BalanceID, sourceBalance.Balance.String(), sourceBalance.CreditBalance.String(), sourceBalance.DebitBalance.String(), sourceBalance.InflightBalance.String(), sourceBalance.InflightCreditBalance.String(), sourceBalance.InflightDebitBalance.String(), sourceBalance.LedgerID, sourceBalance.CreatedAt, sourceBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect the second update (for destinationBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		destinationBalance.BalanceID, destinationBalance.Balance.String(), destinationBalance.CreditBalance.String(), destinationBalance.DebitBalance.String(), destinationBalance.InflightBalance.String(), destinationBalance.InflightCreditBalance.String(), destinationBalance.InflightDebitBalance.String(), destinationBalance.Currency, destinationBalance.LedgerID, destinationBalance.CreatedAt, destinationBalance.Version,
+		destinationBalance.BalanceID, destinationBalance.Balance.String(), destinationBalance.CreditBalance.String(), destinationBalance.DebitBalance.String(), destinationBalance.InflightBalance.String(), destinationBalance.InflightCreditBalance.String(), destinationBalance.InflightDebitBalance.String(), destinationBalance.LedgerID, destinationBalance.CreatedAt, destinationBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect transaction commit
@@ -451,7 +451,7 @@ func TestUpdateMonitor(t *testing.T) {
 		AddRow(monitor.MonitorID, monitor.BalanceID, "balance", "<", 100, 100, 10000, "Test Monitor", gofakeit.URL(), time.Now(), model.TriggerEdge, false)
 	mock.ExpectQuery("SELECT .* FROM blnk.balance_monitors WHERE monitor_id =").WithArgs(monitor.MonitorID).WillReturnRows(previous)
 
-	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, monitor.Condition.Field, monitor.Condition.Operator, monitor.Condition.Value, monitor.Description, float64(100), "0", "").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE blnk.balance_monitors").WithArgs(monitor.MonitorID, monitor.BalanceID, "balance", "<", float64(100), monitor.Description, float64(100), "10000", "").WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = d.UpdateMonitor(context.Background(), monitor)
 

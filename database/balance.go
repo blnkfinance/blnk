@@ -874,15 +874,17 @@ func (d Datasource) UpdateBalances(ctx context.Context, sourceBalance, destinati
 // Returns:
 // - error: Returns an error if the update operation fails at any point, including issues with metadata marshalling, query execution, or optimistic locking.
 func updateBalance(ctx context.Context, tx *sql.Tx, balance *model.Balance) error {
-	// SQL query to update the balance
+	// currency is omitted. It is part of unique_indicator_currency, and the BEFORE UPDATE
+	// trigger makes Postgres lock the row FOR UPDATE whenever a key column is named in
+	// SET. That lock deadlocks with the FOR KEY SHARE taken by transaction inserts.
 	query := `
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+        WHERE balance_id = $1 AND version = $10
     `
 
 	// Execute the update query within the provided transaction context
-	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.InflightBalance.String(), balance.InflightCreditBalance.String(), balance.InflightDebitBalance.String(), balance.Currency, balance.LedgerID, balance.CreatedAt, balance.Version)
+	result, err := tx.ExecContext(ctx, query, balance.BalanceID, balance.Balance.String(), balance.CreditBalance.String(), balance.DebitBalance.String(), balance.InflightBalance.String(), balance.InflightCreditBalance.String(), balance.InflightDebitBalance.String(), balance.LedgerID, balance.CreatedAt, balance.Version)
 	if err != nil {
 		// Return an error if the query execution fails
 		return apierror.NewAPIError(apierror.ErrInternalServer, "Failed to update balance", err)
@@ -949,6 +951,7 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 	}
 
 	var query strings.Builder
+	// currency stays out of SET for the same row-lock reason as updateBalance.
 	query.WriteString(`
 		UPDATE blnk.balances AS b
 		SET balance = v.balance,
@@ -957,21 +960,20 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 		    inflight_balance = v.inflight_balance,
 		    inflight_credit_balance = v.inflight_credit_balance,
 		    inflight_debit_balance = v.inflight_debit_balance,
-		    currency = v.currency,
 		    ledger_id = v.ledger_id,
 		    created_at = v.created_at,
 		    version = b.version + 1
 		FROM (VALUES
 	`)
 
-	args := make([]interface{}, 0, len(balances)*11)
+	args := make([]interface{}, 0, len(balances)*10)
 	for i, balance := range balances {
 		if i > 0 {
 			query.WriteString(",")
 		}
-		base := i*11 + 1
+		base := i*10 + 1
 		fmt.Fprintf(&query,
-			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
 			base,
 			base+1,
 			base+2,
@@ -982,7 +984,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			base+7,
 			base+8,
 			base+9,
-			base+10,
 		)
 		args = append(args,
 			balance.BalanceID,
@@ -992,7 +993,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			balance.InflightBalance.String(),
 			balance.InflightCreditBalance.String(),
 			balance.InflightDebitBalance.String(),
-			balance.Currency,
 			balance.LedgerID,
 			balance.CreatedAt,
 			balance.Version,
@@ -1008,7 +1008,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 			inflight_balance,
 			inflight_credit_balance,
 			inflight_debit_balance,
-			currency,
 			ledger_id,
 			created_at,
 			expected_version
@@ -1022,7 +1021,6 @@ func updateBalanceChunk(ctx context.Context, tx *sql.Tx, balances []*model.Balan
 				raw.inflight_balance::numeric AS inflight_balance,
 				raw.inflight_credit_balance::numeric AS inflight_credit_balance,
 				raw.inflight_debit_balance::numeric AS inflight_debit_balance,
-				raw.currency::text AS currency,
 				raw.ledger_id::text AS ledger_id,
 				raw.created_at::timestamp AS created_at,
 				raw.expected_version::integer AS expected_version
@@ -1174,6 +1172,7 @@ func (d Datasource) CreateMonitor(monitor model.BalanceMonitor) (model.BalanceMo
 func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	var precision sql.NullFloat64
 	var preciseValue sql.NullInt64
+	var description, callBackURL sql.NullString
 	var conditionState bool
 
 	// Query the database to get the monitor details by MonitorID
@@ -1188,7 +1187,7 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 	condition := &model.AlertCondition{}
 
 	// Scan the result into the monitor and condition fields
-	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &precision, &preciseValue, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &monitor.Trigger, &conditionState)
+	err := row.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &precision, &preciseValue, &description, &callBackURL, &monitor.CreatedAt, &monitor.Trigger, &conditionState)
 	if err != nil {
 		// Handle the case where the monitor with the specified ID is not found
 		if err == sql.ErrNoRows {
@@ -1198,6 +1197,8 @@ func (d Datasource) GetMonitorByID(id string) (*model.BalanceMonitor, error) {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to retrieve monitor", err)
 	}
 
+	monitor.Description = nullableString(description)
+	monitor.CallBackURL = nullableString(callBackURL)
 	monitor.Condition = *condition
 	resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 	resolveMonitorState(monitor, conditionState)
@@ -1231,18 +1232,21 @@ func (d Datasource) GetAllMonitors() ([]model.BalanceMonitor, error) {
 	for rows.Next() {
 		var precision sql.NullFloat64
 		var preciseValue sql.NullInt64
+		var description, callBackURL sql.NullString
 		var conditionState bool
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &description, &callBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
 		}
 
 		// Assign the scanned AlertCondition to the monitor
+		monitor.Description = nullableString(description)
+		monitor.CallBackURL = nullableString(callBackURL)
 		monitor.Condition = condition
 		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 		resolveMonitorState(&monitor, conditionState)
@@ -1289,18 +1293,21 @@ func (d Datasource) GetBalanceMonitors(balanceID string) ([]model.BalanceMonitor
 	for rows.Next() {
 		var precision sql.NullFloat64
 		var preciseValue sql.NullInt64
+		var description, callBackURL sql.NullString
 		var conditionState bool
 		monitor := model.BalanceMonitor{}   // Create an empty BalanceMonitor object
 		condition := model.AlertCondition{} // Create an empty AlertCondition object (part of the monitor)
 
 		// Scan the row into the monitor and condition fields
-		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &monitor.Description, &monitor.CallBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
+		err = rows.Scan(&monitor.MonitorID, &monitor.BalanceID, &condition.Field, &condition.Operator, &condition.Value, &description, &callBackURL, &monitor.CreatedAt, &precision, &preciseValue, &monitor.Trigger, &conditionState)
 		if err != nil {
 			// Return an error if scanning fails
 			return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan monitor data", err)
 		}
 
 		// Assign the scanned AlertCondition to the monitor
+		monitor.Description = nullableString(description)
+		monitor.CallBackURL = nullableString(callBackURL)
 		monitor.Condition = condition
 		resolveMonitorThreshold(&monitor.Condition, precision, preciseValue)
 		resolveMonitorState(&monitor, conditionState)

@@ -202,7 +202,7 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 		// processBulkTransactions mutates each transaction (status, metadata,
 		// parent); clone them so the background goroutine never races the caller
 		// still holding the request's transactions.
-		asyncTxns := cloneTransactionsForAsync(req.Transactions)
+		asyncTxns := cloneTransactions(req.Transactions)
 
 		// Start processing in background
 		go func() {

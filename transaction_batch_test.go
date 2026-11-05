@@ -22,6 +22,7 @@ func TestTryRecordQueuedTransactionBatchSkipsWithoutSiblingTransactions(t *testi
 
 	ds := &mocks.MockDataSource{}
 	createdAt := time.Now().UTC()
+	ds.On("QueuedTransactionHasChild", mock.Anything, "txn_parent").Return(false, nil).Once()
 	ds.On(
 		"GetQueuedTransactionsForCoalescing",
 		mock.Anything,
@@ -80,6 +81,7 @@ func TestTryRecordQueuedTransactionBatchFailsOpenOnDiscoveryError(t *testing.T) 
 
 	ds := &mocks.MockDataSource{}
 	createdAt := time.Now().UTC()
+	ds.On("QueuedTransactionHasChild", mock.Anything, "txn_parent").Return(false, nil).Once()
 	ds.On(
 		"GetQueuedTransactionsForCoalescing",
 		mock.Anything,
