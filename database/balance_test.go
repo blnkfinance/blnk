@@ -332,7 +332,6 @@ func TestUpdateBalances_SourceUpdateError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			sourceBalance.Version,
@@ -372,7 +371,6 @@ func TestUpdateBalances_DestUpdateError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			sourceBalance.Version,
@@ -389,7 +387,6 @@ func TestUpdateBalances_DestUpdateError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			destBalance.Version,
@@ -429,7 +426,6 @@ func TestUpdateBalances_CommitError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			sourceBalance.Version,
@@ -446,7 +442,6 @@ func TestUpdateBalances_CommitError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			destBalance.Version,
