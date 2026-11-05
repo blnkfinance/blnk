@@ -37,10 +37,10 @@ const (
 
 var asyncBulkSemaphore = semaphore.NewWeighted(100) // max 100 concurrent
 
-// queuedSaveSemaphore bounds concurrent saves of queued transactions. Every
-// insert into blnk.transactions issues a NOTIFY, and Postgres serializes the
-// commits of notifying transactions, so letting every request insert at once
-// piles them up on that lock and throughput collapses.
+// queuedSaveSemaphore bounds concurrent saves of queued transactions. Beyond a
+// couple dozen concurrent inserts Postgres write throughput falls rather than
+// rises, and unbounded saves would take the connection pool from every other
+// request.
 var queuedSaveSemaphore = semaphore.NewWeighted(20)
 
 // balanceMonitorSem bounds the number of concurrent balance-monitor checks
