@@ -231,7 +231,7 @@ func initializeTypeSense(ctx context.Context, cfg *config.Configuration) (*searc
 		return nil, nil
 	}
 
-	newSearch := search.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns})
+	newSearch := search.NewTypesenseClient(cfg.TypeSenseKey, []string{cfg.TypeSense.Dns}, search.DefaultTimeout)
 
 	err := retryWithBackoff(ctx, 5, 2*time.Second, func() error {
 		if err := newSearch.EnsureCollectionsExist(ctx); err != nil {

@@ -18,6 +18,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -25,11 +26,15 @@ import (
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/internal/metrics"
 	"github.com/sirupsen/logrus"
+	"github.com/typesense/typesense-go/typesense/api"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 )
 
-const defaultBackpressureRetryInterval = 5 * time.Second
+const (
+	defaultBackpressureRetryInterval = 5 * time.Second
+	indexChunkSize                   = 5000
+)
 
 // ReindexProgress tracks the progress of a reindex operation.
 type ReindexProgress struct {
@@ -277,10 +282,108 @@ func (r *ReindexService) setMemoryBackpressurePaused(paused bool) {
 	logrus.WithField("phase", phase).Info("Reindex resumed after Typesense memory backpressure")
 }
 
-func (r *ReindexService) indexDocument(ctx context.Context, collection string, data map[string]interface{}) error {
-	return r.retryWithMemoryBackpressure(ctx, func() error {
-		return r.client.HandleNotification(ctx, collection, data)
-	})
+type indexFailure struct {
+	Index int
+	Error string
+}
+
+// indexDocuments batch upserts docs with one request, so Typesense commits one Raft
+// log entry per batch instead of one per document. A rejected document is
+// returned as an indexFailure; an error means nothing was indexed.
+func (t *TypesenseClient) indexDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]indexFailure, error) {
+	config, ok := collectionConfigs[table]
+	if !ok {
+		return nil, fmt.Errorf("unknown collection: %s", table)
+	}
+	payload := make([]interface{}, 0, len(docs))
+	for _, data := range docs {
+		if err := t.processMetadata(data); err != nil {
+			return nil, err
+		}
+		t.convertLargeNumbers(config, data)
+		t.ensureSchemaFields(config, data)
+		t.normalizeTimeFields(config, data)
+		if id, ok := data[config.IDField].(string); ok && id != "" {
+			data["id"] = id
+		}
+		payload = append(payload, data)
+	}
+
+	action := "upsert"
+	results, err := t.Client.Collection(table).Documents().Import(ctx, payload, &api.ImportDocumentsParams{Action: &action})
+	if err != nil {
+		return nil, fmt.Errorf("failed to index documents in Typesense: %w", err)
+	}
+
+	var failures []indexFailure
+	for i, result := range results {
+		if !result.Success {
+			failures = append(failures, indexFailure{Index: i, Error: result.Error})
+		}
+	}
+	return failures, nil
+}
+
+// indexPage returns an error only when Typesense is unavailable; the count is
+// what it accepted before that.
+func (r *ReindexService) indexPage(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
+	var accepted int64
+	for start := 0; start < len(docs); start += indexChunkSize {
+		end := min(start+indexChunkSize, len(docs))
+		chunk := docs[start:end]
+
+		var failures []indexFailure
+		err := r.retryWithMemoryBackpressure(ctx, func() error {
+			var indexErr error
+			failures, indexErr = r.client.indexDocuments(ctx, collection, chunk)
+			return indexErr
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return accepted, ctx.Err()
+			}
+			logrus.WithError(err).WithFields(logrus.Fields{
+				"collection": collection,
+				"documents":  len(chunk),
+			}).Warn("Bulk indexing failed; indexing the chunk one document at a time")
+			indexed, err := r.indexIndividually(ctx, collection, label, ids[start:end], chunk)
+			accepted += indexed
+			if err != nil {
+				return accepted, err
+			}
+			continue
+		}
+
+		for _, f := range failures {
+			r.addError(label + " " + ids[start+f.Index] + ": " + f.Error)
+		}
+		accepted += int64(len(chunk) - len(failures))
+	}
+	return accepted, nil
+}
+
+// indexIndividually aborts on a failed request: Typesense reports a bad
+// document as a per-line result, so a request that fails as a whole means the
+// server is unavailable.
+func (r *ReindexService) indexIndividually(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
+	var accepted int64
+	for i := range docs {
+		var failures []indexFailure
+		err := r.retryWithMemoryBackpressure(ctx, func() error {
+			var indexErr error
+			failures, indexErr = r.client.indexDocuments(ctx, collection, docs[i:i+1])
+			return indexErr
+		})
+		if err != nil {
+			return accepted, fmt.Errorf("failed to index %s %s: %w", label, ids[i], err)
+		}
+		if len(failures) > 0 {
+			r.addError(label + " " + ids[i] + ": " + failures[0].Error)
+			continue
+		}
+		accepted++
+	}
+	return accepted, nil
 }
 
 func (r *ReindexService) indexLedgers(ctx context.Context) error {
@@ -302,21 +405,22 @@ func (r *ReindexService) indexLedgers(ctx context.Context) error {
 		}
 
 		batchCount := len(ledgers)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
 		for _, ledger := range ledgers {
 			data, err := toMap(ledger)
 			if err != nil {
 				r.addError("ledger " + ledger.LedgerID + ": " + err.Error())
 				continue
 			}
+			ids = append(ids, ledger.LedgerID)
+			docs = append(docs, data)
+		}
 
-			if err := r.indexDocument(ctx, CollectionLedgers, data); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				r.addError("ledger " + ledger.LedgerID + ": " + err.Error())
-				continue
-			}
-			totalIndexed++
+		indexed, err := r.indexPage(ctx, CollectionLedgers, "ledger", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
 		}
 
 		r.updateProgress("indexing_ledgers", totalIndexed, totalIndexed)
@@ -355,25 +459,26 @@ func (r *ReindexService) indexIdentities(ctx context.Context) error {
 		}
 
 		batchCount := len(identities)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
 		for _, identity := range identities {
 			data, err := toMap(identity)
 			if err != nil {
 				r.addError("identity " + identity.IdentityID + ": " + err.Error())
 				continue
 			}
+			ids = append(ids, identity.IdentityID)
+			docs = append(docs, data)
+		}
 
-			if err := r.indexDocument(ctx, CollectionIdentities, data); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				r.addError("identity " + identity.IdentityID + ": " + err.Error())
-				continue
-			}
-			totalIndexed++
+		indexed, err := r.indexPage(ctx, CollectionIdentities, "identity", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
 		}
 
 		r.mu.Lock()
-		r.progress.ProcessedRecords += totalIndexed
+		r.progress.ProcessedRecords += indexed
 		r.progress.TotalRecords = r.progress.ProcessedRecords
 		r.mu.Unlock()
 
@@ -411,25 +516,26 @@ func (r *ReindexService) indexBalances(ctx context.Context) error {
 		}
 
 		batchCount := len(balances)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
 		for _, balance := range balances {
 			data, err := toMap(balance)
 			if err != nil {
 				r.addError("balance " + balance.BalanceID + ": " + err.Error())
 				continue
 			}
+			ids = append(ids, balance.BalanceID)
+			docs = append(docs, data)
+		}
 
-			if err := r.indexDocument(ctx, CollectionBalances, data); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				r.addError("balance " + balance.BalanceID + ": " + err.Error())
-				continue
-			}
-			totalIndexed++
+		indexed, err := r.indexPage(ctx, CollectionBalances, "balance", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
 		}
 
 		r.mu.Lock()
-		r.progress.ProcessedRecords += totalIndexed
+		r.progress.ProcessedRecords += indexed
 		r.progress.TotalRecords = r.progress.ProcessedRecords
 		r.mu.Unlock()
 
@@ -467,25 +573,26 @@ func (r *ReindexService) indexTransactions(ctx context.Context) error {
 		}
 
 		batchCount := len(transactions)
+		ids := make([]string, 0, batchCount)
+		docs := make([]map[string]interface{}, 0, batchCount)
 		for _, transaction := range transactions {
 			data, err := toMap(transaction)
 			if err != nil {
 				r.addError("transaction " + transaction.TransactionID + ": " + err.Error())
 				continue
 			}
+			ids = append(ids, transaction.TransactionID)
+			docs = append(docs, data)
+		}
 
-			if err := r.indexDocument(ctx, CollectionTransactions, data); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				r.addError("transaction " + transaction.TransactionID + ": " + err.Error())
-				continue
-			}
-			totalIndexed++
+		indexed, err := r.indexPage(ctx, CollectionTransactions, "transaction", ids, docs)
+		totalIndexed += indexed
+		if err != nil {
+			return err
 		}
 
 		r.mu.Lock()
-		r.progress.ProcessedRecords += totalIndexed
+		r.progress.ProcessedRecords += indexed
 		r.progress.TotalRecords = r.progress.ProcessedRecords
 		r.mu.Unlock()
 
