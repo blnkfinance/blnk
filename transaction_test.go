@@ -187,8 +187,8 @@ func TestRecordTransaction(t *testing.T) {
 	// Update source and destination balances (order doesn't matter since MatchExpectationsInOrder is false)
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-	  WHERE balance_id = $1 AND version = $11
+	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+	  WHERE balance_id = $1 AND version = $10
 	`)).WithArgs(
 		source,           // balance_id
 		sqlmock.AnyArg(), // balance
@@ -197,7 +197,6 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(), // inflight_balance
 		sqlmock.AnyArg(), // inflight_credit_balance
 		sqlmock.AnyArg(), // inflight_debit_balance
-		sqlmock.AnyArg(), // currency
 		sqlmock.AnyArg(), // ledger_id
 		sqlmock.AnyArg(), // created_at
 		sqlmock.AnyArg(), // version
@@ -205,8 +204,8 @@ func TestRecordTransaction(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-	  WHERE balance_id = $1 AND version = $11
+	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+	  WHERE balance_id = $1 AND version = $10
 	`)).WithArgs(
 		destination,      // balance_id
 		sqlmock.AnyArg(), // balance
@@ -215,7 +214,6 @@ func TestRecordTransaction(t *testing.T) {
 		sqlmock.AnyArg(), // inflight_balance
 		sqlmock.AnyArg(), // inflight_credit_balance
 		sqlmock.AnyArg(), // inflight_debit_balance
-		sqlmock.AnyArg(), // currency
 		sqlmock.AnyArg(), // ledger_id
 		sqlmock.AnyArg(), // created_at
 		sqlmock.AnyArg(), // version
@@ -324,24 +322,24 @@ func TestRecordTransaction_AtomicRollback_InsertFails(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-	  WHERE balance_id = $1 AND version = $11
+	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+	  WHERE balance_id = $1 AND version = $10
 	`)).WithArgs(
 		source,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec(regexp.QuoteMeta(`
 	  UPDATE blnk.balances
-	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-	  WHERE balance_id = $1 AND version = $11
+	  SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+	  WHERE balance_id = $1 AND version = $10
 	`)).WithArgs(
 		destination,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	expectedSQL := `INSERT INTO blnk.transactions(transaction_id, parent_transaction, source, reference, amount, precise_amount, precision, currency, destination, description, status, created_at, meta_data, scheduled_for, hash, effective_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
@@ -426,24 +424,24 @@ func TestRecordTransaction_AtomicRollback_SecondBalanceUpdateFails(t *testing.T)
 
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+        WHERE balance_id = $1 AND version = $10
     `)).WithArgs(
 		source,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+        WHERE balance_id = $1 AND version = $10
     `)).WithArgs(
 		destination,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
 	).WillReturnError(fmt.Errorf("optimistic lock failure - balance was modified by another transaction"))
 
 	mock.ExpectRollback()
@@ -520,13 +518,13 @@ func TestRecordTransaction_AtomicRollback_FirstBalanceUpdateFails(t *testing.T) 
 
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+        WHERE balance_id = $1 AND version = $10
     `)).WithArgs(
 		source,
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
 	).WillReturnError(fmt.Errorf("database write error - disk full"))
 
 	mock.ExpectRollback()

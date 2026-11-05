@@ -248,8 +248,8 @@ func TestUpdateBalances_Success(t *testing.T) {
 	// Expect source balance update
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+        WHERE balance_id = $1 AND version = $10
     `)).WithArgs(
 		sourceBalance.BalanceID,
 		sourceBalance.Balance.String(),
@@ -258,7 +258,6 @@ func TestUpdateBalances_Success(t *testing.T) {
 		sourceBalance.InflightBalance.String(),
 		sourceBalance.InflightCreditBalance.String(),
 		sourceBalance.InflightDebitBalance.String(),
-		sourceBalance.Currency,
 		sourceBalance.LedgerID,
 		sourceBalance.CreatedAt,
 		sourceBalance.Version,
@@ -267,8 +266,8 @@ func TestUpdateBalances_Success(t *testing.T) {
 	// Expect destination balance update
 	mock.ExpectExec(regexp.QuoteMeta(`
         UPDATE blnk.balances
-        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, currency = $8, ledger_id = $9, created_at = $10, version = version + 1
-        WHERE balance_id = $1 AND version = $11
+        SET balance = $2, credit_balance = $3, debit_balance = $4, inflight_balance = $5, inflight_credit_balance = $6, inflight_debit_balance = $7, ledger_id = $8, created_at = $9, version = version + 1
+        WHERE balance_id = $1 AND version = $10
     `)).WithArgs(
 		destBalance.BalanceID,
 		destBalance.Balance.String(),
@@ -277,7 +276,6 @@ func TestUpdateBalances_Success(t *testing.T) {
 		destBalance.InflightBalance.String(),
 		destBalance.InflightCreditBalance.String(),
 		destBalance.InflightDebitBalance.String(),
-		destBalance.Currency,
 		destBalance.LedgerID,
 		destBalance.CreatedAt,
 		destBalance.Version,
@@ -334,7 +332,6 @@ func TestUpdateBalances_SourceUpdateError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			sourceBalance.Version,
@@ -374,7 +371,6 @@ func TestUpdateBalances_DestUpdateError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			sourceBalance.Version,
@@ -391,7 +387,6 @@ func TestUpdateBalances_DestUpdateError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			destBalance.Version,
@@ -431,7 +426,6 @@ func TestUpdateBalances_CommitError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			sourceBalance.Version,
@@ -448,7 +442,6 @@ func TestUpdateBalances_CommitError(t *testing.T) {
 			"0",              // InflightBalance string
 			"0",              // InflightCreditBalance string
 			"0",              // InflightDebitBalance string
-			"",               // Currency
 			"",               // LedgerID
 			sqlmock.AnyArg(), // CreatedAt
 			destBalance.Version,

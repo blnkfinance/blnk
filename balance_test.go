@@ -314,12 +314,12 @@ func TestUpdateBalances(t *testing.T) {
 
 	// Expect the first update (for sourceBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		sourceBalance.BalanceID, sourceBalance.Balance.String(), sourceBalance.CreditBalance.String(), sourceBalance.DebitBalance.String(), sourceBalance.InflightBalance.String(), sourceBalance.InflightCreditBalance.String(), sourceBalance.InflightDebitBalance.String(), sourceBalance.Currency, sourceBalance.LedgerID, sourceBalance.CreatedAt, sourceBalance.Version,
+		sourceBalance.BalanceID, sourceBalance.Balance.String(), sourceBalance.CreditBalance.String(), sourceBalance.DebitBalance.String(), sourceBalance.InflightBalance.String(), sourceBalance.InflightCreditBalance.String(), sourceBalance.InflightDebitBalance.String(), sourceBalance.LedgerID, sourceBalance.CreatedAt, sourceBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect the second update (for destinationBalance)
 	mock.ExpectExec("UPDATE blnk.balances").WithArgs(
-		destinationBalance.BalanceID, destinationBalance.Balance.String(), destinationBalance.CreditBalance.String(), destinationBalance.DebitBalance.String(), destinationBalance.InflightBalance.String(), destinationBalance.InflightCreditBalance.String(), destinationBalance.InflightDebitBalance.String(), destinationBalance.Currency, destinationBalance.LedgerID, destinationBalance.CreatedAt, destinationBalance.Version,
+		destinationBalance.BalanceID, destinationBalance.Balance.String(), destinationBalance.CreditBalance.String(), destinationBalance.DebitBalance.String(), destinationBalance.InflightBalance.String(), destinationBalance.InflightCreditBalance.String(), destinationBalance.InflightDebitBalance.String(), destinationBalance.LedgerID, destinationBalance.CreatedAt, destinationBalance.Version,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect transaction commit
