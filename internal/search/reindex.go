@@ -287,8 +287,8 @@ type indexFailure struct {
 	Error string
 }
 
-// indexDocuments upserts docs with one request, so Typesense commits one Raft
-// log entry per call instead of one per document. A rejected document is
+// indexDocuments batch upserts docs with one request, so Typesense commits one Raft
+// log entry per batch instead of one per document. A rejected document is
 // returned as an indexFailure; an error means nothing was indexed.
 func (t *TypesenseClient) indexDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]indexFailure, error) {
 	config, ok := collectionConfigs[table]
