@@ -287,12 +287,9 @@ type indexFailure struct {
 	Error string
 }
 
-// indexDocuments upserts docs with one request. Typesense replicates each
-// HTTP write as a single Raft log entry, so this costs one commit per page
-// instead of one per document. Documents are normalized the same way
-// HandleNotification normalizes them, so the two paths produce identical
-// documents. A document Typesense rejects is returned as an indexFailure; an
-// error means nothing in docs was indexed.
+// indexDocuments upserts docs with one request, so Typesense commits one Raft
+// log entry per call instead of one per document. A rejected document is
+// returned as an indexFailure; an error means nothing was indexed.
 func (t *TypesenseClient) indexDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]indexFailure, error) {
 	config, ok := collectionConfigs[table]
 	if !ok {
@@ -327,8 +324,8 @@ func (t *TypesenseClient) indexDocuments(ctx context.Context, table string, docs
 	return failures, nil
 }
 
-// indexPage returns an error only when Typesense itself is unavailable; the
-// count is what was accepted before that.
+// indexPage returns an error only when Typesense is unavailable; the count is
+// what it accepted before that.
 func (r *ReindexService) indexPage(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
 	for start := 0; start < len(docs); start += indexChunkSize {
@@ -365,9 +362,9 @@ func (r *ReindexService) indexPage(ctx context.Context, collection, label string
 	return accepted, nil
 }
 
-// indexIndividually relies on Typesense reporting a bad document as a
-// per-line result, never as a failed request, so a single-document request
-// that fails as a whole means the server is unavailable and the phase aborts.
+// indexIndividually aborts on a failed request: Typesense reports a bad
+// document as a per-line result, so a request that fails as a whole means the
+// server is unavailable.
 func (r *ReindexService) indexIndividually(ctx context.Context, collection, label string, ids []string, docs []map[string]interface{}) (int64, error) {
 	var accepted int64
 	for i := range docs {
