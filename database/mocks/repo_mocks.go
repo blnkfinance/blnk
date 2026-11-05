@@ -174,6 +174,11 @@ func (m *MockDataSource) GetQueuedTransactionsForCoalescing(ctx context.Context,
 	return args.Get(0).([]*model.Transaction), args.Error(1)
 }
 
+func (m *MockDataSource) QueuedTransactionHasChild(ctx context.Context, transactionID string) (bool, error) {
+	args := m.Called(ctx, transactionID)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockDataSource) GetQueuedTransactionsForSourceCoalescing(ctx context.Context, source, currency, excludeTransactionID string, createdAtOrAfter time.Time, limit int) ([]*model.Transaction, error) {
 	args := m.Called(ctx, source, currency, excludeTransactionID, createdAtOrAfter, limit)
 	if args.Get(0) == nil {

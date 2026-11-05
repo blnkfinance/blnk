@@ -2663,6 +2663,42 @@ func TestGetQueuedTransactionsForDestinationCoalescing_PreservesEffectiveDate(t 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestQueuedTransactionHasChild(t *testing.T) {
+	for _, exists := range []bool{true, false} {
+		t.Run(fmt.Sprintf("exists=%t", exists), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			ds := Datasource{Conn: db}
+			mock.ExpectQuery(regexp.QuoteMeta("WHERE child.parent_transaction = $1")).
+				WithArgs("txn_queued").
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
+
+			got, err := ds.QueuedTransactionHasChild(context.Background(), "txn_queued")
+			assert.NoError(t, err)
+			assert.Equal(t, exists, got)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestQueuedTransactionHasChild_QueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	ds := Datasource{Conn: db}
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE child.parent_transaction = $1")).
+		WithArgs("txn_queued").
+		WillReturnError(errors.New("connection reset"))
+
+	got, err := ds.QueuedTransactionHasChild(context.Background(), "txn_queued")
+	assert.Error(t, err)
+	assert.False(t, got)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestGetStuckQueuedTransactions_PreservesEffectiveDate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
