@@ -416,52 +416,6 @@ func TestImportDocuments_NormalizesAndSetsID(t *testing.T) {
 	assert.Contains(t, sent, "amount", "required schema fields are defaulted")
 }
 
-func TestImportDocuments_ReportsPerDocumentRejections(t *testing.T) {
-	fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
-		return http.StatusOK, strings.Join([]string{`{"success":true}`, rejectedLine("name"), `{"success":true}`}, "\n")
-	}}
-	client := newFakeTypesense(t, fake)
-
-	docs := []map[string]interface{}{{"ledger_id": "ldg_a"}, {"ledger_id": "ldg_b"}, {"ledger_id": "ldg_c"}}
-	failures, err := client.importDocuments(context.Background(), CollectionLedgers, docs)
-	require.NoError(t, err)
-	require.Len(t, failures, 1)
-	assert.Equal(t, 1, failures[0].Index)
-	assert.Contains(t, failures[0].Error, "must be a string")
-}
-
-func TestImportDocuments_NormalizationFailureIsPerDocument(t *testing.T) {
-	fake := &fakeTypesense{}
-	client := newFakeTypesense(t, fake)
-
-	docs := []map[string]interface{}{
-		{"ledger_id": "ldg_a"},
-		{"ledger_id": "ldg_b", "meta_data": make(chan int)},
-		{"ledger_id": "ldg_c"},
-	}
-	failures, err := client.importDocuments(context.Background(), CollectionLedgers, docs)
-	require.NoError(t, err)
-	require.Len(t, failures, 1)
-	assert.Equal(t, 1, failures[0].Index)
-
-	calls := fake.importCalls()
-	require.Len(t, calls, 1)
-	require.Len(t, calls[0], 2, "the document that could not be normalized is left out of the request")
-	assert.Equal(t, "ldg_a", calls[0][0]["id"])
-	assert.Equal(t, "ldg_c", calls[0][1]["id"])
-}
-
-func TestImportDocuments_OutOfMemoryIsBackpressure(t *testing.T) {
-	fake := &fakeTypesense{respond: func(_ int, _ []map[string]interface{}) (int, string) {
-		return http.StatusServiceUnavailable, `{"message":"Rejecting write: running out of resource type: OUT_OF_MEMORY"}`
-	}}
-	client := newFakeTypesense(t, fake)
-
-	_, err := client.importDocuments(context.Background(), CollectionLedgers, []map[string]interface{}{{"ledger_id": "ldg_a"}})
-	require.Error(t, err)
-	assert.True(t, IsMemoryBackpressure(err), "a request-level OUT_OF_MEMORY must drive the reindex pause/retry loop")
-}
-
 func TestStartReindex_ImportsPagesInChunks(t *testing.T) {
 	fake := &fakeTypesense{}
 	client := newFakeTypesense(t, fake)

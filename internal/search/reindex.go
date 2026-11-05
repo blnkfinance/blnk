@@ -291,20 +291,17 @@ type importFailure struct {
 // HTTP write as a single Raft log entry, so this costs one commit per page
 // instead of one per document. Documents are normalized the same way
 // HandleNotification normalizes them, so the two paths produce identical
-// documents. A document that cannot be normalized or that Typesense rejects
-// is returned as an importFailure; an error means nothing in docs was indexed.
+// documents. A document Typesense rejects is returned as an importFailure; an
+// error means nothing in docs was indexed.
 func (t *TypesenseClient) importDocuments(ctx context.Context, table string, docs []map[string]interface{}) ([]importFailure, error) {
 	config, ok := collectionConfigs[table]
 	if !ok {
 		return nil, fmt.Errorf("unknown collection: %s", table)
 	}
-	var failures []importFailure
 	payload := make([]interface{}, 0, len(docs))
-	positions := make([]int, 0, len(docs))
-	for i, data := range docs {
+	for _, data := range docs {
 		if err := t.processMetadata(data); err != nil {
-			failures = append(failures, importFailure{Index: i, Error: err.Error()})
-			continue
+			return nil, err
 		}
 		t.convertLargeNumbers(config, data)
 		t.ensureSchemaFields(config, data)
@@ -313,10 +310,6 @@ func (t *TypesenseClient) importDocuments(ctx context.Context, table string, doc
 			data["id"] = id
 		}
 		payload = append(payload, data)
-		positions = append(positions, i)
-	}
-	if len(payload) == 0 {
-		return failures, nil
 	}
 
 	action := "upsert"
@@ -325,11 +318,11 @@ func (t *TypesenseClient) importDocuments(ctx context.Context, table string, doc
 		return nil, fmt.Errorf("failed to import documents into Typesense: %w", err)
 	}
 
+	var failures []importFailure
 	for i, result := range results {
-		if result.Success {
-			continue
+		if !result.Success {
+			failures = append(failures, importFailure{Index: i, Error: result.Error})
 		}
-		failures = append(failures, importFailure{Index: positions[i], Error: result.Error})
 	}
 	return failures, nil
 }
