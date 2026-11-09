@@ -36,7 +36,12 @@ const (
 )
 
 var asyncBulkSemaphore = semaphore.NewWeighted(100) // max 100 concurrent
-var asyncTxnSemaphore = semaphore.NewWeighted(20)   // max 20 concurrent async transaction processors
+
+// queuedSaveSemaphore bounds concurrent saves of queued transactions. Beyond a
+// couple dozen concurrent inserts Postgres write throughput falls rather than
+// rises, and unbounded saves would take the connection pool from every other
+// request.
+var queuedSaveSemaphore = semaphore.NewWeighted(20)
 
 // balanceMonitorSem bounds the number of concurrent balance-monitor checks
 // spawned by post-commit work across all transactions.

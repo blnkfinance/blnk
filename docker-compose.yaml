@@ -24,12 +24,12 @@ services:
     restart: "no"
 
   server:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.15.0}
+    image: ${BLNK_IMAGE:-ghcr.io/blnkfinance/blnk:0.15.7}
     container_name: server
     restart: on-failure
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "blnk migrate up && blnk start"
+      - "blnk migrate up && exec blnk start"
     environment:
       TZ: ${TZ:-Etc/UTC}
     ports:
@@ -42,7 +42,7 @@ services:
       - ./blnk.json:/blnk.json
 
   worker:
-    image: ${BLNK_IMAGE:-jerryenebeli/blnk:0.15.0}
+    image: ${BLNK_IMAGE:-ghcr.io/blnkfinance/blnk:0.15.7}
     container_name: worker
     restart: on-failure
     entrypoint: ["blnk", "workers"]

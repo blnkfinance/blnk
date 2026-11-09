@@ -22,11 +22,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
 	"github.com/blnkfinance/blnk/database/mocks"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/brianvoe/gofakeit/v6"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -563,6 +565,7 @@ func TestTryRecordQueuedTransactionBatch_GateBehavior(t *testing.T) {
 	t.Run("hot lane forces batching even when coalescing disabled", func(t *testing.T) {
 		ds := &mocks.MockDataSource{}
 		txn := eligibleQueuedTxn()
+		ds.On("QueuedTransactionHasChild", mock.Anything, txn.ParentTransaction).Return(false, nil).Once()
 		ds.On("GetQueuedTransactionsForCoalescing", mock.Anything, txn.Source, txn.Destination,
 			txn.Currency, txn.ParentTransaction, mock.Anything, 9).
 			Return([]*model.Transaction{}, nil).Once()
@@ -596,6 +599,83 @@ func TestTryRecordQueuedTransactionBatch_GateBehavior(t *testing.T) {
 		handled, err := l.TryRecordQueuedTransactionBatchForHotLane(context.Background(), eligibleQueuedTxn())
 		require.NoError(t, err)
 		assert.False(t, handled)
+		ds.AssertNotCalled(t, "GetQueuedTransactionsForCoalescing",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("already applied leader is acknowledged without building a batch", func(t *testing.T) {
+		ds := &mocks.MockDataSource{}
+		txn := eligibleQueuedTxn()
+		ds.On("QueuedTransactionHasChild", mock.Anything, txn.ParentTransaction).Return(true, nil).Twice()
+
+		// No redis is configured, so reaching the balance lock or the single-transaction
+		// path would panic; returning handled proves neither is attempted.
+		l := &Blnk{
+			datasource: ds,
+			config: &config.Configuration{
+				Transaction: config.TransactionConfig{EnableCoalescing: true, BatchSize: 10},
+			},
+		}
+		handled, err := l.TryRecordQueuedTransactionBatch(context.Background(), txn)
+		require.NoError(t, err)
+		assert.True(t, handled, "an applied leader's task is done and must be acknowledged")
+
+		_, err = l.ProcessQueuedTransaction(context.Background(), txn, false)
+		require.NoError(t, err, "the worker path must acknowledge the task without falling back")
+
+		ds.AssertExpectations(t)
+		ds.AssertNotCalled(t, "GetQueuedTransactionsForCoalescing",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		ds.AssertNotCalled(t, "GetBalancesByIDsLite", mock.Anything, mock.Anything)
+		ds.AssertNotCalled(t, "GetExistingTransactionReferences", mock.Anything, mock.Anything)
+	})
+
+	t.Run("leader applied while waiting for the lock is acknowledged", func(t *testing.T) {
+		mr, err := miniredis.Run()
+		require.NoError(t, err)
+		t.Cleanup(mr.Close)
+
+		ds := &mocks.MockDataSource{}
+		txn := eligibleQueuedTxn()
+		sibling := eligibleQueuedTxn()
+		sibling.ParentTransaction = ""
+		// Not applied when the task starts, applied by another batch once the lock is held.
+		ds.On("QueuedTransactionHasChild", mock.Anything, txn.ParentTransaction).Return(false, nil).Once()
+		ds.On("QueuedTransactionHasChild", mock.Anything, txn.ParentTransaction).Return(true, nil).Once()
+		ds.On("GetQueuedTransactionsForCoalescing", mock.Anything, txn.Source, txn.Destination,
+			txn.Currency, txn.ParentTransaction, mock.Anything, 9).
+			Return([]*model.Transaction{sibling}, nil).Once()
+
+		l := &Blnk{
+			datasource: ds,
+			redis:      redis.NewClient(&redis.Options{Addr: mr.Addr()}),
+			config: &config.Configuration{
+				Transaction: config.TransactionConfig{EnableCoalescing: true, BatchSize: 10, LockDuration: time.Second},
+			},
+		}
+		handled, err := l.TryRecordQueuedTransactionBatch(context.Background(), txn)
+		require.NoError(t, err)
+		assert.True(t, handled, "the leader's task is done and must be acknowledged")
+		ds.AssertExpectations(t)
+		ds.AssertNotCalled(t, "GetBalancesByIDsLite", mock.Anything, mock.Anything)
+		assert.Empty(t, mr.Keys(), "the balance-set lock must be released")
+	})
+
+	t.Run("applied check failure fails open without sibling lookup", func(t *testing.T) {
+		ds := &mocks.MockDataSource{}
+		txn := eligibleQueuedTxn()
+		ds.On("QueuedTransactionHasChild", mock.Anything, txn.ParentTransaction).Return(false, assert.AnError).Once()
+
+		l := &Blnk{
+			datasource: ds,
+			config: &config.Configuration{
+				Transaction: config.TransactionConfig{EnableCoalescing: true, BatchSize: 10},
+			},
+		}
+		handled, err := l.TryRecordQueuedTransactionBatch(context.Background(), txn)
+		require.NoError(t, err)
+		assert.False(t, handled)
+		ds.AssertExpectations(t)
 		ds.AssertNotCalled(t, "GetQueuedTransactionsForCoalescing",
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})

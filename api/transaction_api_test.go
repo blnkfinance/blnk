@@ -199,7 +199,7 @@ func TestRecordTransaction(t *testing.T) {
 			payload: model2.RecordTransaction{
 				Amount:      922337203.6854,
 				Precision:   10000000000,
-				Reference:   "ref_001adcfgf",
+				Reference:   model.GenerateUUIDWithSuffix("ref"),
 				Description: "For fees",
 				Currency:    "NGN",
 				Source:      newSourceBalance.BalanceID,
@@ -213,7 +213,7 @@ func TestRecordTransaction(t *testing.T) {
 			payload: model2.RecordTransaction{
 				Amount:      100.68,
 				Precision:   100,
-				Reference:   "ref_001adcfgf",
+				Reference:   model.GenerateUUIDWithSuffix("ref"),
 				Description: "For fees",
 				Currency:    "NGN",
 				Source:      newSourceBalance.BalanceID,
