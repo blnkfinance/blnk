@@ -132,7 +132,7 @@ func NewBlnk(db database.IDataSource) (*Blnk, error) {
 		LockContentionThreshold: configuration.Queue.HotPairLockContentionThreshold,
 	})
 	newQueue := NewQueue(configuration, asynqClient, redisClient)
-	newSearch := search.NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns})
+	newSearch := search.NewTypesenseClient(configuration.TypeSenseKey, []string{configuration.TypeSense.Dns}, search.DefaultTimeout)
 	hookManager := hooks.NewHookManager(redisClient, asynqClient)
 	tokenizer := initializeTokenizationService(configuration)
 	httpClient := initializeHTTPClient()

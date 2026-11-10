@@ -37,7 +37,7 @@ const (
 
 func newTestTypesenseClient(t *testing.T) *TypesenseClient {
 	t.Helper()
-	client := NewTypesenseClient(testTypesenseKey, []string{testTypesenseHost})
+	client := NewTypesenseClient(testTypesenseKey, []string{testTypesenseHost}, DefaultTimeout)
 	_, err := client.Client.Health(context.Background(), 2*time.Second)
 	require.NoError(t, err, "Typesense must be running on %s for the search test suite (docker compose up -d typesense)", testTypesenseHost)
 	return client
@@ -310,7 +310,7 @@ func TestSearch_DroppedCollectionSurfacesError(t *testing.T) {
 func TestClient_DeadServerReturnsError(t *testing.T) {
 	// Port 1 is reserved/unused: connections fail fast. The client must
 	// return an error within its timeout budget rather than hang.
-	client := NewTypesenseClient("any-key", []string{"http://localhost:1"})
+	client := NewTypesenseClient("any-key", []string{"http://localhost:1"}, DefaultTimeout)
 
 	done := make(chan error, 1)
 	go func() {

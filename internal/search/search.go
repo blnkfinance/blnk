@@ -35,6 +35,7 @@ const (
 	CollectionTransactions    = "transactions"
 	CollectionReconciliations = "reconciliations"
 	CollectionIdentities      = "identities"
+	DefaultTimeout            = 5 * time.Second
 )
 
 // CollectionConfig holds configuration for a specific collection.
@@ -158,11 +159,11 @@ func (b *IndexBatch) Deduplicate() {
 }
 
 // NewTypesenseClient initializes and returns a new Typesense client instance.
-func NewTypesenseClient(apiKey string, hosts []string) *TypesenseClient {
+func NewTypesenseClient(apiKey string, hosts []string, requestTimeout time.Duration) *TypesenseClient {
 	client := typesense.NewClient(
 		typesense.WithServer(hosts[0]),
 		typesense.WithAPIKey(apiKey),
-		typesense.WithConnectionTimeout(5*time.Second),
+		typesense.WithConnectionTimeout(requestTimeout),
 		typesense.WithCircuitBreakerMaxRequests(50),
 		typesense.WithCircuitBreakerInterval(2*time.Minute),
 		typesense.WithCircuitBreakerTimeout(1*time.Minute),
