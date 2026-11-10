@@ -43,6 +43,7 @@ import (
 	"github.com/blnkfinance/blnk/model"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
+	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/hibiken/asynq"
 	"github.com/hibiken/asynqmon"
@@ -63,9 +64,22 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		return err
 	}
 
+	// The items of a queued atomic bulk request run one at a time under the
+	// batch lock; once the batch has failed, the rest are rejected unapplied.
+	return b.blnk.WithQueuedAtomicBatch(ctx, &txn, func(batchFailed bool) error {
+		if batchFailed {
+			return handleTransactionRejection(ctx, b, &txn, blnk.ErrAtomicBatchFailed)
+		}
+		return b.recordQueuedTransaction(ctx, span, t, &txn, startTime)
+	})
+}
+
+// recordQueuedTransaction applies a transaction taken from the queue, and
+// retries or rejects it when that fails.
+func (b *blnkInstance) recordQueuedTransaction(ctx context.Context, span oteltrace.Span, t *asynq.Task, txn *model.Transaction, startTime time.Time) error {
 	// ProcessQueuedTransaction tries the coalesced batch first and falls back to the
 	// single-transaction path itself, so the batch is attempted only once per task.
-	_, err := b.blnk.ProcessQueuedTransaction(ctx, &txn, b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName)
+	_, err := b.blnk.ProcessQueuedTransaction(ctx, txn, b.cnf.Queue.EnableHotLane && t.Type() == b.cnf.Queue.HotQueueName)
 	if err != nil {
 		// Handle reference already used error
 		if blnk.IsDuplicateReferenceError(err) {
@@ -75,7 +89,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 
 		if strings.Contains(strings.ToLower(err.Error()), "insufficient funds") {
 			if !b.cnf.Queue.InsufficientFundRetries {
-				return handleTransactionRejection(ctx, b, &txn, err)
+				return handleTransactionRejection(ctx, b, txn, err)
 			}
 
 			retryCount, _ := asynq.GetRetryCount(ctx)
@@ -85,7 +99,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 					"retry_count":    retryCount,
 					"max_retries":    b.cnf.Queue.MaxRetryAttempts,
 				}).Warn("Transaction reached max retry attempts; rejecting with final processing error")
-				return handleTransactionRejection(ctx, b, &txn, err)
+				return handleTransactionRejection(ctx, b, txn, err)
 			}
 
 			logrus.Infof("Insufficient funds for transaction %s, retry attempt %d/%d",
@@ -97,7 +111,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 		}
 
 		if strings.Contains(strings.ToLower(err.Error()), "transaction exceeds overdraft limit") {
-			return handleTransactionRejection(ctx, b, &txn, err)
+			return handleTransactionRejection(ctx, b, txn, err)
 		}
 
 		if shouldRejectLockContentionImmediately(b.cnf, err) {
@@ -105,7 +119,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 				"transaction_id": txn.TransactionID,
 				"error":          err.Error(),
 			}).Warn("Rejecting transaction immediately due to lock contention policy")
-			return handleTransactionRejection(ctx, b, &txn, err)
+			return handleTransactionRejection(ctx, b, txn, err)
 		}
 
 		retryCount, _ := asynq.GetRetryCount(ctx)
@@ -116,7 +130,7 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 				"max_retries":    b.cnf.Queue.MaxRetryAttempts,
 				"error":          err.Error(),
 			}).Warn("Transaction reached max retry attempts; rejecting with final processing error")
-			return handleTransactionRejection(ctx, b, &txn, err)
+			return handleTransactionRejection(ctx, b, txn, err)
 		}
 
 		logrus.Infof("Transaction %s pushed back for retry due to error: %v", txn.TransactionID, err)
@@ -134,14 +148,19 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 }
 
 func handleTransactionRejection(ctx context.Context, b *blnkInstance, txn *model.Transaction, err error) error {
-	_, rejectErr := b.blnk.RejectTransaction(ctx, txn, err.Error())
+	rejected, rejectErr := b.blnk.RejectTransaction(ctx, txn, err.Error())
 	if rejectErr != nil {
 		return rejectErr
+	}
+	// An item of a failed atomic batch that was applied before the batch
+	// failed is rolled back, not rejected.
+	if rejected.Status != blnk.StatusRejected {
+		return nil
 	}
 
 	webhookErr := b.blnk.SendWebhook(blnk.NewWebhook{
 		Event:   "transaction.rejected",
-		Payload: *txn,
+		Payload: *rejected,
 	})
 	return webhookErr
 }

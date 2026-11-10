@@ -47,10 +47,14 @@ func refundableTransactionsByParentIDSQL() string {
 				AND t.status IN ('APPLIED', 'VOID')
 				AND t.reference IS DISTINCT FROM t.parent_transaction || '%[1]s')
 
-			-- Case 3: APPLIED rows linked via QUEUED_PARENT_TRANSACTION, same refund exclusion
+			-- Case 3: APPLIED rows linked via QUEUED_PARENT_TRANSACTION, same refund exclusion.
+			-- A refund copies the metadata of what it refunds, so the refund of a
+			-- queued bulk item is linked to the batch as well; it is excluded by its
+			-- own parent, as in Case 2.
 			OR (t.status = 'APPLIED'
 				AND t.meta_data->>'QUEUED_PARENT_TRANSACTION' = $1
-				AND t.reference IS DISTINCT FROM t.meta_data->>'QUEUED_PARENT_TRANSACTION' || '%[1]s')
+				AND t.reference IS DISTINCT FROM t.meta_data->>'QUEUED_PARENT_TRANSACTION' || '%[1]s'
+				AND t.reference IS DISTINCT FROM t.parent_transaction || '%[1]s')
 
 		ORDER BY 
 			t.created_at DESC

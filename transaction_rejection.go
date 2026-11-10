@@ -35,6 +35,44 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 	ctx, span := tracer.Start(ctx, "RejectTransaction")
 	defer span.End()
 
+	// A rejected item of a queued atomic bulk request fails its batch.
+	var batchID string
+	if transaction.Atomic {
+		parentTransactionID, ok := transaction.MetaData["QUEUED_PARENT_TRANSACTION"].(string)
+		if !ok {
+			return nil, fmt.Errorf("parent transaction ID not found in meta data")
+		}
+		batchID = parentTransactionID
+
+		// The batch is marked before anything is recorded: if the mark is not
+		// saved, the item is left for the worker to retry.
+		if err := l.markQueuedAtomicBatchFailed(ctx, batchID); err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+
+		// An item recorded before (rejected by an attempt whose rollback did
+		// not finish, or applied before its batch failed) is not recorded
+		// again: this attempt only finishes the rollback.
+		recorded, err := l.datasource.TransactionExistsByRef(ctx, transaction.Reference)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+		if recorded {
+			if err := l.failQueuedAtomicBatch(ctx, errors.New("transaction rejected"), batchID, transaction.Inflight); err != nil {
+				span.RecordError(err)
+				return nil, err
+			}
+			existing, err := l.datasource.GetTransactionByRef(ctx, transaction.Reference)
+			if err != nil {
+				span.RecordError(err)
+				return nil, err
+			}
+			return &existing, nil
+		}
+	}
+
 	// Update the transaction status to rejected
 	transaction.Status = StatusRejected
 
@@ -70,16 +108,16 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 		),
 	)
 
-	if transaction.Atomic {
-		logrus.Info(transaction.ParentTransaction, "parent transaction", transaction.Atomic, "atomic", transaction.Inflight, "inflight")
-		parentTransactionID, ok := transaction.MetaData["QUEUED_PARENT_TRANSACTION"].(string)
-		if !ok {
-			return nil, fmt.Errorf("parent transaction ID not found in meta data")
-		}
-		l.handleAsyncBulkTransactionFailure(ctx, errors.New("transaction rejected"), parentTransactionID, transaction.Atomic, transaction.Inflight)
-	}
 	// For rejected transactions, no balances were updated, so pass nil
 	l.postTransactionActions(ctx, transaction, nil, nil)
+
+	if batchID != "" {
+		logrus.Info(transaction.ParentTransaction, "parent transaction", transaction.Atomic, "atomic", transaction.Inflight, "inflight")
+		if err := l.failQueuedAtomicBatch(ctx, errors.New("transaction rejected"), batchID, transaction.Inflight); err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+	}
 	return transaction, nil
 }
 

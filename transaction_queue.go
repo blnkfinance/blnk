@@ -186,6 +186,15 @@ func (l *Blnk) persistAndEnqueue(ctx context.Context, transaction *model.Transac
 		return err
 	}
 
+	// Register each item of a queued atomic bulk before it is enqueued, so a
+	// later failure in the batch can roll the applied items back.
+	if !queued.SkipQueue {
+		if err := l.registerQueuedAtomicBatchItem(ctx, queued, queueTransactions); err != nil {
+			span.RecordError(err)
+			logrus.WithError(err).Error("failed to register queued atomic batch item")
+		}
+	}
+
 	if err := enqueueTransactions(ctx, l.queue, queued, queueTransactions); err != nil {
 		span.RecordError(err)
 		logrus.WithError(err).WithField("transaction_id", queued.TransactionID).
