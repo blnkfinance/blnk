@@ -80,9 +80,10 @@ func loadInstance(app *blnkInstance, configFile string) error {
 
 // preRun sets up the configuration and initializes the Blnk instance before running any command.
 // It ensures that the configuration is loaded, and the Blnk instance is initialized properly.
-func preRun(app *blnkInstance) func(cmd *cobra.Command, args []string) error {
+// configFile is a pointer because cobra parses --config after the hook is built.
+func preRun(app *blnkInstance, configFile *string) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		if err := loadInstance(app, "blnk.json"); err != nil {
+		if err := loadInstance(app, *configFile); err != nil {
 			log.Fatal(err)
 		}
 		return nil
@@ -121,10 +122,10 @@ func NewCLI() *Blnk {
 	}
 
 	// Add a persistent flag to the root command for specifying the config file.
-	rootCmd.PersistentFlags().StringVar(&configFile, "config", "./blnk.json", "Configuration file for wallet lite")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "./blnk.json", "Path to the configuration file")
 
 	// Set the persistent pre-run hook to initialize the app and config before executing any command.
-	rootCmd.PersistentPreRunE = preRun(b)
+	rootCmd.PersistentPreRunE = preRun(b, &configFile)
 
 	// Add various subcommands to the root command.
 	rootCmd.AddCommand(serverCommands(b))      // Command for starting the server
