@@ -82,6 +82,15 @@ func TestParseFromQuery(t *testing.T) {
 		}
 	})
 
+	t.Run("keeps leading zeros and plus signs in string values", func(t *testing.T) {
+		for _, v := range []string{"0123456789", "+2348012345678"} {
+			result := ParseFromQuery(url.Values{"number_eq": {v}}, nil)
+			if len(result.Filters.Filters) != 1 || result.Filters.Filters[0].Value != v {
+				t.Errorf("expected %q to stay a string, got %+v", v, result.Filters.Filters)
+			}
+		}
+	})
+
 	t.Run("parses IN operator with multiple values", func(t *testing.T) {
 		params := url.Values{"currency_in": {"USD,EUR,GBP"}}
 		result := ParseFromQuery(params, nil)
