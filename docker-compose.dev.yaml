@@ -18,6 +18,12 @@ services:
     image: alpine:3.19
     container_name: init
     working_dir: /workspace
+    environment:
+      BLNK_PROJECT_NAME: ${BLNK_PROJECT_NAME:-Blnk}
+      BLNK_DATA_SOURCE_DNS: ${BLNK_DATA_SOURCE_DNS:-}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-blnk}
     volumes:
       - .:/workspace
     entrypoint: ["/bin/sh", "/workspace/blnk-init.sh"]

@@ -18,6 +18,9 @@
 
 set -eu
 
+# Keep URL parsing deterministic and encode credentials byte-by-byte.
+LC_ALL=C
+
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_FILE="${ROOT_DIR}/blnk.json"
 
@@ -30,11 +33,47 @@ if [ -d "${CONFIG_FILE}" ]; then
     rm -rf "${CONFIG_FILE}"
 fi
 
-cat > "${CONFIG_FILE}" <<'EOF'
+url_encode() {
+    value=$1
+    encoded=""
+
+    while [ -n "${value}" ]; do
+        character=${value%"${value#?}"}
+        case "${character}" in
+            [a-zA-Z0-9.~_-]) encoded="${encoded}${character}" ;;
+            *) encoded="${encoded}$(printf '%%%02X' "'${character}")" ;;
+        esac
+        value=${value#?}
+    done
+
+    printf '%s' "${encoded}"
+}
+
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+POSTGRES_USER=${POSTGRES_USER:-postgres}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+POSTGRES_DB=${POSTGRES_DB:-blnk}
+
+if [ -n "${BLNK_DATA_SOURCE_DNS:-}" ]; then
+    DATA_SOURCE_DNS=${BLNK_DATA_SOURCE_DNS}
+else
+    ENCODED_USER=$(url_encode "${POSTGRES_USER}")
+    ENCODED_PASSWORD=$(url_encode "${POSTGRES_PASSWORD}")
+    ENCODED_DB=$(url_encode "${POSTGRES_DB}")
+    DATA_SOURCE_DNS="postgres://${ENCODED_USER}:${ENCODED_PASSWORD}@postgres:5432/${ENCODED_DB}?sslmode=disable"
+fi
+
+PROJECT_NAME=$(json_escape "${BLNK_PROJECT_NAME:-Blnk}")
+DATA_SOURCE_DNS=$(json_escape "${DATA_SOURCE_DNS}")
+
+cat > "${CONFIG_FILE}" <<EOF
 {
-  "project_name": "Blnk",
+  "project_name": "${PROJECT_NAME}",
   "data_source": {
-    "dns": "postgres://postgres:password@postgres:5432/blnk?sslmode=disable"
+    "dns": "${DATA_SOURCE_DNS}"
   },
   "redis": {
     "dns": "redis:6379"
@@ -45,5 +84,5 @@ cat > "${CONFIG_FILE}" <<'EOF'
 }
 EOF
 
-echo "Created ${CONFIG_FILE} with compose defaults."
+echo "Created ${CONFIG_FILE} from the compose environment."
 echo "Edit ${CONFIG_FILE} to customize your Blnk configuration."
