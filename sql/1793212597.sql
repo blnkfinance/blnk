@@ -66,6 +66,9 @@ BEGIN
                 FROM blnk.balance_snapshots bs
                 WHERE bs.balance_id = b.balance_id
                 AND DATE_TRUNC('day', bs.snapshot_time) = DATE_TRUNC('day', v_current_time)
+                -- A snapshot without last_tx_seq is unusable, so it does not
+                -- block today's sequenced one.
+                AND bs.last_tx_seq IS NOT NULL
             )
             ORDER BY b.id
             LIMIT batch_size

@@ -242,3 +242,31 @@ func TestTakeBalanceSnapshots_RecordsLastAppliedSeq_RealDB(t *testing.T) {
 		"UPDATE blnk.balance_snapshots SET last_tx_seq = last_tx_seq + 1 WHERE balance_id = $1", dst)
 	assert.Error(t, err, "last_tx_seq must be immutable like the rest of the snapshot")
 }
+
+func TestTakeBalanceSnapshots_SameDayLegacySnapshotDoesNotBlock_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	ctx := context.Background()
+	ledgerID, src, dst := newReplayPair(t, ds, "seq-same-day")
+	now := time.Now().UTC()
+
+	applied := insertReplayTransaction(t, ds, src, dst, 1000, now, now)
+	// Taken earlier today, before the upgrade.
+	insertLegacySnapshot(t, ds, dst, ledgerID, 1000, 0, now)
+
+	var snapshotted int
+	require.NoError(t, ds.Conn.QueryRowContext(ctx,
+		"SELECT blnk.take_daily_balance_snapshots_batched($1)", 1000).Scan(&snapshotted))
+
+	var seq int64
+	require.NoError(t, ds.Conn.QueryRowContext(ctx,
+		"SELECT last_tx_seq FROM blnk.balance_snapshots WHERE balance_id = $1 AND last_tx_seq IS NOT NULL", dst).Scan(&seq))
+	assert.Equal(t, applied, seq)
+
+	// The sequenced snapshot is the one per day; a second run adds nothing.
+	require.NoError(t, ds.Conn.QueryRowContext(ctx,
+		"SELECT blnk.take_daily_balance_snapshots_batched($1)", 1000).Scan(&snapshotted))
+	var count int
+	require.NoError(t, ds.Conn.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM blnk.balance_snapshots WHERE balance_id = $1", dst).Scan(&count))
+	assert.Equal(t, 2, count)
+}
