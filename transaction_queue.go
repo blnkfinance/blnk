@@ -280,7 +280,7 @@ func (l *Blnk) processTxns(ctx context.Context, originalTxn *model.Transaction, 
 				recorded, err := l.RecordTransaction(ctx, txn)
 				if err != nil {
 					if txn.Atomic {
-						l.handleAsyncBulkTransactionFailure(ctx, err, originalTxnID, true, txn.Inflight)
+						l.handleAsyncBulkTransactionFailure(ctx, err, originalTxnID, true, txn.Inflight, false)
 					}
 					return nil, fmt.Errorf("failed to record split transaction %d: %w", i, err)
 				}
