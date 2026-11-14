@@ -488,14 +488,14 @@ func TestWorker_AtomicBulkFailingBeforeQueuedRejectsQueuedItems(t *testing.T) {
 	require.NoError(t, srv.Start(mux))
 	t.Cleanup(srv.Shutdown)
 
-	deadline := time.Now().Add(30 * time.Second)
-	for idle := time.Now(); time.Since(idle) < time.Second; time.Sleep(50 * time.Millisecond) {
-		require.True(t, time.Now().Before(deadline), "the transaction queue did not drain")
-		info, err := inspector.GetQueueInfo(queue)
-		if err != nil || info.Pending+info.Active+info.Scheduled+info.Retry > 0 {
-			idle = time.Now()
-		}
-	}
+	// Wait for the worker to settle the queued item, whichever way it goes.
+	var recorded model.Transaction
+	require.Eventually(t, func() bool {
+		var getErr error
+		recorded, getErr = b.blnk.GetTransactionByRef(ctx, first.Reference)
+		return getErr == nil && recorded.Status != "QUEUED"
+	}, 30*time.Second, 50*time.Millisecond, "the worker did not process the queued item")
+	assert.Equal(t, "REJECTED", recorded.Status)
 
 	dstAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(dst.BalanceID)
 	require.NoError(t, err)
@@ -504,9 +504,6 @@ func TestWorker_AtomicBulkFailingBeforeQueuedRejectsQueuedItems(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "10000", srcAfter.Balance.String())
 
-	recorded, err := b.blnk.GetTransactionByRef(ctx, first.Reference)
-	require.NoError(t, err)
-	assert.Equal(t, "REJECTED", recorded.Status)
 	assert.Empty(t, bulkWebhooks(t, inspector, cfg.Queue.WebhookQueue, result.BatchID), "a sync batch answers the request and sends no webhook")
 }
 
