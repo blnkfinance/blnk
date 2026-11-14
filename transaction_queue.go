@@ -405,6 +405,12 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	}
 	if transaction.AllowOverdraft {
 		transaction.MetaData["allow_overdraft"] = true
+		// The limit has no column either. Without it a transaction read back
+		// from the DB (coalesced sibling, recovered stuck transaction) gets
+		// OverdraftLimit 0, which means an unlimited overdraft.
+		if transaction.OverdraftLimit > 0 {
+			transaction.MetaData["overdraft_limit"] = transaction.OverdraftLimit
+		}
 	}
 }
 
