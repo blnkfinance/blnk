@@ -460,10 +460,13 @@ func TestWorker_AtomicBulkFailingBeforeQueuedRejectsQueuedItems(t *testing.T) {
 
 	queue := cfg.Queue.TransactionQueue + "_1"
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: cfg.Redis.Dns})
+	db, err := sql.Open("postgres", cfg.DataSource.Dns)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = inspector.DeleteQueue(queue, true)
 		_ = inspector.DeleteQueue(cfg.Queue.WebhookQueue, true)
 		_ = inspector.Close()
+		_ = db.Close()
 	})
 
 	src, dst := createBalancePair(t, b)
@@ -488,14 +491,20 @@ func TestWorker_AtomicBulkFailingBeforeQueuedRejectsQueuedItems(t *testing.T) {
 	require.NoError(t, srv.Start(mux))
 	t.Cleanup(srv.Shutdown)
 
-	// Wait for the worker to settle the queued item, whichever way it goes.
-	var recorded model.Transaction
+	// The worker records what it does with the queued item as a row of the
+	// batch: wait until there is one, whichever way it went.
+	settled := func(status string) int {
+		var n int
+		require.NoError(t, db.QueryRow(`SELECT count(*) FROM blnk.transactions
+			WHERE status = $2 AND meta_data->>'QUEUED_PARENT_TRANSACTION' = $1
+			AND reference NOT LIKE '%_refund'`, result.BatchID, status).Scan(&n))
+		return n
+	}
 	require.Eventually(t, func() bool {
-		var getErr error
-		recorded, getErr = b.blnk.GetTransactionByRef(ctx, first.Reference)
-		return getErr == nil && recorded.Status != "QUEUED"
-	}, 30*time.Second, 50*time.Millisecond, "the worker did not process the queued item")
-	assert.Equal(t, "REJECTED", recorded.Status)
+		return settled("APPLIED")+settled("REJECTED") > 0
+	}, 30*time.Second, 100*time.Millisecond, "the worker did not process the queued item")
+	assert.Zero(t, settled("APPLIED"), "the queued item must not be applied after its batch failed")
+	assert.Equal(t, 1, settled("REJECTED"))
 
 	dstAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(dst.BalanceID)
 	require.NoError(t, err)
