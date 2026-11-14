@@ -445,6 +445,77 @@ func (bt *queuedAtomicBatch) underBatch(t *testing.T, where string) int {
 // The refund the rollback writes is listed under the batch id, next to the
 // payment it reverses, and nothing refunds it in turn: neither a redelivered
 // item of the batch nor a refund of the batch id.
+// An atomic bulk that fails while its items are being queued must not leave
+// the items queued before the failure to be applied by the worker later.
+func TestWorker_AtomicBulkFailingBeforeQueuedRejectsQueuedItems(t *testing.T) {
+	cfg := realInfraConfig(t)
+	suffix := strings.ToLower(gofakeit.LetterN(8))
+	cfg.Queue.TransactionQueue = "transaction_queue_cmd_test_bulk_queued_" + suffix
+	cfg.Queue.WebhookQueue = "webhook_queue_cmd_test_bulk_queued_" + suffix
+	cfg.Notification.Webhook.Url = "http://127.0.0.1:1/bulk"
+	newBlnk, err := setupBlnk(cfg)
+	require.NoError(t, err, "Postgres and Redis must be running for the cmd test suite")
+	b := &blnkInstance{blnk: newBlnk, cnf: cfg}
+	ctx := context.Background()
+
+	queue := cfg.Queue.TransactionQueue + "_1"
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: cfg.Redis.Dns})
+	db, err := sql.Open("postgres", cfg.DataSource.Dns)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = inspector.DeleteQueue(queue, true)
+		_ = inspector.DeleteQueue(cfg.Queue.WebhookQueue, true)
+		_ = inspector.Close()
+		_ = db.Close()
+	})
+
+	src, dst := createBalancePair(t, b)
+	funded := queuedTransaction(src.BalanceID, src.BalanceID, 100, true)
+	funded.Source = "@world_" + suffix
+	funded.SkipQueue = true
+	_, err = b.blnk.QueueTransaction(ctx, funded)
+	require.NoError(t, err)
+
+	// The worker is not running yet, so item 0 is still queued when item 1
+	// fails on a reference that is already taken.
+	first := &model.Transaction{Reference: "ref_" + gofakeit.UUID(), Source: src.BalanceID, Destination: dst.BalanceID, Amount: 50, Precision: 100, Currency: "USD"}
+	second := &model.Transaction{Reference: funded.Reference, Source: src.BalanceID, Destination: dst.BalanceID, Amount: 10, Precision: 100, Currency: "USD"}
+	result, err := b.blnk.CreateBulkTransactions(ctx, &model.BulkTransactionRequest{Atomic: true, Transactions: []*model.Transaction{first, second}})
+	require.Error(t, err)
+	assert.Equal(t, "failed", result.Status)
+
+	srv, err := initializeWorkerServer(cfg, initializeQueues())
+	require.NoError(t, err)
+	mux := asynq.NewServeMux()
+	initializeTaskHandlers(b, mux)
+	require.NoError(t, srv.Start(mux))
+	t.Cleanup(srv.Shutdown)
+
+	// The worker records what it does with the queued item as a row of the
+	// batch: wait until there is one, whichever way it went.
+	settled := func(status string) int {
+		var n int
+		require.NoError(t, db.QueryRow(`SELECT count(*) FROM blnk.transactions
+			WHERE status = $2 AND meta_data->>'QUEUED_PARENT_TRANSACTION' = $1
+			AND reference NOT LIKE '%_refund'`, result.BatchID, status).Scan(&n))
+		return n
+	}
+	require.Eventually(t, func() bool {
+		return settled("APPLIED")+settled("REJECTED") > 0
+	}, 30*time.Second, 100*time.Millisecond, "the worker did not process the queued item")
+	assert.Zero(t, settled("APPLIED"), "the queued item must not be applied after its batch failed")
+	assert.Equal(t, 1, settled("REJECTED"))
+
+	dstAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(dst.BalanceID)
+	require.NoError(t, err)
+	assert.Equal(t, "0", dstAfter.Balance.String(), "the queued item must not be applied after its batch failed")
+	srcAfter, err := b.blnk.GetDataSource().GetBalanceByIDLite(src.BalanceID)
+	require.NoError(t, err)
+	assert.Equal(t, "10000", srcAfter.Balance.String())
+
+	assert.Empty(t, bulkWebhooks(t, inspector, cfg.Queue.WebhookQueue, result.BatchID), "a sync batch answers the request and sends no webhook")
+}
+
 func TestWorker_AtomicBulkRefundKeepsTheBatchID(t *testing.T) {
 	bt := queueAtomicBatch(t, false, 50, 500)
 	ctx := context.Background()
