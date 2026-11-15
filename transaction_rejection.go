@@ -108,6 +108,15 @@ func (l *Blnk) RejectTransaction(ctx context.Context, transaction *model.Transac
 		),
 	)
 
+	// Queue registered POST_TRANSACTION hooks with the rejected transaction.
+	// A hook enqueue error is recorded and does not undo the rejection.
+	if l.Hooks != nil {
+		if err := l.Hooks.ExecutePostHooks(ctx, transaction.TransactionID, transaction); err != nil {
+			span.RecordError(err)
+			logrus.WithError(err).Error("post-transaction hooks failed")
+		}
+	}
+
 	// For rejected transactions, no balances were updated, so pass nil
 	l.postTransactionActions(ctx, transaction, nil, nil)
 
