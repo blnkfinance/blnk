@@ -178,9 +178,16 @@ func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Co
 
 // processStuckTransaction replays one stuck queued transaction, preserving the existing recovery
 // attempt tracking and rejection semantics while preferring the shared queued executor path.
+// An item of a queued atomic bulk request is replayed under its batch lock, as the worker runs it.
 func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context.Context, stuckTxn *model.Transaction) error {
 	restoreTransactionFlagsFromMetadata(stuckTxn)
+	queueCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
+	return p.blnk.WithQueuedAtomicBatch(ctx, queueCopy, func(batchFailed bool) error {
+		return p.recoverStuckTransaction(ctx, stuckTxn, queueCopy, batchFailed)
+	})
+}
 
+func (p *QueuedTransactionRecoveryProcessor) recoverStuckTransaction(ctx context.Context, stuckTxn, queueCopy *model.Transaction, batchFailed bool) error {
 	attempts := 0
 	if stuckTxn.MetaData != nil {
 		if v, ok := stuckTxn.MetaData["recovery_attempts"]; ok {
@@ -204,6 +211,11 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 		return p.rejectStuckTransaction(ctx, stuckTxn, "exceeded max queued recovery attempts")
 	}
 
+	if batchFailed {
+		logrus.Warnf("Stuck transaction %s belongs to a failed atomic batch, rejecting", stuckTxn.TransactionID)
+		return p.rejectStuckTransaction(ctx, stuckTxn, ErrAtomicBatchFailed.Error())
+	}
+
 	if stuckTxn.Atomic {
 		if parentID, ok := stuckTxn.MetaData["QUEUED_PARENT_TRANSACTION"].(string); ok && parentID != "" {
 			siblings, err := p.blnk.datasource.GetTransactionsByParent(ctx, parentID, 100, 0)
@@ -219,7 +231,6 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 		}
 	}
 
-	queueCopy := createQueueCopy(stuckTxn, stuckTxn.Reference)
 	result, err := p.tryRecordRecoveredTransaction(ctx, queueCopy)
 	if err != nil {
 		if isReferenceAlreadyUsedError(err) {
