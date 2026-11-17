@@ -67,6 +67,13 @@ func (l *Blnk) prepareTransactionForQueue(ctx context.Context, transaction *mode
 // - *model.Transaction: A pointer to the queued Transaction model.
 // - error: An error if the transaction could not be queued.
 func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transaction) (*model.Transaction, error) {
+	return l.queueTransaction(ctx, transaction, nil)
+}
+
+// queueTransaction queues a transaction as QueueTransaction does, except that
+// an item of a queued atomic bulk request is added to batch instead of being
+// enqueued on its own.
+func (l *Blnk) queueTransaction(ctx context.Context, transaction *model.Transaction, batch *QueuedAtomicBatch) (*model.Transaction, error) {
 	ctx, span := tracer.Start(ctx, "QueueTransaction")
 	defer span.End()
 
@@ -126,7 +133,7 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 		if strings.Contains(transaction.ParentTransaction, "bulk") {
 			transaction.MetaData["QUEUED_PARENT_TRANSACTION"] = transaction.ParentTransaction
 		}
-		if err := l.persistAndEnqueue(ctx, transaction, transactions, originalTxnID, originalRef); err != nil {
+		if err := l.persistAndEnqueue(ctx, transaction, transactions, originalTxnID, originalRef, batch); err != nil {
 			span.RecordError(err)
 			return nil, err
 		}
@@ -157,9 +164,10 @@ func (l *Blnk) QueueTransaction(ctx context.Context, transaction *model.Transact
 }
 
 // persistAndEnqueue saves a queued transaction (or its split legs) as QUEUED,
-// then enqueues it. It returns only after the save, so if the process dies or
-// the enqueue fails, queue recovery still finds the row.
-func (l *Blnk) persistAndEnqueue(ctx context.Context, transaction *model.Transaction, splitTxns []*model.Transaction, originalTxnID, originalRef string) error {
+// then enqueues it, or adds it to batch when it is an item of a queued atomic
+// bulk request that is not scheduled. It returns only after the save, so if
+// the process dies or the enqueue fails, queue recovery still finds the row.
+func (l *Blnk) persistAndEnqueue(ctx context.Context, transaction *model.Transaction, splitTxns []*model.Transaction, originalTxnID, originalRef string, batch *QueuedAtomicBatch) error {
 	ctx, span := tracer.Start(ctx, "PersistAndEnqueueTransaction")
 	defer span.End()
 
@@ -193,6 +201,11 @@ func (l *Blnk) persistAndEnqueue(ctx context.Context, transaction *model.Transac
 			span.RecordError(err)
 			logrus.WithError(err).Error("failed to register queued atomic batch item")
 		}
+	}
+
+	if _, ok := queuedAtomicBatchID(queued); ok && batch != nil && queued.ScheduledFor.IsZero() {
+		batch.Transactions = append(batch.Transactions, queueTransactions...)
+		return nil
 	}
 
 	if err := enqueueTransactions(ctx, l.queue, queued, queueTransactions); err != nil {

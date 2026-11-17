@@ -49,6 +49,9 @@ func (e *BulkTransactionError) Error() string { return e.Message }
 func (e *BulkTransactionError) Unwrap() error { return e.cause }
 
 func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*model.Transaction, batchID string, inflight bool, skipQueue bool) error {
+	batch := &QueuedAtomicBatch{BatchID: batchID}
+	defer l.enqueueQueuedAtomicBatch(ctx, batch)
+
 	for i, txn := range transactions {
 		// Set transaction properties
 		txn.Inflight = inflight
@@ -62,7 +65,7 @@ func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*mode
 		txn.MetaData["sequence"] = i + 1
 
 		// Queue the transaction (which will record it if SkipQueue is true)
-		if _, err := l.QueueTransaction(ctx, txn); err != nil {
+		if _, err := l.queueTransaction(ctx, txn, batch); err != nil {
 			// Create a more descriptive error that includes transaction reference details.
 			// The index is 0-based to match the position reported by the request
 			// validation errors for the same batch ("transactions[0]", and the
@@ -73,6 +76,19 @@ func (l *Blnk) processBulkTransactions(ctx context.Context, transactions []*mode
 		}
 	}
 	return nil
+}
+
+// enqueueQueuedAtomicBatch enqueues the items of a queued atomic bulk request
+// saved so far as one task. Their rows are saved, so when the enqueue fails,
+// queue recovery picks them up.
+func (l *Blnk) enqueueQueuedAtomicBatch(ctx context.Context, batch *QueuedAtomicBatch) {
+	if len(batch.Transactions) == 0 {
+		return
+	}
+	if err := l.queue.EnqueueQueuedAtomicBatch(context.WithoutCancel(ctx), batch); err != nil {
+		logrus.WithError(err).WithField("batch_id", batch.BatchID).
+			Warn("atomic batch saved as QUEUED but not enqueued; queue recovery will pick it up")
+	}
 }
 
 // rollbackBatchTransactions performs a rollback of transactions in a batch.
