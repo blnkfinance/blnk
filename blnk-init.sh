@@ -19,7 +19,7 @@
 set -eu
 
 # Keep URL parsing deterministic and encode credentials byte-by-byte.
-LC_ALL=C
+export LC_ALL=C
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_FILE="${ROOT_DIR}/blnk.json"
@@ -50,7 +50,18 @@ url_encode() {
 }
 
 json_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+    value=$1
+
+    while [ -n "${value}" ]; do
+        character=${value%"${value#?}"}
+        case "${character}" in
+            '"') printf '\\"' ;;
+            '\') printf '\\\\' ;;
+            [[:cntrl:]]) printf '\\u%04x' "'${character}" ;;
+            *) printf '%s' "${character}" ;;
+        esac
+        value=${value#?}
+    done
 }
 
 POSTGRES_USER=${POSTGRES_USER:-postgres}
@@ -69,6 +80,8 @@ fi
 PROJECT_NAME=$(json_escape "${BLNK_PROJECT_NAME:-Blnk}")
 DATA_SOURCE_DNS=$(json_escape "${DATA_SOURCE_DNS}")
 
+# The generated file contains the database password; keep it private from creation.
+umask 077
 cat > "${CONFIG_FILE}" <<EOF
 {
   "project_name": "${PROJECT_NAME}",
