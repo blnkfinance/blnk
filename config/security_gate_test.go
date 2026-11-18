@@ -28,7 +28,9 @@ func isolateSecurityEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{"BLNK_ALLOW_INSECURE", "BLNK_SERVER_SECURE", "BLNK_SERVER_SECRET_KEY", "BLNK_DATA_SOURCE_DNS"} {
 		t.Setenv(key, "unset-me")
-		os.Unsetenv(key)
+		// Unset after Setenv so an empty value is not left for envconfig to parse.
+		// The key is static, so Unsetenv cannot fail.
+		_ = os.Unsetenv(key)
 	}
 }
 
