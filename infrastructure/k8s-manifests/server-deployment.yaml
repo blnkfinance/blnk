@@ -36,12 +36,22 @@ spec:
               value: http://jaeger:4318/v1/traces
             - name: TZ
               value: Etc/UTC
+            - name: BLNK_SERVER_SECURE
+              value: "true"
+            - name: BLNK_SERVER_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: blnk-secrets
+                  key: server-secret-key
+            - name: BLNK_DATA_SOURCE_DNS
+              valueFrom:
+                secretKeyRef:
+                  name: blnk-secrets
+                  key: data-source-dns
           image: jerryenebeli/blnk:0.13.3
           name: server
           ports:
             - containerPort: 5001
-            - containerPort: 80
-            - containerPort: 443
           resources: {}
           volumeMounts:
             - name: blnk-config

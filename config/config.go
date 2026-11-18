@@ -327,6 +327,8 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	cnf.trimWhitespace()
 	cnf.setupRateLimiting()
 
+	// Loading config must stay possible for migrate and other commands that
+	// do not serve the ledger API. blnk start calls RequireAPIAuthentication.
 	if !cnf.Server.Secure {
 		logrus.Warn(
 			"SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.",
@@ -339,6 +341,34 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	}
 
 	return nil
+}
+
+// RequireAPIAuthentication refuses to listen when authentication is disabled,
+// unless BLNK_ALLOW_INSECURE is set, and when secure mode has no master key.
+// Commands that only load config, such as migrate, do not call this.
+func (cnf *Configuration) RequireAPIAuthentication() error {
+	cnf.Server.SecretKey = strings.TrimSpace(cnf.Server.SecretKey)
+	if cnf.Server.Secure {
+		if cnf.Server.SecretKey == "" {
+			return errors.New("server.secret_key is required when server.secure is true")
+		}
+		return nil
+	}
+
+	if insecureModeAllowed() {
+		return nil
+	}
+
+	return errors.New("server.secure is false — API authentication is DISABLED. Set server.secure to true and server.secret_key, or set BLNK_ALLOW_INSECURE=true for a private development instance")
+}
+
+func insecureModeAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BLNK_ALLOW_INSECURE"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (cnf *Configuration) validateRequiredFields() error {
@@ -549,6 +579,7 @@ func (cnf *Configuration) setDatabaseDefaults() {
 func (cnf *Configuration) trimWhitespace() {
 	cnf.ProjectName = strings.TrimSpace(cnf.ProjectName)
 	cnf.Server.Port = strings.TrimSpace(cnf.Server.Port)
+	cnf.Server.SecretKey = strings.TrimSpace(cnf.Server.SecretKey)
 	cnf.DataSource.Dns = strings.TrimSpace(cnf.DataSource.Dns)
 	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
 }

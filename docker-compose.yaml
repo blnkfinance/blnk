@@ -39,7 +39,7 @@ services:
     environment:
       TZ: ${TZ:-Etc/UTC}
     ports:
-      - "5001:5001"
+      - "127.0.0.1:5001:5001"
     depends_on:
       - init
       - redis
@@ -53,7 +53,7 @@ services:
     restart: on-failure
     entrypoint: ["blnk", "workers"]
     ports:
-      - "5004:5004"
+      - "127.0.0.1:5004:5004"
     depends_on:
       - init
       - redis
@@ -71,7 +71,7 @@ services:
     container_name: ${POSTGRES_CONTAINER:-postgres}
     restart: on-failure
     ports:
-      - "${POSTGRES_OUTER_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_OUTER_PORT:-5432}:5432"
     environment:
       TZ: ${TZ:-Etc/UTC}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
