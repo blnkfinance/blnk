@@ -319,6 +319,14 @@ func Fetch() (*Configuration, error) {
 }
 
 func (cnf *Configuration) validateAndAddDefaults() error {
+	return cnf.applyDefaults(true)
+}
+
+// applyDefaults fills defaults and, when enforceSecurity is set, refuses to
+// boot with authentication disabled or with secure mode and no master key.
+// Tests use enforceSecurity=false so partial fixtures can still exercise
+// other behavior. Production loading always enforces the check.
+func (cnf *Configuration) applyDefaults(enforceSecurity bool) error {
 	if err := cnf.validateRequiredFields(); err != nil {
 		return err
 	}
@@ -327,10 +335,10 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	cnf.trimWhitespace()
 	cnf.setupRateLimiting()
 
-	if !cnf.Server.Secure {
-		logrus.Warn(
-			"SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.",
-		)
+	if enforceSecurity {
+		if err := cnf.validateServerSecurity(); err != nil {
+			return err
+		}
 	}
 
 	// Validate tokenization secret length (AES-256 requires 32 bytes)
@@ -339,6 +347,33 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	}
 
 	return nil
+}
+
+func (cnf *Configuration) validateServerSecurity() error {
+	if cnf.Server.Secure {
+		if cnf.Server.SecretKey == "" {
+			return errors.New("server.secret_key is required when server.secure is true")
+		}
+		return nil
+	}
+
+	if insecureModeAllowed() {
+		logrus.Warn(
+			"SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.",
+		)
+		return nil
+	}
+
+	return errors.New("server.secure is false — API authentication is DISABLED. Set server.secure to true and server.secret_key, or set BLNK_ALLOW_INSECURE=true for a private development instance")
+}
+
+func insecureModeAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BLNK_ALLOW_INSECURE"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (cnf *Configuration) validateRequiredFields() error {
@@ -549,6 +584,7 @@ func (cnf *Configuration) setDatabaseDefaults() {
 func (cnf *Configuration) trimWhitespace() {
 	cnf.ProjectName = strings.TrimSpace(cnf.ProjectName)
 	cnf.Server.Port = strings.TrimSpace(cnf.Server.Port)
+	cnf.Server.SecretKey = strings.TrimSpace(cnf.Server.SecretKey)
 	cnf.DataSource.Dns = strings.TrimSpace(cnf.DataSource.Dns)
 	cnf.Redis.Dns = strings.TrimSpace(cnf.Redis.Dns)
 }
@@ -629,7 +665,9 @@ func (cnf *Configuration) setupRateLimiting() {
 
 // MockConfig sets a mock configuration for testing purposes.
 func MockConfig(mockConfig *Configuration) {
-	err := mockConfig.validateAndAddDefaults()
+	// Skip the production security gate so fixtures can model both secure and
+	// explicitly insecure middleware behavior. Real startups use InitConfig.
+	err := mockConfig.applyDefaults(false)
 	if err != nil {
 		logrus.WithError(err).Error("error setting mock config")
 		return
