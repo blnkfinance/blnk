@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -185,8 +184,7 @@ func TestWorker_AtomicBulkRejectionRollsBackQueuedBatch(t *testing.T) {
 	}
 
 	// The source of each batch holds 100: 500 cannot be paid, 50 and 10 can.
-	// Every case is sent five times and all batches go to the worker at once,
-	// so the items are applied in varying orders.
+	// Every case is sent five times and all batches go to the worker at once.
 	type batch struct {
 		name     string
 		inflight bool
@@ -315,9 +313,10 @@ func bulkWebhooks(t *testing.T, inspector *asynq.Inspector, queue, batchID strin
 	return hooks
 }
 
-// queuedAtomicBatch is an atomic bulk request whose items wait in the queue
-// with no worker serving it, so a test hands them to processTransaction
-// itself, in request order.
+// queuedAtomicBatch is an atomic bulk request whose task waits in the queue
+// with no worker serving it. A test runs that task with
+// processQueuedAtomicBatch, or hands its items to processTransaction itself,
+// in request order, as tasks of their own.
 type queuedAtomicBatch struct {
 	b         *blnkInstance
 	inspector *asynq.Inspector
@@ -325,6 +324,7 @@ type queuedAtomicBatch struct {
 	id        string
 	src       *model.Balance
 	dsts      []*model.Balance
+	batch     *asynq.Task
 	tasks     []*asynq.Task
 	items     []*model.Transaction
 }
@@ -386,28 +386,26 @@ func queueBulkRequest(t *testing.T, req model.BulkTransactionRequest, amounts ..
 	require.NoError(t, err)
 	bt.id = result.BatchID
 
-	// The items are queued in the background; wait for all of them.
-	var queued []*asynq.TaskInfo
+	// The batch is queued in the background; wait for it.
+	var queued *asynq.TaskInfo
 	deadline := time.Now().Add(10 * time.Second)
-	for len(queued) < len(amounts) {
-		require.True(t, time.Now().Before(deadline), "the batch's items were not queued")
+	for queued == nil {
+		require.True(t, time.Now().Before(deadline), "the batch was not queued")
 		time.Sleep(50 * time.Millisecond)
-		queued, _ = inspector.ListPendingTasks(queue, asynq.PageSize(1000))
+		queued, _ = inspector.GetTaskInfo(queue, bt.id)
 	}
-	sequence := make(map[*asynq.TaskInfo]float64, len(queued))
-	for _, task := range queued {
+	bt.batch = asynq.NewTask(queued.Type, queued.Payload)
+	var batch struct {
+		Transactions []json.RawMessage `json:"transactions"`
+	}
+	require.NoError(t, json.Unmarshal(queued.Payload, &batch))
+	require.Len(t, batch.Transactions, len(amounts))
+	for _, payload := range batch.Transactions {
 		var txn model.Transaction
-		require.NoError(t, json.Unmarshal(task.Payload, &txn))
+		require.NoError(t, json.Unmarshal(payload, &txn))
 		require.Equal(t, bt.id, txn.MetaData["QUEUED_PARENT_TRANSACTION"])
-		sequence[task], _ = txn.MetaData["sequence"].(float64)
-	}
-	// In request order, with the payloads exactly as queued.
-	sort.Slice(queued, func(i, j int) bool { return sequence[queued[i]] < sequence[queued[j]] })
-	for _, task := range queued {
-		var txn model.Transaction
-		require.NoError(t, json.Unmarshal(task.Payload, &txn))
 		bt.items = append(bt.items, &txn)
-		bt.tasks = append(bt.tasks, asynq.NewTask(task.Type, task.Payload))
+		bt.tasks = append(bt.tasks, asynq.NewTask(queue, payload))
 	}
 	return bt
 }

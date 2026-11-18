@@ -328,6 +328,46 @@ func (q *Queue) Enqueue(ctx context.Context, transaction *model.Transaction) err
 	return nil
 }
 
+// QueuedAtomicBatchTask is the type of the task that runs the items of a
+// queued atomic bulk request.
+const QueuedAtomicBatchTask = "new:atomic_batch"
+
+// QueuedAtomicBatch is the payload of a QueuedAtomicBatchTask: the queued
+// transactions of the batch in the order sent, the legs of a split item one
+// after another.
+type QueuedAtomicBatch struct {
+	BatchID      string               `json:"batch_id"`
+	Transactions []*model.Transaction `json:"transactions"`
+}
+
+// EnqueueQueuedAtomicBatch enqueues the items of a queued atomic bulk request
+// as one task, on the queue of the first item's source.
+func (q *Queue) EnqueueQueuedAtomicBatch(ctx context.Context, batch *QueuedAtomicBatch) error {
+	ctx, span := tracer.Start(ctx, "Adding Atomic Batch To Redis Queue")
+	defer span.End()
+
+	if err := q.assertEnqueueAllowed(ctx); err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(batch)
+	if err != nil {
+		return err
+	}
+	queueName := q.balanceQueueName(batch.Transactions[0].Source)
+	task := asynq.NewTask(QueuedAtomicBatchTask, payload, asynq.TaskID(batch.BatchID), asynq.Queue(queueName))
+	if _, err := q.Client.EnqueueContext(ctx, task, asynq.MaxRetry(q.config.Queue.MaxRetryAttempts)); err != nil {
+		logrus.WithError(err).WithField("batch_id", batch.BatchID).Error("failed to enqueue atomic batch")
+		return err
+	}
+	logrus.WithField("batch_id", batch.BatchID).Debug("successfully enqueued atomic batch")
+
+	metrics.QueueEnqueuedTotal.Add(ctx, 1,
+		otelmetric.WithAttributes(attribute.String("queue_name", queueName)),
+	)
+	return nil
+}
+
 // QueueInflightExpiry handles queuing a transaction for inflight expiration.
 // This method is separate from the main Enqueue to ensure expiration is handled
 // regardless of whether the transaction is queued or processed immediately.
@@ -380,7 +420,11 @@ func (q *Queue) transactionQueueName(transaction *model.Transaction) string {
 	metrics.HotpairsLaneRoutedTotal.Add(context.Background(), 1,
 		otelmetric.WithAttributes(attribute.String("lane", "normal")),
 	)
-	queueIndex := hashBalanceID(transaction.Source) % q.config.Queue.NumberOfQueues
+	return q.balanceQueueName(transaction.Source)
+}
+
+func (q *Queue) balanceQueueName(balanceID string) string {
+	queueIndex := hashBalanceID(balanceID) % q.config.Queue.NumberOfQueues
 	return fmt.Sprintf("%s_%d", q.config.Queue.TransactionQueue, queueIndex+1)
 }
 

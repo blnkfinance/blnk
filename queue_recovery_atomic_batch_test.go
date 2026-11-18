@@ -19,16 +19,18 @@ package blnk
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/blnkfinance/blnk/database"
+	dbmocks "github.com/blnkfinance/blnk/database/mocks"
 	"github.com/blnkfinance/blnk/model"
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,7 +47,7 @@ type lostAtomicBulk struct {
 }
 
 // queueLostAtomicBulk queues an atomic bulk request paying the amounts from a
-// source that holds 100, then drops the items' tasks. Tasks and rows are in
+// source that holds 100, then drops the batch's task. Tasks and rows are in
 // request order.
 func queueLostAtomicBulk(t *testing.T, b *Blnk, ds database.IDataSource, runAsync bool, amounts ...float64) *lostAtomicBulk {
 	t.Helper()
@@ -79,27 +81,21 @@ func queueLostAtomicBulk(t *testing.T, b *Blnk, ds database.IDataSource, runAsyn
 	require.NoError(t, err)
 	bulk.id = result.BatchID
 
-	var queued []*asynq.TaskInfo
+	var task *asynq.TaskInfo
 	deadline := time.Now().Add(10 * time.Second)
-	for len(queued) < len(amounts) {
-		require.True(t, time.Now().Before(deadline), "the batch's items were not queued")
+	for task == nil {
+		require.True(t, time.Now().Before(deadline), "the batch was not queued")
 		time.Sleep(50 * time.Millisecond)
-		queued, _ = inspector.ListPendingTasks(queue, asynq.PageSize(100))
+		task, _ = inspector.GetTaskInfo(queue, bulk.id)
 	}
-	for _, task := range queued {
-		var txn model.Transaction
-		require.NoError(t, json.Unmarshal(task.Payload, &txn))
+	var batch QueuedAtomicBatch
+	require.NoError(t, json.Unmarshal(task.Payload, &batch))
+	require.NoError(t, inspector.DeleteTask(queue, task.ID))
+	bulk.tasks = batch.Transactions
+	require.Len(t, bulk.tasks, len(amounts))
+	for _, txn := range bulk.tasks {
 		require.Equal(t, bulk.id, txn.MetaData["QUEUED_PARENT_TRANSACTION"])
-		require.NoError(t, inspector.DeleteTask(queue, task.ID))
-		bulk.tasks = append(bulk.tasks, &txn)
-	}
-	sequence := func(txn *model.Transaction) float64 {
-		s, _ := txn.MetaData["sequence"].(float64)
-		return s
-	}
-	sort.Slice(bulk.tasks, func(i, j int) bool { return sequence(bulk.tasks[i]) < sequence(bulk.tasks[j]) })
-	for _, task := range bulk.tasks {
-		row, err := ds.GetTransaction(ctx, task.ParentTransaction)
+		row, err := ds.GetTransaction(ctx, txn.ParentTransaction)
 		require.NoError(t, err)
 		require.Equal(t, StatusQueued, row.Status)
 		bulk.rows = append(bulk.rows, row)
@@ -175,4 +171,42 @@ func TestRecovery_LastItemOfAsyncAtomicBatchReportsTheBatch(t *testing.T) {
 
 	assert.Equal(t, "1000", balanceOf(t, ds, bulk.dsts[1]), "recovery pays the 10")
 	assert.Equal(t, []string{"bulk_transaction.applied"}, bulk.bulkEvents(t), "the batch is reported once its last item lands")
+}
+
+// Recovery replays stuck rows oldest first. When an item of an atomic batch
+// fails, the batch's later items wait for the next pass instead of being
+// applied before it; rows of other batches are still recovered.
+func TestRecoverWithThreshold_AtomicBatchWaitsForItsFailedItem(t *testing.T) {
+	b, _ := newCoreTestBlnk(t)
+	mockDS := &dbmocks.MockDataSource{}
+	b.datasource = mockDS
+	processor := NewQueuedTransactionRecoveryProcessor(b)
+
+	stuckItem := func(batchID, ref string) *model.Transaction {
+		txn := positiveStuckTxn()
+		txn.TransactionID = model.GenerateUUIDWithSuffix("txn")
+		txn.Reference = ref
+		txn.MetaData = map[string]interface{}{"atomic": true, "QUEUED_PARENT_TRANSACTION": batchID}
+		return txn
+	}
+	batch, other := model.GenerateUUIDWithSuffix("bulk"), model.GenerateUUIDWithSuffix("bulk")
+	first, second, elsewhere := stuckItem(batch, "ref_first"), stuckItem(batch, "ref_second"), stuckItem(other, "ref_elsewhere")
+	mockDS.On("GetStuckQueuedTransactions", mock.Anything, mock.Anything, 100).
+		Return([]*model.Transaction{first, second, elsewhere}, nil).Once()
+	mockDS.On("GetTransactionsByParent", mock.Anything, mock.Anything, 100, int64(0)).Return([]*model.Transaction{}, nil)
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	var replayed []string
+	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
+		replayed = append(replayed, txn.Reference)
+		if txn.ParentTransaction == first.TransactionID {
+			return transactionExecutionResult{}, errors.New("lock contention")
+		}
+		return transactionExecutionResult{mode: transactionExecutionModeSingle, transaction: txn}, nil
+	}
+
+	recovered, err := processor.recoverWithThreshold(context.Background(), time.Hour)
+	require.Error(t, err)
+	assert.Equal(t, 1, recovered)
+	assert.Equal(t, []string{"ref_first_q", "ref_elsewhere_q"}, replayed, "the second item must wait for the first")
 }
