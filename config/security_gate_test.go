@@ -44,12 +44,20 @@ func openLedgerConfig() Configuration {
 }
 
 func TestServerSecurityGate(t *testing.T) {
-	t.Run("refuses the unauthenticated default", func(t *testing.T) {
+	t.Run("config load still allows migrate without authentication", func(t *testing.T) {
 		isolateSecurityEnv(t)
 		cnf := openLedgerConfig()
-		err := cnf.validateAndAddDefaults()
+		if err := cnf.validateAndAddDefaults(); err != nil {
+			t.Fatalf("loading an open config must not block migrate, got %v", err)
+		}
+	})
+
+	t.Run("refuses to serve the unauthenticated default", func(t *testing.T) {
+		isolateSecurityEnv(t)
+		cnf := openLedgerConfig()
+		err := cnf.RequireAPIAuthentication()
 		if err == nil || !strings.Contains(err.Error(), "authentication is DISABLED") {
-			t.Fatalf("expected authentication to be refused, got %v", err)
+			t.Fatalf("expected the API server to be refused, got %v", err)
 		}
 	})
 
@@ -61,7 +69,10 @@ func TestServerSecurityGate(t *testing.T) {
 
 		cnf := openLedgerConfig()
 		if err := cnf.validateAndAddDefaults(); err != nil {
-			t.Fatalf("opt-in should start, got %v", err)
+			t.Fatalf("opt-in config should load, got %v", err)
+		}
+		if err := cnf.RequireAPIAuthentication(); err != nil {
+			t.Fatalf("opt-in should allow the API server, got %v", err)
 		}
 		var warned bool
 		for _, entry := range hook.AllEntries() {
@@ -79,7 +90,10 @@ func TestServerSecurityGate(t *testing.T) {
 		cnf := openLedgerConfig()
 		cnf.Server.Secure = true
 		cnf.Server.SecretKey = "   "
-		err := cnf.validateAndAddDefaults()
+		if err := cnf.validateAndAddDefaults(); err != nil {
+			t.Fatalf("secure config without a key must still load for migrate, got %v", err)
+		}
+		err := cnf.RequireAPIAuthentication()
 		if err == nil || !strings.Contains(err.Error(), "server.secret_key is required") {
 			t.Fatalf("expected a missing secret_key error, got %v", err)
 		}
@@ -94,7 +108,10 @@ func TestServerSecurityGate(t *testing.T) {
 		cnf.Server.Secure = true
 		cnf.Server.SecretKey = "master-secret"
 		if err := cnf.validateAndAddDefaults(); err != nil {
-			t.Fatalf("secure config should start, got %v", err)
+			t.Fatalf("secure config should load, got %v", err)
+		}
+		if err := cnf.RequireAPIAuthentication(); err != nil {
+			t.Fatalf("secure config should serve, got %v", err)
 		}
 		for _, entry := range hook.AllEntries() {
 			if strings.Contains(entry.Message, "authentication is DISABLED") {
@@ -140,17 +157,26 @@ func TestShippedConfigMapRequiresASecret(t *testing.T) {
 	}
 
 	t.Setenv("BLNK_DATA_SOURCE_DNS", "postgres://postgres:secret@postgres:5432/blnk?sslmode=disable")
-	err = InitConfig(file.Name())
-	if err == nil || !strings.Contains(err.Error(), "server.secret_key is required") {
-		t.Fatalf("shipped config without a master key should be refused, got %v", err)
+	if err := InitConfig(file.Name()); err != nil {
+		t.Fatalf("shipped config must load without a master key so migrate can run, got %v", err)
+	}
+	loaded, err := Fetch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.RequireAPIAuthentication(); err == nil || !strings.Contains(err.Error(), "server.secret_key is required") {
+		t.Fatalf("API server should refuse the shipped config without a master key, got %v", err)
 	}
 
 	t.Setenv("BLNK_SERVER_SECRET_KEY", "env-master-key")
 	if err := InitConfig(file.Name()); err != nil {
-		t.Fatalf("shipped config with a master key from the environment should start, got %v", err)
+		t.Fatalf("shipped config with a master key from the environment should load, got %v", err)
 	}
-	loaded, err := Fetch()
+	loaded, err = Fetch()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.RequireAPIAuthentication(); err != nil {
 		t.Fatal(err)
 	}
 	if !loaded.Server.Secure || loaded.Server.SecretKey != "env-master-key" {

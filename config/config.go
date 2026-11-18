@@ -319,14 +319,6 @@ func Fetch() (*Configuration, error) {
 }
 
 func (cnf *Configuration) validateAndAddDefaults() error {
-	return cnf.applyDefaults(true)
-}
-
-// applyDefaults fills defaults and, when enforceSecurity is set, refuses to
-// boot with authentication disabled or with secure mode and no master key.
-// Tests use enforceSecurity=false so partial fixtures can still exercise
-// other behavior. Production loading always enforces the check.
-func (cnf *Configuration) applyDefaults(enforceSecurity bool) error {
 	if err := cnf.validateRequiredFields(); err != nil {
 		return err
 	}
@@ -335,10 +327,12 @@ func (cnf *Configuration) applyDefaults(enforceSecurity bool) error {
 	cnf.trimWhitespace()
 	cnf.setupRateLimiting()
 
-	if enforceSecurity {
-		if err := cnf.validateServerSecurity(); err != nil {
-			return err
-		}
+	// Loading config must stay possible for migrate and other commands that
+	// do not serve the ledger API. blnk start calls RequireAPIAuthentication.
+	if !cnf.Server.Secure {
+		logrus.Warn(
+			"SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.",
+		)
 	}
 
 	// Validate tokenization secret length (AES-256 requires 32 bytes)
@@ -349,7 +343,11 @@ func (cnf *Configuration) applyDefaults(enforceSecurity bool) error {
 	return nil
 }
 
-func (cnf *Configuration) validateServerSecurity() error {
+// RequireAPIAuthentication refuses to listen when authentication is disabled,
+// unless BLNK_ALLOW_INSECURE is set, and when secure mode has no master key.
+// Commands that only load config, such as migrate, do not call this.
+func (cnf *Configuration) RequireAPIAuthentication() error {
+	cnf.Server.SecretKey = strings.TrimSpace(cnf.Server.SecretKey)
 	if cnf.Server.Secure {
 		if cnf.Server.SecretKey == "" {
 			return errors.New("server.secret_key is required when server.secure is true")
@@ -358,9 +356,6 @@ func (cnf *Configuration) validateServerSecurity() error {
 	}
 
 	if insecureModeAllowed() {
-		logrus.Warn(
-			"SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.",
-		)
 		return nil
 	}
 
@@ -665,9 +660,7 @@ func (cnf *Configuration) setupRateLimiting() {
 
 // MockConfig sets a mock configuration for testing purposes.
 func MockConfig(mockConfig *Configuration) {
-	// Skip the production security gate so fixtures can model both secure and
-	// explicitly insecure middleware behavior. Real startups use InitConfig.
-	err := mockConfig.applyDefaults(false)
+	err := mockConfig.validateAndAddDefaults()
 	if err != nil {
 		logrus.WithError(err).Error("error setting mock config")
 		return

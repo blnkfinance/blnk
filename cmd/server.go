@@ -370,10 +370,14 @@ func serverCommands(b *blnkInstance) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.Background()
 
-			// Load configuration
+			// Load configuration. Authentication is enforced here, not during
+			// config load, so migrate can run without serving the API.
 			cfg, err := config.Fetch()
-			if err != nil {
-				logrus.Error(err)
+			if err != nil || cfg == nil {
+				logrus.Fatal(err)
+			}
+			if err := cfg.RequireAPIAuthentication(); err != nil {
+				logrus.Fatal(err)
 			}
 
 			// Initialize telemetry and observability before the router,

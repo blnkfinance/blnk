@@ -84,8 +84,6 @@ jobs:
         env:
           BLNK_DATA_SOURCE_DNS: postgres://postgres@localhost:5432/blnk?sslmode=disable
           BLNK_REDIS_DNS: localhost:6379
-          BLNK_SERVER_SECURE: "true"
-          BLNK_SERVER_SECRET_KEY: ci-test-secret
 
       - name: Test
         run: go test -v -p 1 ./...
@@ -149,8 +147,6 @@ jobs:
         env:
           BLNK_DATA_SOURCE_DNS: postgres://postgres@localhost:5432/blnk?sslmode=disable
           BLNK_REDIS_DNS: localhost:6379
-          BLNK_SERVER_SECURE: "true"
-          BLNK_SERVER_SECRET_KEY: ci-test-secret
 
       - name: Test (race detector)
         run: go test -race -p 1 ./...
