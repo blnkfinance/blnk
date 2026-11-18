@@ -328,7 +328,7 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 	cnf.setupRateLimiting()
 
 	// Loading config must stay possible for migrate and other commands that
-	// do not serve the ledger API. blnk start calls RequireAPIAuthentication.
+	// do not serve the ledger. blnk start and blnk workers call RequireAPIAuthentication.
 	if !cnf.Server.Secure {
 		logrus.Warn(
 			"SECURITY: server.secure is false — API authentication is DISABLED. Do not use this configuration in production.",
@@ -345,7 +345,8 @@ func (cnf *Configuration) validateAndAddDefaults() error {
 
 // RequireAPIAuthentication refuses to listen when authentication is disabled,
 // unless BLNK_ALLOW_INSECURE is set, and when secure mode has no master key.
-// Commands that only load config, such as migrate, do not call this.
+// blnk start and blnk workers call this. Commands that only load config, such
+// as migrate, do not.
 func (cnf *Configuration) RequireAPIAuthentication() error {
 	cnf.Server.SecretKey = strings.TrimSpace(cnf.Server.SecretKey)
 	if cnf.Server.Secure {

@@ -808,6 +808,8 @@ func TestIndexData(t *testing.T) {
 
 func TestRunWorkers_LifecycleStartsAndShutsDown(t *testing.T) {
 	b := newCmdTestInstance(t)
+	b.cnf.Server.Secure = true
+	b.cnf.Server.SecretKey = "worker-lifecycle-master-key"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -835,4 +837,32 @@ func TestRunWorkers_LifecycleStartsAndShutsDown(t *testing.T) {
 	// Monitoring server must be gone after shutdown.
 	_, err := http.Get("http://localhost:" + b.cnf.Queue.MonitoringPort + "/health")
 	require.Error(t, err, "monitoring server must stop with the workers")
+}
+
+func TestRunWorkers_RefusesInsecureConfig(t *testing.T) {
+	t.Setenv("BLNK_ALLOW_INSECURE", "")
+
+	conf := &config.Configuration{
+		Server: config.ServerConfig{Secure: false},
+		Queue:  config.QueueConfig{MonitoringPort: "18094"},
+	}
+	err := runWorkers(context.Background(), &blnkInstance{}, conf)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "authentication is DISABLED")
+
+	_, herr := http.Get("http://127.0.0.1:18094/health")
+	require.Error(t, herr, "refused worker must not listen")
+}
+
+func TestRunWorkers_RefusesSecureModeWithoutMasterKey(t *testing.T) {
+	conf := &config.Configuration{
+		Server: config.ServerConfig{Secure: true, SecretKey: "   "},
+		Queue:  config.QueueConfig{MonitoringPort: "18095"},
+	}
+	err := runWorkers(context.Background(), &blnkInstance{}, conf)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "server.secret_key is required")
+
+	_, herr := http.Get("http://127.0.0.1:18095/health")
+	require.Error(t, herr, "refused worker must not listen")
 }
