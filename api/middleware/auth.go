@@ -29,6 +29,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	typesenseapi "github.com/typesense/typesense-go/typesense/api"
 )
 
 const (
@@ -77,8 +78,92 @@ func isReadQueryPath(path string) bool {
 	if readQueryPaths[path] {
 		return true
 	}
+	_, ok := searchCollectionFromPath(path)
+	return ok
+}
+
+// searchCollections is the allowlist of Typesense collections a search request
+// may query. The value is the resource whose read scope is required.
+// "reconciliations" is the indexed name; its scope is reconciliation:read.
+var searchCollections = map[string]Resource{
+	"ledgers":         ResourceLedgers,
+	"balances":        ResourceBalances,
+	"transactions":    ResourceTransactions,
+	"identities":      ResourceIdentities,
+	"reconciliations": ResourceReconciliation,
+}
+
+type authzFailure struct {
+	code    apierror.ErrorCode
+	message string
+}
+
+func searchCollectionFromPath(path string) (string, bool) {
 	collection, ok := strings.CutPrefix(path, "/search/")
-	return ok && collection != "" && collection != "reindex" && !strings.Contains(collection, "/")
+	if !ok || collection == "" || collection == "reindex" || strings.Contains(collection, "/") {
+		return "", false
+	}
+	return collection, true
+}
+
+func authorizeCollectionRead(scopes []string, collection string) *authzFailure {
+	resource, ok := searchCollections[collection]
+	if !ok {
+		return &authzFailure{
+			code:    apierror.ErrAuthInsufficientPermissions,
+			message: "Insufficient permissions for this search collection",
+		}
+	}
+	if !HasPermission(scopes, resource, http.MethodGet) {
+		return &authzFailure{
+			code:    apierror.ErrAuthInsufficientPermissions,
+			message: "Insufficient permissions for " + string(resource) + ":" + string(ActionRead),
+		}
+	}
+	return nil
+}
+
+// authorizeSearchCollections requires the resource read scope for every
+// collection a search request would forward to Typesense. search:read alone
+// is not enough, and collection names outside the allowlist are rejected.
+func authorizeSearchCollections(c *gin.Context, scopes []string) *authzFailure {
+	if c.Request == nil || c.Request.URL == nil {
+		return &authzFailure{code: apierror.ErrGenInternal, message: "Invalid request"}
+	}
+
+	if collection, ok := searchCollectionFromPath(c.Request.URL.Path); ok {
+		return authorizeCollectionRead(scopes, collection)
+	}
+
+	if c.Request.URL.Path == "/multi-search" && c.Request.Method == http.MethodPost {
+		return authorizeMultiSearch(c, scopes)
+	}
+
+	return nil
+}
+
+func authorizeMultiSearch(c *gin.Context, scopes []string) *authzFailure {
+	if c.Request.Body == nil {
+		return &authzFailure{code: apierror.ErrGenMalformedRequest, message: "Invalid multi-search request"}
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return &authzFailure{code: apierror.ErrGenMalformedRequest, message: "Invalid multi-search request"}
+	}
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	var params typesenseapi.MultiSearchSearchesParameter
+	if err := json.Unmarshal(body, &params); err != nil || len(params.Searches) == 0 {
+		return &authzFailure{code: apierror.ErrGenMalformedRequest, message: "Invalid multi-search request"}
+	}
+
+	for _, search := range params.Searches {
+		if failure := authorizeCollectionRead(scopes, search.Collection); failure != nil {
+			return failure
+		}
+	}
+	return nil
 }
 
 // AuthMiddleware handles authentication and authorization for API routes.
@@ -291,6 +376,11 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 		if !allowed {
 			abortWithCode(c, apierror.ErrAuthInsufficientPermissions, "Insufficient permissions for "+string(resource)+":"+string(action))
+			return
+		}
+
+		if failure := authorizeSearchCollections(c, apiKey.Scopes); failure != nil {
+			abortWithCode(c, failure.code, failure.message)
 			return
 		}
 
