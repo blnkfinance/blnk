@@ -29,7 +29,10 @@ spec:
             - name: POSTGRES_USER
               value: postgres
             - name: POSTGRES_PASSWORD
-              value: password
+              valueFrom:
+                secretKeyRef:
+                  name: blnk-secrets
+                  key: postgres-password
             - name: POSTGRES_DB
               value: blnk
             - name: TZ

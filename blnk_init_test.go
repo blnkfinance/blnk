@@ -91,16 +91,18 @@ func TestBlnkInit(t *testing.T) {
 					if shell == "busybox" {
 						args = append([]string{"sh"}, args...)
 					}
-					run := func() {
+					run := func() []byte {
 						t.Helper()
 						cmd := exec.Command(shell, args...)
 						// Isolate the test from the developer's database configuration.
 						cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, tc.env...)
-						if out, err := cmd.CombinedOutput(); err != nil {
+						out, err := cmd.CombinedOutput()
+						if err != nil {
 							t.Fatalf("init failed: %v\n%s", err, out)
 						}
+						return out
 					}
-					run()
+					created := run()
 					configPath := filepath.Join(dir, "blnk.json")
 					data, err := os.ReadFile(configPath)
 					if err != nil {
@@ -111,6 +113,11 @@ func TestBlnkInit(t *testing.T) {
 						DataSource  struct {
 							DNS string `json:"dns"`
 						} `json:"data_source"`
+						Server struct {
+							Port      string `json:"port"`
+							Secure    bool   `json:"secure"`
+							SecretKey string `json:"secret_key"`
+						} `json:"server"`
 					}
 					if err := json.Unmarshal(data, &config); err != nil {
 						t.Fatalf("invalid JSON: %v", err)
@@ -118,6 +125,13 @@ func TestBlnkInit(t *testing.T) {
 					if config.ProjectName != tc.project || config.DataSource.DNS != tc.dsn {
 						t.Errorf("got project %q, DSN %q; want project %q, DSN %q",
 							config.ProjectName, config.DataSource.DNS, tc.project, tc.dsn)
+					}
+					if config.Server.Port != "5001" || !config.Server.Secure || len(config.Server.SecretKey) < 32 {
+						t.Errorf("generated server config port=%q secure=%v secret_len=%d; want port 5001, secure true, and a master key",
+							config.Server.Port, config.Server.Secure, len(config.Server.SecretKey))
+					}
+					if !strings.Contains(string(created), config.Server.SecretKey) {
+						t.Error("init did not print the master key")
 					}
 					info, err := os.Stat(configPath)
 					if err != nil {
@@ -131,7 +145,10 @@ func TestBlnkInit(t *testing.T) {
 					if err := os.WriteFile(configPath, []byte(existing), 0600); err != nil {
 						t.Fatal(err)
 					}
-					run()
+					warned := run()
+					if !strings.Contains(string(warned), "BLNK_ALLOW_INSECURE") {
+						t.Error("existing config without server.secure did not warn")
+					}
 					preserved, err := os.ReadFile(configPath)
 					if err != nil || string(preserved) != existing {
 						t.Fatalf("existing config changed: %q, error: %v", preserved, err)

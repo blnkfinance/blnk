@@ -527,6 +527,12 @@ func workerCommands(b *blnkInstance) *cobra.Command {
 // so the full worker lifecycle is testable; startup failures are returned to
 // the caller, which keeps the process-exit decision at the command layer.
 func runWorkers(ctx context.Context, b *blnkInstance, conf *config.Configuration) error {
+	// Same gate as blnk start. An insecure config must not bring up the queue
+	// panel unless BLNK_ALLOW_INSECURE is set.
+	if err := conf.RequireAPIAuthentication(); err != nil {
+		return err
+	}
+
 	phClient, shutdown, err := initializeTelemetryAndObservability(context.Background(), conf)
 	if err != nil {
 		return err

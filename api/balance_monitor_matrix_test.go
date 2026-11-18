@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/stretchr/testify/assert"
@@ -151,13 +152,28 @@ func TestBalanceMonitorEdge_EveryOperator(t *testing.T) {
 		t.Run(tc.operator, func(t *testing.T) {
 			e := setupMonitorE2E(t)
 			funding, wallet := e.newBalance(t), e.newBalance(t)
-			e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", tc.operator, tc.value)
+			monitor := e.createMonitorOn(t, wallet.BalanceID, model.TriggerEdge, "balance", tc.operator, tc.value)
 
-			for _, amount := range tc.steps {
+			for i, amount := range tc.steps {
 				if amount > 0 {
 					e.transfer(t, funding.BalanceID, wallet.BalanceID, amount)
 				} else {
 					e.transfer(t, wallet.BalanceID, funding.BalanceID, -amount)
+				}
+
+				// Monitor checks run after the response returns. A newer
+				// balance version discards an older one, so the != case has
+				// to see the re-arm before the next transfer or the second
+				// crossing is lost.
+				if tc.operator == "!=" && i == 0 {
+					e.awaitWebhooks(t, 1)
+					require.True(t, e.monitorState(t, monitor.MonitorID))
+				}
+				if tc.operator == "!=" && i == 1 {
+					require.Eventually(t, func() bool {
+						return !e.monitorState(t, monitor.MonitorID)
+					}, 5*time.Second, 25*time.Millisecond, "returning to zero must re-arm the monitor")
+					require.Equal(t, 1, e.webhooks())
 				}
 			}
 
