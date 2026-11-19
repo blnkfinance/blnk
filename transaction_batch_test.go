@@ -290,6 +290,25 @@ func TestUnlimitedOverdraftStoresNoLimit(t *testing.T) {
 	assert.NotContains(t, txn.MetaData, "overdraft_limit")
 }
 
+func TestCallerMetadataCannotSetOverdraftLimit(t *testing.T) {
+	// The limit is read back from meta_data, which the caller also controls.
+	for _, txn := range []*model.Transaction{
+		{AllowOverdraft: false, MetaData: map[string]interface{}{"overdraft_limit": 1000.0}},
+		{AllowOverdraft: true, MetaData: map[string]interface{}{"overdraft_limit": 1000.0}},
+	} {
+		setTransactionMetadata(txn)
+		assert.NotContains(t, txn.MetaData, "overdraft_limit")
+
+		fromDB := &model.Transaction{MetaData: txn.MetaData}
+		restoreTransactionFlagsFromMetadata(fromDB)
+		assert.Equal(t, 0.0, fromDB.OverdraftLimit)
+	}
+
+	limited := &model.Transaction{AllowOverdraft: true, OverdraftLimit: 50, MetaData: map[string]interface{}{"overdraft_limit": 1000.0}}
+	setTransactionMetadata(limited)
+	assert.Equal(t, 50.0, limited.MetaData["overdraft_limit"])
+}
+
 func TestValidateQueuedBatchTransactionReferenceUsesPrefetchedSet(t *testing.T) {
 	blnkInstance := &Blnk{}
 	prefetched := map[string]struct{}{

@@ -234,3 +234,29 @@ func TestRecoverWithThreshold_CountsOnlySuccessfulRecoveries(t *testing.T) {
 	assert.Contains(t, err.Error(), "recovery failed for 1 of 2 stuck transactions")
 	mockDS.AssertExpectations(t)
 }
+
+func TestProcessStuckTransaction_RejectsWhenOverdraftLimitExceeded(t *testing.T) {
+	mockDS := &dbmocks.MockDataSource{}
+	blnk := &Blnk{datasource: mockDS}
+	processor := NewQueuedTransactionRecoveryProcessor(blnk)
+
+	stuckTxn := positiveStuckTxn()
+	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
+		return transactionExecutionResult{}, errors.New("transaction exceeds overdraft limit")
+	}
+
+	var recorded *model.Transaction
+	mockDS.On("RecordTransaction", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			recorded = args.Get(1).(*model.Transaction)
+		}).
+		Return(&model.Transaction{}, errors.New("db unavailable")).Once()
+
+	err := processor.processStuckTransaction(context.Background(), stuckTxn)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db unavailable", "only a failed reject write is returned")
+	require.NotNil(t, recorded, "a transaction over its overdraft limit is rejected, not left QUEUED")
+	assert.Equal(t, StatusRejected, recorded.Status)
+	mockDS.AssertNotCalled(t, "UpdateTransactionMetadata", mock.Anything, mock.Anything, mock.Anything)
+	mockDS.AssertExpectations(t)
+}

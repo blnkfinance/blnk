@@ -403,6 +403,9 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	if transaction.Atomic {
 		transaction.MetaData["atomic"] = true
 	}
+	// Drop any caller-supplied value first: restoreTransactionFlagsFromMetadata
+	// reads this key back as the limit, so only the real limit may be stored.
+	delete(transaction.MetaData, "overdraft_limit")
 	if transaction.AllowOverdraft {
 		transaction.MetaData["allow_overdraft"] = true
 		// The limit has no column either. Without it a transaction read back
