@@ -189,9 +189,10 @@ type RefundOptions struct {
 
 	// MetaData is merged onto the metadata inherited from the original
 	// transaction, with these keys winning on conflict. Merging rather than
-	// replacing keeps the keys the ledger itself sets on the original — such
-	// as inflight, atomic and allow_overdraft — which downstream processing
-	// reads.
+	// replacing keeps keys the caller did not mention. inflight, atomic, and
+	// allow_overdraft on the queued row are rewritten from the reversal's
+	// struct fields when it is queued, so a value in this map does not change
+	// those controls.
 	MetaData map[string]interface{}
 }
 
