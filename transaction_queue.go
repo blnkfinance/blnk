@@ -395,17 +395,23 @@ func setTransactionMetadata(transaction *model.Transaction) {
 		transaction.MetaData = make(map[string]interface{})
 	}
 
-	// Set inflight flag in metadata if the transaction is inflight
-	//maybe move to their respective columns in the db later
-	if transaction.Inflight {
-		transaction.MetaData["inflight"] = true
+	// These flags have no columns of their own. Coalescing and stuck-queue
+	// recovery copy them back off meta_data, so the stored keys must follow
+	// the struct. A client value already in meta_data is replaced, and a
+	// flag that is off is removed so a later reload cannot turn it on.
+	writeServerOwnedFlag(transaction.MetaData, "inflight", transaction.Inflight)
+	writeServerOwnedFlag(transaction.MetaData, "atomic", transaction.Atomic)
+	writeServerOwnedFlag(transaction.MetaData, "allow_overdraft", transaction.AllowOverdraft)
+}
+
+// writeServerOwnedFlag stores an execution flag in metadata, or removes it
+// when the flag is off. The key names match serverOwnedTransactionFlagKeys.
+func writeServerOwnedFlag(meta map[string]interface{}, key string, enabled bool) {
+	if enabled {
+		meta[key] = true
+		return
 	}
-	if transaction.Atomic {
-		transaction.MetaData["atomic"] = true
-	}
-	if transaction.AllowOverdraft {
-		transaction.MetaData["allow_overdraft"] = true
-	}
+	delete(meta, key)
 }
 
 // createQueueCopy creates a new copy of a transaction specifically for queueing.
