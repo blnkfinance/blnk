@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -230,7 +229,7 @@ func (p *QueuedTransactionRecoveryProcessor) processStuckTransaction(ctx context
 		}
 		// Same handling as the queue worker: the limit will not change on a
 		// retry, so reject instead of leaving the transaction QUEUED.
-		if strings.Contains(strings.ToLower(err.Error()), "transaction exceeds overdraft limit") {
+		if errors.Is(err, model.ErrOverdraftLimitExceeded) {
 			logrus.Warnf("Stuck transaction %s exceeds its overdraft limit, rejecting", stuckTxn.TransactionID)
 			return p.rejectStuckTransaction(ctx, stuckTxn, err.Error())
 		}

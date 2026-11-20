@@ -110,7 +110,7 @@ func (b *blnkInstance) recordQueuedTransaction(ctx context.Context, span oteltra
 			return err // This will trigger a retry
 		}
 
-		if strings.Contains(strings.ToLower(err.Error()), "transaction exceeds overdraft limit") {
+		if errors.Is(err, model.ErrOverdraftLimitExceeded) {
 			return handleTransactionRejection(ctx, b, txn, err)
 		}
 

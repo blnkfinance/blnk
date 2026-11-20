@@ -3,6 +3,7 @@ package blnk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -236,27 +237,78 @@ func TestRecoverWithThreshold_CountsOnlySuccessfulRecoveries(t *testing.T) {
 }
 
 func TestProcessStuckTransaction_RejectsWhenOverdraftLimitExceeded(t *testing.T) {
+	// The apply path wraps the error from canProcessTransaction, so recovery
+	// must match the sentinel through the wrap, not the sentence.
+	overLimit := fmt.Errorf("failed to apply transaction to balances: %w", model.ErrOverdraftLimitExceeded)
+
+	t.Run("reject write fails", func(t *testing.T) {
+		mockDS := &dbmocks.MockDataSource{}
+		blnk := &Blnk{datasource: mockDS}
+		processor := NewQueuedTransactionRecoveryProcessor(blnk)
+
+		stuckTxn := positiveStuckTxn()
+		processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
+			return transactionExecutionResult{}, overLimit
+		}
+
+		var recorded *model.Transaction
+		mockDS.On("RecordTransaction", mock.Anything, mock.Anything).
+			Run(func(args mock.Arguments) {
+				recorded = args.Get(1).(*model.Transaction)
+			}).
+			Return(&model.Transaction{}, errors.New("db unavailable")).Once()
+
+		err := processor.processStuckTransaction(context.Background(), stuckTxn)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "db unavailable", "only a failed reject write is returned")
+		require.NotNil(t, recorded, "a transaction over its overdraft limit is rejected, not left QUEUED")
+		assert.Equal(t, StatusRejected, recorded.Status)
+		mockDS.AssertNotCalled(t, "UpdateTransactionMetadata", mock.Anything, mock.Anything, mock.Anything)
+		mockDS.AssertExpectations(t)
+	})
+
+	t.Run("reject write succeeds", func(t *testing.T) {
+		mockDS := &dbmocks.MockDataSource{}
+		blnk, _, _ := setupMetadataQueuesBlnk(t, mockDS, "")
+		processor := NewQueuedTransactionRecoveryProcessor(blnk)
+
+		stuckTxn := positiveStuckTxn()
+		processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
+			return transactionExecutionResult{}, overLimit
+		}
+
+		var recorded *model.Transaction
+		mockDS.On("RecordTransaction", mock.Anything, mock.Anything).
+			Run(func(args mock.Arguments) {
+				recorded = args.Get(1).(*model.Transaction)
+			}).
+			Return(&model.Transaction{TransactionID: "txn_rejected", Status: StatusRejected}, nil).Once()
+
+		err := processor.processStuckTransaction(context.Background(), stuckTxn)
+		require.NoError(t, err)
+		require.NotNil(t, recorded)
+		assert.Equal(t, StatusRejected, recorded.Status)
+		assert.Equal(t, overLimit.Error(), recorded.MetaData["blnk_rejection_reason"])
+		mockDS.AssertNotCalled(t, "UpdateTransactionMetadata", mock.Anything, mock.Anything, mock.Anything)
+		mockDS.AssertExpectations(t)
+	})
+}
+
+func TestProcessStuckTransaction_OverdraftSentenceAloneIsNotRejected(t *testing.T) {
 	mockDS := &dbmocks.MockDataSource{}
 	blnk := &Blnk{datasource: mockDS}
 	processor := NewQueuedTransactionRecoveryProcessor(blnk)
 
 	stuckTxn := positiveStuckTxn()
 	processor.processQueuedTransaction = func(ctx context.Context, txn *model.Transaction, hotLane bool) (transactionExecutionResult, error) {
-		return transactionExecutionResult{}, errors.New("transaction exceeds overdraft limit")
+		return transactionExecutionResult{}, errors.New("upstream: transaction exceeds overdraft limit")
 	}
-
-	var recorded *model.Transaction
-	mockDS.On("RecordTransaction", mock.Anything, mock.Anything).
-		Run(func(args mock.Arguments) {
-			recorded = args.Get(1).(*model.Transaction)
-		}).
-		Return(&model.Transaction{}, errors.New("db unavailable")).Once()
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, stuckTxn.TransactionID, mock.MatchedBy(func(metadata map[string]interface{}) bool {
+		return metadata["recovery_status"] == recoveryStatusFailed
+	})).Return(nil).Once()
 
 	err := processor.processStuckTransaction(context.Background(), stuckTxn)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "db unavailable", "only a failed reject write is returned")
-	require.NotNil(t, recorded, "a transaction over its overdraft limit is rejected, not left QUEUED")
-	assert.Equal(t, StatusRejected, recorded.Status)
-	mockDS.AssertNotCalled(t, "UpdateTransactionMetadata", mock.Anything, mock.Anything, mock.Anything)
+	mockDS.AssertNotCalled(t, "RecordTransaction", mock.Anything, mock.Anything)
 	mockDS.AssertExpectations(t)
 }
