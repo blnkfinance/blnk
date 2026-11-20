@@ -428,6 +428,12 @@ func createQueueCopy(persistedTxn *model.Transaction, originalRef string) *model
 	queueTxn.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	queueTxn.ParentTransaction = persistedTxn.TransactionID
 	queueTxn.Reference = fmt.Sprintf("%s_q", originalRef)
+	// A shallow copy would share MetaData. The copy is applied on its own, and
+	// its post-commit webhook encodes that map on another goroutine, while
+	// recovery writes the parent's map.
+	if persistedTxn.MetaData != nil {
+		queueTxn.MetaData = cloneMetadata(persistedTxn.MetaData)
+	}
 	return &queueTxn
 }
 

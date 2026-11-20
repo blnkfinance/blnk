@@ -234,3 +234,18 @@ func TestRecoverWithThreshold_CountsOnlySuccessfulRecoveries(t *testing.T) {
 	assert.Contains(t, err.Error(), "recovery failed for 1 of 2 stuck transactions")
 	mockDS.AssertExpectations(t)
 }
+
+func TestCreateQueueCopyDoesNotShareMetadata(t *testing.T) {
+	original := &model.Transaction{
+		TransactionID: "txn_parent",
+		Reference:     "ref",
+		MetaData:      map[string]interface{}{"inflight": true},
+	}
+
+	queueCopy := createQueueCopy(original, original.Reference)
+	queueCopy.MetaData["recovery_attempts"] = 1
+
+	_, shared := original.MetaData["recovery_attempts"]
+	assert.False(t, shared)
+	assert.Equal(t, true, queueCopy.MetaData["inflight"])
+}

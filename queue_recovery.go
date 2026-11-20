@@ -280,14 +280,15 @@ func (p *QueuedTransactionRecoveryProcessor) tryRecordRecoveredTransaction(ctx c
 // updateRecoveryMetadata stores recovery attempt and status information on the stuck parent
 // transaction so later recovery passes can make bounded retry decisions.
 func (p *QueuedTransactionRecoveryProcessor) updateRecoveryMetadata(ctx context.Context, txn *model.Transaction, attempts int, status string) {
-	if txn.MetaData == nil {
-		txn.MetaData = make(map[string]interface{})
-	}
-	txn.MetaData["recovery_attempts"] = attempts
-	txn.MetaData["recovery_status"] = status
-	txn.MetaData["recovery_last_attempt"] = time.Now().UTC().Format(time.RFC3339)
+	// Write a new map. A post-commit webhook may still be encoding the map
+	// this transaction held when it was applied.
+	meta := cloneMetadata(txn.MetaData)
+	meta["recovery_attempts"] = attempts
+	meta["recovery_status"] = status
+	meta["recovery_last_attempt"] = time.Now().UTC().Format(time.RFC3339)
+	txn.MetaData = meta
 
-	if err := p.blnk.datasource.UpdateTransactionMetadata(ctx, txn.TransactionID, txn.MetaData); err != nil {
+	if err := p.blnk.datasource.UpdateTransactionMetadata(ctx, txn.TransactionID, meta); err != nil {
 		logrus.Errorf("failed to update recovery metadata for transaction %s: %v", txn.TransactionID, err)
 		return
 	}
