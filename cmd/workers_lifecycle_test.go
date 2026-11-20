@@ -442,9 +442,6 @@ func (bt *queuedAtomicBatch) underBatch(t *testing.T, where string) int {
 	return n
 }
 
-// The refund the rollback writes is listed under the batch id, next to the
-// payment it reverses, and nothing refunds it in turn: neither a redelivered
-// item of the batch nor a refund of the batch id.
 // An atomic bulk that fails while its items are being queued must not leave
 // the items queued before the failure to be applied by the worker later.
 func TestWorker_AtomicBulkFailingBeforeQueuedRejectsQueuedItems(t *testing.T) {
@@ -516,6 +513,9 @@ func TestWorker_AtomicBulkFailingBeforeQueuedRejectsQueuedItems(t *testing.T) {
 	assert.Empty(t, bulkWebhooks(t, inspector, cfg.Queue.WebhookQueue, result.BatchID), "a sync batch answers the request and sends no webhook")
 }
 
+// The refund the rollback writes is listed under the batch id, next to the
+// payment it reverses, and nothing refunds it in turn: neither a redelivered
+// item of the batch nor a refund of the batch id.
 func TestWorker_AtomicBulkRefundKeepsTheBatchID(t *testing.T) {
 	bt := queueAtomicBatch(t, false, 50, 500)
 	ctx := context.Background()

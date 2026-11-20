@@ -121,23 +121,37 @@ func (l *Blnk) rollbackFailedBatch(ctx context.Context, batchID string, isInflig
 // left in the queue without rolling back or reporting the batch again. When
 // the rollback fails, the batch is left unreported, and the first rejected
 // item finishes it.
+//
+// When the lock wait runs out, an item is still being applied. The batch is
+// marked failed anyway, so the worker takes no further item, and the rollback
+// waits for the lock up to LockDuration, the longest the item can hold it, so
+// that what it applies is rolled back too.
 func (l *Blnk) abortQueuedAtomicBatch(ctx context.Context, batchID string, isInflight bool) (int, error) {
 	locker := redlock.NewLocker(l.redis, atomicBatchLockKey(batchID), model.GenerateUUIDWithSuffix("loc"))
 	lockCfg := l.Config().Transaction
-	var err error
+	var lockErr error
 	if lockCfg.LockWaitTimeout > 0 {
-		err = locker.WaitLock(ctx, lockCfg.LockDuration, lockCfg.LockWaitTimeout)
+		lockErr = locker.WaitLock(ctx, lockCfg.LockDuration, lockCfg.LockWaitTimeout)
 	} else {
-		err = locker.Lock(ctx, lockCfg.LockDuration)
+		lockErr = locker.Lock(ctx, lockCfg.LockDuration)
 	}
-	if err != nil {
-		return 0, fmt.Errorf("failed to acquire lock for atomic batch %s: %w", batchID, err)
+	lockBusy := errors.Is(lockErr, redlock.ErrLockHeld) || errors.Is(lockErr, redlock.ErrLockWaitTimeout)
+	if lockErr != nil && !lockBusy {
+		return 0, fmt.Errorf("failed to acquire lock for atomic batch %s: %w", batchID, lockErr)
 	}
-	defer l.releaseSingleLock(ctx, locker)
 
 	if err := l.markQueuedAtomicBatchFailed(ctx, batchID); err != nil {
+		if lockErr == nil {
+			l.releaseSingleLock(ctx, locker)
+		}
 		return 0, err
 	}
+	if lockErr != nil {
+		if err := locker.WaitLock(ctx, lockCfg.LockDuration, lockCfg.LockDuration); err != nil {
+			return 0, fmt.Errorf("failed to acquire lock for atomic batch %s: %w", batchID, err)
+		}
+	}
+	defer l.releaseSingleLock(ctx, locker)
 	count, err := l.rollBackQueuedAtomicBatch(ctx, batchID, isInflight)
 	if err != nil {
 		return count, err
