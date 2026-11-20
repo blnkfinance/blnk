@@ -656,4 +656,7 @@ func restoreTransactionFlagsFromMetadata(transaction *model.Transaction) {
 	if v, ok := transaction.MetaData["allow_overdraft"].(bool); ok {
 		transaction.AllowOverdraft = v
 	}
+	if v, ok := transaction.MetaData["overdraft_limit"].(float64); ok {
+		transaction.OverdraftLimit = v
+	}
 }
