@@ -292,6 +292,14 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, ErrEntityNotFound
 		}
 
+		// Queue recovery reads overdraft_limit back as the transaction's limit,
+		// so a metadata update must not change it. The create path drops a
+		// caller-supplied value the same way.
+		if _, ok := newMetadata["overdraft_limit"]; ok {
+			newMetadata = cloneMetadata(newMetadata)
+			delete(newMetadata, "overdraft_limit")
+		}
+
 		// Apply metadata updates directly without reading current metadata so
 		// child rows keep DB-side JSONB merge behaviour.
 		if err := l.updateEntityMetadata(ctx, entityType, entityID, newMetadata); err != nil {
