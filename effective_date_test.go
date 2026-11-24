@@ -24,6 +24,52 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestSetTransactionMetadata_ExecutionFlagsFollowStruct(t *testing.T) {
+	t.Run("client metadata cannot turn a flag on", func(t *testing.T) {
+		txn := &model.Transaction{
+			Amount:    10,
+			Precision: 100,
+			MetaData: map[string]interface{}{
+				"allow_overdraft": true,
+				"inflight":        true,
+				"atomic":          true,
+				"invoice":         "INV-1",
+			},
+		}
+
+		setTransactionMetadata(txn)
+
+		_, hasOverdraft := txn.MetaData["allow_overdraft"]
+		_, hasInflight := txn.MetaData["inflight"]
+		_, hasAtomic := txn.MetaData["atomic"]
+		assert.False(t, hasOverdraft)
+		assert.False(t, hasInflight)
+		assert.False(t, hasAtomic)
+		assert.Equal(t, "INV-1", txn.MetaData["invoice"])
+	})
+
+	t.Run("struct flags replace a client false", func(t *testing.T) {
+		txn := &model.Transaction{
+			Amount:         10,
+			Precision:      100,
+			AllowOverdraft: true,
+			Inflight:       true,
+			Atomic:         true,
+			MetaData: map[string]interface{}{
+				"allow_overdraft": false,
+				"inflight":        false,
+				"atomic":          false,
+			},
+		}
+
+		setTransactionMetadata(txn)
+
+		assert.Equal(t, true, txn.MetaData["allow_overdraft"])
+		assert.Equal(t, true, txn.MetaData["inflight"])
+		assert.Equal(t, true, txn.MetaData["atomic"])
+	})
+}
+
 // TestSetTransactionMetadata_EffectiveDateDefault tests that setTransactionMetadata
 // sets EffectiveDate to CreatedAt when EffectiveDate is nil
 func TestSetTransactionMetadata_EffectiveDateDefault(t *testing.T) {

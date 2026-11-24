@@ -395,26 +395,32 @@ func setTransactionMetadata(transaction *model.Transaction) {
 		transaction.MetaData = make(map[string]interface{})
 	}
 
-	// Set inflight flag in metadata if the transaction is inflight
-	//maybe move to their respective columns in the db later
-	if transaction.Inflight {
-		transaction.MetaData["inflight"] = true
-	}
-	if transaction.Atomic {
-		transaction.MetaData["atomic"] = true
-	}
-	// Drop any caller-supplied value first: restoreTransactionFlagsFromMetadata
-	// reads this key back as the limit, so only the real limit may be stored.
+	// These flags have no columns of their own. Coalescing and stuck-queue
+	// recovery copy them back off meta_data, so the stored keys must follow
+	// the struct. A client value already in meta_data is replaced, and a
+	// flag that is off is removed so a later reload cannot turn it on.
+	writeServerOwnedFlag(transaction.MetaData, "inflight", transaction.Inflight)
+	writeServerOwnedFlag(transaction.MetaData, "atomic", transaction.Atomic)
+	writeServerOwnedFlag(transaction.MetaData, "allow_overdraft", transaction.AllowOverdraft)
+
+	// The limit has no column either. Without it a transaction read back
+	// from the DB (coalesced sibling, recovered stuck transaction) gets
+	// OverdraftLimit 0, which means an unlimited overdraft. Only the real
+	// limit may be stored, so a caller-supplied value is dropped first.
 	delete(transaction.MetaData, "overdraft_limit")
-	if transaction.AllowOverdraft {
-		transaction.MetaData["allow_overdraft"] = true
-		// The limit has no column either. Without it a transaction read back
-		// from the DB (coalesced sibling, recovered stuck transaction) gets
-		// OverdraftLimit 0, which means an unlimited overdraft.
-		if transaction.OverdraftLimit > 0 {
-			transaction.MetaData["overdraft_limit"] = transaction.OverdraftLimit
-		}
+	if transaction.AllowOverdraft && transaction.OverdraftLimit > 0 {
+		transaction.MetaData["overdraft_limit"] = transaction.OverdraftLimit
 	}
+}
+
+// writeServerOwnedFlag stores an execution flag in metadata, or removes it
+// when the flag is off. The key names match serverOwnedTransactionFlagKeys.
+func writeServerOwnedFlag(meta map[string]interface{}, key string, enabled bool) {
+	if enabled {
+		meta[key] = true
+		return
+	}
+	delete(meta, key)
 }
 
 // createQueueCopy creates a new copy of a transaction specifically for queueing.
@@ -431,6 +437,12 @@ func createQueueCopy(persistedTxn *model.Transaction, originalRef string) *model
 	queueTxn.TransactionID = model.GenerateUUIDWithSuffix("txn")
 	queueTxn.ParentTransaction = persistedTxn.TransactionID
 	queueTxn.Reference = fmt.Sprintf("%s_q", originalRef)
+	// A shallow copy would share MetaData. The copy is applied on its own, and
+	// its post-commit webhook encodes that map on another goroutine, while
+	// recovery writes the parent's map.
+	if persistedTxn.MetaData != nil {
+		queueTxn.MetaData = cloneMetadata(persistedTxn.MetaData)
+	}
 	return &queueTxn
 }
 

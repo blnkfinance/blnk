@@ -18,6 +18,12 @@ import (
 // does not exist. API handlers match it with errors.Is to return 404.
 var ErrEntityNotFound = errors.New("entity not found")
 
+// serverOwnedTransactionFlagKeys are execution controls stored in transaction
+// meta_data. The transactions table has no columns for them, so coalescing and
+// stuck-queue recovery copy these keys back onto the struct. A client metadata
+// patch must not change them. UpdateTransactionMetadata strips the same keys.
+var serverOwnedTransactionFlagKeys = []string{"allow_overdraft", "overdraft_limit", "inflight", "atomic"}
+
 // metadataUpdatedWebhookData flattens a resource snapshot into the webhook
 // `data` object, matching ledger.created / balance.created / identity.created:
 // resource fields sit at the top of `data`, with event_id and timestamp added
@@ -292,24 +298,25 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, ErrEntityNotFound
 		}
 
-		// Queue recovery reads overdraft_limit back as the transaction's limit,
-		// so a metadata update must not change it. The create path drops a
-		// caller-supplied value the same way.
-		if _, ok := newMetadata["overdraft_limit"]; ok {
-			newMetadata = cloneMetadata(newMetadata)
-			delete(newMetadata, "overdraft_limit")
+		// allow_overdraft, overdraft_limit, inflight, and atomic decide how a queued transfer
+		// executes. They are written from the transaction struct when it is
+		// queued. A metadata update must not replace or clear them. The
+		// database merge strips the same keys.
+		patch := cloneMetadata(newMetadata)
+		for _, key := range serverOwnedTransactionFlagKeys {
+			delete(patch, key)
 		}
 
 		// Apply metadata updates directly without reading current metadata so
 		// child rows keep DB-side JSONB merge behaviour.
-		if err := l.updateEntityMetadata(ctx, entityType, entityID, newMetadata); err != nil {
+		if err := l.updateEntityMetadata(ctx, entityType, entityID, patch); err != nil {
 			return nil, fmt.Errorf("failed to update metadata: %w", err)
 		}
 
-		snapshot := transactionMetadataSnapshot(entityID, newMetadata)
+		snapshot := transactionMetadataSnapshot(entityID, patch)
 		l.queueTransactionMetadataIndexRefresh(entityID)
 		l.enqueueMetadataUpdatedWebhook(entityType, snapshot)
-		return newMetadata, nil
+		return patch, nil
 
 	case "balances":
 		balance, err := l.GetBalanceByID(ctx, entityID, nil, false)

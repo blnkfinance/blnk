@@ -1571,35 +1571,40 @@ func (d Datasource) getBalanceInfo(ctx context.Context, tx *sql.Tx, balanceID st
 	return currency, createdAt, nil
 }
 
-// getMostRecentSnapshot finds the most recent balance snapshot before the target time
-func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balanceID string, targetTime time.Time) (creditBalance, debitBalance *big.Int, snapshotTime time.Time, err error) {
+// getMostRecentSnapshot finds the most recent balance snapshot before the target time.
+// lastTxSeq is the highest APPLIED transactions.id the snapshot contains.
+// Snapshots taken before last_tx_seq existed are skipped: nothing tells which
+// transactions they hold, so the balance is rebuilt from genesis instead.
+func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balanceID string, targetTime time.Time) (creditBalance, debitBalance *big.Int, snapshotTime time.Time, lastTxSeq int64, err error) {
 	snapshot := tx.QueryRowContext(ctx, `
 		SELECT 
 			balance,
 			credit_balance,
 			debit_balance,
-			snapshot_time
+			snapshot_time,
+			last_tx_seq
 		FROM blnk.balance_snapshots
 		WHERE balance_id = $1
 		AND snapshot_time <= $2
+		AND last_tx_seq IS NOT NULL
 		ORDER BY snapshot_time DESC
 		LIMIT 1
 	`, balanceID, targetTime)
 
 	var snapshotBalance, snapshotCredit, snapshotDebit string
 
-	err = snapshot.Scan(&snapshotBalance, &snapshotCredit, &snapshotDebit, &snapshotTime)
+	err = snapshot.Scan(&snapshotBalance, &snapshotCredit, &snapshotDebit, &snapshotTime, &lastTxSeq)
 
 	switch err {
 	case nil:
 		// Snapshot found, use it as starting point
 		creditBalance, err = parseBigInt(snapshotCredit)
 		if err != nil {
-			return nil, nil, time.Time{}, fmt.Errorf("failed to parse snapshot credit_balance: %w", err)
+			return nil, nil, time.Time{}, 0, fmt.Errorf("failed to parse snapshot credit_balance: %w", err)
 		}
 		debitBalance, err = parseBigInt(snapshotDebit)
 		if err != nil {
-			return nil, nil, time.Time{}, fmt.Errorf("failed to parse snapshot debit_balance: %w", err)
+			return nil, nil, time.Time{}, 0, fmt.Errorf("failed to parse snapshot debit_balance: %w", err)
 		}
 		logrus.WithFields(logrus.Fields{
 			"balance_id": balanceID,
@@ -1620,35 +1625,56 @@ func (d Datasource) getMostRecentSnapshot(ctx context.Context, tx *sql.Tx, balan
 		// applied on top of the snapshot that already accounts for them. No
 		// error either way -- just a wrong historical balance. Converting here
 		// puts the bound on the same clock as the columns it bounds.
-		return creditBalance, debitBalance, snapshotTime.UTC(), nil
+		return creditBalance, debitBalance, snapshotTime.UTC(), lastTxSeq, nil
 	case sql.ErrNoRows:
 		// No snapshot found, calculate from genesis (all transactions)
 		logrus.WithField("balance_id", balanceID).Debug("no snapshot found, calculating from genesis")
-		return new(big.Int).SetInt64(0), new(big.Int).SetInt64(0), time.Time{}, nil
+		return new(big.Int).SetInt64(0), new(big.Int).SetInt64(0), time.Time{}, genesisTxSeq, nil
 	}
 
 	// Other error occurred
-	return nil, nil, time.Time{}, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get balance snapshot", err)
+	return nil, nil, time.Time{}, 0, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get balance snapshot", err)
 }
 
-// fetchTransactions retrieves transactions for a balance within a specific time range
-// using effective_date if available, otherwise falling back to created_at
-func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime, targetTime time.Time) (*sql.Rows, error) {
+// genesisTxSeq is the replay start that contains no transactions.
+const genesisTxSeq int64 = 0
+
+// replayTransaction is a transaction that moves a balance between a snapshot
+// and the target time. InSnapshot rows are already counted in the snapshot but
+// take effect after the target time, so they are reversed rather than applied.
+type replayTransaction struct {
+	PreciseAmount string
+	Source        string
+	Destination   string
+	CreatedAt     time.Time
+	EffectiveDate time.Time
+	InSnapshot    bool
+}
+
+// fetchTransactions retrieves the transactions that separate a snapshot from the
+// balance at targetTime: ones missing from the snapshot and effective by
+// targetTime, and ones in the snapshot but effective after it. A snapshot holds
+// whatever was applied when it was taken, so membership is id <= lastTxSeq.
+func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, lastTxSeq int64, targetTime time.Time) (*sql.Rows, error) {
 	logrus.WithFields(logrus.Fields{
-		"balance_id": balanceID,
-		"start_time": startTime,
-		"end_time":   targetTime,
+		"balance_id":  balanceID,
+		"last_tx_seq": lastTxSeq,
+		"end_time":    targetTime,
 	}).Debug("querying transactions")
+
 	rows, err := tx.QueryContext(ctx, `
         SELECT precise_amount, source, destination, created_at, 
-               COALESCE(effective_date, created_at) as effective_date
+               COALESCE(effective_date, created_at) as effective_date,
+               id <= $2 as in_snapshot
         FROM blnk.transactions
         WHERE (source = $1 OR destination = $1)
-        AND COALESCE(effective_date, created_at) > $2
-        AND COALESCE(effective_date, created_at) <= $3
         AND status = 'APPLIED'
+        AND (
+            (id > $2 AND COALESCE(effective_date, created_at) <= $3)
+            OR (id <= $2 AND COALESCE(effective_date, created_at) > $3)
+        )
         ORDER BY COALESCE(effective_date, created_at) ASC
-    `, balanceID, startTime, targetTime)
+    `, balanceID, lastTxSeq, targetTime)
 	if err != nil {
 		return nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to get transactions", err)
 	}
@@ -1656,18 +1682,16 @@ func fetchTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startT
 	return rows, nil
 }
 
-// applyTransaction applies a single transaction to update balance totals
-func applyTransaction(txn struct {
-	PreciseAmount string
-	Source        string
-	Destination   string
-	CreatedAt     time.Time
-	EffectiveDate time.Time
-}, balanceID string, creditBalance, debitBalance *big.Int,
+// applyTransaction applies a single transaction to update balance totals,
+// or reverses it when it is already counted in the snapshot.
+func applyTransaction(txn replayTransaction, balanceID string, creditBalance, debitBalance *big.Int,
 ) (*big.Int, *big.Int, error) {
 	txAmount, ok := new(big.Int).SetString(txn.PreciseAmount, 10)
 	if !ok {
 		return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Invalid transaction amount", nil)
+	}
+	if txn.InSnapshot {
+		txAmount.Neg(txAmount)
 	}
 
 	// Use the transaction amount to update the appropriate balance
@@ -1682,12 +1706,12 @@ func applyTransaction(txn struct {
 }
 
 // calculateBalanceFromTransactions applies transactions to calculate the balance at a specific time
-func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sql.Tx, balanceID string, startTime time.Time, targetTime time.Time, initialCredit, initialDebit *big.Int) (creditBalance, debitBalance *big.Int, err error) {
+func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sql.Tx, balanceID string, lastTxSeq int64, targetTime time.Time, initialCredit, initialDebit *big.Int) (creditBalance, debitBalance *big.Int, err error) {
 	creditBalance = new(big.Int).Set(initialCredit)
 	debitBalance = new(big.Int).Set(initialDebit)
 
 	// Fetch relevant transactions
-	rows, err := fetchTransactions(ctx, tx, balanceID, startTime, targetTime)
+	rows, err := fetchTransactions(ctx, tx, balanceID, lastTxSeq, targetTime)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1698,15 +1722,9 @@ func (d Datasource) calculateBalanceFromTransactions(ctx context.Context, tx *sq
 
 	// Apply transactions
 	for rows.Next() {
-		var txn struct {
-			PreciseAmount string
-			Source        string
-			Destination   string
-			CreatedAt     time.Time
-			EffectiveDate time.Time
-		}
+		var txn replayTransaction
 
-		if err := rows.Scan(&txn.PreciseAmount, &txn.Source, &txn.Destination, &txn.CreatedAt, &txn.EffectiveDate); err != nil {
+		if err := rows.Scan(&txn.PreciseAmount, &txn.Source, &txn.Destination, &txn.CreatedAt, &txn.EffectiveDate, &txn.InSnapshot); err != nil {
 			return nil, nil, apierror.NewAPIError(apierror.ErrInternalServer, "Failed to scan transaction", err)
 		}
 
@@ -1792,17 +1810,17 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 	}
 
 	var creditBalance, debitBalance *big.Int
-	var startTime time.Time
+	var lastTxSeq int64
 
 	if fromSource {
 		// Skip snapshots and start from zero
 		logrus.WithField("balance_id", balanceID).Debug("skipping snapshots, calculating from genesis")
 		creditBalance = new(big.Int).SetInt64(0)
 		debitBalance = new(big.Int).SetInt64(0)
-		startTime = time.Time{} // Use zero time to get all transactions
+		lastTxSeq = genesisTxSeq
 	} else {
 		// Try to find the most recent snapshot
-		creditBalance, debitBalance, startTime, err = d.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
+		creditBalance, debitBalance, _, lastTxSeq, err = d.getMostRecentSnapshot(ctx, tx, balanceID, targetTime)
 		if err != nil {
 			return nil, err
 		}
@@ -1810,7 +1828,7 @@ func (d Datasource) GetBalanceAtTime(ctx context.Context, balanceID string, targ
 
 	// Calculate the balance by applying transactions since the snapshot (or from genesis)
 	creditBalance, debitBalance, err = d.calculateBalanceFromTransactions(
-		ctx, tx, balanceID, startTime, targetTime, creditBalance, debitBalance)
+		ctx, tx, balanceID, lastTxSeq, targetTime, creditBalance, debitBalance)
 	if err != nil {
 		return nil, err
 	}

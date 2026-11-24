@@ -312,3 +312,18 @@ func TestProcessStuckTransaction_OverdraftSentenceAloneIsNotRejected(t *testing.
 	mockDS.AssertNotCalled(t, "RecordTransaction", mock.Anything, mock.Anything)
 	mockDS.AssertExpectations(t)
 }
+
+func TestCreateQueueCopyDoesNotShareMetadata(t *testing.T) {
+	original := &model.Transaction{
+		TransactionID: "txn_parent",
+		Reference:     "ref",
+		MetaData:      map[string]interface{}{"inflight": true},
+	}
+
+	queueCopy := createQueueCopy(original, original.Reference)
+	queueCopy.MetaData["recovery_attempts"] = 1
+
+	_, shared := original.MetaData["recovery_attempts"]
+	assert.False(t, shared)
+	assert.Equal(t, true, queueCopy.MetaData["inflight"])
+}

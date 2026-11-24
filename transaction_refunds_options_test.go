@@ -86,11 +86,10 @@ func TestPrepareRefundDoesNotMutateOriginalMetaData(t *testing.T) {
 	assert.False(t, leaked, "the reversal must not share the original's metadata map")
 }
 
-// TestPrepareRefundCanOverrideInheritedInflight covers a practical use of
-// merge semantics: setTransactionMetadata only ever sets the inflight marker,
-// never clears it, so a reversal of an inflight transaction inherits it even
-// though the reversal itself is not inflight. An override lets a caller
-// correct that on their own row.
+// TestPrepareRefundCanOverrideInheritedInflight covers merge semantics: the
+// caller's metadata wins on the prepared reversal. setTransactionMetadata
+// later rewrites inflight, atomic, and allow_overdraft from the struct, so
+// this override does not by itself change how the queued reversal executes.
 func TestPrepareRefundCanOverrideInheritedInflight(t *testing.T) {
 	original := originalForRefund()
 	require.Equal(t, true, original.MetaData["inflight"])

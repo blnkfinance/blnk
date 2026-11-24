@@ -79,11 +79,6 @@ func (m *redisHookManager) executeHook(ctx context.Context, hook *Hook, payload 
 		return fmt.Errorf("config is not initialized")
 	}
 	secret := m.config.Server.SecretKey
-	// Create signature: HMAC-SHA256(timestamp + "." + payload)
-	signatureData := timestamp + "." + string(payloadBytes)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(signatureData))
-	signature := hex.EncodeToString(mac.Sum(nil))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", hook.URL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
@@ -91,8 +86,19 @@ func (m *redisHookManager) executeHook(ctx context.Context, hook *Hook, payload 
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Blnk-Signature", signature)
-	req.Header.Set("X-Blnk-Timestamp", timestamp)
+	if secret != "" {
+		// Create signature: HMAC-SHA256(timestamp + "." + payload)
+		signatureData := timestamp + "." + string(payloadBytes)
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write([]byte(signatureData))
+		signature := hex.EncodeToString(mac.Sum(nil))
+		req.Header.Set("X-Blnk-Signature", signature)
+		req.Header.Set("X-Blnk-Timestamp", timestamp)
+	} else {
+		// An HMAC with an empty key can be computed by anyone, so send the hook
+		// unsigned rather than with a signature that looks valid.
+		logrus.WithField("hook_id", hook.ID).Warn("hook sent unsigned: server.secret_key is not configured")
+	}
 	req.Header.Set("X-Hook-ID", hook.ID)
 	req.Header.Set("X-Hook-Type", string(hook.Type))
 

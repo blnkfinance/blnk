@@ -54,8 +54,9 @@ func TestUpdateTransactionMetadata(t *testing.T) {
 	metadataJSON, _ := json.Marshal(metadata)
 
 	// Verify the SQL coerces the existing metadata to an object before the jsonb
-	// merge and updates both direct and parent matches.
-	mock.ExpectExec(`UPDATE blnk\.transactions\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\) \|\| \$1::jsonb\s+WHERE transaction_id = \$2 OR parent_transaction = \$2`).
+	// merge, strips execution flags from the patch, and updates both direct and
+	// parent matches.
+	mock.ExpectExec(`UPDATE blnk\.transactions\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\)\s+\|\| \(\(CASE WHEN jsonb_typeof\(\$1::jsonb\) = 'object' THEN \$1::jsonb ELSE '\{\}'::jsonb END\) - 'allow_overdraft' - 'overdraft_limit' - 'inflight' - 'atomic'\)\s+WHERE transaction_id = \$2 OR parent_transaction = \$2`).
 		WithArgs(metadataJSON, "txn_123").
 		WillReturnResult(sqlmock.NewResult(1, 2)) // 2 rows affected (1 direct + 1 parent match)
 
@@ -304,6 +305,79 @@ func TestUpdateTransactionMetadata_BulkScope_RealDB(t *testing.T) {
 		assert.Equal(t, marker, txn.MetaData["marker"])
 		assert.Equal(t, "B-42", txn.MetaData["settlement_batch"])
 	}
+}
+
+func TestUpdateTransactionMetadata_ExecutionFlagsStay_RealDB(t *testing.T) {
+	ds := openRealTestDB(t)
+	ctx := context.Background()
+
+	marker := gofakeit.UUID()
+	ledger, err := ds.CreateLedger(model.Ledger{Name: "flag-meta-" + marker})
+	require.NoError(t, err)
+	balance, err := ds.CreateBalance(model.Balance{LedgerID: ledger.LedgerID, Currency: "USD"})
+	require.NoError(t, err)
+
+	insert := func(meta map[string]interface{}) string {
+		t.Helper()
+		txnID := model.GenerateUUIDWithSuffix("txn")
+		metaJSON, err := json.Marshal(meta)
+		require.NoError(t, err)
+		_, err = ds.Conn.ExecContext(ctx, `
+			INSERT INTO blnk.transactions
+				(transaction_id, source, destination, reference, amount, precise_amount, precision,
+				 currency, status, description, hash, created_at, meta_data)
+			VALUES ($1, $2, $3, $4, 10, 10, 100, 'USD', 'QUEUED', 'flag metadata', $5, $6, $7::jsonb)
+		`, txnID, balance.BalanceID, balance.BalanceID, "flag-scope-"+txnID, "hash-"+txnID, time.Now().UTC(), metaJSON)
+		require.NoError(t, err)
+		return txnID
+	}
+
+	t.Run("a patch cannot flip or clear stored flags", func(t *testing.T) {
+		txnID := insert(map[string]interface{}{
+			"marker":          marker,
+			"allow_overdraft": true,
+			"inflight":        true,
+			"atomic":          true,
+		})
+
+		require.NoError(t, ds.UpdateTransactionMetadata(ctx, txnID, map[string]interface{}{
+			"allow_overdraft": false,
+			"inflight":        nil,
+			"atomic":          false,
+			"invoice":         "INV-9",
+		}))
+
+		txns, err := ds.ListTransactionsByMetadataScope(ctx, txnID, 10, 0)
+		require.NoError(t, err)
+		require.Len(t, txns, 1)
+		assert.Equal(t, true, txns[0].MetaData["allow_overdraft"])
+		assert.Equal(t, true, txns[0].MetaData["inflight"])
+		assert.Equal(t, true, txns[0].MetaData["atomic"])
+		assert.Equal(t, marker, txns[0].MetaData["marker"])
+		assert.Equal(t, "INV-9", txns[0].MetaData["invoice"])
+	})
+
+	t.Run("a patch cannot add flags that were not stored", func(t *testing.T) {
+		txnID := insert(map[string]interface{}{"marker": marker})
+
+		require.NoError(t, ds.UpdateTransactionMetadata(ctx, txnID, map[string]interface{}{
+			"allow_overdraft": true,
+			"inflight":        true,
+			"atomic":          true,
+			"invoice":         "INV-10",
+		}))
+
+		txns, err := ds.ListTransactionsByMetadataScope(ctx, txnID, 10, 0)
+		require.NoError(t, err)
+		require.Len(t, txns, 1)
+		_, hasOverdraft := txns[0].MetaData["allow_overdraft"]
+		_, hasInflight := txns[0].MetaData["inflight"]
+		_, hasAtomic := txns[0].MetaData["atomic"]
+		assert.False(t, hasOverdraft)
+		assert.False(t, hasInflight)
+		assert.False(t, hasAtomic)
+		assert.Equal(t, "INV-10", txns[0].MetaData["invoice"])
+	})
 }
 
 func TestListTransactionsByMetadataScope_RootTransactionNullParent_RealDB(t *testing.T) {

@@ -110,6 +110,28 @@ func TestUpdateMetadata(t *testing.T) {
 		mockDS.AssertExpectations(t)
 	})
 
+	t.Run("Update Transaction Metadata leaves execution flags", func(t *testing.T) {
+		mockDS := new(mocks.MockDataSource)
+		blnk := &Blnk{datasource: mockDS}
+
+		mockDS.On("TransactionExistsByIDOrParentID", ctx, "txn_123").Return(true, nil)
+
+		newMetadata := map[string]interface{}{
+			"invoice":         "INV-1",
+			"allow_overdraft": true,
+			"inflight":        false,
+			"atomic":          true,
+		}
+		mockDS.On("UpdateTransactionMetadata", ctx, "txn_123", map[string]interface{}{"invoice": "INV-1"}).Return(nil)
+
+		result, err := blnk.UpdateMetadata(ctx, "txn_123", newMetadata)
+
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]interface{}{"invoice": "INV-1"}, result)
+		assert.Equal(t, true, newMetadata["allow_overdraft"], "the caller's map is left as they sent it")
+		mockDS.AssertExpectations(t)
+	})
+
 	t.Run("Update Balance Metadata", func(t *testing.T) {
 		mockDS := new(mocks.MockDataSource)
 		blnk := &Blnk{datasource: mockDS}
