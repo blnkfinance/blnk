@@ -493,6 +493,7 @@ func initializeWebhookTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 
 	mux.HandleFunc(cfg.Queue.WebhookQueue, b.blnk.ProcessWebhook)
 	mux.HandleFunc("new:hook_execution", b.blnk.Hooks.ProcessHookTask)
+	mux.HandleFunc(blnk.AtomicBatchFailureTask, b.blnk.ProcessAtomicBatchFailure)
 	mux.HandleFunc(cfg.Queue.IndexQueue, b.indexData)
 	mux.HandleFunc("new:index:batch", b.indexBatchData)
 }

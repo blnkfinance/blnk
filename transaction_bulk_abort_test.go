@@ -222,7 +222,7 @@ func TestAbortQueuedAtomicBatch_WaitsForAnItemBeingApplied(t *testing.T) {
 			}
 			aborted := make(chan abortResult, 1)
 			go func() {
-				count, err := bt.b.abortQueuedAtomicBatch(ctx, bt.id, inflight)
+				count, err := bt.b.abortQueuedAtomicBatch(ctx, bt.id, inflight, nil)
 				aborted <- abortResult{count, err}
 			}()
 
@@ -278,7 +278,7 @@ func TestAbortQueuedAtomicBatch_VoidsWrittenHoldAndRejectsQueuedHold(t *testing.
 	src := bt.balance(t, bt.src.BalanceID)
 	require.Equal(t, "5000", src.InflightDebitBalance.String())
 
-	count, err := bt.b.abortQueuedAtomicBatch(ctx, bt.id, true)
+	count, err := bt.b.abortQueuedAtomicBatch(ctx, bt.id, true, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "the written hold is voided")
 
@@ -311,7 +311,7 @@ func TestAbortQueuedAtomicBatch_FailedRollbackIsFinishedByTheWorker(t *testing.T
 			}
 			require.NoError(t, bt.b.redis.Set(ctx, lockKey, "held-by-test", time.Minute).Err())
 
-			_, err := bt.b.abortQueuedAtomicBatch(ctx, bt.id, inflight)
+			_, err := bt.b.abortQueuedAtomicBatch(ctx, bt.id, inflight, nil)
 			require.Error(t, err, "the abort's rollback fails")
 			reported, err := bt.b.redis.Exists(ctx, atomicBatchReportedKey(bt.id)).Result()
 			require.NoError(t, err)
@@ -335,4 +335,81 @@ func TestAbortQueuedAtomicBatch_FailedRollbackIsFinishedByTheWorker(t *testing.T
 			assert.Equal(t, 1, bt.failedWebhooks(t), "the batch is reported once")
 		})
 	}
+}
+
+// retryTasks returns the queued rollback retries of the batch.
+func (bt *abortTestBatch) retryTasks(t *testing.T) []*asynq.TaskInfo {
+	t.Helper()
+	tasks, err := bt.inspector.ListPendingTasks(bt.cnf.Queue.WebhookQueue, asynq.PageSize(1000))
+	if errors.Is(err, asynq.ErrQueueNotFound) {
+		return nil
+	}
+	require.NoError(t, err)
+	var retries []*asynq.TaskInfo
+	for _, task := range tasks {
+		var p atomicBatchFailurePayload
+		if task.Type == AtomicBatchFailureTask && json.Unmarshal(task.Payload, &p) == nil && p.BatchID == bt.id {
+			retries = append(retries, task)
+		}
+	}
+	return retries
+}
+
+// A background batch whose every item has been taken fails, and the refund of
+// what it applied fails. No queued item is left to finish it, so the request
+// side queues a retry, which refunds and reports the batch once.
+func TestAsyncAtomicFailure_FailedRefundIsRetriedWithNothingQueued(t *testing.T) {
+	for _, inflight := range []bool{false, true} {
+		t.Run(map[bool]string{false: "applied", true: "inflight"}[inflight], func(t *testing.T) {
+			bt := newAbortTestBatch(t, inflight, 50)
+			ctx := context.Background()
+			paid := bt.items[0]
+			require.NoError(t, bt.work(t, 0), "the 50 is paid")
+
+			lockKey := "refund:" + paid.TransactionID
+			if inflight {
+				lockKey = "inflight-commit:" + paid.TransactionID
+			}
+			require.NoError(t, bt.b.redis.Set(ctx, lockKey, "held-by-test", time.Minute).Err())
+
+			bt.b.handleAsyncBulkTransactionFailure(ctx, errors.New("the next item failed"), bt.id, true, inflight, true)
+			assert.Zero(t, bt.failedWebhooks(t), "nothing is reported before the rollback is complete")
+			retries := bt.retryTasks(t)
+			require.Len(t, retries, 1, "the failed rollback is queued for a retry")
+			retry := asynq.NewTask(retries[0].Type, retries[0].Payload)
+
+			assert.Error(t, bt.b.ProcessAtomicBatchFailure(ctx, retry), "the retry fails while the refund still fails")
+			assert.Zero(t, bt.failedWebhooks(t))
+
+			require.NoError(t, bt.b.redis.Del(ctx, lockKey).Err())
+			require.NoError(t, bt.b.ProcessAtomicBatchFailure(ctx, retry), "the retry finishes the rollback")
+			bt.assertRolledBack(t, "after the retry")
+			assert.Equal(t, 1, bt.failedWebhooks(t), "the batch is reported once its rollback is complete")
+
+			require.NoError(t, bt.b.ProcessAtomicBatchFailure(ctx, retry))
+			require.NoError(t, bt.work(t, 0))
+			assert.Equal(t, 1, bt.failedWebhooks(t), "a duplicate retry or delivery reports nothing more")
+		})
+	}
+}
+
+// A background batch that fails and rolls back is reported once, by the
+// request side, and the worker reports nothing for the items it then rejects.
+func TestAsyncAtomicFailure_ReportedOnceByTheRequest(t *testing.T) {
+	bt := newAbortTestBatch(t, false, 50, 10)
+	ctx := context.Background()
+	require.NoError(t, bt.work(t, 0), "the 50 is paid")
+
+	bt.b.handleAsyncBulkTransactionFailure(ctx, errors.New("the batch failed"), bt.id, true, false, true)
+	bt.assertRolledBack(t, "after the request")
+	assert.Equal(t, 1, bt.failedWebhooks(t), "the request reports the failure")
+	assert.Empty(t, bt.retryTasks(t), "nothing is left to retry")
+	reported, err := bt.b.redis.Exists(ctx, atomicBatchReportedKey(bt.id)).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), reported)
+
+	require.NoError(t, bt.work(t, 1))
+	require.NoError(t, bt.work(t, 0))
+	bt.assertRolledBack(t, "after the worker")
+	assert.Equal(t, 1, bt.failedWebhooks(t), "the worker reports nothing more")
 }

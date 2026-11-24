@@ -18,6 +18,7 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -27,6 +28,7 @@ import (
 	"github.com/blnkfinance/blnk/internal/apierror"
 	redlock "github.com/blnkfinance/blnk/internal/lock"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/hibiken/asynq"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -108,7 +110,7 @@ func (l *Blnk) rollbackFailedBatch(ctx context.Context, batchID string, isInflig
 	if isInflight {
 		action = "voided"
 	}
-	count, err := l.abortQueuedAtomicBatch(ctx, batchID, isInflight)
+	count, err := l.abortQueuedAtomicBatch(ctx, batchID, isInflight, nil)
 	l.logRollbackResult(batchID, action, err)
 	return action, count, err
 }
@@ -119,14 +121,16 @@ func (l *Blnk) rollbackFailedBatch(ctx context.Context, batchID string, isInflig
 // failed mark is set before any later item is taken. Once the rollback is
 // complete the batch is marked reported: the worker then rejects the items
 // left in the queue without rolling back or reporting the batch again. When
-// the rollback fails, the batch is left unreported, and the first rejected
-// item finishes it.
+// notice is set, the batch's failure notice is sent right after the mark, and
+// the mark is cleared again if the send fails, so the batch is reported only
+// once the notice is queued. When the rollback or the send fails, the batch is
+// left unreported, and the caller hands it to retryQueuedAtomicBatchFailure.
 //
 // When the lock wait runs out, an item is still being applied. The batch is
 // marked failed anyway, so the worker takes no further item, and the rollback
 // waits for the lock up to LockDuration, the longest the item can hold it, so
 // that what it applies is rolled back too.
-func (l *Blnk) abortQueuedAtomicBatch(ctx context.Context, batchID string, isInflight bool) (int, error) {
+func (l *Blnk) abortQueuedAtomicBatch(ctx context.Context, batchID string, isInflight bool, notice func(count int) NewWebhook) (int, error) {
 	locker := redlock.NewLocker(l.redis, atomicBatchLockKey(batchID), model.GenerateUUIDWithSuffix("loc"))
 	lockCfg := l.Config().Transaction
 	var lockErr error
@@ -156,10 +160,63 @@ func (l *Blnk) abortQueuedAtomicBatch(ctx context.Context, batchID string, isInf
 	if err != nil {
 		return count, err
 	}
-	if err := l.redis.SetNX(ctx, atomicBatchReportedKey(batchID), time.Now().UTC().Format(time.RFC3339), atomicBatchMarkTTL).Err(); err != nil {
+	reportedKey := atomicBatchReportedKey(batchID)
+	first, err := l.redis.SetNX(ctx, reportedKey, time.Now().UTC().Format(time.RFC3339), atomicBatchMarkTTL).Result()
+	if err != nil {
 		return count, fmt.Errorf("failed to mark atomic batch %s as reported: %w", batchID, err)
 	}
+	if !first || notice == nil {
+		return count, nil
+	}
+	if err := l.SendWebhook(notice(count)); err != nil {
+		if delErr := l.redis.Del(ctx, reportedKey).Err(); delErr != nil {
+			logrus.WithError(delErr).WithField("batch_id", batchID).Error("failed to clear the report mark of atomic batch")
+		}
+		return count, fmt.Errorf("failed to report atomic batch %s: %w", batchID, err)
+	}
 	return count, nil
+}
+
+// AtomicBatchFailureTask is the task type that finishes a queued atomic batch
+// whose failure the request side could not finish: a rollback or a failure
+// notice that failed. The queued items cannot be relied on for that, since
+// they may all have been taken already.
+const AtomicBatchFailureTask = "new:atomic_batch:failure"
+
+// atomicBatchFailurePayload is the payload of an AtomicBatchFailureTask.
+type atomicBatchFailurePayload struct {
+	BatchID  string `json:"batch_id"`
+	Inflight bool   `json:"inflight"`
+	Reason   string `json:"reason"`
+}
+
+// retryQueuedAtomicBatchFailure queues a task that finishes the rollback of a
+// failed queued atomic batch and reports it. The task is retried until it
+// succeeds. If it cannot be queued, a rejected item of the batch still
+// finishes the batch when one is left.
+func (l *Blnk) retryQueuedAtomicBatchFailure(batchID string, isInflight bool, cause error) {
+	payload, err := json.Marshal(atomicBatchFailurePayload{BatchID: batchID, Inflight: isInflight, Reason: cause.Error()})
+	if err == nil {
+		task := asynq.NewTask(AtomicBatchFailureTask, payload, asynq.Queue(l.Config().Queue.WebhookQueue))
+		_, err = l.queue.Client.Enqueue(task)
+	}
+	if err != nil {
+		logrus.WithError(err).WithField("batch_id", batchID).Error("failed to queue the rollback retry of atomic batch")
+	}
+}
+
+// ProcessAtomicBatchFailure handles an AtomicBatchFailureTask. It marks the
+// batch failed again, in case the request side could not, then rolls it back
+// and reports it with failQueuedAtomicBatch. An error makes the task retry.
+func (l *Blnk) ProcessAtomicBatchFailure(ctx context.Context, t *asynq.Task) error {
+	var p atomicBatchFailurePayload
+	if err := json.Unmarshal(t.Payload(), &p); err != nil {
+		return fmt.Errorf("invalid atomic batch failure task: %w", err)
+	}
+	if err := l.markQueuedAtomicBatchFailed(ctx, p.BatchID); err != nil {
+		return err
+	}
+	return l.failQueuedAtomicBatch(ctx, errors.New(p.Reason), p.BatchID, p.Inflight)
 }
 
 // voidInflightBatchTransactions voids all inflight transactions in a batch
@@ -283,6 +340,24 @@ func bulkTransactionWebhook(batchID, status, errorMsg string, transactionCount i
 // and builds a detailed error message including rollback status
 func (l *Blnk) handleAsyncBulkTransactionFailure(ctx context.Context, err error, batchID string, isAtomic bool, isInflight bool, queued bool) {
 	logrus.WithError(err).WithField("batch_id", batchID).Error("async bulk transaction error")
+
+	if isAtomic && queued {
+		// The notice is sent by the abort once the rollback is complete, so a
+		// rollback that fails sends nothing here; the retry reports the batch.
+		notice := func(count int) NewWebhook {
+			return bulkTransactionWebhook(batchID, "failed", batchFailureMessage(err, isInflight, count, nil), 0)
+		}
+		action := "refunded"
+		if isInflight {
+			action = "voided"
+		}
+		_, abortErr := l.abortQueuedAtomicBatch(ctx, batchID, isInflight, notice)
+		l.logRollbackResult(batchID, action, abortErr)
+		if abortErr != nil {
+			l.retryQueuedAtomicBatchFailure(batchID, isInflight, err)
+		}
+		return
+	}
 
 	var errorMessage string
 
@@ -659,6 +734,9 @@ func (l *Blnk) CreateBulkTransactions(ctx context.Context, req *model.BulkTransa
 			// The rollback has to finish even when the client has given up on
 			// the request, or the items applied so far stay applied.
 			_, count, rollbackErr := l.rollbackFailedBatch(context.WithoutCancel(ctx), batchID, req.Inflight, !req.SkipQueue)
+			if rollbackErr != nil && !req.SkipQueue {
+				l.retryQueuedAtomicBatchFailure(batchID, req.Inflight, err)
+			}
 			responseError = batchFailureMessage(err, req.Inflight, count, rollbackErr)
 		} else {
 			responseError = fmt.Sprintf("%s. Previous transactions were not rolled back.", err.Error())
