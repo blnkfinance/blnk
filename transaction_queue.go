@@ -402,6 +402,15 @@ func setTransactionMetadata(transaction *model.Transaction) {
 	writeServerOwnedFlag(transaction.MetaData, "inflight", transaction.Inflight)
 	writeServerOwnedFlag(transaction.MetaData, "atomic", transaction.Atomic)
 	writeServerOwnedFlag(transaction.MetaData, "allow_overdraft", transaction.AllowOverdraft)
+
+	// The limit has no column either. Without it a transaction read back
+	// from the DB (coalesced sibling, recovered stuck transaction) gets
+	// OverdraftLimit 0, which means an unlimited overdraft. Only the real
+	// limit may be stored, so a caller-supplied value is dropped first.
+	delete(transaction.MetaData, "overdraft_limit")
+	if transaction.AllowOverdraft && transaction.OverdraftLimit > 0 {
+		transaction.MetaData["overdraft_limit"] = transaction.OverdraftLimit
+	}
 }
 
 // writeServerOwnedFlag stores an execution flag in metadata, or removes it

@@ -627,6 +627,26 @@ func TestUpdateMetadata_TransactionPatchPayloadWithoutRefetch(t *testing.T) {
 	mockDS.AssertExpectations(t)
 }
 
+// TestUpdateMetadata_TransactionIgnoresOverdraftLimit checks that a metadata
+// update cannot change the overdraft limit queue recovery reads back for a
+// queued transaction.
+func TestUpdateMetadata_TransactionIgnoresOverdraftLimit(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	newMetadata := map[string]interface{}{"tag": "vip", "overdraft_limit": 1000.0}
+	mockDS.On("TransactionExistsByIDOrParentID", mock.Anything, "txn_od_1").Return(true, nil).Once()
+	mockDS.On("UpdateTransactionMetadata", mock.Anything, "txn_od_1", map[string]interface{}{"tag": "vip"}).Return(nil).Once()
+	mockDS.On("ListTransactionsByMetadataScope", mock.Anything, "txn_od_1", mock.Anything, mock.Anything).
+		Return([]*model.Transaction{}, nil).Maybe()
+
+	b, _ := setupMetadataWebhookBlnk(t, mockDS, "http://localhost:1/webhooks")
+	got, err := b.UpdateMetadata(context.Background(), "txn_od_1", newMetadata)
+	require.NoError(t, err)
+
+	assert.NotContains(t, got, "overdraft_limit")
+	assert.Equal(t, 1000.0, newMetadata["overdraft_limit"], "caller's map must not be modified")
+	mockDS.AssertExpectations(t)
+}
+
 // TestUpdateMetadata_TransactionIndexUsesFullDocumentNotPatch guards against a
 // regression where the Typesense index payload for a transaction metadata
 // update was the webhook patch stub ({transaction_id, meta_data_patch}). That

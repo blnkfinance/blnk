@@ -22,7 +22,7 @@ var ErrEntityNotFound = errors.New("entity not found")
 // meta_data. The transactions table has no columns for them, so coalescing and
 // stuck-queue recovery copy these keys back onto the struct. A client metadata
 // patch must not change them. UpdateTransactionMetadata strips the same keys.
-var serverOwnedTransactionFlagKeys = []string{"allow_overdraft", "inflight", "atomic"}
+var serverOwnedTransactionFlagKeys = []string{"allow_overdraft", "overdraft_limit", "inflight", "atomic"}
 
 // metadataUpdatedWebhookData flattens a resource snapshot into the webhook
 // `data` object, matching ledger.created / balance.created / identity.created:
@@ -298,7 +298,7 @@ func (l *Blnk) UpdateMetadata(ctx context.Context, entityID string, newMetadata 
 			return nil, ErrEntityNotFound
 		}
 
-		// allow_overdraft, inflight, and atomic decide how a queued transfer
+		// allow_overdraft, overdraft_limit, inflight, and atomic decide how a queued transfer
 		// executes. They are written from the transaction struct when it is
 		// queued. A metadata update must not replace or clear them. The
 		// database merge strips the same keys.

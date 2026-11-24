@@ -56,7 +56,7 @@ func TestUpdateTransactionMetadata(t *testing.T) {
 	// Verify the SQL coerces the existing metadata to an object before the jsonb
 	// merge, strips execution flags from the patch, and updates both direct and
 	// parent matches.
-	mock.ExpectExec(`UPDATE blnk\.transactions\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\)\s+\|\| \(\(CASE WHEN jsonb_typeof\(\$1::jsonb\) = 'object' THEN \$1::jsonb ELSE '\{\}'::jsonb END\) - 'allow_overdraft' - 'inflight' - 'atomic'\)\s+WHERE transaction_id = \$2 OR parent_transaction = \$2`).
+	mock.ExpectExec(`UPDATE blnk\.transactions\s+SET meta_data = \(CASE WHEN jsonb_typeof\(meta_data\) = 'object' THEN meta_data ELSE '\{\}'::jsonb END\)\s+\|\| \(\(CASE WHEN jsonb_typeof\(\$1::jsonb\) = 'object' THEN \$1::jsonb ELSE '\{\}'::jsonb END\) - 'allow_overdraft' - 'overdraft_limit' - 'inflight' - 'atomic'\)\s+WHERE transaction_id = \$2 OR parent_transaction = \$2`).
 		WithArgs(metadataJSON, "txn_123").
 		WillReturnResult(sqlmock.NewResult(1, 2)) // 2 rows affected (1 direct + 1 parent match)
 

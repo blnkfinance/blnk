@@ -57,7 +57,7 @@ func (d *Datasource) UpdateLedgerMetadata(id string, metadata map[string]interfa
 // The update applies to both the transaction with the provided ID and any transactions
 // where this ID is set as the parent_transaction.
 //
-// allow_overdraft, inflight, and atomic are execution controls. They are removed
+// allow_overdraft, overdraft_limit, inflight, and atomic are execution controls. They are removed
 // from the patch before the merge, so this write cannot replace or clear them.
 //
 // Parameters:
@@ -82,7 +82,7 @@ func (d *Datasource) UpdateTransactionMetadata(ctx context.Context, id string, m
 	_, err = d.Conn.ExecContext(ctx, `
 		UPDATE blnk.transactions
 		SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END)
-			|| ((CASE WHEN jsonb_typeof($1::jsonb) = 'object' THEN $1::jsonb ELSE '{}'::jsonb END) - 'allow_overdraft' - 'inflight' - 'atomic')
+			|| ((CASE WHEN jsonb_typeof($1::jsonb) = 'object' THEN $1::jsonb ELSE '{}'::jsonb END) - 'allow_overdraft' - 'overdraft_limit' - 'inflight' - 'atomic')
 		WHERE transaction_id = $2 OR parent_transaction = $2
 	`, metadataJSON, id)
 	return err

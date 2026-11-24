@@ -19,6 +19,10 @@ import (
 // precisionCache stores transaction precisions fetched from the database.
 // It is read-through over the database (the source of truth) and is bounded
 // and concurrency-safe via precisionCacheMu.
+// ErrOverdraftLimitExceeded is returned when a transaction would take its
+// source balance past the overdraft limit. Callers match it with errors.Is.
+var ErrOverdraftLimitExceeded = errors.New("transaction exceeds overdraft limit")
+
 var (
 	precisionCacheMu sync.RWMutex
 	precisionCache   = make(map[string]float64)
@@ -200,7 +204,7 @@ func canProcessTransaction(transaction *Transaction, sourceBalance *Balance) err
 		if resultingBalance.Cmp(negativeOverdraftLimit) >= 0 {
 			return nil
 		}
-		return fmt.Errorf("transaction exceeds overdraft limit")
+		return ErrOverdraftLimitExceeded
 	}
 
 	// Insufficient funds and no overdraft allowed

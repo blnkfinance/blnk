@@ -238,6 +238,12 @@ func (p *QueuedTransactionRecoveryProcessor) recoverStuckTransaction(ctx context
 			p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusAlreadyProcessed)
 			return nil
 		}
+		// Same handling as the queue worker: the limit will not change on a
+		// retry, so reject instead of leaving the transaction QUEUED.
+		if errors.Is(err, model.ErrOverdraftLimitExceeded) {
+			logrus.Warnf("Stuck transaction %s exceeds its overdraft limit, rejecting", stuckTxn.TransactionID)
+			return p.rejectStuckTransaction(ctx, stuckTxn, err.Error())
+		}
 
 		p.updateRecoveryMetadata(ctx, stuckTxn, attempts, recoveryStatusFailed)
 		return err
