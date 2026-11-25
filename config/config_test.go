@@ -21,57 +21,13 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sirupsen/logrus"
-	logtest "github.com/sirupsen/logrus/hooks/test"
 )
 
-func TestValidateAndAddDefaults_InsecureWarning(t *testing.T) {
-	baseConfig := func() Configuration {
-		return Configuration{
-			ProjectName: "Test Project",
-			DataSource:  DataSourceConfig{Dns: "some-dns"},
-			Redis:       RedisConfig{Dns: "localhost:6379"},
-		}
+func withTestAuth(cnf *Configuration) {
+	cnf.Server.Secure = true
+	if strings.TrimSpace(cnf.Server.SecretKey) == "" {
+		cnf.Server.SecretKey = "test-secret"
 	}
-
-	t.Run("warns when secure is disabled", func(t *testing.T) {
-		hook := logtest.NewGlobal()
-		defer hook.Reset()
-
-		cnf := baseConfig()
-		cnf.Server.Secure = false
-		if err := cnf.validateAndAddDefaults(); err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-
-		var warned bool
-		for _, entry := range hook.AllEntries() {
-			if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "authentication is DISABLED") {
-				warned = true
-			}
-		}
-		if !warned {
-			t.Errorf("Expected a SECURITY warning when server.secure is false")
-		}
-	})
-
-	t.Run("no warning when secure is enabled", func(t *testing.T) {
-		hook := logtest.NewGlobal()
-		defer hook.Reset()
-
-		cnf := baseConfig()
-		cnf.Server.Secure = true
-		if err := cnf.validateAndAddDefaults(); err != nil {
-			t.Fatalf("Expected no error, got %v", err)
-		}
-
-		for _, entry := range hook.AllEntries() {
-			if strings.Contains(entry.Message, "authentication is DISABLED") {
-				t.Errorf("Did not expect a SECURITY warning when server.secure is true")
-			}
-		}
-	})
 }
 
 func TestValidateAndAddDefaults(t *testing.T) {
@@ -114,6 +70,7 @@ func TestValidateAndAddDefaults(t *testing.T) {
 			Dns: "localhost:6379",
 		},
 	}
+	withTestAuth(&cnf)
 
 	err = cnf.validateAndAddDefaults()
 	if err != nil {
@@ -150,6 +107,7 @@ func TestValidateAndAddDefaults_TransactionLockWaitTimeout(t *testing.T) {
 			LockWaitTimeout: 12,
 		},
 	}
+	withTestAuth(&cnf)
 
 	err := cnf.validateAndAddDefaults()
 	if err != nil {
@@ -174,6 +132,7 @@ func TestValidateAndAddDefaults_TransactionLockWaitTimeoutAlreadyDuration(t *tes
 			LockWaitTimeout: 5 * time.Second,
 		},
 	}
+	withTestAuth(&cnf)
 
 	err := cnf.validateAndAddDefaults()
 	if err != nil {
@@ -204,6 +163,10 @@ func TestLoadConfigFromFile(t *testing.T) {
 		},
 		Transaction: TransactionConfig{
 			LockWaitTimeout: 7,
+		},
+		Server: ServerConfig{
+			Secure:    true,
+			SecretKey: "test-secret",
 		},
 	}
 	if err := json.NewEncoder(tmpFile).Encode(sampleConfig); err != nil {
@@ -259,6 +222,10 @@ func TestLoadConfigFromFileMonitoringDSN(t *testing.T) {
 		Redis: RedisConfig{
 			Dns: "temp-redis",
 		},
+		Server: ServerConfig{
+			Secure:    true,
+			SecretKey: "test-secret",
+		},
 	}
 	if err := json.NewEncoder(tmpFile).Encode(sampleConfig); err != nil {
 		t.Fatalf("Unable to write to temporary file: %v", err)
@@ -299,6 +266,10 @@ func TestInitConfig(t *testing.T) {
 		}, Redis: RedisConfig{
 			Dns: "localhost:6379",
 		},
+		Server: ServerConfig{
+			Secure:    true,
+			SecretKey: "test-secret",
+		},
 	}
 	if err := json.NewEncoder(tmpFile).Encode(sampleConfig); err != nil {
 		t.Fatalf("Unable to write to temporary file: %v", err)
@@ -335,6 +306,7 @@ func TestUploadURLTimeoutDefault(t *testing.T) {
 		DataSource:  DataSourceConfig{Dns: "some-dns"},
 		Redis:       RedisConfig{Dns: "localhost:6379"},
 	}
+	withTestAuth(&cnf)
 	cnf.Server.UploadURLTimeoutSec = 0
 	if err := cnf.validateAndAddDefaults(); err != nil {
 		t.Fatalf("validateAndAddDefaults failed: %v", err)
@@ -349,6 +321,7 @@ func TestUploadURLTimeoutDefault(t *testing.T) {
 		DataSource:  DataSourceConfig{Dns: "some-dns"},
 		Redis:       RedisConfig{Dns: "localhost:6379"},
 	}
+	withTestAuth(&cnf2)
 	cnf2.Server.UploadURLTimeoutSec = 7
 	if err := cnf2.validateAndAddDefaults(); err != nil {
 		t.Fatalf("validateAndAddDefaults failed: %v", err)
@@ -364,6 +337,7 @@ func TestTypeSenseBackpressureRetryIntervalDefault(t *testing.T) {
 		DataSource:  DataSourceConfig{Dns: "some-dns"},
 		Redis:       RedisConfig{Dns: "localhost:6379"},
 	}
+	withTestAuth(&cnf)
 	if err := cnf.validateAndAddDefaults(); err != nil {
 		t.Fatalf("validateAndAddDefaults failed: %v", err)
 	}
@@ -386,6 +360,7 @@ func TestRedisConnMaxIdleTimeDefault(t *testing.T) {
 		DataSource:  DataSourceConfig{Dns: "some-dns"},
 		Redis:       RedisConfig{Dns: "localhost:6379"},
 	}
+	withTestAuth(&cnf)
 	if err := cnf.validateAndAddDefaults(); err != nil {
 		t.Fatalf("validateAndAddDefaults failed: %v", err)
 	}

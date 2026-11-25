@@ -10,18 +10,11 @@ metadata:
   name: server
   namespace: blnk
 spec:
-  type: LoadBalancer                # ← expose externally via a GCP LB
+  # ClusterIP only. Terminate TLS on an Ingress in front of this Service.
+  type: ClusterIP
   ports:
     - name: "5001"
       port: 5001
       targetPort: 5001
-    - name: "80"
-      port: 80
-      targetPort: 80
-    - name: "443"
-      port: 443
-      targetPort: 443
   selector:
     io.kompose.service: server
-status:
-  loadBalancer: {}
