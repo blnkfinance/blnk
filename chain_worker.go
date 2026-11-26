@@ -179,7 +179,8 @@ func (l *Blnk) VerifyChain(ctx context.Context, progress func(seq int64)) (Chain
 	expectedSeq := int64(1)
 	const page = 1000
 
-	for {
+replay:
+	for lastSeq < state.LastSeq {
 		rows, err := l.datasource.GetChainedTransactionsAfter(ctx, lastSeq, page)
 		if err != nil {
 			return ChainVerifyResult{}, err
@@ -191,6 +192,10 @@ func (l *Blnk) VerifyChain(ctx context.Context, progress func(seq int64)) (Chain
 			if ct.ChainSeq != expectedSeq {
 				return ChainVerifyResult{BrokenSeq: ct.ChainSeq, BrokenTxnID: ct.Row.TransactionID,
 					Reason: fmt.Sprintf("non-contiguous chain_seq: expected %d, got %d", expectedSeq, ct.ChainSeq)}, nil
+			}
+			// Rows past state.LastSeq were sealed after chain_state was read.
+			if ct.ChainSeq > state.LastSeq {
+				break replay
 			}
 			if ct.ChainPrevHash != head {
 				return ChainVerifyResult{BrokenSeq: ct.ChainSeq, BrokenTxnID: ct.Row.TransactionID,
@@ -209,8 +214,13 @@ func (l *Blnk) VerifyChain(ctx context.Context, progress func(seq int64)) (Chain
 		}
 	}
 
-	// The replayed head must match the recorded head at the recorded length.
-	if lastSeq == state.LastSeq && head != state.HeadHash {
+	// The replay must reach the recorded length and match the recorded head there;
+	// otherwise the newest sealed rows were deleted.
+	if lastSeq != state.LastSeq {
+		return ChainVerifyResult{BrokenSeq: lastSeq + 1,
+			Reason: fmt.Sprintf("chain ends at seq %d but chain_state.last_seq is %d", lastSeq, state.LastSeq)}, nil
+	}
+	if head != state.HeadHash {
 		return ChainVerifyResult{BrokenSeq: lastSeq, Reason: "replayed head does not match chain_state head_hash"}, nil
 	}
 
