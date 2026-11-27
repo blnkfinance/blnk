@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"time"
 
@@ -256,6 +257,9 @@ func (t *TypesenseClient) HandleNotification(ctx context.Context, table string, 
 	t.convertLargeNumbers(config, data)
 	t.ensureSchemaFields(config, data)
 	t.normalizeTimeFields(config, data)
+	if err := t.fillLegacyReferenceArrays(ctx, table, data); err != nil {
+		return err
+	}
 
 	// Upsert the document
 	return t.upsertDocument(ctx, table, data)
@@ -450,72 +454,141 @@ func (t *TypesenseClient) upsertDocument(ctx context.Context, table string, data
 	return nil
 }
 
-// MigrateTypeSenseSchema adds new fields and removes old fields from the existing collection schema in Typesense.
-// This is useful when the schema has been updated, and fields need to be added or removed.
+// MigrateTypeSenseSchema applies known Blnk schema changes to an existing collection.
 func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collectionName string) error {
-	collection := t.Client.Collection(collectionName)
-
-	currentSchemaResponse, err := collection.Retrieve(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to retrieve current schema: %w", err)
-	}
-
-	currentSchema := &api.CollectionSchema{
-		Name:   currentSchemaResponse.Name,
-		Fields: currentSchemaResponse.Fields,
-	}
-
 	config, ok := collectionConfigs[collectionName]
 	if !ok {
 		return fmt.Errorf("unknown collection: %s", collectionName)
 	}
-	latestSchema := config.Schema
-
-	newFields, _ := compareSchemas(currentSchema, latestSchema)
-
-	for _, field := range newFields {
-		updateSchema := &api.CollectionUpdateSchema{
-			Fields: []api.Field{field},
-		}
-
-		_, err := collection.Update(ctx, updateSchema)
-		if err != nil {
-			return fmt.Errorf("failed to add field %s: %w", field.Name, err)
-		}
-		logrus.Infof("Added new field %s to collection %s", field.Name, collectionName)
+	collection := t.Client.Collection(collectionName)
+	current, err := collection.Retrieve(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve current schema: %w", err)
 	}
 
+	changes := schemaMigrationFields(config, current.Fields)
+	if len(changes) == 0 {
+		return nil
+	}
+	if _, err := collection.Update(ctx, &api.CollectionUpdateSchema{Fields: changes}); err != nil {
+		return fmt.Errorf("failed to migrate Typesense collection %s: %w", collectionName, err)
+	}
+	logrus.Infof("Updated schema for Typesense collection %s", collectionName)
 	return nil
 }
 
-// compareSchemas compares the old schema with the new schema and returns:
-// - newFields: fields present in new schema but not in old schema
-// - removedFields: field names present in old schema but not in new schema
-func compareSchemas(oldSchema, newSchema *api.CollectionSchema) ([]api.Field, []string) {
-	var newFields []api.Field
-	var removedFields []string
-
-	oldFieldMap := make(map[string]bool)
-	newFieldMap := make(map[string]bool)
-
-	for _, field := range oldSchema.Fields {
-		oldFieldMap[field.Name] = true
-	}
-
-	for _, field := range newSchema.Fields {
-		newFieldMap[field.Name] = true
-		if !oldFieldMap[field.Name] {
-			newFields = append(newFields, field)
+func schemaMigrationFields(config CollectionConfig, existing []api.Field) []api.Field {
+	var changes []api.Field
+	drop := true
+	byName := make(map[string]api.Field, len(existing))
+	for _, field := range existing {
+		byName[field.Name] = field
+		// The retired fields were required. Leave optional custom fields alone.
+		if config.Schema.Name != CollectionTransactions || (field.Optional != nil && *field.Optional) {
+			continue
+		}
+		switch field.Name {
+		case "rate":
+			if field.Type == "float" {
+				changes = append(changes, api.Field{Name: field.Name, Drop: &drop})
+			}
+		case "sources", "destinations":
+			if field.Type != "string[]" {
+				continue
+			}
+			// Typesense 29 cannot alter a reference field in place. A drop looks
+			// successful and then rejects every later write. Indexing copies
+			// the singular id into the list instead. POST /search/reindex
+			// recreates the collection and removes the field.
+			if field.Reference != nil && *field.Reference != "" {
+				from := "source"
+				if field.Name == "destinations" {
+					from = "destination"
+				}
+				logrus.Warnf("Legacy transactions.%s reference stays in place. Indexing copies %s into it. POST /search/reindex removes the field.", field.Name, from)
+				continue
+			}
+			changes = append(changes, api.Field{Name: field.Name, Drop: &drop})
 		}
 	}
 
-	for _, field := range oldSchema.Fields {
-		if !newFieldMap[field.Name] {
-			removedFields = append(removedFields, field.Name)
+	for _, field := range config.Schema.Fields {
+		old, ok := byName[field.Name]
+		if !ok {
+			changes = append(changes, field)
+		} else if old.Type == "int64" && field.Type == "string" && slices.Contains(config.BigIntFields, field.Name) {
+			// Typesense changes a field type with a drop and add in the same request.
+			changes = append(changes, api.Field{Name: field.Name, Drop: &drop}, field)
 		}
 	}
+	return changes
+}
 
-	return newFields, removedFields
+// legacyArrayField is a retired transaction list that an old Typesense
+// collection may still require. from is the singular id copied into it.
+type legacyArrayField struct {
+	name string
+	from string
+}
+
+// legacyArrayPairs is the only pair of retired lists. Order is stable so
+// tests and logs do not depend on map iteration.
+var legacyArrayPairs = [...]legacyArrayField{
+	{name: "sources", from: "source"},
+	{name: "destinations", from: "destination"},
+}
+
+// requiredLegacyArrayFields returns retired lists that are still required.
+// Optional fields with the same names are custom extensions and are left alone.
+func requiredLegacyArrayFields(fields []api.Field) []legacyArrayField {
+	byName := make(map[string]api.Field, len(fields))
+	for _, field := range fields {
+		byName[field.Name] = field
+	}
+	var required []legacyArrayField
+	for _, pair := range legacyArrayPairs {
+		field, ok := byName[pair.name]
+		if !ok || field.Type != "string[]" {
+			continue
+		}
+		if field.Optional != nil && *field.Optional {
+			continue
+		}
+		required = append(required, pair)
+	}
+	return required
+}
+
+// applyLegacyArrayFields copies a singular balance id into a missing required
+// list. An id that is already set, or a blank singular id, is left unchanged.
+func applyLegacyArrayFields(data map[string]interface{}, required []legacyArrayField) {
+	for _, field := range required {
+		if _, exists := data[field.name]; exists {
+			continue
+		}
+		id, ok := data[field.from].(string)
+		if !ok || id == "" {
+			continue
+		}
+		data[field.name] = []string{id}
+	}
+}
+
+// fillLegacyReferenceArrays copies singular balance ids into retired lists
+// when the live collection still requires them. The schema is read on every
+// upsert. A process-local snapshot would keep copying those lists after
+// another Core instance recreated the collection, and Typesense stores the
+// extra keys instead of rejecting them.
+func (t *TypesenseClient) fillLegacyReferenceArrays(ctx context.Context, table string, data map[string]interface{}) error {
+	if table != CollectionTransactions || t == nil || t.Client == nil {
+		return nil
+	}
+	current, err := t.Client.Collection(table).Retrieve(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to read Typesense collection %s: %w", table, err)
+	}
+	applyLegacyArrayFields(data, requiredLegacyArrayFields(current.Fields))
+	return nil
 }
 
 // getDefaultValue returns the default value for a given field type in Typesense.

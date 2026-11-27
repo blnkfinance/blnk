@@ -18,6 +18,7 @@ package search
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -263,6 +264,183 @@ func TestMigrateTypeSenseSchema_AddsMissingFields(t *testing.T) {
 	}
 	assert.True(t, fields["name"], "migration should have added the missing 'name' field")
 	assert.True(t, fields["meta_data"], "migration should have added the missing 'meta_data' field")
+}
+
+func TestMigrateTypeSenseSchema_PopulatedLegacyCollections(t *testing.T) {
+	client := newTestTypesenseClient(t)
+	ctx := t.Context()
+	require.NoError(t, client.DropAllCollections(ctx))
+	optional := true
+	balances, transactions := getBalanceSchema(), getTransactionSchema()
+	for _, schema := range []*api.CollectionSchema{balances, transactions} {
+		for i, field := range schema.Fields {
+			if slices.Contains(collectionConfigs[schema.Name].BigIntFields, field.Name) {
+				schema.Fields[i].Type = "int64"
+			}
+		}
+	}
+	transactions.Fields = append(transactions.Fields,
+		api.Field{Name: "rate", Type: "float"},
+		api.Field{Name: "sources", Type: "string[]"},
+		api.Field{Name: "destinations", Type: "string[]"},
+		api.Field{Name: "merchant_tag", Type: "string", Optional: &optional},
+	)
+	for _, schema := range []*api.CollectionSchema{balances, transactions} {
+		_, err := client.CreateCollection(ctx, schema)
+		require.NoError(t, err)
+	}
+	require.NoError(t, client.EnsureCollectionsExist(ctx))
+
+	balance := map[string]interface{}{"balance_id": "bal_existing", "ledger_id": "general_ledger_id"}
+	for _, name := range collectionConfigs[CollectionBalances].BigIntFields {
+		balance[name] = int64(1)
+	}
+	require.NoError(t, client.HandleNotification(ctx, CollectionBalances, balance))
+	transaction := map[string]interface{}{
+		"transaction_id": "txn_existing", "source": "bal_existing", "destination": "bal_existing",
+		"precise_amount": int64(9007199254740993), "merchant_tag": "custom", "meta_data": map[string]interface{}{"invoice": "A"},
+		"rate": 1.0, "sources": []string{"bal_existing"}, "destinations": []string{"bal_existing"},
+	}
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, transaction))
+	delete(transaction, "rate")
+	require.ErrorContains(t, client.HandleNotification(ctx, CollectionTransactions, transaction), "rate")
+	delete(transaction, "sources")
+	delete(transaction, "destinations")
+
+	for range 2 {
+		require.NoError(t, client.MigrateTypeSenseSchema(ctx, CollectionBalances))
+		require.NoError(t, client.MigrateTypeSenseSchema(ctx, CollectionTransactions))
+	}
+
+	// The old int64 is still searchable exactly after its index changes type.
+	filter := "precise_amount:=9007199254740993"
+	retained, err := client.Search(ctx, CollectionTransactions, &api.SearchCollectionParams{
+		Q: "*", QueryBy: "transaction_id", FilterBy: &filter,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, retained.Found)
+	require.Equal(t, 1, *retained.Found)
+
+	// A value outside int64 must survive both an update and a new document.
+	const large = "9223372036854775809"
+	for _, name := range collectionConfigs[CollectionBalances].BigIntFields {
+		balance[name] = large
+	}
+	require.NoError(t, client.HandleNotification(ctx, CollectionBalances, balance))
+	transaction["precise_amount"] = large
+	for _, id := range []string{"txn_existing", "txn_new"} {
+		transaction["transaction_id"] = id
+		require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, transaction))
+		got, err := client.Client.Collection(CollectionTransactions).Document(id).Retrieve(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, large, got["precise_amount"])
+		assert.Equal(t, "custom", got["merchant_tag"])
+		assert.Equal(t, transaction["meta_data"], got["meta_data"])
+		assert.Equal(t, "bal_existing", got["source"])
+		assert.Equal(t, "bal_existing", got["destination"])
+	}
+	schema, err := client.Client.Collection(CollectionTransactions).Retrieve(ctx)
+	require.NoError(t, err)
+	assert.True(t, slices.ContainsFunc(schema.Fields, func(f api.Field) bool { return f.Name == "merchant_tag" }))
+}
+
+func TestHandleNotification_FillsLinkedLegacyArrays(t *testing.T) {
+	client := newTestTypesenseClient(t)
+	ctx := t.Context()
+	require.NoError(t, client.DropAllCollections(ctx))
+	require.NoError(t, client.EnsureCollectionsExist(ctx))
+
+	bal := "bal_linked"
+	require.NoError(t, client.HandleNotification(ctx, CollectionBalances, map[string]interface{}{
+		"balance_id": bal, "ledger_id": "general_ledger_id",
+	}))
+
+	// A collection created while sources and destinations referenced balances.
+	require.NoError(t, client.DropCollection(ctx, CollectionTransactions))
+	legacy := getTransactionSchema()
+	ref := "balances.balance_id"
+	for i, field := range legacy.Fields {
+		if field.Name == "source" || field.Name == "destination" {
+			legacy.Fields[i].Reference = &ref
+		}
+	}
+	legacy.Fields = append(legacy.Fields,
+		api.Field{Name: "sources", Type: "string[]", Reference: &ref},
+		api.Field{Name: "destinations", Type: "string[]", Reference: &ref},
+	)
+	_, err := client.CreateCollection(ctx, legacy)
+	require.NoError(t, err)
+	require.NoError(t, client.MigrateTypeSenseSchema(ctx, CollectionTransactions))
+
+	txnID := "txn_linked_new"
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": txnID, "source": bal, "destination": bal,
+	}))
+	got, err := client.Client.Collection(CollectionTransactions).Document(txnID).Retrieve(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []any{bal}, got["sources"])
+	assert.Equal(t, []any{bal}, got["destinations"])
+
+	// The current collection has neither list. A payment must not grow them.
+	require.NoError(t, client.DropCollection(ctx, CollectionTransactions))
+	require.NoError(t, client.EnsureCollectionsExist(ctx))
+	currentID := "txn_current_schema"
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": currentID, "source": bal, "destination": bal,
+	}))
+	current, err := client.Client.Collection(CollectionTransactions).Document(currentID).Retrieve(ctx)
+	require.NoError(t, err)
+	_, hasSources := current["sources"]
+	_, hasDestinations := current["destinations"]
+	assert.False(t, hasSources)
+	assert.False(t, hasDestinations)
+}
+
+func TestHandleNotification_OtherClientRecreateUsesCurrentSchema(t *testing.T) {
+	clientA := newTestTypesenseClient(t)
+	clientB := newTestTypesenseClient(t)
+	ctx := t.Context()
+	require.NoError(t, clientA.DropAllCollections(ctx))
+	require.NoError(t, clientA.EnsureCollectionsExist(ctx))
+
+	bal := "bal_cross_client"
+	require.NoError(t, clientA.HandleNotification(ctx, CollectionBalances, map[string]interface{}{
+		"balance_id": bal, "ledger_id": "general_ledger_id",
+	}))
+
+	// Client A learns a collection that still requires the retired lists.
+	require.NoError(t, clientA.DropCollection(ctx, CollectionTransactions))
+	legacy := getTransactionSchema()
+	ref := "balances.balance_id"
+	for i, field := range legacy.Fields {
+		if field.Name == "source" || field.Name == "destination" {
+			legacy.Fields[i].Reference = &ref
+		}
+	}
+	legacy.Fields = append(legacy.Fields,
+		api.Field{Name: "sources", Type: "string[]", Reference: &ref},
+		api.Field{Name: "destinations", Type: "string[]", Reference: &ref},
+	)
+	_, err := clientA.CreateCollection(ctx, legacy)
+	require.NoError(t, err)
+	require.NoError(t, clientA.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": "txn_cross_warm", "source": bal, "destination": bal,
+	}))
+
+	// Client B is another Core instance. It recreates the current collection.
+	require.NoError(t, clientB.DropCollection(ctx, CollectionTransactions))
+	require.NoError(t, clientB.EnsureCollectionsExist(ctx))
+
+	currentID := "txn_cross_current"
+	require.NoError(t, clientA.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": currentID, "source": bal, "destination": bal,
+	}))
+	got, err := clientA.Client.Collection(CollectionTransactions).Document(currentID).Retrieve(ctx)
+	require.NoError(t, err)
+	_, hasSources := got["sources"]
+	_, hasDestinations := got["destinations"]
+	assert.False(t, hasSources)
+	assert.False(t, hasDestinations)
 }
 
 func TestMigrateTypeSenseSchema_UnknownCollection(t *testing.T) {

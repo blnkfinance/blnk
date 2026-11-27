@@ -323,6 +323,28 @@ func listWebhookTasks(t *testing.T, redisAddr, queueName string) []*asynq.TaskIn
 	return listQueuedTasks(t, redisAddr, queueName)
 }
 
+// metadataEvents returns queued webhook tasks for one event and one entity id.
+// Tasks that are not that webhook are ignored.
+func metadataEvents(t *testing.T, tasks []*asynq.TaskInfo, event, idField, id string) []*asynq.TaskInfo {
+	t.Helper()
+	matched := make([]*asynq.TaskInfo, 0, 1)
+	for _, task := range tasks {
+		var wh NewWebhook
+		if err := json.Unmarshal(task.Payload, &wh); err != nil {
+			continue
+		}
+		data, ok := wh.Payload.(map[string]interface{})
+		if !ok || wh.Event != event {
+			continue
+		}
+		if idField != "" && data[idField] != id {
+			continue
+		}
+		matched = append(matched, task)
+	}
+	return matched
+}
+
 func listQueuedTasks(t *testing.T, redisAddr, queueName string) []*asynq.TaskInfo {
 	t.Helper()
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr})
@@ -751,7 +773,10 @@ func TestUpdateMetadata_BalanceIndexRereadsCurrentPosition(t *testing.T) {
 	_, err := b.UpdateMetadata(context.Background(), "bln_idx_1", newMetadata)
 	require.NoError(t, err)
 
-	tasks := listWebhookTasks(t, b.Config().Redis.Dns, webhookQueue)
+	// Count this balance's metadata event only. A system.error from an
+	// earlier test's notify goroutine can share the process-wide sender
+	// and land on this queue under the race detector.
+	tasks := metadataEvents(t, listWebhookTasks(t, b.Config().Redis.Dns, webhookQueue), "balance.metadata.updated", "balance_id", "bln_idx_1")
 	require.Len(t, tasks, 1)
 	event, data := decodeMetadataWebhook(t, tasks[0])
 	assert.Equal(t, "balance.metadata.updated", event)

@@ -162,6 +162,39 @@ func TestStartReindex_HappyPath(t *testing.T) {
 	balDst := "bln_" + gofakeit.UUID()
 	txnID := "txn_" + gofakeit.UUID()
 
+	// Typesense 29 requires collection recreation to retire reference fields.
+	resetCollections(t, client)
+	require.NoError(t, client.DropCollection(ctx, CollectionTransactions))
+	legacy := getTransactionSchema()
+	ref := "balances.balance_id"
+	for i, field := range legacy.Fields {
+		if field.Name == "source" || field.Name == "destination" {
+			legacy.Fields[i].Reference = &ref
+		}
+	}
+	legacy.Fields = append(legacy.Fields,
+		api.Field{Name: "sources", Type: "string[]", Reference: &ref},
+		api.Field{Name: "destinations", Type: "string[]", Reference: &ref},
+	)
+	_, err := client.CreateCollection(ctx, legacy)
+	require.NoError(t, err)
+	for _, id := range []string{balSrc, balDst} {
+		require.NoError(t, client.HandleNotification(ctx, CollectionBalances, map[string]interface{}{
+			"balance_id": id, "ledger_id": "general_ledger_id",
+		}))
+	}
+	doc := map[string]interface{}{
+		"transaction_id": txnID, "source": balSrc, "destination": balDst,
+		"sources": []string{balSrc}, "destinations": []string{balDst},
+	}
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, doc))
+	require.NoError(t, client.MigrateTypeSenseSchema(ctx, CollectionTransactions))
+	// Linked lists cannot be dropped. Indexing copies the singular ids in,
+	// so a payment that no longer sends the lists is still accepted.
+	delete(doc, "sources")
+	delete(doc, "destinations")
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, doc))
+
 	batchSize := 2
 	ds := new(mocks.MockDataSource)
 	// Two pages of ledgers (2 + 1) then the empty terminator page.

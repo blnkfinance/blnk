@@ -136,14 +136,19 @@ func getWebhookSender() WebhookSender {
 //
 // This function runs the notification process asynchronously using a goroutine to avoid blocking.
 func NotifyError(systemError error) {
+	// Capture the sender and config before the goroutine runs. A later test
+	// or reload can replace both, and this notification must stay on the
+	// queue that was current when the error happened.
+	conf, err := config.Fetch()
+	sender := getWebhookSender()
 	go func(systemError error) {
 		// Log the error locally using logrus
 		logrus.Error(systemError)
 
-		// Fetch the configuration
-		conf, err := config.Fetch()
-		if err != nil {
-			logrus.Error(err)
+		if err != nil || conf == nil {
+			if err != nil {
+				logrus.Error(err)
+			}
 			return
 		}
 
@@ -153,15 +158,13 @@ func NotifyError(systemError error) {
 		}
 
 		// If a webhook sender is registered and webhook URL is configured, send the webhook
-		sender := getWebhookSender()
 		if sender != nil && conf.Notification.Webhook.Url != "" {
 			payload := map[string]interface{}{
 				"error": systemError.Error(),
 				"time":  time.Now(),
 			}
-			err := sender("system.error", payload)
-			if err != nil {
-				logrus.Errorf("Error sending webhook notification: %v", err)
+			if sendErr := sender("system.error", payload); sendErr != nil {
+				logrus.Errorf("Error sending webhook notification: %v", sendErr)
 			}
 		}
 	}(systemError)
