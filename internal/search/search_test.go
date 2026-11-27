@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/typesense/typesense-go/typesense/api"
 )
 
@@ -273,6 +274,65 @@ func TestSchemaMigrationFields(t *testing.T) {
 	config.Schema.Name = CollectionLedgers
 	customRate := api.Field{Name: "rate", Type: "float"}
 	assert.Empty(t, schemaMigrationFields(config, []api.Field{amount, description, customRate}))
+}
+
+func TestRequiredLegacyArrayFields(t *testing.T) {
+	reference := "balances.balance_id"
+	optional := true
+	assert.Equal(t, []legacyArrayField{
+		{name: "sources", from: "source"},
+		{name: "destinations", from: "destination"},
+	}, requiredLegacyArrayFields([]api.Field{
+		{Name: "sources", Type: "string[]", Reference: &reference},
+		{Name: "destinations", Type: "string[]"},
+		{Name: "rate", Type: "float"},
+	}))
+	assert.Empty(t, requiredLegacyArrayFields([]api.Field{
+		{Name: "sources", Type: "string[]", Optional: &optional},
+		{Name: "destinations", Type: "string"},
+	}))
+}
+
+func TestApplyLegacyArrayFields(t *testing.T) {
+	required := []legacyArrayField{
+		{name: "sources", from: "source"},
+		{name: "destinations", from: "destination"},
+	}
+
+	filled := map[string]interface{}{"source": "bal_a", "destination": "bal_b"}
+	applyLegacyArrayFields(filled, required)
+	assert.Equal(t, []string{"bal_a"}, filled["sources"])
+	assert.Equal(t, []string{"bal_b"}, filled["destinations"])
+
+	kept := map[string]interface{}{
+		"source": "bal_a", "destination": "bal_b",
+		"sources": []string{"bal_existing"}, "destinations": []string{"bal_existing"},
+	}
+	applyLegacyArrayFields(kept, required)
+	assert.Equal(t, []string{"bal_existing"}, kept["sources"])
+	assert.Equal(t, []string{"bal_existing"}, kept["destinations"])
+
+	blank := map[string]interface{}{"source": "", "destination": "bal_b"}
+	applyLegacyArrayFields(blank, []legacyArrayField{{name: "sources", from: "source"}})
+	_, present := blank["sources"]
+	assert.False(t, present)
+}
+
+func TestLegacyArraySnapshotRoundTrip(t *testing.T) {
+	const collection = "transactions_snapshot_test"
+	t.Cleanup(func() { forgetLegacyArraySnapshot(collection) })
+
+	reference := "balances.balance_id"
+	storeLegacyArraySnapshot(collection, []api.Field{
+		{Name: "sources", Type: "string[]", Reference: &reference},
+	})
+	got, ok := loadLegacyArraySnapshot(collection)
+	require.True(t, ok)
+	assert.Equal(t, []legacyArrayField{{name: "sources", from: "source"}}, got)
+
+	forgetLegacyArraySnapshot(collection)
+	_, ok = loadLegacyArraySnapshot(collection)
+	assert.False(t, ok)
 }
 
 func TestTypesenseClient_ConvertNumberField_BigInt(t *testing.T) {

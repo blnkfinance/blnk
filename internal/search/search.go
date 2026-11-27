@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -257,6 +258,9 @@ func (t *TypesenseClient) HandleNotification(ctx context.Context, table string, 
 	t.convertLargeNumbers(config, data)
 	t.ensureSchemaFields(config, data)
 	t.normalizeTimeFields(config, data)
+	if err := t.fillLegacyReferenceArrays(ctx, table, data); err != nil {
+		return err
+	}
 
 	// Upsert the document
 	return t.upsertDocument(ctx, table, data)
@@ -465,11 +469,15 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 
 	changes := schemaMigrationFields(config, current.Fields)
 	if len(changes) == 0 {
+		storeLegacyArraySnapshot(collectionName, current.Fields)
 		return nil
 	}
 	if _, err := collection.Update(ctx, &api.CollectionUpdateSchema{Fields: changes}); err != nil {
 		return fmt.Errorf("failed to migrate Typesense collection %s: %w", collectionName, err)
 	}
+	// The retrieved schema is the pre-update one. Drop it so the next write
+	// reads the fields Typesense kept, including any reference lists.
+	forgetLegacyArraySnapshot(collectionName)
 	logrus.Infof("Updated schema for Typesense collection %s", collectionName)
 	return nil
 }
@@ -493,10 +501,16 @@ func schemaMigrationFields(config CollectionConfig, existing []api.Field) []api.
 			if field.Type != "string[]" {
 				continue
 			}
-			// Typesense 29 retains reference constraints in memory after a drop.
-			// Recreating the collection through Blnk's reindex clears them.
+			// Typesense 29 cannot alter a reference field in place. A drop looks
+			// successful and then rejects every later write. Indexing copies
+			// the singular id into the list instead. POST /search/reindex
+			// recreates the collection and removes the field.
 			if field.Reference != nil && *field.Reference != "" {
-				logrus.Warnf("Legacy transactions.%s reference requires a full search reindex (POST /search/reindex)", field.Name)
+				from := "source"
+				if field.Name == "destinations" {
+					from = "destination"
+				}
+				logrus.Warnf("Legacy transactions.%s reference stays in place. Indexing copies %s into it. POST /search/reindex removes the field.", field.Name, from)
 				continue
 			}
 			changes = append(changes, api.Field{Name: field.Name, Drop: &drop})
@@ -513,6 +527,110 @@ func schemaMigrationFields(config CollectionConfig, existing []api.Field) []api.
 		}
 	}
 	return changes
+}
+
+// legacyArrayField is a retired transaction list that an old Typesense
+// collection may still require. from is the singular id copied into it.
+type legacyArrayField struct {
+	name string
+	from string
+}
+
+// legacyArrayPairs is the only pair of retired lists. Order is stable so
+// tests and logs do not depend on map iteration.
+var legacyArrayPairs = [...]legacyArrayField{
+	{name: "sources", from: "source"},
+	{name: "destinations", from: "destination"},
+}
+
+// legacyArrayCache remembers, per collection, which retired lists the live
+// Typesense schema still requires. Workers build a new client for every
+// task, so the cache cannot live on TypesenseClient. Migration and collection
+// drops clear the entry they change.
+var (
+	legacyArrayMu    sync.Mutex
+	legacyArrayCache = map[string][]legacyArrayField{}
+	legacyArraySeen  = map[string]bool{}
+)
+
+func storeLegacyArraySnapshot(collection string, fields []api.Field) {
+	required := requiredLegacyArrayFields(fields)
+	legacyArrayMu.Lock()
+	legacyArrayCache[collection] = required
+	legacyArraySeen[collection] = true
+	legacyArrayMu.Unlock()
+}
+
+func forgetLegacyArraySnapshot(collection string) {
+	legacyArrayMu.Lock()
+	delete(legacyArrayCache, collection)
+	delete(legacyArraySeen, collection)
+	legacyArrayMu.Unlock()
+}
+
+func loadLegacyArraySnapshot(collection string) ([]legacyArrayField, bool) {
+	legacyArrayMu.Lock()
+	defer legacyArrayMu.Unlock()
+	if !legacyArraySeen[collection] {
+		return nil, false
+	}
+	return legacyArrayCache[collection], true
+}
+
+// requiredLegacyArrayFields returns retired lists that are still required.
+// Optional fields with the same names are custom extensions and are left alone.
+func requiredLegacyArrayFields(fields []api.Field) []legacyArrayField {
+	byName := make(map[string]api.Field, len(fields))
+	for _, field := range fields {
+		byName[field.Name] = field
+	}
+	var required []legacyArrayField
+	for _, pair := range legacyArrayPairs {
+		field, ok := byName[pair.name]
+		if !ok || field.Type != "string[]" {
+			continue
+		}
+		if field.Optional != nil && *field.Optional {
+			continue
+		}
+		required = append(required, pair)
+	}
+	return required
+}
+
+// applyLegacyArrayFields copies a singular balance id into a missing required
+// list. An id that is already set, or a blank singular id, is left unchanged.
+func applyLegacyArrayFields(data map[string]interface{}, required []legacyArrayField) {
+	for _, field := range required {
+		if _, exists := data[field.name]; exists {
+			continue
+		}
+		id, ok := data[field.from].(string)
+		if !ok || id == "" {
+			continue
+		}
+		data[field.name] = []string{id}
+	}
+}
+
+// fillLegacyReferenceArrays satisfies retired source lists that Typesense
+// still requires. Fields absent from the live schema are not added, because
+// Typesense stores unknown keys and search would start returning them.
+func (t *TypesenseClient) fillLegacyReferenceArrays(ctx context.Context, table string, data map[string]interface{}) error {
+	if table != CollectionTransactions || t == nil || t.Client == nil {
+		return nil
+	}
+	required, ok := loadLegacyArraySnapshot(table)
+	if !ok {
+		current, err := t.Client.Collection(table).Retrieve(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to read Typesense collection %s: %w", table, err)
+		}
+		storeLegacyArraySnapshot(table, current.Fields)
+		required = requiredLegacyArrayFields(current.Fields)
+	}
+	applyLegacyArrayFields(data, required)
+	return nil
 }
 
 // getDefaultValue returns the default value for a given field type in Typesense.

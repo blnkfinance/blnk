@@ -189,12 +189,11 @@ func TestStartReindex_HappyPath(t *testing.T) {
 	}
 	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, doc))
 	require.NoError(t, client.MigrateTypeSenseSchema(ctx, CollectionTransactions))
-	for _, name := range []string{"sources", "destinations"} {
-		ids := doc[name]
-		delete(doc, name)
-		require.ErrorContains(t, client.HandleNotification(ctx, CollectionTransactions, doc), name)
-		doc[name] = ids
-	}
+	// Linked lists cannot be dropped. Indexing copies the singular ids in,
+	// so a payment that no longer sends the lists is still accepted.
+	delete(doc, "sources")
+	delete(doc, "destinations")
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, doc))
 
 	batchSize := 2
 	ds := new(mocks.MockDataSource)

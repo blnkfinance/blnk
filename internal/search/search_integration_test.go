@@ -344,6 +344,58 @@ func TestMigrateTypeSenseSchema_PopulatedLegacyCollections(t *testing.T) {
 	assert.True(t, slices.ContainsFunc(schema.Fields, func(f api.Field) bool { return f.Name == "merchant_tag" }))
 }
 
+func TestHandleNotification_FillsLinkedLegacyArrays(t *testing.T) {
+	client := newTestTypesenseClient(t)
+	ctx := t.Context()
+	require.NoError(t, client.DropAllCollections(ctx))
+	require.NoError(t, client.EnsureCollectionsExist(ctx))
+
+	bal := "bal_linked"
+	require.NoError(t, client.HandleNotification(ctx, CollectionBalances, map[string]interface{}{
+		"balance_id": bal, "ledger_id": "general_ledger_id",
+	}))
+
+	// A collection created while sources and destinations referenced balances.
+	require.NoError(t, client.DropCollection(ctx, CollectionTransactions))
+	legacy := getTransactionSchema()
+	ref := "balances.balance_id"
+	for i, field := range legacy.Fields {
+		if field.Name == "source" || field.Name == "destination" {
+			legacy.Fields[i].Reference = &ref
+		}
+	}
+	legacy.Fields = append(legacy.Fields,
+		api.Field{Name: "sources", Type: "string[]", Reference: &ref},
+		api.Field{Name: "destinations", Type: "string[]", Reference: &ref},
+	)
+	_, err := client.CreateCollection(ctx, legacy)
+	require.NoError(t, err)
+	require.NoError(t, client.MigrateTypeSenseSchema(ctx, CollectionTransactions))
+
+	txnID := "txn_linked_new"
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": txnID, "source": bal, "destination": bal,
+	}))
+	got, err := client.Client.Collection(CollectionTransactions).Document(txnID).Retrieve(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []any{bal}, got["sources"])
+	assert.Equal(t, []any{bal}, got["destinations"])
+
+	// The current collection has neither list. A payment must not grow them.
+	require.NoError(t, client.DropCollection(ctx, CollectionTransactions))
+	require.NoError(t, client.EnsureCollectionsExist(ctx))
+	currentID := "txn_current_schema"
+	require.NoError(t, client.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": currentID, "source": bal, "destination": bal,
+	}))
+	current, err := client.Client.Collection(CollectionTransactions).Document(currentID).Retrieve(ctx)
+	require.NoError(t, err)
+	_, hasSources := current["sources"]
+	_, hasDestinations := current["destinations"]
+	assert.False(t, hasSources)
+	assert.False(t, hasDestinations)
+}
+
 func TestMigrateTypeSenseSchema_UnknownCollection(t *testing.T) {
 	client := newTestTypesenseClient(t)
 	err := client.MigrateTypeSenseSchema(context.Background(), "no_such_collection")
