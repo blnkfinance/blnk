@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/blnkfinance/blnk"
 	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database"
+	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
@@ -699,6 +701,7 @@ func TestAuthMiddleware_ReadScopedKeysCanPOSTQueryRoutes(t *testing.T) {
 	tests := []struct {
 		name          string
 		path          string
+		body          string
 		scopes        []string
 		expectedCode  int
 		expectedError string
@@ -734,16 +737,99 @@ func TestAuthMiddleware_ReadScopedKeysCanPOSTQueryRoutes(t *testing.T) {
 			expectedCode: http.StatusOK,
 		},
 		{
-			name:         "search collection accepts search:read",
+			name:          "search collection rejects search:read without the resource scope",
+			path:          "/search/transactions",
+			scopes:        []string{"search:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for transactions:read",
+		},
+		{
+			name:         "search collection accepts search:read plus the resource read scope",
 			path:         "/search/transactions",
-			scopes:       []string{"search:read"},
+			body:         `{"q":"*","query_by":"reference"}`,
+			scopes:       []string{"search:read", "transactions:read"},
 			expectedCode: http.StatusOK,
 		},
 		{
-			name:         "multi-search accepts search:read",
-			path:         "/multi-search",
-			scopes:       []string{"search:read"},
+			name:          "identity search rejects search:read without identities:read",
+			path:          "/search/identities",
+			body:          `{"q":"*","query_by":"email_address"}`,
+			scopes:        []string{"search:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for identities:read",
+		},
+		{
+			name:         "identity search accepts identities:read",
+			path:         "/search/identities",
+			body:         `{"q":"*","query_by":"email_address"}`,
+			scopes:       []string{"search:read", "identities:read"},
 			expectedCode: http.StatusOK,
+		},
+		{
+			name:          "identity search still requires search:read",
+			path:          "/search/identities",
+			scopes:        []string{"identities:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for search:read",
+		},
+		{
+			name:          "resource write scope does not permit search",
+			path:          "/search/identities",
+			scopes:        []string{"search:read", "identities:write"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for identities:read",
+		},
+		{
+			name:          "unknown search collection is rejected",
+			path:          "/search/accounts",
+			scopes:        []string{"search:read", "accounts:read", "*:*"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for this search collection",
+		},
+		{
+			name:         "reconciliations search uses reconciliation:read",
+			path:         "/search/reconciliations",
+			scopes:       []string{"search:read", "reconciliation:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:          "multi-search rejects search:read without each collection scope",
+			path:          "/multi-search",
+			body:          `{"searches":[{"collection":"identities","q":"*","query_by":"email_address"}]}`,
+			scopes:        []string{"search:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for identities:read",
+		},
+		{
+			name:         "multi-search accepts a batch the key can read",
+			path:         "/multi-search",
+			body:         `{"searches":[{"collection":"identities","q":"*","query_by":"email_address"},{"collection":"ledgers","q":"*","query_by":"name"}]}`,
+			scopes:       []string{"search:read", "identities:read", "ledgers:read"},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:          "multi-search rejects the batch when any collection is forbidden",
+			path:          "/multi-search",
+			body:          `{"searches":[{"collection":"ledgers","q":"*","query_by":"name"},{"collection":"transactions","q":"*","query_by":"reference"}]}`,
+			scopes:        []string{"search:read", "ledgers:read"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for transactions:read",
+		},
+		{
+			name:          "multi-search rejects an unknown collection in the batch",
+			path:          "/multi-search",
+			body:          `{"searches":[{"collection":"ledgers","q":"*","query_by":"name"},{"collection":"secrets","q":"*"}]}`,
+			scopes:        []string{"search:read", "ledgers:read", "*:*"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for this search collection",
+		},
+		{
+			name:          "multi-search rejects a malformed batch",
+			path:          "/multi-search",
+			body:          `{bad`,
+			scopes:        []string{"search:read", "*:*"},
+			expectedCode:  http.StatusBadRequest,
+			expectedError: "Invalid multi-search request",
 		},
 		{
 			name:         "ledgers filter still accepts ledgers:write",
@@ -758,10 +844,11 @@ func TestAuthMiddleware_ReadScopedKeysCanPOSTQueryRoutes(t *testing.T) {
 			expectedCode: http.StatusOK,
 		},
 		{
-			name:         "search collection still accepts search:write",
-			path:         "/search/transactions",
-			scopes:       []string{"search:write"},
-			expectedCode: http.StatusOK,
+			name:          "search write scope does not bypass the collection read scope",
+			path:          "/search/transactions",
+			scopes:        []string{"search:write"},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "Insufficient permissions for transactions:read",
 		},
 		{
 			name:          "creating a transaction still requires transactions:write",
@@ -797,17 +884,189 @@ func TestAuthMiddleware_ReadScopedKeysCanPOSTQueryRoutes(t *testing.T) {
 
 			router := gin.New()
 			router.Any(tt.path, NewAuthMiddleware(service).Authenticate(), func(c *gin.Context) {
+				if tt.body != "" {
+					raw, err := io.ReadAll(c.Request.Body)
+					if err != nil || !strings.Contains(string(raw), `"q"`) {
+						c.Status(http.StatusTeapot)
+						return
+					}
+				}
 				c.Status(http.StatusOK)
 			})
 
 			recorder := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			var body io.Reader
+			if tt.body != "" {
+				body = strings.NewReader(tt.body)
+			}
+			req := httptest.NewRequest(http.MethodPost, tt.path, body)
 			req.Header.Set(KeyHeader, key.Key)
 			router.ServeHTTP(recorder, req)
 
 			assert.Equal(t, tt.expectedCode, recorder.Code)
 			if tt.expectedError != "" {
 				assert.Contains(t, recorder.Body.String(), tt.expectedError)
+			}
+		})
+	}
+}
+
+func TestAuthorizeSearchCollections(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		body       string
+		scopes     []string
+		wantNil    bool
+		wantCode   apierror.ErrorCode
+		wantPhrase string
+	}{
+		{
+			name:       "identities require identities:read",
+			method:     http.MethodPost,
+			path:       "/search/identities",
+			scopes:     []string{"search:read"},
+			wantCode:   apierror.ErrAuthInsufficientPermissions,
+			wantPhrase: "identities:read",
+		},
+		{
+			name:    "identities:read allows the identities collection",
+			method:  http.MethodPost,
+			path:    "/search/identities",
+			scopes:  []string{"identities:read"},
+			wantNil: true,
+		},
+		{
+			name:       "get is held to the same collection scope",
+			method:     http.MethodGet,
+			path:       "/search/balances",
+			scopes:     []string{"search:read"},
+			wantCode:   apierror.ErrAuthInsufficientPermissions,
+			wantPhrase: "balances:read",
+		},
+		{
+			name:    "wildcard read covers an allowlisted collection",
+			method:  http.MethodPost,
+			path:    "/search/ledgers",
+			scopes:  []string{"*:read"},
+			wantNil: true,
+		},
+		{
+			name:    "resource wildcard covers that collection",
+			method:  http.MethodPost,
+			path:    "/search/transactions",
+			scopes:  []string{"transactions:*"},
+			wantNil: true,
+		},
+		{
+			name:       "write does not grant collection read",
+			method:     http.MethodPost,
+			path:       "/search/transactions",
+			scopes:     []string{"transactions:write"},
+			wantCode:   apierror.ErrAuthInsufficientPermissions,
+			wantPhrase: "transactions:read",
+		},
+		{
+			name:       "full access still cannot leave the allowlist",
+			method:     http.MethodPost,
+			path:       "/search/custom_pii",
+			scopes:     []string{"*:*"},
+			wantCode:   apierror.ErrAuthInsufficientPermissions,
+			wantPhrase: "this search collection",
+		},
+		{
+			name:    "reconciliations map to reconciliation:read",
+			method:  http.MethodPost,
+			path:    "/search/reconciliations",
+			scopes:  []string{"reconciliation:read"},
+			wantNil: true,
+		},
+		{
+			name:    "reindex is not a collection search",
+			method:  http.MethodPost,
+			path:    "/search/reindex",
+			scopes:  []string{"search:read"},
+			wantNil: true,
+		},
+		{
+			name:    "multi-search authorizes every search",
+			method:  http.MethodPost,
+			path:    "/multi-search",
+			body:    `{"searches":[{"collection":"balances","q":"*"},{"collection":"identities","q":"*"}]}`,
+			scopes:  []string{"balances:read", "identities:*"},
+			wantNil: true,
+		},
+		{
+			name:       "multi-search stops on the first forbidden collection",
+			method:     http.MethodPost,
+			path:       "/multi-search",
+			body:       `{"searches":[{"collection":"balances","q":"*"},{"collection":"identities","q":"*"}]}`,
+			scopes:     []string{"balances:read"},
+			wantCode:   apierror.ErrAuthInsufficientPermissions,
+			wantPhrase: "identities:read",
+		},
+		{
+			name:       "multi-search rejects a collection outside the allowlist",
+			method:     http.MethodPost,
+			path:       "/multi-search",
+			body:       `{"searches":[{"collection":"balances","q":"*"},{"collection":"accounts","q":"*"}]}`,
+			scopes:     []string{"*:*"},
+			wantCode:   apierror.ErrAuthInsufficientPermissions,
+			wantPhrase: "this search collection",
+		},
+		{
+			name:     "multi-search rejects an empty batch",
+			method:   http.MethodPost,
+			path:     "/multi-search",
+			body:     `{"searches":[]}`,
+			scopes:   []string{"*:*"},
+			wantCode: apierror.ErrGenMalformedRequest,
+		},
+		{
+			name:     "multi-search rejects malformed json",
+			method:   http.MethodPost,
+			path:     "/multi-search",
+			body:     `{bad`,
+			scopes:   []string{"*:*"},
+			wantCode: apierror.ErrGenMalformedRequest,
+		},
+		{
+			name:    "other resources are unchanged",
+			method:  http.MethodPost,
+			path:    "/ledgers/filter",
+			scopes:  []string{"ledgers:read"},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			var body io.Reader
+			if tt.body != "" {
+				body = strings.NewReader(tt.body)
+			}
+			c.Request = httptest.NewRequest(tt.method, tt.path, body)
+
+			failure := authorizeSearchCollections(c, tt.scopes)
+			if tt.wantNil {
+				assert.Nil(t, failure)
+				if tt.body != "" {
+					raw, err := io.ReadAll(c.Request.Body)
+					assert.NoError(t, err)
+					assert.JSONEq(t, tt.body, string(raw))
+				}
+				return
+			}
+
+			if assert.NotNil(t, failure) {
+				assert.Equal(t, tt.wantCode, failure.code)
+				if tt.wantPhrase != "" {
+					assert.Contains(t, failure.message, tt.wantPhrase)
+				}
 			}
 		})
 	}
