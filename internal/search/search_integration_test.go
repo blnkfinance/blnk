@@ -396,6 +396,53 @@ func TestHandleNotification_FillsLinkedLegacyArrays(t *testing.T) {
 	assert.False(t, hasDestinations)
 }
 
+func TestHandleNotification_OtherClientRecreateUsesCurrentSchema(t *testing.T) {
+	clientA := newTestTypesenseClient(t)
+	clientB := newTestTypesenseClient(t)
+	ctx := t.Context()
+	require.NoError(t, clientA.DropAllCollections(ctx))
+	require.NoError(t, clientA.EnsureCollectionsExist(ctx))
+
+	bal := "bal_cross_client"
+	require.NoError(t, clientA.HandleNotification(ctx, CollectionBalances, map[string]interface{}{
+		"balance_id": bal, "ledger_id": "general_ledger_id",
+	}))
+
+	// Client A learns a collection that still requires the retired lists.
+	require.NoError(t, clientA.DropCollection(ctx, CollectionTransactions))
+	legacy := getTransactionSchema()
+	ref := "balances.balance_id"
+	for i, field := range legacy.Fields {
+		if field.Name == "source" || field.Name == "destination" {
+			legacy.Fields[i].Reference = &ref
+		}
+	}
+	legacy.Fields = append(legacy.Fields,
+		api.Field{Name: "sources", Type: "string[]", Reference: &ref},
+		api.Field{Name: "destinations", Type: "string[]", Reference: &ref},
+	)
+	_, err := clientA.CreateCollection(ctx, legacy)
+	require.NoError(t, err)
+	require.NoError(t, clientA.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": "txn_cross_warm", "source": bal, "destination": bal,
+	}))
+
+	// Client B is another Core instance. It recreates the current collection.
+	require.NoError(t, clientB.DropCollection(ctx, CollectionTransactions))
+	require.NoError(t, clientB.EnsureCollectionsExist(ctx))
+
+	currentID := "txn_cross_current"
+	require.NoError(t, clientA.HandleNotification(ctx, CollectionTransactions, map[string]interface{}{
+		"transaction_id": currentID, "source": bal, "destination": bal,
+	}))
+	got, err := clientA.Client.Collection(CollectionTransactions).Document(currentID).Retrieve(ctx)
+	require.NoError(t, err)
+	_, hasSources := got["sources"]
+	_, hasDestinations := got["destinations"]
+	assert.False(t, hasSources)
+	assert.False(t, hasDestinations)
+}
+
 func TestMigrateTypeSenseSchema_UnknownCollection(t *testing.T) {
 	client := newTestTypesenseClient(t)
 	err := client.MigrateTypeSenseSchema(context.Background(), "no_such_collection")

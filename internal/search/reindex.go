@@ -622,7 +622,6 @@ func (t *TypesenseClient) DropCollection(ctx context.Context, collectionName str
 		!strings.Contains(err.Error(), "status: 404") {
 		return err
 	}
-	forgetLegacyArraySnapshot(collectionName)
 	return nil
 }
 

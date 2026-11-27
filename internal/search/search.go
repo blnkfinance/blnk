@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -469,15 +468,11 @@ func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collection
 
 	changes := schemaMigrationFields(config, current.Fields)
 	if len(changes) == 0 {
-		storeLegacyArraySnapshot(collectionName, current.Fields)
 		return nil
 	}
 	if _, err := collection.Update(ctx, &api.CollectionUpdateSchema{Fields: changes}); err != nil {
 		return fmt.Errorf("failed to migrate Typesense collection %s: %w", collectionName, err)
 	}
-	// The retrieved schema is the pre-update one. Drop it so the next write
-	// reads the fields Typesense kept, including any reference lists.
-	forgetLegacyArraySnapshot(collectionName)
 	logrus.Infof("Updated schema for Typesense collection %s", collectionName)
 	return nil
 }
@@ -543,40 +538,6 @@ var legacyArrayPairs = [...]legacyArrayField{
 	{name: "destinations", from: "destination"},
 }
 
-// legacyArrayCache remembers, per collection, which retired lists the live
-// Typesense schema still requires. Workers build a new client for every
-// task, so the cache cannot live on TypesenseClient. Migration and collection
-// drops clear the entry they change.
-var (
-	legacyArrayMu    sync.Mutex
-	legacyArrayCache = map[string][]legacyArrayField{}
-	legacyArraySeen  = map[string]bool{}
-)
-
-func storeLegacyArraySnapshot(collection string, fields []api.Field) {
-	required := requiredLegacyArrayFields(fields)
-	legacyArrayMu.Lock()
-	legacyArrayCache[collection] = required
-	legacyArraySeen[collection] = true
-	legacyArrayMu.Unlock()
-}
-
-func forgetLegacyArraySnapshot(collection string) {
-	legacyArrayMu.Lock()
-	delete(legacyArrayCache, collection)
-	delete(legacyArraySeen, collection)
-	legacyArrayMu.Unlock()
-}
-
-func loadLegacyArraySnapshot(collection string) ([]legacyArrayField, bool) {
-	legacyArrayMu.Lock()
-	defer legacyArrayMu.Unlock()
-	if !legacyArraySeen[collection] {
-		return nil, false
-	}
-	return legacyArrayCache[collection], true
-}
-
 // requiredLegacyArrayFields returns retired lists that are still required.
 // Optional fields with the same names are custom extensions and are left alone.
 func requiredLegacyArrayFields(fields []api.Field) []legacyArrayField {
@@ -613,23 +574,20 @@ func applyLegacyArrayFields(data map[string]interface{}, required []legacyArrayF
 	}
 }
 
-// fillLegacyReferenceArrays satisfies retired source lists that Typesense
-// still requires. Fields absent from the live schema are not added, because
-// Typesense stores unknown keys and search would start returning them.
+// fillLegacyReferenceArrays copies singular balance ids into retired lists
+// when the live collection still requires them. The schema is read on every
+// upsert. A process-local snapshot would keep copying those lists after
+// another Core instance recreated the collection, and Typesense stores the
+// extra keys instead of rejecting them.
 func (t *TypesenseClient) fillLegacyReferenceArrays(ctx context.Context, table string, data map[string]interface{}) error {
 	if table != CollectionTransactions || t == nil || t.Client == nil {
 		return nil
 	}
-	required, ok := loadLegacyArraySnapshot(table)
-	if !ok {
-		current, err := t.Client.Collection(table).Retrieve(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to read Typesense collection %s: %w", table, err)
-		}
-		storeLegacyArraySnapshot(table, current.Fields)
-		required = requiredLegacyArrayFields(current.Fields)
+	current, err := t.Client.Collection(table).Retrieve(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to read Typesense collection %s: %w", table, err)
 	}
-	applyLegacyArrayFields(data, required)
+	applyLegacyArrayFields(data, requiredLegacyArrayFields(current.Fields))
 	return nil
 }
 

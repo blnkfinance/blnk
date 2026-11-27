@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/typesense/typesense-go/typesense/api"
 )
 
@@ -316,23 +315,6 @@ func TestApplyLegacyArrayFields(t *testing.T) {
 	applyLegacyArrayFields(blank, []legacyArrayField{{name: "sources", from: "source"}})
 	_, present := blank["sources"]
 	assert.False(t, present)
-}
-
-func TestLegacyArraySnapshotRoundTrip(t *testing.T) {
-	const collection = "transactions_snapshot_test"
-	t.Cleanup(func() { forgetLegacyArraySnapshot(collection) })
-
-	reference := "balances.balance_id"
-	storeLegacyArraySnapshot(collection, []api.Field{
-		{Name: "sources", Type: "string[]", Reference: &reference},
-	})
-	got, ok := loadLegacyArraySnapshot(collection)
-	require.True(t, ok)
-	assert.Equal(t, []legacyArrayField{{name: "sources", from: "source"}}, got)
-
-	forgetLegacyArraySnapshot(collection)
-	_, ok = loadLegacyArraySnapshot(collection)
-	assert.False(t, ok)
 }
 
 func TestTypesenseClient_ConvertNumberField_BigInt(t *testing.T) {
