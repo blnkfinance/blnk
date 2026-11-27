@@ -242,90 +242,37 @@ func TestGetDefaultValue(t *testing.T) {
 	}
 }
 
-func TestCompareSchemas_NewFields(t *testing.T) {
-	oldSchema := &api.CollectionSchema{
-		Name: "test",
-		Fields: []api.Field{
-			{Name: "field1", Type: "string"},
-		},
+func TestSchemaMigrationFields(t *testing.T) {
+	drop := true
+	reference := "balances.balance_id"
+	amount := api.Field{Name: "precise_amount", Type: "string"}
+	description := api.Field{Name: "description", Type: "string"}
+	config := CollectionConfig{
+		Schema:       &api.CollectionSchema{Name: CollectionTransactions, Fields: []api.Field{amount, description}},
+		BigIntFields: []string{"precise_amount"},
 	}
-
-	newSchema := &api.CollectionSchema{
-		Name: "test",
-		Fields: []api.Field{
-			{Name: "field1", Type: "string"},
-			{Name: "field2", Type: "int64"},
-		},
+	existing := []api.Field{
+		{Name: "rate", Type: "float"},
+		{Name: "sources", Type: "string[]"},
+		{Name: "destinations", Type: "string[]", Reference: &reference},
+		{Name: "precise_amount", Type: "int64"},
+		{Name: "custom", Type: "string"},
 	}
+	assert.Equal(t, []api.Field{
+		{Name: "rate", Drop: &drop},
+		{Name: "sources", Drop: &drop},
+		{Name: "precise_amount", Drop: &drop}, amount,
+		description,
+	}, schemaMigrationFields(config, existing))
+	assert.Empty(t, schemaMigrationFields(config, config.Schema.Fields))
 
-	newFields, removedFields := compareSchemas(oldSchema, newSchema)
+	optional := true
+	optionalSources := api.Field{Name: "sources", Type: "string[]", Optional: &optional}
+	assert.Empty(t, schemaMigrationFields(config, []api.Field{amount, description, optionalSources}))
 
-	assert.Len(t, newFields, 1)
-	assert.Equal(t, "field2", newFields[0].Name)
-	assert.Len(t, removedFields, 0)
-}
-
-func TestCompareSchemas_RemovedFields(t *testing.T) {
-	oldSchema := &api.CollectionSchema{
-		Name: "test",
-		Fields: []api.Field{
-			{Name: "field1", Type: "string"},
-			{Name: "field2", Type: "int64"},
-		},
-	}
-
-	newSchema := &api.CollectionSchema{
-		Name: "test",
-		Fields: []api.Field{
-			{Name: "field1", Type: "string"},
-		},
-	}
-
-	newFields, removedFields := compareSchemas(oldSchema, newSchema)
-
-	assert.Len(t, newFields, 0)
-	assert.Len(t, removedFields, 1)
-	assert.Equal(t, "field2", removedFields[0])
-}
-
-func TestCompareSchemas_BothNewAndRemoved(t *testing.T) {
-	oldSchema := &api.CollectionSchema{
-		Name: "test",
-		Fields: []api.Field{
-			{Name: "field1", Type: "string"},
-			{Name: "old_field", Type: "string"},
-		},
-	}
-
-	newSchema := &api.CollectionSchema{
-		Name: "test",
-		Fields: []api.Field{
-			{Name: "field1", Type: "string"},
-			{Name: "new_field", Type: "int64"},
-		},
-	}
-
-	newFields, removedFields := compareSchemas(oldSchema, newSchema)
-
-	assert.Len(t, newFields, 1)
-	assert.Equal(t, "new_field", newFields[0].Name)
-	assert.Len(t, removedFields, 1)
-	assert.Equal(t, "old_field", removedFields[0])
-}
-
-func TestCompareSchemas_NoChanges(t *testing.T) {
-	schema := &api.CollectionSchema{
-		Name: "test",
-		Fields: []api.Field{
-			{Name: "field1", Type: "string"},
-			{Name: "field2", Type: "int64"},
-		},
-	}
-
-	newFields, removedFields := compareSchemas(schema, schema)
-
-	assert.Len(t, newFields, 0)
-	assert.Len(t, removedFields, 0)
+	config.Schema.Name = CollectionLedgers
+	customRate := api.Field{Name: "rate", Type: "float"}
+	assert.Empty(t, schemaMigrationFields(config, []api.Field{amount, description, customRate}))
 }
 
 func TestTypesenseClient_ConvertNumberField_BigInt(t *testing.T) {

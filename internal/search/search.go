@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"time"
 
@@ -450,72 +451,68 @@ func (t *TypesenseClient) upsertDocument(ctx context.Context, table string, data
 	return nil
 }
 
-// MigrateTypeSenseSchema adds new fields and removes old fields from the existing collection schema in Typesense.
-// This is useful when the schema has been updated, and fields need to be added or removed.
+// MigrateTypeSenseSchema applies known Blnk schema changes to an existing collection.
 func (t *TypesenseClient) MigrateTypeSenseSchema(ctx context.Context, collectionName string) error {
-	collection := t.Client.Collection(collectionName)
-
-	currentSchemaResponse, err := collection.Retrieve(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to retrieve current schema: %w", err)
-	}
-
-	currentSchema := &api.CollectionSchema{
-		Name:   currentSchemaResponse.Name,
-		Fields: currentSchemaResponse.Fields,
-	}
-
 	config, ok := collectionConfigs[collectionName]
 	if !ok {
 		return fmt.Errorf("unknown collection: %s", collectionName)
 	}
-	latestSchema := config.Schema
-
-	newFields, _ := compareSchemas(currentSchema, latestSchema)
-
-	for _, field := range newFields {
-		updateSchema := &api.CollectionUpdateSchema{
-			Fields: []api.Field{field},
-		}
-
-		_, err := collection.Update(ctx, updateSchema)
-		if err != nil {
-			return fmt.Errorf("failed to add field %s: %w", field.Name, err)
-		}
-		logrus.Infof("Added new field %s to collection %s", field.Name, collectionName)
+	collection := t.Client.Collection(collectionName)
+	current, err := collection.Retrieve(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve current schema: %w", err)
 	}
 
+	changes := schemaMigrationFields(config, current.Fields)
+	if len(changes) == 0 {
+		return nil
+	}
+	if _, err := collection.Update(ctx, &api.CollectionUpdateSchema{Fields: changes}); err != nil {
+		return fmt.Errorf("failed to migrate Typesense collection %s: %w", collectionName, err)
+	}
+	logrus.Infof("Updated schema for Typesense collection %s", collectionName)
 	return nil
 }
 
-// compareSchemas compares the old schema with the new schema and returns:
-// - newFields: fields present in new schema but not in old schema
-// - removedFields: field names present in old schema but not in new schema
-func compareSchemas(oldSchema, newSchema *api.CollectionSchema) ([]api.Field, []string) {
-	var newFields []api.Field
-	var removedFields []string
-
-	oldFieldMap := make(map[string]bool)
-	newFieldMap := make(map[string]bool)
-
-	for _, field := range oldSchema.Fields {
-		oldFieldMap[field.Name] = true
-	}
-
-	for _, field := range newSchema.Fields {
-		newFieldMap[field.Name] = true
-		if !oldFieldMap[field.Name] {
-			newFields = append(newFields, field)
+func schemaMigrationFields(config CollectionConfig, existing []api.Field) []api.Field {
+	var changes []api.Field
+	drop := true
+	byName := make(map[string]api.Field, len(existing))
+	for _, field := range existing {
+		byName[field.Name] = field
+		// The retired fields were required. Leave optional custom fields alone.
+		if config.Schema.Name != CollectionTransactions || (field.Optional != nil && *field.Optional) {
+			continue
+		}
+		switch field.Name {
+		case "rate":
+			if field.Type == "float" {
+				changes = append(changes, api.Field{Name: field.Name, Drop: &drop})
+			}
+		case "sources", "destinations":
+			if field.Type != "string[]" {
+				continue
+			}
+			// Typesense 29 retains reference constraints in memory after a drop.
+			// Recreating the collection through Blnk's reindex clears them.
+			if field.Reference != nil && *field.Reference != "" {
+				logrus.Warnf("Legacy transactions.%s reference requires a full search reindex (POST /search/reindex)", field.Name)
+				continue
+			}
+			changes = append(changes, api.Field{Name: field.Name, Drop: &drop})
 		}
 	}
 
-	for _, field := range oldSchema.Fields {
-		if !newFieldMap[field.Name] {
-			removedFields = append(removedFields, field.Name)
+	for _, field := range config.Schema.Fields {
+		old, ok := byName[field.Name]
+		if !ok {
+			changes = append(changes, field)
+		} else if old.Type == "int64" && field.Type == "string" && slices.Contains(config.BigIntFields, field.Name) {
+			// Typesense changes a field type with a drop and add in the same request.
+			changes = append(changes, api.Field{Name: field.Name, Drop: &drop}, field)
 		}
 	}
-
-	return newFields, removedFields
+	return changes
 }
 
 // getDefaultValue returns the default value for a given field type in Typesense.
