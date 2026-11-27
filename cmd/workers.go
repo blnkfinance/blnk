@@ -253,8 +253,9 @@ func (b *blnkInstance) indexData(ctx context.Context, t *asynq.Task) error {
 }
 
 // indexBatchData indexes a batch of items into TypeSense in dependency order.
-// It first indexes all dependencies (e.g., balances), then indexes the primary item (e.g., transaction).
-// This ensures referential integrity in the search index.
+// Balances go in first so the transaction can reference them. The primary
+// transaction is re-read from Postgres immediately before upsert so a
+// create-time snapshot cannot overwrite a later metadata refresh.
 func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error {
 	if b.cnf.TypeSense.Dns == "" {
 		return nil
@@ -279,8 +280,15 @@ func (b *blnkInstance) indexBatchData(ctx context.Context, t *asynq.Task) error 
 		return err
 	}
 
-	// Handle the batch notification - indexes dependencies first, then primary.
-	err = newSearch.HandleBatchNotification(ctx, &batch)
+	// Re-read the primary from Postgres immediately before upsert so a
+	// create-time snapshot cannot overwrite a later metadata refresh.
+	err = b.blnk.ProcessIndexBatch(ctx, &batch, func(ctx context.Context, collection string, document interface{}) error {
+		payload, err := blnk.DocumentToIndexMap(document)
+		if err != nil {
+			return err
+		}
+		return newSearch.HandleNotification(ctx, collection, payload)
+	})
 	if err != nil {
 		err = markWorkerSearchBackpressure(ctx, err)
 		if !errors.Is(err, search.ErrMemoryBackpressure) {
