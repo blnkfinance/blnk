@@ -194,7 +194,7 @@ func TestVerifyChain(t *testing.T) {
 	newMock := func(rows []model.ChainedTransaction) *Blnk {
 		ds := new(mocks.MockDataSource)
 		ds.On("GetChainState", mock.Anything).Return(
-			&model.ChainState{ChainKey: "global", GenesisHash: genesis, HeadHash: head, LastSeq: int64(len(rows))}, nil)
+			&model.ChainState{ChainKey: "global", GenesisHash: genesis, HeadHash: head, LastSeq: int64(len(chain))}, nil)
 		ds.On("GetChainedTransactionsAfter", mock.Anything, int64(0), mock.Anything).Return(rows, nil)
 		ds.On("GetChainedTransactionsAfter", mock.Anything, int64(len(rows)), mock.Anything).
 			Return([]model.ChainedTransaction{}, nil)
@@ -226,5 +226,24 @@ func TestVerifyChain(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, res.Verified)
 		assert.Contains(t, res.Reason, "non-contiguous")
+	})
+
+	t.Run("deleted tail is caught", func(t *testing.T) {
+		res, err := newMock(chain[:2]).VerifyChain(context.Background(), nil)
+		require.NoError(t, err)
+		assert.False(t, res.Verified)
+		assert.Equal(t, int64(3), res.BrokenSeq)
+		assert.Contains(t, res.Reason, "chain_state.last_seq is 3")
+	})
+
+	t.Run("rows sealed after chain_state was read are ignored", func(t *testing.T) {
+		r4 := model.ChainRow{TransactionID: "t4", Source: "d", Destination: "e", Amount: "40", PreciseAmount: "4000", Currency: "USD", Status: "APPLIED", Reference: "r4", CreatedAt: at}
+		longer := append(append([]model.ChainedTransaction(nil), chain...),
+			model.ChainedTransaction{Row: r4, ChainSeq: 4, ChainPrevHash: head, ChainHash: model.ComputeChainHash(head, r4)})
+		res, err := newMock(longer).VerifyChain(context.Background(), nil)
+		require.NoError(t, err)
+		assert.True(t, res.Verified)
+		assert.Equal(t, int64(3), res.LastSeq)
+		assert.Equal(t, head, res.HeadHash)
 	})
 }
