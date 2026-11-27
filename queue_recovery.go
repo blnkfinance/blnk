@@ -145,7 +145,9 @@ func (b *Blnk) RecoverQueuedTransactions(ctx context.Context, threshold time.Dur
 	return processor.recoverWithThreshold(ctx, threshold)
 }
 
-// recoverWithThreshold loads currently stuck queued transactions and reprocesses them serially.
+// recoverWithThreshold loads currently stuck queued transactions and reprocesses them serially,
+// oldest first. When an item of a queued atomic batch fails, the batch's later items wait for
+// the next pass, so they are not applied before it.
 func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Context, threshold time.Duration) (int, error) {
 	stuckTxns, err := p.blnk.datasource.GetStuckQueuedTransactions(ctx, threshold, p.batchSize)
 	if err != nil {
@@ -161,10 +163,19 @@ func (p *QueuedTransactionRecoveryProcessor) recoverWithThreshold(ctx context.Co
 
 	var recovered int
 	var failures []error
+	failedBatches := make(map[string]bool)
 	for _, txn := range stuckTxns {
+		restoreTransactionFlagsFromMetadata(txn)
+		batchID, atomicItem := queuedAtomicBatchID(txn)
+		if atomicItem && failedBatches[batchID] {
+			continue
+		}
 		if err := p.processStuckTransaction(ctx, txn); err != nil {
 			logrus.Errorf("failed to process stuck transaction %s: %v", txn.TransactionID, err)
 			failures = append(failures, fmt.Errorf("%s: %w", txn.TransactionID, err))
+			if atomicItem {
+				failedBatches[batchID] = true
+			}
 			continue
 		}
 		recovered++

@@ -18,10 +18,15 @@ package blnk
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/blnkfinance/blnk/internal/apierror"
 	"github.com/blnkfinance/blnk/model"
+	"github.com/brianvoe/gofakeit/v6"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,4 +52,39 @@ func TestCreateBulkTransactions_SemaphoreSaturated(t *testing.T) {
 	var apiErr apierror.APIError
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, apierror.ErrRateLimited, apiErr.Code)
+}
+
+// A scheduled item of a queued atomic bulk request keeps a task of its own,
+// due when it is scheduled; the other items go to the batch's task.
+func TestCreateBulkTransactions_ScheduledAtomicItemKeepsItsOwnTask(t *testing.T) {
+	b, ds := newCoreTestBlnk(t)
+	ctx := context.Background()
+	cfg := b.Config()
+	cfg.Queue.TransactionQueue = "transaction_queue_bulk_" + strings.ToLower(gofakeit.LetterN(8))
+	queue := cfg.Queue.TransactionQueue + "_1"
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: cfg.Redis.Dns})
+	t.Cleanup(func() {
+		_ = inspector.DeleteQueue(queue, true)
+		_ = inspector.Close()
+	})
+
+	src, dst := newBalancePair(t, ds)
+	now := &model.Transaction{Reference: "ref_" + gofakeit.UUID(), Source: src.BalanceID, Destination: dst.BalanceID, Amount: 10, Precision: 100, Currency: "USD", AllowOverdraft: true}
+	later := &model.Transaction{Reference: "ref_" + gofakeit.UUID(), Source: src.BalanceID, Destination: dst.BalanceID, Amount: 20, Precision: 100, Currency: "USD", AllowOverdraft: true, ScheduledFor: time.Now().Add(time.Hour)}
+	result, err := b.CreateBulkTransactions(ctx, &model.BulkTransactionRequest{Atomic: true, Transactions: []*model.Transaction{now, later}})
+	require.NoError(t, err)
+
+	task, err := inspector.GetTaskInfo(queue, result.BatchID)
+	require.NoError(t, err)
+	var batch QueuedAtomicBatch
+	require.NoError(t, json.Unmarshal(task.Payload, &batch))
+	require.Len(t, batch.Transactions, 1)
+	assert.Equal(t, now.Reference+"_q", batch.Transactions[0].Reference)
+
+	scheduled, err := inspector.ListScheduledTasks(queue)
+	require.NoError(t, err)
+	require.Len(t, scheduled, 1)
+	var txn model.Transaction
+	require.NoError(t, json.Unmarshal(scheduled[0].Payload, &txn))
+	assert.Equal(t, later.Reference+"_q", txn.Reference)
 }

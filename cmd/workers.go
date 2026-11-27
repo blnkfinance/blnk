@@ -74,6 +74,39 @@ func (b *blnkInstance) processTransaction(ctx context.Context, t *asynq.Task) er
 	})
 }
 
+// processQueuedAtomicBatch runs the items of a queued atomic bulk request in
+// the order sent, each the way processTransaction runs a queued item, and
+// stops at the first error, so the task is retried from there. An item that
+// has already landed is not run again.
+func (b *blnkInstance) processQueuedAtomicBatch(ctx context.Context, t *asynq.Task) error {
+	ctx, span := otel.Tracer("blnk.transactions.worker").Start(ctx, "Process Queued Atomic Batch From Redis Queue")
+	defer span.End()
+
+	var batch blnk.QueuedAtomicBatch
+	if err := json.Unmarshal(t.Payload(), &batch); err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	for _, txn := range batch.Transactions {
+		startTime := time.Now()
+		err := b.blnk.WithQueuedAtomicBatch(ctx, txn, func(batchFailed bool) error {
+			if batchFailed {
+				return handleTransactionRejection(ctx, b, txn, blnk.ErrAtomicBatchFailed)
+			}
+			landed, err := b.blnk.GetDataSource().TransactionExistsByRef(ctx, txn.Reference)
+			if err != nil || landed {
+				return err
+			}
+			return b.recordQueuedTransaction(ctx, span, t, txn, startTime)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // recordQueuedTransaction applies a transaction taken from the queue, and
 // retries or rejects it when that fails.
 func (b *blnkInstance) recordQueuedTransaction(ctx context.Context, span oteltrace.Span, t *asynq.Task, txn *model.Transaction, startTime time.Time) error {
@@ -480,6 +513,7 @@ func initializeTaskHandlers(b *blnkInstance, mux *asynq.ServeMux) {
 	if cfg.Queue.EnableHotLane {
 		mux.HandleFunc(cfg.Queue.HotQueueName, b.processTransaction)
 	}
+	mux.HandleFunc(blnk.QueuedAtomicBatchTask, b.processQueuedAtomicBatch)
 	mux.HandleFunc(cfg.Queue.InflightExpiryQueue, b.processInflightExpiry)
 	mux.HandleFunc(cfg.Queue.InflightCommitQueue, b.processInflightCommit)
 }
