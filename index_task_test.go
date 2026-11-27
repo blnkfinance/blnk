@@ -3,10 +3,12 @@ package blnk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/blnkfinance/blnk/config"
 	"github.com/blnkfinance/blnk/database/mocks"
 	"github.com/blnkfinance/blnk/internal/search"
 	"github.com/blnkfinance/blnk/model"
@@ -93,6 +95,116 @@ func TestProcessIndexRefresh_TransactionScopeHydratesFlags(t *testing.T) {
 	assert.Equal(t, true, normalized["allow_overdraft"])
 	assert.Equal(t, effectiveDate.Unix(), normalized["effective_date"])
 	mockDS.AssertExpectations(t)
+}
+
+func TestProcessIndexBatch_PrimaryTransactionRereadsPostgres(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	b := &Blnk{datasource: mockDS}
+	ctx := context.Background()
+
+	stale := map[string]interface{}{
+		"transaction_id": "txn_batch_race",
+		"status":         "INFLIGHT",
+		"meta_data":      map[string]interface{}{},
+	}
+	fresh := &model.Transaction{
+		TransactionID: "txn_batch_race",
+		Status:        "INFLIGHT",
+		MetaData:      map[string]interface{}{"stamp": "S"},
+	}
+	mockDS.On("GetTransaction", mock.Anything, "txn_batch_race").Return(fresh, nil).Once()
+
+	batch := search.NewIndexBatch("txn_batch_race")
+	batch.AddDependency("balances", "bln_src", map[string]interface{}{"balance_id": "bln_src"})
+	batch.SetPrimary("transactions", "txn_batch_race", stale)
+
+	var upserted []string
+	var primary map[string]interface{}
+	err := b.ProcessIndexBatch(ctx, batch, func(_ context.Context, collection string, document interface{}) error {
+		upserted = append(upserted, collection)
+		if collection == "transactions" {
+			doc, err := DocumentToIndexMap(document)
+			require.NoError(t, err)
+			primary = doc
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"balances", "transactions"}, upserted)
+	require.NotNil(t, primary)
+	meta, ok := primary["meta_data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "S", meta["stamp"],
+		"batch worker must index the Postgres row, not the create-time snapshot, when it lands last")
+	mockDS.AssertExpectations(t)
+}
+
+func TestProcessIndexBatch_CustomIndexQueuePrefixStillRereadsTransaction(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	b := &Blnk{datasource: mockDS, config: &config.Configuration{
+		Transaction: config.TransactionConfig{IndexQueuePrefix: "test_index"},
+	}}
+
+	fresh := &model.Transaction{
+		TransactionID: "txn_prefix",
+		MetaData:      map[string]interface{}{"stamp": "S"},
+	}
+	mockDS.On("GetTransaction", mock.Anything, "txn_prefix").Return(fresh, nil).Once()
+
+	batch := search.NewIndexBatch("txn_prefix")
+	batch.SetPrimary("test_index", "txn_prefix", map[string]interface{}{
+		"transaction_id": "txn_prefix",
+		"meta_data":      map[string]interface{}{},
+	})
+
+	var indexed map[string]interface{}
+	err := b.ProcessIndexBatch(context.Background(), batch, func(_ context.Context, collection string, document interface{}) error {
+		assert.Equal(t, "test_index", collection)
+		doc, err := DocumentToIndexMap(document)
+		require.NoError(t, err)
+		indexed = doc
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "S", indexed["meta_data"].(map[string]interface{})["stamp"])
+	mockDS.AssertExpectations(t)
+}
+
+func TestProcessIndexBatch_FetchErrorDoesNotUpsertStalePrimary(t *testing.T) {
+	mockDS := new(mocks.MockDataSource)
+	b := &Blnk{datasource: mockDS}
+	mockDS.On("GetTransaction", mock.Anything, "txn_missing").Return((*model.Transaction)(nil), fmt.Errorf("not found")).Once()
+
+	batch := search.NewIndexBatch("txn_missing")
+	batch.AddDependency("balances", "bln_src", map[string]interface{}{"balance_id": "bln_src"})
+	batch.SetPrimary("transactions", "txn_missing", map[string]interface{}{
+		"transaction_id": "txn_missing",
+		"meta_data":      map[string]interface{}{},
+	})
+
+	var upserted []string
+	err := b.ProcessIndexBatch(context.Background(), batch, func(_ context.Context, collection string, _ interface{}) error {
+		upserted = append(upserted, collection)
+		return nil
+	})
+	require.Error(t, err)
+	assert.Equal(t, []string{"balances"}, upserted, "stale primary must not be upserted when the Postgres re-read fails")
+	mockDS.AssertExpectations(t)
+}
+
+func TestProcessIndexBatch_UnknownCollectionKeepsSnapshot(t *testing.T) {
+	b := &Blnk{}
+	stale := map[string]interface{}{"id": "x", "meta_data": map[string]interface{}{}}
+	batch := search.NewIndexBatch("unknown")
+	batch.SetPrimary("not_a_collection", "x", stale)
+
+	var got interface{}
+	require.NoError(t, b.ProcessIndexBatch(context.Background(), batch, func(_ context.Context, collection string, document interface{}) error {
+		assert.Equal(t, "not_a_collection", collection)
+		got = document
+		return nil
+	}))
+	assert.Equal(t, stale, got)
 }
 
 func TestProcessIndexTask_LegacySnapshotPathUnchanged(t *testing.T) {

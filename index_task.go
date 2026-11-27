@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/blnkfinance/blnk/internal/search"
 )
 
 // IndexModeRefresh marks an index task that carries only an entity reference.
@@ -65,6 +67,52 @@ func (l *Blnk) processIndexRefresh(ctx context.Context, task IndexTask, upsert I
 		return err
 	}
 	return upsert(ctx, task.Collection, doc)
+}
+
+// ProcessIndexBatch indexes a create-time batch in dependency order, then
+// upserts the primary from a Postgres re-read instead of the embedded
+// snapshot. Create enqueues the transaction as it was at apply time;
+// a later metadata POST re-reads Postgres. If the batch upserts last, the
+// snapshot would wipe the stamp from search. Re-reading immediately before
+// the primary upsert closes that race the same way processIndexRefresh does.
+func (l *Blnk) ProcessIndexBatch(ctx context.Context, batch *search.IndexBatch, upsert IndexUpserter) error {
+	if batch == nil {
+		return nil
+	}
+	batch.Deduplicate()
+
+	for _, dep := range batch.Dependencies {
+		if err := upsert(ctx, dep.Collection, dep.Data); err != nil {
+			return err
+		}
+	}
+	if batch.Primary == nil {
+		return nil
+	}
+
+	doc := batch.Primary.Data
+	if fetchCollection := l.indexFetchCollection(batch.Primary.Collection); fetchCollection != "" && batch.Primary.DocumentID != "" {
+		fresh, err := l.fetchEntityForIndex(ctx, fetchCollection, batch.Primary.DocumentID)
+		if err != nil {
+			return fmt.Errorf("re-read primary %s/%s before index: %w", fetchCollection, batch.Primary.DocumentID, err)
+		}
+		doc = fresh
+	}
+	return upsert(ctx, batch.Primary.Collection, doc)
+}
+
+// indexFetchCollection maps a batch collection name onto one fetchEntityForIndex
+// can load. Create uses Transaction.IndexQueuePrefix as the primary collection
+// (default "transactions"); a custom prefix still stores a transaction.
+func (l *Blnk) indexFetchCollection(collection string) string {
+	switch collection {
+	case "ledgers", "balances", "identities", "transactions":
+		return collection
+	}
+	if prefix := l.Config().Transaction.IndexQueuePrefix; prefix != "" && collection == prefix {
+		return "transactions"
+	}
+	return ""
 }
 
 func (l *Blnk) fetchEntityForIndex(ctx context.Context, collection, documentID string) (interface{}, error) {
